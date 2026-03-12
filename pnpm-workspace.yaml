@@ -1,0 +1,5 @@
+packages:
+  - 'sna-core'
+  - 'sna-base'
+  - 'sna-templates/*'
+  - 'start-sna-app'

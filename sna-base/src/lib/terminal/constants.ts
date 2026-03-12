@@ -1,0 +1,7 @@
+export {
+  TERMINAL_WS_PORT,
+  TERMINAL_WS_URL,
+  TERMINAL_MIN_WIDTH,
+  TERMINAL_MAX_WIDTH_RATIO,
+  TERMINAL_DEFAULT_WIDTH,
+} from "sna/lib/terminal/constants";

@@ -1,0 +1,38 @@
+{
+  "name": "start-sna-app",
+  "version": "0.1.0",
+  "description": "Create a new Skills-Native Application powered by Claude Code",
+  "type": "module",
+  "bin": {
+    "start-sna-app": "bin/index.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "templates/"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "claude-code",
+    "sna",
+    "skills-native-app",
+    "create-app",
+    "cli"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "node scripts/bundle-template.js"
+  },
+  "dependencies": {
+    "chalk": "^5.0.0",
+    "ora": "^8.0.0",
+    "tsx": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "name": "sna",
+  "version": "0.0.1",
+  "description": "Skills-Native Application primitives — runtime, event bus, terminal, and React hooks",
+  "type": "module",
+  "bin": {
+    "sna": "bin/sna.js"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "skills/"
+  ],
+  "exports": {
+    "./db/schema": {
+      "types": "./dist/db/schema.d.ts",
+      "default": "./dist/db/schema.js"
+    },
+    "./api/emit": {
+      "types": "./dist/api/emit.d.ts",
+      "default": "./dist/api/emit.js"
+    },
+    "./api/events": {
+      "types": "./dist/api/events.d.ts",
+      "default": "./dist/api/events.js"
+    },
+    "./api/run": {
+      "types": "./dist/api/run.d.ts",
+      "default": "./dist/api/run.js"
+    },
+    "./components/lna-provider": {
+      "types": "./dist/components/lna-provider.d.ts",
+      "default": "./dist/components/lna-provider.js"
+    },
+    "./components/terminal": {
+      "types": "./dist/components/terminal/index.d.ts",
+      "default": "./dist/components/terminal/index.js"
+    },
+    "./hooks": {
+      "types": "./dist/hooks/index.d.ts",
+      "default": "./dist/hooks/index.js"
+    },
+    "./stores/terminal-store": {
+      "types": "./dist/stores/terminal-store.d.ts",
+      "default": "./dist/stores/terminal-store.js"
+    },
+    "./lib/sna-run": {
+      "types": "./dist/lib/sna-run.d.ts",
+      "default": "./dist/lib/sna-run.js"
+    },
+    "./lib/terminal/constants": {
+      "types": "./dist/lib/terminal/constants.d.ts",
+      "default": "./dist/lib/terminal/constants.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "prepublishOnly": "pnpm build"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "claude-code",
+    "sna",
+    "skills-native",
+    "skills-native-app"
+  ],
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "chalk": "^5.0.0",
+    "node-pty": "^1.1.0",
+    "ws": "^8.19.0"
+  },
+  "peerDependencies": {
+    "@xterm/addon-fit": ">=0.10.0",
+    "@xterm/addon-web-links": ">=0.11.0",
+    "@xterm/xterm": ">=5.0.0",
+    "next": ">=14.0.0",
+    "react": ">=18.0.0",
+    "zustand": ">=4.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/ws": "^8.18.1",
+    "next": ">=14.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  }
+}

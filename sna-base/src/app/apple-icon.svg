@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bolt-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fafafa"/>
+      <stop offset="100%" stop-color="#c4b5fd"/>
+    </linearGradient>
+    <linearGradient id="hash-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#9580d0"/>
+      <stop offset="100%" stop-color="#4a3878"/>
+    </linearGradient>
+    <filter id="bolt-glow">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="#2d2548"/>
+  <text x="96" y="370" font-family="'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace" font-size="300" font-weight="700" fill="url(#hash-grad)">#</text>
+  <polygon points="332,56 192,272 284,272 178,460 340,232 248,232" fill="url(#bolt-grad)" stroke="url(#bolt-grad)" stroke-width="8" stroke-linejoin="round" paint-order="stroke fill" filter="url(#bolt-glow)"/>
+</svg>
