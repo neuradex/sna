@@ -16,7 +16,7 @@ import { NextRequest } from 'next/server';
  * const SNA_CORE = path.join(ROOT, "node_modules/sna");
  *
  * export const GET = createRunHandler({
- *   status: [TSX, path.join(SNA_CORE, "src/scripts/lna.ts"), "status"],
+ *   status: [TSX, path.join(SNA_CORE, "src/scripts/sna.ts"), "status"],
  *   collect: [TSX, "src/scripts/devlog.ts", "collect"],
  * });
  */

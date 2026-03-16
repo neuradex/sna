@@ -21,7 +21,7 @@ const VALID_TYPES = [
   "error"
 ];
 if (!flags.skill || !flags.type || !flags.message) {
-  console.error("Usage: tsx node_modules/lna/src/scripts/emit.ts --skill <name> --type <type> --message <text> [--data <json>]");
+  console.error("Usage: tsx node_modules/sna/src/scripts/emit.ts --skill <name> --type <type> --message <text> [--data <json>]");
   process.exit(1);
 }
 if (!VALID_TYPES.includes(flags.type)) {

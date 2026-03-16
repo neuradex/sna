@@ -13,23 +13,21 @@ export default defineConfig({
     // peer deps
     "react",
     "react-dom",
-    "next",
-    "next/dynamic",
-    "next/server",
     "zustand",
     "zustand/middleware",
     "@xterm/xterm",
     "@xterm/addon-fit",
     "@xterm/addon-web-links",
     "@xterm/xterm/css/xterm.css",
-    // native deps (consumers install these)
+    // own deps (consumers install these via sna)
+    "hono",
+    "hono/streaming",
     "better-sqlite3",
     "node-pty",
     "ws",
     "chalk",
+    "js-yaml",
   ],
-  // .js 拡張子なしの相対 import を解決
-  // (tsx が自動解決してたものを tsup でも通す)
   esbuildOptions(options) {
     options.jsx = "automatic";
   },

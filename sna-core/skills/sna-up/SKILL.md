@@ -6,9 +6,9 @@ allowed-tools:
   - Bash(pnpm sna:status)
 ---
 
-# lna-up
+# sna-up
 
-Start the full LLM-Native Application environment in one command.
+Start the full Skills-Native Application environment in one command.
 This handles everything automatically — even for first-time setup.
 
 ## What it does (automatically)

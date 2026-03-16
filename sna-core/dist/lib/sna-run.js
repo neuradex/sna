@@ -14,7 +14,7 @@ function getClaudePath() {
   for (const p of ["/usr/local/bin/claude", "/opt/homebrew/bin/claude"]) {
     if (fs.existsSync(p)) return p;
   }
-  throw new Error("Claude binary not found. Run /lna-up first.");
+  throw new Error("Claude binary not found. Run /sna-up first.");
 }
 function parseSkillName(command) {
   return command.trim().replace(/^\//, "").split(/\s+/)[0];

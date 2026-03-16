@@ -10,12 +10,12 @@ const SHELL = process.env.SHELL || "/bin/zsh";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "../..");
-const CLAUDE_PATH_FILE = path.join(ROOT, ".lna/claude-path");
+const CLAUDE_PATH_FILE = path.join(ROOT, ".sna/claude-path");
 
 // Resolve the real claude binary path (handles aliases and shims)
-// Reads from .lna/claude-path cache written by lna up; falls back to live resolution.
+// Reads from .sna/claude-path cache written by sna up; falls back to live resolution.
 function resolveClaudePath(): string {
-  // Use cached path from lna up if available
+  // Use cached path from sna up if available
   if (fs.existsSync(CLAUDE_PATH_FILE)) {
     const cached = fs.readFileSync(CLAUDE_PATH_FILE, "utf8").trim();
     if (cached) {

@@ -5,7 +5,7 @@
  * Events are written to SQLite; the /api/events SSE endpoint streams them to clients.
  *
  * Usage:
- *   tsx node_modules/lna/src/scripts/emit.ts --skill <name> --type <type> --message "<text>" [--data '<json>']
+ *   tsx node_modules/sna/src/scripts/emit.ts --skill <name> --type <type> --message "<text>" [--data '<json>']
  *
  * Types:
  *   start      — skill has begun
@@ -35,7 +35,7 @@ const VALID_TYPES = [
 ];
 
 if (!flags.skill || !flags.type || !flags.message) {
-  console.error("Usage: tsx node_modules/lna/src/scripts/emit.ts --skill <name> --type <type> --message <text> [--data <json>]");
+  console.error("Usage: tsx node_modules/sna/src/scripts/emit.ts --skill <name> --type <type> --message <text> [--data <json>]");
   process.exit(1);
 }
 

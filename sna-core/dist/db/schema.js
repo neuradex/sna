@@ -1,10 +1,12 @@
-import Database from "better-sqlite3";
+import { createRequire } from "node:module";
 import path from "path";
+const require2 = createRequire(path.join(process.cwd(), "node_modules", "_"));
+const BetterSqlite3 = require2("better-sqlite3");
 const DB_PATH = path.join(process.cwd(), "data/app.db");
 let _db = null;
 function getDb() {
   if (!_db) {
-    _db = new Database(DB_PATH);
+    _db = new BetterSqlite3(DB_PATH);
     _db.pragma("journal_mode = WAL");
     initSchema(_db);
   }

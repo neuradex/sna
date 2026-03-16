@@ -59,7 +59,7 @@ export const translations = {
     ],
     primitives: {
       heading: "One hook. The full loop.",
-      subheading: "useLna() closes the loop: trigger skills from the GUI, receive events back in real time.",
+      subheading: "useSna() closes the loop: trigger skills from the GUI, receive events back in real time.",
       layers: [
         {
           tag: "Skill Trigger",
@@ -85,7 +85,7 @@ export const translations = {
     },
     liveEvents: {
       heading: "Claude's movements, live in your frontend.",
-      subheading: "Every skill emits structured events as it runs. useLna() lets your UI subscribe to Claude Code's internal state in real time — milestones, permission requests, completions. Without this, Claude Code is just a CLI. With this, it becomes the backbone of a real product.",
+      subheading: "Every skill emits structured events as it runs. useSna() lets your UI subscribe to Claude Code's internal state in real time — milestones, permission requests, completions. Without this, Claude Code is just a CLI. With this, it becomes the backbone of a real product.",
       caption: "Real event feed from a running skill. Your UI sees this as it happens.",
       insight: "This is what makes Claude Code a production runtime, not just a terminal.",
     },
@@ -202,7 +202,7 @@ export const translations = {
     ],
     primitives: {
       heading: "1つのフック。完全なループ。",
-      subheading: "useLna() がループを完結させます：GUIからスキルをトリガーし、リアルタイムでイベントを受け取ります。",
+      subheading: "useSna() がループを完結させます：GUIからスキルをトリガーし、リアルタイムでイベントを受け取ります。",
       layers: [
         {
           tag: "Skill Trigger",
@@ -228,7 +228,7 @@ export const translations = {
     },
     liveEvents: {
       heading: "Claudeの動きを、フロントエンドでリアルタイムに。",
-      subheading: "スキルが実行される間、構造化されたイベントを送出し続けます。useLna()でUIがClaude Codeの内部状態——マイルストーン、パーミッション要求、完了通知——をリアルタイムに購読できます。これがなければClaude CodeはただのCLI。これがあれば、本物のプロダクトのバックボーンになります。",
+      subheading: "スキルが実行される間、構造化されたイベントを送出し続けます。useSna()でUIがClaude Codeの内部状態——マイルストーン、パーミッション要求、完了通知——をリアルタイムに購読できます。これがなければClaude CodeはただのCLI。これがあれば、本物のプロダクトのバックボーンになります。",
       caption: "実行中のスキルからのリアルイベントフィード。発生と同時にUIに届きます。",
       insight: "これが、Claude Codeをプロダクションランタイムにできる理由です。",
     },
@@ -345,7 +345,7 @@ export const translations = {
     ],
     primitives: {
       heading: "훅 하나. 완전한 루프.",
-      subheading: "useLna()가 루프를 닫습니다: GUI에서 스킬을 트리거하고, 실시간으로 이벤트를 받습니다.",
+      subheading: "useSna()가 루프를 닫습니다: GUI에서 스킬을 트리거하고, 실시간으로 이벤트를 받습니다.",
       layers: [
         {
           tag: "Skill Trigger",
@@ -371,7 +371,7 @@ export const translations = {
     },
     liveEvents: {
       heading: "Claude의 움직임을 프론트엔드에서 실시간으로.",
-      subheading: "스킬이 실행되는 동안 구조화된 이벤트를 지속적으로 emit합니다. useLna()로 UI가 Claude Code의 내부 상태——마일스톤, 퍼미션 요청, 완료 신호——를 실시간으로 구독합니다. 이것이 없으면 Claude Code는 그냥 CLI입니다. 이것이 있으면, 진짜 제품의 백본이 됩니다.",
+      subheading: "스킬이 실행되는 동안 구조화된 이벤트를 지속적으로 emit합니다. useSna()로 UI가 Claude Code의 내부 상태——마일스톤, 퍼미션 요청, 완료 신호——를 실시간으로 구독합니다. 이것이 없으면 Claude Code는 그냥 CLI입니다. 이것이 있으면, 진짜 제품의 백본이 됩니다.",
       caption: "실행 중인 스킬의 실제 이벤트 피드. 발생하는 즉시 UI에 전달됩니다.",
       insight: "이것이 Claude Code를 프로덕션 런타임으로 만드는 이유입니다.",
     },

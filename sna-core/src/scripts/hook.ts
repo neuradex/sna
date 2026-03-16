@@ -3,7 +3,7 @@
  *
  * Configured in .claude/settings.json:
  *   "PermissionRequest": [{ "matcher": ".*", "hooks": [{ "type": "command", "async": true,
- *     "command": "\"$CLAUDE_PROJECT_DIR\"/node_modules/.bin/tsx \"$CLAUDE_PROJECT_DIR\"/node_modules/lna/src/scripts/hook.ts" }] }]
+ *     "command": "\"$CLAUDE_PROJECT_DIR\"/node_modules/.bin/tsx \"$CLAUDE_PROJECT_DIR\"/node_modules/sna/src/scripts/hook.ts" }] }]
  *
  * Fires exactly when a permission dialog is about to appear to the user.
  * Emits "permission_needed" to SQLite for the currently running skill.
@@ -43,7 +43,7 @@ process.stdin.on("end", () => {
       ORDER BY id DESC LIMIT 1
     `).get() as { skill: string } | null;
 
-    if (!latestCalled) process.exit(0);
+    const skillName = latestCalled?.skill ?? "system";
 
     const summary =
       toolName === "Bash"                                ? String(toolInput.command ?? "").slice(0, 120) :
@@ -54,7 +54,7 @@ process.stdin.on("end", () => {
     db.prepare(
       `INSERT INTO skill_events (skill, type, message, data) VALUES (?, ?, ?, ?)`
     ).run(
-      latestCalled.skill,
+      skillName,
       "permission_needed",
       `${toolName}: ${summary}`,
       JSON.stringify({ tool_name: toolName, tool_input: toolInput })

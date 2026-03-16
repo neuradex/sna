@@ -42,8 +42,10 @@ declare function useSna(options?: UseSnaOptions): {
         toggle: () => void;
         setOpen: (open: boolean) => void;
         send: (text: string) => void;
+        sendSub: (text: string) => void;
     };
     runSkill: (name: string) => void;
+    runSkillSub: (name: string) => void;
 };
 
 export { SkillEvent, SkillEventHandler, useSna };

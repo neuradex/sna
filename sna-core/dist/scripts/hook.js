@@ -18,12 +18,12 @@ process.stdin.on("end", () => {
         )
       ORDER BY id DESC LIMIT 1
     `).get();
-    if (!latestCalled) process.exit(0);
+    const skillName = latestCalled?.skill ?? "system";
     const summary = toolName === "Bash" ? String(toolInput.command ?? "").slice(0, 120) : toolName === "Write" ? String(toolInput.file_path ?? "") : toolName === "Edit" || toolName === "MultiEdit" ? String(toolInput.file_path ?? "") : JSON.stringify(toolInput).slice(0, 120);
     db.prepare(
       `INSERT INTO skill_events (skill, type, message, data) VALUES (?, ?, ?, ?)`
     ).run(
-      latestCalled.skill,
+      skillName,
       "permission_needed",
       `${toolName}: ${summary}`,
       JSON.stringify({ tool_name: toolName, tool_input: toolInput })

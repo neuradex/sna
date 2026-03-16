@@ -37,9 +37,15 @@ function useSna(options = {}) {
   const toggleTerminal = useTerminalStore((s) => s.toggle);
   const openTerminal = useTerminalStore((s) => s.setOpen);
   const sendToTerminal = useTerminalStore((s) => s.sendToTerminal);
+  const sendToTerminalSub = useTerminalStore((s) => s.sendToTerminalSub);
   const runSkill = (name) => {
     openTerminal(true);
     setTimeout(() => sendToTerminal(`/${name}
+`), 100);
+  };
+  const runSkillSub = (name) => {
+    openTerminal(true);
+    setTimeout(() => sendToTerminalSub(`/${name}
 `), 100);
   };
   return {
@@ -57,9 +63,11 @@ function useSna(options = {}) {
       isConnecting: terminalIsConnecting,
       toggle: toggleTerminal,
       setOpen: openTerminal,
-      send: sendToTerminal
+      send: sendToTerminal,
+      sendSub: sendToTerminalSub
     },
-    runSkill
+    runSkill,
+    runSkillSub
   };
 }
 export {

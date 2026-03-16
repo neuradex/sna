@@ -52,10 +52,18 @@ export function useSna(options: UseSnaOptions = {}) {
   const toggleTerminal = useTerminalStore((s) => s.toggle);
   const openTerminal = useTerminalStore((s) => s.setOpen);
   const sendToTerminal = useTerminalStore((s) => s.sendToTerminal);
+  const sendToTerminalSub = useTerminalStore((s) => s.sendToTerminalSub);
 
+  /** Run skill directly on the main agent */
   const runSkill = (name: string) => {
     openTerminal(true);
     setTimeout(() => sendToTerminal(`/${name}\n`), 100);
+  };
+
+  /** Run skill as a subagent via /sna-sub */
+  const runSkillSub = (name: string) => {
+    openTerminal(true);
+    setTimeout(() => sendToTerminalSub(`/${name}\n`), 100);
   };
 
   return {
@@ -74,8 +82,10 @@ export function useSna(options: UseSnaOptions = {}) {
       toggle: toggleTerminal,
       setOpen: openTerminal,
       send: sendToTerminal,
+      sendSub: sendToTerminalSub,
     },
     runSkill,
+    runSkillSub,
   };
 }
 

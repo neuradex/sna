@@ -108,7 +108,28 @@ The `complete` event triggers automatic frontend data refresh.
 
 ### Terminal in Browser
 
-The right panel embeds real Claude Code via xterm.js + node-pty + WebSocket (port 3001). This is not mocked — users run actual skills here.
+A **bottom drawer** embeds real Claude Code via xterm.js + node-pty + WebSocket (port 3001). This is not mocked — users run actual skills here.
+
+The drawer bar is always visible at the bottom (36px). Clicking it or dragging up expands it. Clicking outside the drawer closes it.
+
+**Required setup in consumer apps:**
+- `<SnaProvider>` wraps the entire app in `layout.tsx`
+- `<TerminalSpacer />` goes at the bottom of every scrollable content container (prevents content from being hidden behind the bar)
+
+```tsx
+// app/layout.tsx
+import { SnaProvider } from "sna/components/sna-provider";
+// ...
+<SnaProvider>{children}</SnaProvider>
+
+// any page/layout with a scroll container
+import { TerminalSpacer } from "sna/components/terminal-spacer";
+// ...
+<main className="overflow-auto">
+  {children}
+  <TerminalSpacer />
+</main>
+```
 
 ## Tech Stack
 

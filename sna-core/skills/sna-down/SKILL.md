@@ -6,9 +6,9 @@ allowed-tools:
   - Bash(pnpm sna:status)
 ---
 
-# lna-down
+# sna-down
 
-Stop the full LLM-Native Application environment.
+Stop the full Skills-Native Application environment.
 
 ## Steps
 

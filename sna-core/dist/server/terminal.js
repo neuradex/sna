@@ -40,14 +40,30 @@ const CLAUDE_PATH = resolveClaudePath();
 console.log(`[terminal] claude binary: ${CLAUDE_PATH}`);
 const cleanEnv = { ...process.env };
 delete cleanEnv.CLAUDECODE;
+delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
+delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
 const wss = new WebSocketServer({ port: PORT });
 const activePtys = /* @__PURE__ */ new Set();
 console.log(`[terminal] WebSocket server on port ${PORT}`);
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
+  const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+  const claudeArgs = ["--continue"];
+  if (url.searchParams.get("dangerouslySkipPermissions") === "1") {
+    claudeArgs.push("--dangerously-skip-permissions");
+  }
   let ptyProcess = null;
-  function spawnPty(claudeArgs) {
+  function spawnPty() {
+    if (ptyProcess) {
+      activePtys.delete(ptyProcess);
+      try {
+        ptyProcess.kill();
+      } catch {
+      }
+      ptyProcess = null;
+    }
+    let proc;
     try {
-      ptyProcess = pty.spawn(CLAUDE_PATH, claudeArgs, {
+      proc = pty.spawn(CLAUDE_PATH, claudeArgs, {
         name: "xterm-256color",
         cols: 80,
         rows: 24,
@@ -59,54 +75,50 @@ wss.on("connection", (ws) => {
       ws.close();
       return;
     }
-    activePtys.add(ptyProcess);
-    ptyProcess.onData((data) => {
+    ptyProcess = proc;
+    activePtys.add(proc);
+    proc.onData((data) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(data);
     });
-    ptyProcess.onExit(({ exitCode }) => {
+    proc.onExit(({ exitCode }) => {
       console.log(`[terminal] PTY exited (code=${exitCode})`);
-      if (ptyProcess) activePtys.delete(ptyProcess);
+      activePtys.delete(proc);
+      if (ptyProcess === proc) ptyProcess = null;
       if (ws.readyState === WebSocket.OPEN) ws.close();
     });
   }
-  const initTimeout = setTimeout(() => {
-    if (!ptyProcess) spawnPty([]);
-  }, 500);
+  spawnPty();
   ws.on("message", (data) => {
     const msg = data.toString();
     if (msg.startsWith("{")) {
       try {
         const parsed = JSON.parse(msg);
-        if (parsed.type === "init") {
-          clearTimeout(initTimeout);
-          if (!ptyProcess) {
-            const args = [];
-            if (parsed.dangerouslySkipPermissions) args.push("--dangerously-skip-permissions");
-            spawnPty(args);
-          }
+        if (parsed.type === "restart") {
+          console.log("[terminal] In-band restart requested");
+          spawnPty();
           return;
         }
         if (parsed.type === "resize" && parsed.cols && parsed.rows) {
-          if (ptyProcess) ptyProcess.resize(parsed.cols, parsed.rows);
+          ptyProcess?.resize(parsed.cols, parsed.rows);
           return;
         }
       } catch {
       }
     }
-    if (ptyProcess) ptyProcess.write(msg);
+    ptyProcess?.write(msg);
   });
   ws.on("close", () => {
-    clearTimeout(initTimeout);
     if (ptyProcess) {
       activePtys.delete(ptyProcess);
       ptyProcess.kill();
+      ptyProcess = null;
     }
   });
   ws.on("error", () => {
-    clearTimeout(initTimeout);
     if (ptyProcess) {
       activePtys.delete(ptyProcess);
       ptyProcess.kill();
+      ptyProcess = null;
     }
   });
 });

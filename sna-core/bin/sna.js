@@ -4,10 +4,9 @@ import { fileURLToPath } from 'url'
 import { resolve, dirname } from 'path'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const entry = resolve(__dirname, '../src/cli.ts')
-const tsx = resolve(__dirname, '../node_modules/.bin/tsx')
+const entry = resolve(__dirname, '../dist/scripts/sna.js')
 
-const child = spawn(tsx, [entry, ...process.argv.slice(2)], {
+const child = spawn(process.execPath, [entry, ...process.argv.slice(2)], {
   stdio: 'inherit',
   shell: false,
 })

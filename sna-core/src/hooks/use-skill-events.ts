@@ -30,7 +30,7 @@ interface UseSkillEventsOptions {
 /**
  * useSkillEvents — subscribe to real-time skill events from the SNA backend.
  *
- * Skills emit events via: tsx node_modules/lna/src/scripts/emit.ts --skill <name> --type <type> --message <text>
+ * Skills emit events via: tsx node_modules/sna/src/scripts/emit.ts --skill <name> --type <type> --message <text>
  * Those events flow through SQLite → /api/events SSE → this hook → your UI.
  */
 export function useSkillEvents(options: UseSkillEventsOptions = {}) {
