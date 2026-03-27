@@ -10,6 +10,7 @@ import type { EventEmitter } from "events";
 export interface AgentEvent {
   type:
     | "init"          // session initialized
+    | "thinking"      // model is reasoning (extended thinking block)
     | "text_delta"    // streaming text from assistant
     | "assistant"     // full assistant message
     | "tool_use"      // agent is calling a tool
@@ -48,6 +49,7 @@ export interface AgentProcess {
 export interface SpawnOptions {
   cwd: string;
   prompt?: string;
+  model?: string;
   permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan";
   env?: Record<string, string>;
 }

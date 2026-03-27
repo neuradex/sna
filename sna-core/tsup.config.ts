@@ -22,6 +22,7 @@ export default defineConfig([
       "better-sqlite3",
       "chalk",
       "js-yaml",
+      "marked",
     ],
     esbuildOptions(options) {
       options.jsx = "automatic";

@@ -19,6 +19,7 @@ import { logger } from "../lib/logger.js";
 
 const port = parseInt(process.env.SNA_PORT ?? "3099", 10);
 const permissionMode = (process.env.SNA_PERMISSION_MODE ?? "acceptEdits") as "acceptEdits" | "bypassPermissions";
+const defaultModel = process.env.SNA_MODEL ?? "claude-sonnet-4-6";
 
 const root = new Hono();
 root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "OPTIONS"] }));
@@ -42,7 +43,7 @@ root.route("/", createSnaApp());
 // 1. Spawn agent first
 const provider = getProvider("claude-code");
 logger.log("sna", "spawning agent...");
-const agentProcess = provider.spawn({ cwd: process.cwd(), permissionMode });
+const agentProcess = provider.spawn({ cwd: process.cwd(), permissionMode, model: defaultModel });
 setAgentProcess(agentProcess);
 
 let server: ReturnType<typeof serve> | null = null;

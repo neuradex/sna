@@ -19,7 +19,9 @@ interface UseAgentOptions {
   permissionMode?: string;
 
   onEvent?: (e: AgentEvent) => void;
+  onThinking?: (e: AgentEvent) => void;
   onAssistant?: (e: AgentEvent) => void;
+  onToolResult?: (e: AgentEvent) => void;
   onComplete?: (e: AgentEvent) => void;
   onError?: (e: AgentEvent) => void;
   onInit?: (e: AgentEvent) => void;
@@ -44,12 +46,16 @@ export function useAgent(options: UseAgentOptions = {}) {
   const esRef = useRef<EventSource | null>(null);
 
   const onEventRef = useRef(options.onEvent);
+  const onThinkingRef = useRef(options.onThinking);
   const onAssistantRef = useRef(options.onAssistant);
+  const onToolResultRef = useRef(options.onToolResult);
   const onCompleteRef = useRef(options.onComplete);
   const onErrorRef = useRef(options.onError);
   const onInitRef = useRef(options.onInit);
   onEventRef.current = options.onEvent;
+  onThinkingRef.current = options.onThinking;
   onAssistantRef.current = options.onAssistant;
+  onToolResultRef.current = options.onToolResult;
   onCompleteRef.current = options.onComplete;
   onErrorRef.current = options.onError;
   onInitRef.current = options.onInit;
@@ -86,7 +92,9 @@ export function useAgent(options: UseAgentOptions = {}) {
             onEventRef.current?.(event);
 
             if (event.type === "init") onInitRef.current?.(event);
+            if (event.type === "thinking") onThinkingRef.current?.(event);
             if (event.type === "assistant") onAssistantRef.current?.(event);
+            if (event.type === "tool_result") onToolResultRef.current?.(event);
             if (event.type === "complete") onCompleteRef.current?.(event);
             if (event.type === "error") onErrorRef.current?.(event);
           } catch { /* malformed */ }

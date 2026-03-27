@@ -46,6 +46,7 @@ export function createAgentRoutes() {
     const body = (await c.req.json().catch(() => ({}))) as {
       provider?: string;
       prompt?: string;
+      model?: string;
       permissionMode?: string;
       force?: boolean;
     };
@@ -64,8 +65,8 @@ export function createAgentRoutes() {
     if (currentProcess?.alive) {
       currentProcess.kill();
     }
+    // Clear buffer but keep eventCounter — SSE cursors depend on monotonic IDs
     eventBuffer.length = 0;
-    eventCounter = 0;
 
     const provider = getProvider(body.provider ?? "claude-code");
 
@@ -73,6 +74,7 @@ export function createAgentRoutes() {
       currentProcess = provider.spawn({
         cwd: process.cwd(),
         prompt: body.prompt,
+        model: body.model ?? "claude-sonnet-4-6",
         permissionMode: (body.permissionMode as any) ?? "acceptEdits",
       });
 

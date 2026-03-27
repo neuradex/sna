@@ -78,6 +78,12 @@ function injectStyles() {
 
 const TERMINAL_EVENT_TYPES = new Set(["success", "failed", "complete", "error"]);
 
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
 export function ChatPanel({ onClose }: ChatPanelProps) {
   const messages = useChatStore((s) => s.messages);
   const addMessage = useChatStore((s) => s.addMessage);
@@ -89,13 +95,22 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [thinking, setThinking] = useState(false);
+  const [sessionUsage, setSessionUsage] = useState({
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalCost: 0,
+    contextWindow: 0,
+    lastTurnContextTokens: 0,
+    lastTurnSystemTokens: 0,
+    lastTurnConvTokens: 0,
+    model: "",
+  });
 
   useEffect(() => injectStyles(), []);
 
   // Subscribe to agent events (from stdio spawn)
   const agent = useAgent({
     onEvent: (e) => {
-      console.log("[sna:agent-event]", e.type, e.message ?? "", e.data ?? "");
       if (e.type === "tool_use") {
         const toolName = (e.data?.toolName as string) ?? e.message ?? "tool";
         addMessage({
@@ -105,12 +120,82 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
         });
       }
     },
+    onThinking: (e) => {
+      // Keep thinking=true — TypingIndicator stays until text arrives
+      addMessage({
+        role: "thinking",
+        content: e.message ?? "",
+        meta: { done: true },
+      });
+    },
     onAssistant: (e) => {
       setThinking(false);
-      addMessage({ role: "assistant", content: e.message ?? "" });
+      addMessage({ role: "assistant", content: e.message ?? "", meta: { animate: true } });
     },
-    onComplete: () => {
+    onToolResult: (e) => {
+      // Attach result to the last tool message instead of creating a new one
+      const msgs = useChatStore.getState().messages;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === "tool" && !msgs[i].meta?.result) {
+          const updated = [...msgs];
+          updated[i] = {
+            ...updated[i],
+            meta: {
+              ...updated[i].meta,
+              result: e.message ?? "",
+              isError: !!e.data?.isError,
+            },
+          };
+          useChatStore.setState({ messages: updated });
+          return;
+        }
+      }
+    },
+    onInit: (e) => {
+      const model = (e.data?.model as string) ?? "";
+      if (model) setSessionUsage((prev) => ({ ...prev, model }));
+    },
+    onComplete: (e) => {
       setThinking(false);
+      const d = e.data ?? {};
+      const duration = d.durationMs as number | undefined;
+      const cost = d.costUsd as number | undefined;
+      const inTok = (d.inputTokens as number) ?? 0;
+      const outTok = (d.outputTokens as number) ?? 0;
+      const cacheRead = (d.cacheReadTokens as number) ?? 0;
+      const cacheWrite = (d.cacheWriteTokens as number) ?? 0;
+      const ctxWindow = (d.contextWindow as number) ?? 0;
+      const model = (d.model as string) ?? "";
+
+      // Accumulate session usage
+      const systemTok = cacheRead + cacheWrite;
+      const convTok = inTok + outTok;
+      setSessionUsage((prev) => ({
+        totalInputTokens: prev.totalInputTokens + inTok,
+        totalOutputTokens: prev.totalOutputTokens + outTok,
+        totalCost: prev.totalCost + (cost ?? 0),
+        contextWindow: ctxWindow || prev.contextWindow,
+        lastTurnContextTokens: systemTok + convTok,
+        lastTurnSystemTokens: systemTok,
+        lastTurnConvTokens: convTok,
+        model: model || prev.model,
+      }));
+
+      // Attach cost info to the last assistant message
+      const msgs = useChatStore.getState().messages;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === "assistant") {
+          const parts: string[] = [];
+          if (duration != null) parts.push(`${(duration / 1000).toFixed(1)}s`);
+          if (outTok > 0) parts.push(`${fmtTokens(outTok)} tokens`);
+          if (cost != null) parts.push(`$${cost.toFixed(4)}`);
+          // Update the message meta with cost info
+          const updated = [...msgs];
+          updated[i] = { ...updated[i], meta: { ...updated[i].meta, costLabel: parts.join(" · ") } };
+          useChatStore.setState({ messages: updated });
+          break;
+        }
+      }
     },
     onError: (e) => {
       setThinking(false);
@@ -181,9 +266,17 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
     return Object.values(latestBySkill).some((e) => !TERMINAL_EVENT_TYPES.has(e.type));
   })();
 
+  // Auto-scroll on any content change (new messages, typewriter, tool results)
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const observer = new MutationObserver(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    });
+    observer.observe(container, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, []);
 
   const handleSend = async (text: string) => {
     addMessage({ role: "user", content: text });
@@ -227,9 +320,30 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
           animation: "sna-slide-in 0.2s ease-out",
         }}
       >
-        <ChatHeader onClose={onClose} onClear={clearMessages} isRunning={thinking || (anyRunning ?? false)} />
+        <ChatHeader
+          onClose={onClose}
+          onClear={() => {
+            clearMessages();
+            agent.kill();
+            agent.start();
+            setSessionUsage({
+              totalInputTokens: 0, totalOutputTokens: 0, totalCost: 0,
+              contextWindow: 0, lastTurnContextTokens: 0,
+              lastTurnSystemTokens: 0, lastTurnConvTokens: 0, model: sessionUsage.model,
+            });
+          }}
+          isRunning={thinking || (anyRunning ?? false)}
+          sessionUsage={sessionUsage}
+          onModelChange={(model) => {
+            setSessionUsage((prev) => ({ ...prev, model }));
+            // Restart agent with new model
+            agent.kill();
+            agent.start();
+          }}
+        />
 
         <div
+          ref={scrollContainerRef}
           style={{
             flex: 1,
             overflowY: "auto",

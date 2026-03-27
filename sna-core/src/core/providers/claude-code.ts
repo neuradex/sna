@@ -62,7 +62,7 @@ class ClaudeCodeProcess implements AgentProcess {
 
       for (const line of lines) {
         if (!line.trim()) continue;
-        logger.log("stdout", line.slice(0, 200));
+        logger.log("stdout", line);
         try {
           const msg = JSON.parse(line);
           if (msg.session_id && !this._sessionId) {
@@ -151,45 +151,75 @@ class ClaudeCodeProcess implements AgentProcess {
 
         const events: AgentEvent[] = [];
 
-        // Extract tool_use blocks → emit as tool_use events
         for (const block of content) {
-          if (block.type === "tool_use") {
+          if (block.type === "thinking") {
+            events.push({
+              type: "thinking",
+              message: block.thinking ?? "",
+              timestamp: Date.now(),
+            });
+          } else if (block.type === "tool_use") {
             events.push({
               type: "tool_use",
               message: block.name,
               data: { toolName: block.name, input: block.input, id: block.id },
               timestamp: Date.now(),
             });
+          } else if (block.type === "text") {
+            const text = (block.text ?? "").trim();
+            if (text) {
+              events.push({ type: "assistant", message: text, timestamp: Date.now() });
+            }
           }
         }
 
-        // Extract text blocks → emit as assistant event
-        const text = content
-          .filter((c: any) => c.type === "text")
-          .map((c: any) => c.text)
-          .join("")
-          .trim();
-        if (text) {
-          events.push({ type: "assistant", message: text, timestamp: Date.now() });
-        }
-
-        // Emit all events (tool_use first, then text)
         if (events.length > 0) {
-          // Emit extra events via the emitter directly
           for (let i = 1; i < events.length; i++) {
             this.emitter.emit("event", events[i]);
           }
-          return events[0]; // Return first event via normal flow
+          return events[0];
+        }
+        return null;
+      }
+
+      case "user": {
+        // Tool results come as user messages
+        const userContent = msg.message?.content;
+        if (!Array.isArray(userContent)) return null;
+        for (const block of userContent) {
+          if (block.type === "tool_result") {
+            return {
+              type: "tool_result" as const,
+              message: typeof block.content === "string"
+                ? block.content.slice(0, 300)
+                : JSON.stringify(block.content).slice(0, 300),
+              data: { toolUseId: block.tool_use_id, isError: block.is_error },
+              timestamp: Date.now(),
+            };
+          }
         }
         return null;
       }
 
       case "result": {
         if (msg.subtype === "success") {
+          const mu = msg.modelUsage ?? {};
+          const modelKey = Object.keys(mu)[0] ?? "";
+          const u = mu[modelKey] ?? {};
           return {
             type: "complete",
             message: msg.result ?? "Done",
-            data: { durationMs: msg.duration_ms, costUsd: msg.total_cost_usd },
+            data: {
+              durationMs: msg.duration_ms,
+              costUsd: msg.total_cost_usd,
+              inputTokens: u.inputTokens ?? 0,
+              outputTokens: u.outputTokens ?? 0,
+              cacheReadTokens: u.cacheReadInputTokens ?? 0,
+              cacheWriteTokens: u.cacheCreationInputTokens ?? 0,
+              contextWindow: u.contextWindow ?? 0,
+              maxOutputTokens: u.maxOutputTokens ?? 0,
+              model: modelKey,
+            },
             timestamp: Date.now(),
           };
         }
@@ -232,11 +262,14 @@ export class ClaudeCodeProvider implements AgentProvider {
     const claudePath = resolveClaudePath(options.cwd);
 
     const args = [
-      "--print",
       "--output-format", "stream-json",
       "--input-format", "stream-json",
       "--verbose",
     ];
+
+    if (options.model) {
+      args.push("--model", options.model);
+    }
 
     if (options.permissionMode) {
       args.push("--permission-mode", options.permissionMode);

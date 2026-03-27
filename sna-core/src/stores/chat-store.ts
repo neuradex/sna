@@ -5,7 +5,7 @@ import { persist } from "zustand/middleware";
 
 export interface ChatMessage {
   id: string;
-  role: "user" | "assistant" | "status" | "error" | "permission" | "tool" | "skill";
+  role: "user" | "assistant" | "thinking" | "status" | "error" | "permission" | "tool" | "tool_result" | "skill";
   content: string;
   timestamp: number;
   skillName?: string;
@@ -65,7 +65,10 @@ export const useChatStore = create<ChatState>()(
       partialize: (s) => ({
         isOpen: s.isOpen,
         width: s.width,
-        messages: s.messages,
+        // Strip transient flags (animate) so they don't replay on reload
+        messages: s.messages.map((m) =>
+          m.meta?.animate ? { ...m, meta: { ...m.meta, animate: undefined } } : m
+        ),
         // processedEventIds as array for JSON serialization
         processedEventIds: [...s.processedEventIds],
       }),

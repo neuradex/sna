@@ -1,13 +1,14 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "../../stores/chat-store.js";
+import { MarkdownContent } from "./markdown-content.js";
+import { ThinkingCard } from "./thinking-card.js";
 import { ToolUseCard } from "./tool-use-card.js";
 import { SkillCard } from "./skill-card.js";
 
 interface MessageBubbleProps {
   message: ChatMessage;
-  onPermissionApprove?: () => void;
-  onPermissionDeny?: () => void;
 }
 
 const bubbleBase: React.CSSProperties = {
@@ -18,7 +19,140 @@ const bubbleBase: React.CSSProperties = {
   wordBreak: "break-word",
 };
 
-export function MessageBubble({ message, onPermissionApprove, onPermissionDeny }: MessageBubbleProps) {
+/** Typewriter effect for assistant messages */
+function AssistantBubble({ message }: { message: ChatMessage }) {
+  const animate = !!message.meta?.animate;
+  const text = message.content;
+  const costLabel = (message.meta?.costLabel as string) ?? "";
+  const [visibleCount, setVisibleCount] = useState(animate ? 0 : Infinity);
+  const [done, setDone] = useState(!animate);
+  const wordsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    if (!animate) { setDone(true); return; }
+    const words = text.split(/(\s+)/);
+    wordsRef.current = words;
+    const total = words.length;
+    const speed = total > 400 ? 5 : total > 200 ? 10 : total > 80 ? 18 : 25;
+    let i = 0;
+
+    const timer = setInterval(() => {
+      i += 2;
+      if (i >= total) {
+        i = total;
+        clearInterval(timer);
+        setDone(true);
+      }
+      setVisibleCount(i);
+    }, speed);
+
+    return () => clearInterval(timer);
+  }, [text, animate]);
+
+  const visibleText = done ? text : wordsRef.current.slice(0, visibleCount).join("");
+
+  return (
+    <div style={{ display: "flex", justifyContent: "flex-start" }}>
+      <div
+        style={{
+          ...bubbleBase,
+          padding: "4px 0",
+          background: "none",
+          color: "var(--sna-text-secondary)",
+          cursor: done ? undefined : "pointer",
+          maxWidth: "100%",
+        }}
+        onClick={() => {
+          if (!done) { setVisibleCount(Infinity); setDone(true); }
+        }}
+        title={done ? undefined : "Click to skip animation"}
+      >
+        <MarkdownContent text={visibleText} />
+        {!done && (
+          <span
+            style={{
+              display: "inline-block",
+              width: 2,
+              height: "1em",
+              background: "var(--sna-accent)",
+              marginLeft: 2,
+              verticalAlign: "text-bottom",
+              animation: "sna-pulse 1s infinite",
+            }}
+          />
+        )}
+        {done && costLabel && (
+          <div
+            style={{
+              marginTop: 6,
+              paddingTop: 4,
+              borderTop: "1px solid rgba(255,255,255,0.04)",
+              fontSize: 10,
+              fontFamily: "var(--sna-font-mono)",
+              color: "var(--sna-text-faint)",
+              textAlign: "left",
+            }}
+          >
+            {costLabel}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const sIco = { stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round" as const, strokeLinejoin: "round" as const, fill: "none" };
+
+function IconCheck() {
+  return <svg width={12} height={12} viewBox="0 0 24 24" {...sIco}><path d="M5 12l5 5L20 7" /></svg>;
+}
+function IconX() {
+  return <svg width={12} height={12} viewBox="0 0 24 24" {...sIco}><path d="M18 6L6 18M6 6l12 12" /></svg>;
+}
+function IconAlertTriangle() {
+  return <svg width={14} height={14} viewBox="0 0 24 24" {...sIco}><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>;
+}
+
+function ToolResultCard({ message }: { message: ChatMessage }) {
+  const [expanded, setExpanded] = useState(false);
+  const isError = !!message.meta?.isError;
+  const content = message.content;
+  const isLong = content.length > 120;
+  const display = expanded || !isLong ? content : content.slice(0, 120) + "...";
+
+  return (
+    <div
+      onClick={() => isLong && setExpanded(!expanded)}
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 5,
+        padding: "1px 0 1px 24px",
+        cursor: isLong ? "pointer" : undefined,
+      }}
+    >
+      <span style={{ color: isError ? "var(--sna-error-text)" : "var(--sna-text-faint)", flexShrink: 0, marginTop: 1, display: "flex", opacity: 0.7 }}>
+        {isError ? <IconX /> : <IconCheck />}
+      </span>
+      <div
+        style={{
+          fontSize: 10,
+          fontFamily: "var(--sna-font-mono)",
+          color: isError ? "var(--sna-error-text)" : "var(--sna-text-faint)",
+          whiteSpace: "pre-wrap",
+          lineHeight: 1.4,
+          wordBreak: "break-all",
+          minWidth: 0,
+          opacity: 0.7,
+        }}
+      >
+        {display}
+      </div>
+    </div>
+  );
+}
+
+export function MessageBubble({ message }: MessageBubbleProps) {
   switch (message.role) {
     case "user":
       return (
@@ -38,55 +172,30 @@ export function MessageBubble({ message, onPermissionApprove, onPermissionDeny }
       );
 
     case "assistant":
-      return (
-        <div style={{ display: "flex", justifyContent: "flex-start" }}>
-          <div
-            style={{
-              ...bubbleBase,
-              background: "var(--sna-surface)",
-              border: "1px solid var(--sna-surface-border)",
-              borderRadius: "var(--sna-radius-xl) var(--sna-radius-xl) var(--sna-radius-xl) var(--sna-radius-sm)",
-              color: "var(--sna-text-secondary)",
-            }}
-          >
-            {message.content}
-          </div>
-        </div>
-      );
+      return <AssistantBubble message={message} />;
+
+    case "thinking":
+      return <ThinkingCard message={message} />;
+
+    case "tool":
+      return <ToolUseCard message={message} />;
+
+    case "tool_result":
+      return <ToolResultCard message={message} />;
 
     case "status":
       return (
         <div style={{ display: "flex", justifyContent: "center" }}>
-          <div
+          <span
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "6px 12px",
-              borderRadius: "var(--sna-radius-full)",
-              background: "var(--sna-surface)",
-              border: "1px solid var(--sna-surface-border)",
+              color: "var(--sna-text-faint)",
+              fontSize: 10,
+              fontFamily: "var(--sna-font-mono)",
+              padding: "2px 0",
             }}
           >
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: "var(--sna-radius-full)",
-                background: "var(--sna-success)",
-                flexShrink: 0,
-              }}
-            />
-            <span
-              style={{
-                color: "var(--sna-text-muted)",
-                fontSize: 12,
-                fontFamily: "var(--sna-font-mono)",
-              }}
-            >
-              {message.content}
-            </span>
-          </div>
+            {message.content}
+          </span>
         </div>
       );
 
@@ -100,39 +209,9 @@ export function MessageBubble({ message, onPermissionApprove, onPermissionDeny }
             padding: 16,
           }}
         >
-          <p style={{ color: "var(--sna-warning-text)", fontSize: 14, margin: "0 0 12px 0" }}>
+          <p style={{ color: "var(--sna-warning-text)", fontSize: 14, margin: 0 }}>
             {message.content}
           </p>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              onClick={onPermissionApprove}
-              style={{
-                padding: "6px 12px",
-                borderRadius: "var(--sna-radius-md)",
-                background: "var(--sna-success-approve)",
-                border: "none",
-                color: "white",
-                fontSize: 12,
-                cursor: "pointer",
-              }}
-            >
-              Approve
-            </button>
-            <button
-              onClick={onPermissionDeny}
-              style={{
-                padding: "6px 12px",
-                borderRadius: "var(--sna-radius-md)",
-                background: "none",
-                border: "1px solid var(--sna-surface-border)",
-                color: "var(--sna-text-muted)",
-                fontSize: 12,
-                cursor: "pointer",
-              }}
-            >
-              Deny
-            </button>
-          </div>
         </div>
       );
 
@@ -140,20 +219,23 @@ export function MessageBubble({ message, onPermissionApprove, onPermissionDeny }
       return (
         <div
           style={{
-            border: "1px solid var(--sna-error-border)",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+            padding: "8px 12px",
             background: "var(--sna-error-bg)",
-            borderRadius: "var(--sna-radius-lg)",
-            padding: "10px 16px",
+            border: "1px solid var(--sna-error-border)",
+            borderRadius: "var(--sna-radius-md)",
           }}
         >
-          <p style={{ color: "var(--sna-error-text)", fontSize: 14, margin: 0 }}>
+          <span style={{ color: "var(--sna-error-text)", flexShrink: 0, marginTop: 1, display: "flex" }}>
+            <IconAlertTriangle />
+          </span>
+          <span style={{ color: "var(--sna-error-text)", fontSize: 12, lineHeight: 1.5 }}>
             {message.content}
-          </p>
+          </span>
         </div>
       );
-
-    case "tool":
-      return <ToolUseCard message={message} />;
 
     case "skill":
       return <SkillCard message={message} />;

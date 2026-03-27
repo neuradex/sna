@@ -96,7 +96,8 @@
     "better-sqlite3": "^12.6.2",
     "chalk": "^5.0.0",
     "hono": "^4.12.7",
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "marked": "^17.0.5"
   },
   "peerDependencies": {
     "react": ">=18.0.0",
