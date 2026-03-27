@@ -25,16 +25,12 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
   };
 
   return (
-    <div style={{ borderTop: "1px solid var(--sna-chat-border)", padding: 12, flexShrink: 0 }}>
+    <div style={{ padding: "8px 12px", flexShrink: 0, borderTop: "1px solid var(--sna-chat-border)" }}>
       <div
         style={{
           display: "flex",
           alignItems: "flex-end",
           gap: 8,
-          background: "var(--sna-surface)",
-          border: "1px solid var(--sna-surface-border)",
-          borderRadius: "var(--sna-radius-lg)",
-          padding: "8px 12px",
         }}
       >
         <textarea
@@ -62,24 +58,24 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
             maxHeight: 120,
             lineHeight: 1.5,
             fontFamily: "var(--sna-font-sans)",
-            padding: 0,
+            padding: "4px 0",
           }}
         />
         <button
           onClick={handleSend}
           disabled={disabled || !text.trim()}
           style={{
-            width: 32,
-            height: 32,
-            borderRadius: "var(--sna-radius-md)",
-            background: "var(--sna-accent)",
+            width: 28,
+            height: 28,
+            borderRadius: "var(--sna-radius-sm)",
+            background: disabled || !text.trim() ? "transparent" : "var(--sna-accent)",
             border: "none",
-            cursor: disabled || !text.trim() ? "not-allowed" : "pointer",
+            cursor: disabled || !text.trim() ? "default" : "pointer",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             flexShrink: 0,
-            opacity: disabled || !text.trim() ? 0.3 : 1,
+            opacity: disabled || !text.trim() ? 0.2 : 1,
             transition: "background 0.15s, opacity 0.15s",
           }}
         >
@@ -94,12 +90,13 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
           </svg>
         </button>
       </div>
-      <div style={{ padding: "8px 4px 0", display: "flex", alignItems: "center" }}>
+      <div style={{ padding: "4px 0 0" }}>
         <span
           style={{
             color: "var(--sna-text-faint)",
-            fontSize: 10,
+            fontSize: 9,
             fontFamily: "var(--sna-font-mono)",
+            opacity: 0.6,
           }}
         >
           {disabled ? "Running..." : "Enter to send \u00b7 Shift+Enter for newline"}
