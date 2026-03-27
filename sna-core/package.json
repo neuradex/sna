@@ -1,7 +1,7 @@
 {
   "name": "sna",
-  "version": "0.1.0",
-  "description": "Skills-Native Application primitives — runtime, event bus, terminal, and React hooks",
+  "version": "0.2.0",
+  "description": "Skills-Native Application primitives — runtime, event bus, agent providers, and React hooks",
   "type": "module",
   "bin": {
     "sna": "bin/sna.js"
@@ -33,10 +33,10 @@
       "types": "./dist/server/routes/run.d.ts",
       "default": "./dist/server/routes/run.js"
     },
-    "./server/terminal": {
-      "source": "./src/server/terminal.ts",
-      "types": "./dist/server/terminal.d.ts",
-      "default": "./dist/server/terminal.js"
+    "./server/routes/agent": {
+      "source": "./src/server/routes/agent.ts",
+      "types": "./dist/server/routes/agent.d.ts",
+      "default": "./dist/server/routes/agent.js"
     },
     "./db/schema": {
       "source": "./src/db/schema.ts",
@@ -48,40 +48,37 @@
       "types": "./dist/components/sna-provider.d.ts",
       "default": "./dist/components/sna-provider.js"
     },
-    "./components/terminal-spacer": {
-      "source": "./src/components/terminal-spacer.tsx",
-      "types": "./dist/components/terminal-spacer.d.ts",
-      "default": "./dist/components/terminal-spacer.js"
-    },
-    "./components/terminal": {
-      "source": "./src/components/terminal/index.ts",
-      "types": "./dist/components/terminal/index.d.ts",
-      "default": "./dist/components/terminal/index.js"
+    "./components/chat": {
+      "source": "./src/components/chat/index.ts",
+      "types": "./dist/components/chat/index.d.ts",
+      "default": "./dist/components/chat/index.js"
     },
     "./hooks": {
       "source": "./src/hooks/index.ts",
       "types": "./dist/hooks/index.d.ts",
       "default": "./dist/hooks/index.js"
     },
-    "./stores/terminal-store": {
-      "source": "./src/stores/terminal-store.ts",
-      "types": "./dist/stores/terminal-store.d.ts",
-      "default": "./dist/stores/terminal-store.js"
+    "./stores/chat-store": {
+      "source": "./src/stores/chat-store.ts",
+      "types": "./dist/stores/chat-store.d.ts",
+      "default": "./dist/stores/chat-store.js"
+    },
+    "./providers": {
+      "source": "./src/core/providers/index.ts",
+      "types": "./dist/core/providers/index.d.ts",
+      "default": "./dist/core/providers/index.js"
     },
     "./lib/sna-run": {
       "source": "./src/lib/sna-run.ts",
       "types": "./dist/lib/sna-run.d.ts",
       "default": "./dist/lib/sna-run.js"
-    },
-    "./lib/terminal/constants": {
-      "source": "./src/lib/terminal/constants.ts",
-      "types": "./dist/lib/terminal/constants.d.ts",
-      "default": "./dist/lib/terminal/constants.js"
     }
   },
   "scripts": {
     "build": "tsup",
-    "dev": "tsup --watch",
+    "predev": "lsof -ti:3099 | xargs kill -9 2>/dev/null; true",
+    "dev": "tsx --watch src/server/standalone.ts",
+    "test": "node --import tsx --test test/**/*.test.ts",
     "prepublishOnly": "pnpm build"
   },
   "engines": {
@@ -95,17 +92,13 @@
     "hono"
   ],
   "dependencies": {
+    "@hono/node-server": "^1.19.11",
     "better-sqlite3": "^12.6.2",
     "chalk": "^5.0.0",
     "hono": "^4.12.7",
-    "js-yaml": "^4.1.0",
-    "node-pty": "^1.1.0",
-    "ws": "^8.19.0"
+    "js-yaml": "^4.1.0"
   },
   "peerDependencies": {
-    "@xterm/addon-fit": ">=0.10.0",
-    "@xterm/addon-web-links": ">=0.11.0",
-    "@xterm/xterm": ">=5.0.0",
     "react": ">=18.0.0",
     "zustand": ">=4.0.0"
   },
@@ -114,8 +107,9 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
-    "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
     "tsup": "^8.0.0",
+    "tsx": "^4.0.0",
     "typescript": "^5.0.0"
   }
 }

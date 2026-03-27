@@ -1,6 +1,7 @@
 "use client";
 import { useSkillEvents } from "./use-skill-events.js";
-import { useTerminalStore } from "../stores/terminal-store.js";
+import { useAgent } from "./use-agent.js";
+import { useChatStore } from "../stores/chat-store.js";
 function useSna(options = {}) {
   const {
     skills,
@@ -11,7 +12,10 @@ function useSna(options = {}) {
     onFailed,
     onPermissionNeeded,
     onProgress,
-    onMilestone
+    onMilestone,
+    provider = "claude-code",
+    onTextDelta,
+    onComplete
   } = options;
   const {
     events,
@@ -31,40 +35,50 @@ function useSna(options = {}) {
     onProgress,
     onMilestone
   });
-  const terminalIsOpen = useTerminalStore((s) => s.isOpen);
-  const terminalConnected = useTerminalStore((s) => s.connected);
-  const terminalIsConnecting = useTerminalStore((s) => s.isConnecting);
-  const toggleTerminal = useTerminalStore((s) => s.toggle);
-  const openTerminal = useTerminalStore((s) => s.setOpen);
-  const sendToTerminal = useTerminalStore((s) => s.sendToTerminal);
-  const sendToTerminalSub = useTerminalStore((s) => s.sendToTerminalSub);
-  const runSkill = (name) => {
-    openTerminal(true);
-    setTimeout(() => sendToTerminal(`/${name}
-`), 100);
+  const agent = useAgent({
+    provider,
+    onAssistant: onTextDelta,
+    onComplete
+  });
+  const chatIsOpen = useChatStore((s) => s.isOpen);
+  const chatMessages = useChatStore((s) => s.messages);
+  const toggleChat = useChatStore((s) => s.toggle);
+  const openChat = useChatStore((s) => s.setOpen);
+  const addChatMessage = useChatStore((s) => s.addMessage);
+  const clearChatMessages = useChatStore((s) => s.clearMessages);
+  const runSkill = async (name) => {
+    openChat(true);
+    addChatMessage({ role: "user", content: `/${name}` });
+    if (agent.alive) {
+      await agent.send(`Execute the skill: ${name}`);
+    } else {
+      await agent.start(`Execute the skill: ${name}`);
+    }
   };
-  const runSkillSub = (name) => {
-    openTerminal(true);
-    setTimeout(() => sendToTerminalSub(`/${name}
-`), 100);
+  const runSkillSub = async (name) => {
+    openChat(true);
+    addChatMessage({ role: "user", content: `/${name}` });
+    if (agent.alive) {
+      await agent.send(`Execute the skill: ${name}`);
+    } else {
+      await agent.start(`Execute the skill: ${name}`);
+    }
   };
   return {
     events,
-    connected: eventsConnected,
+    connected: eventsConnected && agent.connected,
     latestBySkill,
     isRunning,
     isWaitingForPermission,
     clearEvents,
-    terminal: {
-      isOpen: terminalIsOpen,
-      /** WebSocket is open and Claude PTY is running */
-      connected: terminalConnected,
-      /** WebSocket is currently connecting or reconnecting */
-      isConnecting: terminalIsConnecting,
-      toggle: toggleTerminal,
-      setOpen: openTerminal,
-      send: sendToTerminal,
-      sendSub: sendToTerminalSub
+    agent,
+    chat: {
+      isOpen: chatIsOpen,
+      messages: chatMessages,
+      toggle: toggleChat,
+      setOpen: openChat,
+      addMessage: addChatMessage,
+      clearMessages: clearChatMessages
     },
     runSkill,
     runSkillSub

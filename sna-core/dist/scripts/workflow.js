@@ -260,7 +260,7 @@ function executeHandler(step, submitted, context) {
   const cmd = interpolate(handlerTemplate, { ...context, submitted: jsonStr }).replace(/\{\{submitted\}\}/g, jsonStr);
   let output;
   try {
-    output = execSync(cmd, { encoding: "utf8", cwd: ROOT, timeout: 3e4 }).trim();
+    output = execSync(cmd, { encoding: "utf8", cwd: ROOT, timeout: step.timeout ?? 3e4 }).trim();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`handler failed: ${msg}`);
@@ -282,7 +282,7 @@ function executeExecStep(step, context) {
   const cmd = interpolate(step.exec, context);
   let output;
   try {
-    output = execSync(cmd, { encoding: "utf8", cwd: ROOT, timeout: 3e4 }).trim();
+    output = execSync(cmd, { encoding: "utf8", cwd: ROOT, timeout: step.timeout ?? 3e4 }).trim();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`exec step "${step.id}" failed: ${msg}`);
@@ -300,16 +300,38 @@ function executeExecStep(step, context) {
   }
   return extracted;
 }
-function applyExtract(data, expr) {
-  const mapMatch = expr.match(/^\[\.?\[\]\s*\|\s*\.(\w+)\]$/);
-  if (mapMatch && Array.isArray(data)) {
-    return data.map((item) => item[mapMatch[1]]);
+function resolvePath(data, pathStr) {
+  const segments = pathStr.match(/[^.\[\]]+|\[\d+\]/g);
+  if (!segments) return data;
+  let current = data;
+  for (const seg of segments) {
+    if (current === null || current === void 0) return void 0;
+    const indexMatch = seg.match(/^\[(\d+)\]$/);
+    if (indexMatch) {
+      if (Array.isArray(current)) {
+        current = current[parseInt(indexMatch[1])];
+      } else {
+        return void 0;
+      }
+    } else {
+      if (typeof current === "object" && current !== null) {
+        current = current[seg];
+      } else {
+        return void 0;
+      }
+    }
   }
-  const fieldMatch = expr.match(/^\.(\w+)$/);
-  if (fieldMatch) {
-    return data[fieldMatch[1]];
+  return current;
+}
+function applyExtract(data, expr) {
+  const mapMatch = expr.match(/^\[\.?\[\]\s*\|\s*\.(.+)\]$/);
+  if (mapMatch && Array.isArray(data)) {
+    return data.map((item) => resolvePath(item, mapMatch[1]));
   }
   if (expr === ".") return data;
+  if (expr.startsWith(".")) {
+    return resolvePath(data, expr.slice(1));
+  }
   return data;
 }
 function displayStep(step, stepIndex, totalSteps, context, taskId) {
@@ -409,6 +431,17 @@ function cmdWorkflow(taskId, args) {
       console.error(`Task ${taskId} is already completed.`);
       process.exit(1);
     }
+    if (task.status === "cancelled") {
+      console.error(`Task ${taskId} is cancelled. Create a new task instead.`);
+      process.exit(1);
+    }
+    if (task.status === "error") {
+      const currentStep = workflow.steps[task.current_step];
+      task.status = "in_progress";
+      task.steps[currentStep.id] = { status: "in_progress" };
+      saveTask(task);
+      console.log(`\u21BB Retrying from step ${task.current_step + 1}/${workflow.steps.length}: ${currentStep.name}`);
+    }
     const advanced = autoAdvance(task, workflow);
     if (advanced.current_step < workflow.steps.length) {
       const currentStep = workflow.steps[advanced.current_step];
@@ -503,10 +536,85 @@ ${msg}`);
     }
     return;
   }
-  console.error(`Usage: sna ${taskId} <start|next> [--key val ...]`);
+  console.error(`Usage: sna ${taskId} <start|next|cancel> [--key val ...]`);
   process.exit(1);
 }
+function cmdCancel(taskId) {
+  const task = loadTask(taskId);
+  if (task.status === "completed") {
+    console.error(`Task ${taskId} is already completed.`);
+    process.exit(1);
+  }
+  if (task.status === "cancelled") {
+    console.error(`Task ${taskId} is already cancelled.`);
+    process.exit(1);
+  }
+  const workflow = loadWorkflow(task.skill);
+  const currentStep = workflow.steps[task.current_step];
+  if (currentStep) {
+    task.steps[currentStep.id] = { status: "error" };
+  }
+  task.status = "cancelled";
+  saveTask(task);
+  emitEvent(workflow.skill, "error", `Task ${taskId} cancelled`);
+  console.log(`\u2717 Task ${taskId} cancelled`);
+}
+function cmdTasks() {
+  ensureTasksDir();
+  const files = fs.readdirSync(TASKS_DIR).filter((f) => f.endsWith(".json")).sort();
+  if (files.length === 0) {
+    console.log("No tasks found.");
+    return;
+  }
+  console.log("\u2500\u2500 Tasks \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+  console.log(
+    "  ID           Skill                Status       Step"
+  );
+  console.log("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500   \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+  for (const file of files) {
+    const task = JSON.parse(fs.readFileSync(path.join(TASKS_DIR, file), "utf8"));
+    let workflow = null;
+    try {
+      workflow = loadWorkflow(task.skill);
+    } catch {
+    }
+    const totalSteps = workflow ? workflow.steps.length : "?";
+    const currentStepId = workflow && task.current_step < workflow.steps.length ? workflow.steps[task.current_step].id : "";
+    const statusIcon = {
+      in_progress: "\u25B6",
+      completed: "\u2713",
+      error: "\u2717",
+      cancelled: "\u25A0",
+      created: "\xB7"
+    };
+    const icon = statusIcon[task.status] ?? "\xB7";
+    const stepLabel = task.status === "completed" ? `${totalSteps}/${totalSteps}` : `${task.current_step + 1}/${totalSteps} ${currentStepId}`;
+    console.log(
+      `  ${task.task_id.padEnd(13)}${task.skill.padEnd(22)}${icon} ${task.status.padEnd(13)}${stepLabel}`
+    );
+  }
+  console.log("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
+}
+const _test = {
+  resolvePath,
+  applyExtract,
+  interpolate,
+  coerceValue,
+  kebabToSnake,
+  parseCliFlags,
+  validateSubmitData,
+  readStdin,
+  loadWorkflow,
+  loadTask,
+  saveTask,
+  generateTaskId,
+  ensureTasksDir,
+  TASKS_DIR
+};
 export {
+  _test,
+  cmdCancel,
   cmdNew,
+  cmdTasks,
   cmdWorkflow
 };

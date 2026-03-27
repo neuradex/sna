@@ -24,6 +24,7 @@ import { Hono } from "hono";
 import { eventsRoute } from "./routes/events.js";
 import { emitRoute } from "./routes/emit.js";
 import { createRunRoute } from "./routes/run.js";
+import { createAgentRoutes } from "./routes/agent.js";
 
 export interface SnaAppOptions {
   /** Commands available via GET /run?skill=<name> */
@@ -33,8 +34,15 @@ export interface SnaAppOptions {
 export function createSnaApp(options: SnaAppOptions = {}) {
   const app = new Hono();
 
+  // Health check — used by consumers to verify this is an SNA server
+  app.get("/health", (c) => c.json({ ok: true, name: "sna", version: "1" }));
+
+  // Skill event routes (SQLite → SSE)
   app.get("/events", eventsRoute);
   app.post("/emit", emitRoute);
+
+  // Agent routes (stdio spawn → SSE)
+  app.route("/agent", createAgentRoutes());
 
   if (options.runCommands) {
     app.get("/run", createRunRoute(options.runCommands));
@@ -46,3 +54,4 @@ export function createSnaApp(options: SnaAppOptions = {}) {
 export { eventsRoute } from "./routes/events.js";
 export { emitRoute } from "./routes/emit.js";
 export { createRunRoute } from "./routes/run.js";
+export { createAgentRoutes } from "./routes/agent.js";

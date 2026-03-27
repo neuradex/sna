@@ -1,16 +1,17 @@
 import { execSync, spawn } from "child_process";
 import fs from "fs";
 import path from "path";
-import { cmdNew, cmdWorkflow } from "./workflow.js";
+import { cmdNew, cmdWorkflow, cmdCancel, cmdTasks } from "./workflow.js";
 const ROOT = process.cwd();
 const STATE_DIR = path.join(ROOT, ".sna");
 const PID_FILE = path.join(STATE_DIR, "server.pid");
 const PORT_FILE = path.join(STATE_DIR, "port");
 const LOG_FILE = path.join(STATE_DIR, "server.log");
+const SNA_API_PID_FILE = path.join(STATE_DIR, "sna-api.pid");
+const SNA_API_LOG_FILE = path.join(STATE_DIR, "sna-api.log");
+const SNA_API_PORT = process.env.SNA_PORT ?? "3099";
 const PORT = process.env.PORT ?? "3000";
-const WS_PORT = "3001";
 const DB_PATH = path.join(ROOT, "data/app.db");
-const WS_PID_FILE = path.join(STATE_DIR, "terminal.pid");
 const CLAUDE_PATH_FILE = path.join(STATE_DIR, "claude-path");
 const SNA_CORE_DIR = path.join(ROOT, "node_modules/sna");
 function ensureStateDir() {
@@ -38,6 +39,79 @@ function writePid(pid) {
 function clearState() {
   if (fs.existsSync(PID_FILE)) fs.unlinkSync(PID_FILE);
   if (fs.existsSync(PORT_FILE)) fs.unlinkSync(PORT_FILE);
+}
+function readSnaApiPid() {
+  if (!fs.existsSync(SNA_API_PID_FILE)) return null;
+  const raw = fs.readFileSync(SNA_API_PID_FILE, "utf8").trim();
+  const pid = parseInt(raw);
+  return isNaN(pid) ? null : pid;
+}
+function clearSnaApiState() {
+  if (fs.existsSync(SNA_API_PID_FILE)) fs.unlinkSync(SNA_API_PID_FILE);
+}
+async function checkSnaApiHealth(port) {
+  try {
+    const res = await fetch(`http://localhost:${port}/health`, {
+      signal: AbortSignal.timeout(2e3)
+    });
+    const json = await res.json();
+    return json.name === "sna";
+  } catch {
+    return false;
+  }
+}
+async function cmdApiUp() {
+  const standaloneEntry = path.join(SNA_CORE_DIR, "dist/server/standalone.js");
+  if (isPortInUse(SNA_API_PORT)) {
+    const healthy = await checkSnaApiHealth(SNA_API_PORT);
+    if (healthy) {
+      step(`SNA API already running on :${SNA_API_PORT} \u2014 reusing`);
+      return;
+    }
+    console.error(`
+\u2717  Port ${SNA_API_PORT} is occupied by a non-SNA process.`);
+    console.error(`   Free it or set SNA_PORT to a different port.
+`);
+    process.exit(1);
+  }
+  if (!fs.existsSync(standaloneEntry)) {
+    console.error(`
+\u2717  SNA standalone server not found: ${standaloneEntry}`);
+    console.error(`   Run "pnpm build" in sna-core.
+`);
+    process.exit(1);
+  }
+  const staleApiPid = readSnaApiPid();
+  if (staleApiPid && isProcessRunning(staleApiPid)) {
+    try {
+      process.kill(staleApiPid, "SIGTERM");
+    } catch {
+    }
+  }
+  ensureStateDir();
+  const logStream = fs.openSync(SNA_API_LOG_FILE, "w");
+  const child = spawn("node", [standaloneEntry], {
+    cwd: ROOT,
+    detached: true,
+    stdio: ["ignore", logStream, logStream],
+    env: { ...process.env, SNA_PORT: SNA_API_PORT }
+  });
+  child.unref();
+  fs.writeFileSync(SNA_API_PID_FILE, String(child.pid));
+  step(`SNA API server \u2192 http://localhost:${SNA_API_PORT}`);
+}
+function cmdApiDown() {
+  const pid = readSnaApiPid();
+  if (pid && isProcessRunning(pid)) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+    }
+    console.log(`   SNA API     \u2713  stopped (pid=${pid})`);
+  } else {
+    console.log(`   SNA API     \u2014  not running`);
+  }
+  clearSnaApiState();
 }
 function isPortInUse(port) {
   try {
@@ -129,32 +203,36 @@ function cmdUp() {
     }
     console.log(`\r  \u2713  Port ${PORT} cleared              `);
   }
-  const spawnHelper = path.join(ROOT, "node_modules/.pnpm/node-pty@1.1.0/node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper");
-  if (fs.existsSync(spawnHelper)) {
-    const mode = fs.statSync(spawnHelper).mode;
-    if ((mode & 73) === 0) {
-      fs.chmodSync(spawnHelper, 493);
-      step("node-pty spawn-helper permissions fixed");
-    }
-  }
-  if (isPortInUse(WS_PORT)) {
-    try {
-      execSync(`lsof -ti:${WS_PORT} | xargs kill -9`, { stdio: "pipe" });
-    } catch {
-    }
-  }
   ensureStateDir();
   const claudePath = resolveAndCacheClaudePath();
   step(`Claude binary: ${claudePath}`);
-  const wsLog = fs.openSync(path.join(STATE_DIR, "terminal.log"), "w");
-  const wsChild = spawn("node", [path.join(SNA_CORE_DIR, "dist/server/terminal.js")], {
-    cwd: ROOT,
-    detached: true,
-    stdio: ["ignore", wsLog, wsLog]
-  });
-  wsChild.unref();
-  fs.writeFileSync(WS_PID_FILE, String(wsChild.pid));
-  step("Terminal WebSocket server starting");
+  const standaloneEntry = path.join(SNA_CORE_DIR, "dist/server/standalone.js");
+  if (fs.existsSync(standaloneEntry)) {
+    const staleApiPid = readSnaApiPid();
+    if (staleApiPid && isProcessRunning(staleApiPid)) {
+      try {
+        process.kill(staleApiPid, "SIGTERM");
+      } catch {
+      }
+    }
+    if (isPortInUse(SNA_API_PORT)) {
+      try {
+        execSync(`lsof -ti:${SNA_API_PORT} | xargs kill -9`, { stdio: "pipe" });
+      } catch {
+      }
+    }
+    const snaApiLogStream = fs.openSync(SNA_API_LOG_FILE, "w");
+    const snaApiChild = spawn("node", [standaloneEntry], {
+      cwd: ROOT,
+      detached: true,
+      stdio: ["ignore", snaApiLogStream, snaApiLogStream],
+      env: { ...process.env, SNA_PORT: SNA_API_PORT }
+    });
+    snaApiChild.unref();
+    ensureStateDir();
+    fs.writeFileSync(SNA_API_PID_FILE, String(snaApiChild.pid));
+    step(`SNA API server \u2192 http://localhost:${SNA_API_PORT}`);
+  }
   const logStream = fs.openSync(LOG_FILE, "w");
   const child = spawn("pnpm", ["dev"], {
     cwd: ROOT,
@@ -213,24 +291,18 @@ function cmdDown() {
       break;
     }
   }
-  if (fs.existsSync(WS_PID_FILE)) {
-    const wsPid = parseInt(fs.readFileSync(WS_PID_FILE, "utf8").trim());
-    if (!isNaN(wsPid) && isProcessRunning(wsPid)) {
-      try {
-        process.kill(-wsPid, "SIGTERM");
-      } catch {
-        try {
-          process.kill(wsPid, "SIGKILL");
-        } catch {
-        }
-      }
-    }
-    fs.unlinkSync(WS_PID_FILE);
-    console.log(`   Terminal WS \u2713  (pid=${wsPid} stopped)`);
-  }
   clearState();
   console.log(`   Web server  \u2713  (pid=${pid} stopped)`);
   if (!freed) console.log(`   Note: port ${PORT} may still be in use briefly`);
+  const snaApiPid = readSnaApiPid();
+  if (snaApiPid && isProcessRunning(snaApiPid)) {
+    try {
+      process.kill(snaApiPid, "SIGTERM");
+    } catch {
+    }
+    console.log(`   SNA API     \u2713  (pid=${snaApiPid} stopped)`);
+  }
+  clearSnaApiState();
   console.log("\n\u2713  SNA is down");
 }
 function cmdStatus() {
@@ -243,6 +315,13 @@ function cmdStatus() {
   } else {
     console.log(`  Web server   \u2717  stopped`);
     if (pid) clearState();
+  }
+  const snaApiPid = readSnaApiPid();
+  if (snaApiPid && isProcessRunning(snaApiPid)) {
+    console.log(`  SNA API      \u2713  running  (pid=${snaApiPid}, port=${SNA_API_PORT})`);
+  } else {
+    console.log(`  SNA API      \u2717  stopped`);
+    if (snaApiPid) clearSnaApiState();
   }
   if (fs.existsSync(DB_PATH)) {
     const stat = fs.statSync(DB_PATH);
@@ -331,9 +410,11 @@ Lifecycle:
 
 Workflow:
   sna new <skill> [--param val ...]    Create a task from a workflow.yml
-  sna <task-id> start                  Resume a paused task
+  sna <task-id> start                  Resume a paused task (retries on error)
   sna <task-id> next [--key val]       Submit scalar data (CLI flags)
   sna <task-id> next <<'EOF' ... EOF   Submit structured data (stdin JSON)
+  sna <task-id> cancel                 Cancel a running task
+  sna tasks                            List all tasks with status
 
   Task IDs are 10-digit timestamps (MMDDHHmmss), e.g. 0317143052
 
@@ -365,8 +446,9 @@ Structure:
       # === Step type A: exec (CLI auto-executes) ===
       exec: "curl -s http://..."   # shell command, {{param}} interpolated
       extract:                     # parse JSON response into context
-        field_name: ".json_key"    # jq-like: ".key", "[.[] | .key]", "."
+        field_name: ".json_key"    # ".key", ".a.b.c", ".[0]", "[.[] | .key]", "."
       event: "Message with {{field_name}}"  # emitted as milestone
+      timeout: 60000               # optional, ms (default: 30000)
 
       # === Step type B: instruction (model does work) ===
       instruction: |               # displayed to the model
@@ -385,6 +467,7 @@ Structure:
       extract:                     # parse handler response into context
         registered: ".registered"
       event: "{{registered}} items processed"
+      timeout: 60000               # optional, ms (default: 30000)
 
       # --- Option 2: scalar values via CLI flags ---
       data:
@@ -403,7 +486,21 @@ Execution rules:
   - instruction steps pause: CLI displays the instruction and waits
     for "sna <id> next" with the required data.
   - Events are emitted to SQLite skill_events automatically.
-  - Task state is saved to .sna/tasks/<id>.json after each step.`);
+  - Task state is saved to .sna/tasks/<id>.json after each step.
+
+Error recovery:
+  - If a task errors, "sna <id> start" retries from the failed step.
+  - The step and task status are reset to in_progress automatically.
+  - exec steps are re-executed; instruction steps re-display.
+
+Cancel:
+  - "sna <id> cancel" permanently stops a task.
+  - Status is set to "cancelled" and an error event is emitted.
+  - Cancelled tasks cannot be resumed \u2014 create a new task instead.
+
+Task management:
+  - "sna tasks" lists all tasks with ID, skill, status, and current step.
+  - Task state files: .sna/tasks/<id>.json`);
 }
 function printSubmitHelp() {
   console.log(`sna help submit \u2014 data submission patterns
@@ -469,18 +566,23 @@ Run "sna help workflow" for workflow.yml specification.`);
   } else {
     cmdNew(args);
   }
+} else if (command === "tasks") {
+  cmdTasks();
 } else if (isTaskId) {
   if (wantsHelp) {
-    console.log(`Usage: sna <task-id> <start|next> [options]
+    console.log(`Usage: sna <task-id> <start|next|cancel> [options]
 
 Commands:
-  sna <id> start                   Resume task from current step
+  sna <id> start                   Resume task from current step (retries on error)
   sna <id> next --key val          Submit scalar values
   sna <id> next <<'EOF' ... EOF    Submit JSON via stdin
+  sna <id> cancel                  Cancel task
 
 Task state: .sna/tasks/<id>.json
 
 Run "sna help submit" for data submission patterns.`);
+  } else if (args[0] === "cancel") {
+    cmdCancel(command);
   } else {
     cmdWorkflow(command, args);
   }
@@ -497,6 +599,12 @@ Run "sna help submit" for data submission patterns.`);
       break;
     case "status":
       cmdStatus();
+      break;
+    case "api:up":
+      cmdApiUp();
+      break;
+    case "api:down":
+      cmdApiDown();
       break;
     case "restart":
       cmdDown();

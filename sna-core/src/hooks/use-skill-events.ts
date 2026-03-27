@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useSnaContext } from "../core/sna-context.js";
 
 export interface SkillEvent {
   id: number;
@@ -15,6 +16,8 @@ export interface SkillEvent {
 export type SkillEventHandler = (event: SkillEvent) => void;
 
 interface UseSkillEventsOptions {
+  /** Set to false to disable the SSE connection (saves browser connection slots). */
+  enabled?: boolean;
   skills?: string[];
   maxEvents?: number;
   onEvent?: SkillEventHandler;
@@ -34,7 +37,8 @@ interface UseSkillEventsOptions {
  * Those events flow through SQLite → /api/events SSE → this hook → your UI.
  */
 export function useSkillEvents(options: UseSkillEventsOptions = {}) {
-  const { skills, maxEvents = 100, onEvent, onInvoked, onCalled, onSuccess, onFailed, onNeedPermission, onProgress, onMilestone } = options;
+  const { enabled = true, skills, maxEvents = 100, onEvent, onInvoked, onCalled, onSuccess, onFailed, onNeedPermission, onProgress, onMilestone } = options;
+  const { apiUrl } = useSnaContext();
   const [events, setEvents] = useState<SkillEvent[]>([]);
   const [connected, setConnected] = useState(false);
   const lastIdRef = useRef<number>(0);
@@ -49,13 +53,14 @@ export function useSkillEvents(options: UseSkillEventsOptions = {}) {
   const onMilestoneRef = useRef(onMilestone); onMilestoneRef.current = onMilestone;
 
   useEffect(() => {
+    if (!enabled) return;
     let disposed = false;
 
     function connect() {
       if (disposed) return;
       if (esRef.current) esRef.current.close();
 
-      const url = `/api/events?since=${lastIdRef.current}`;
+      const url = `${apiUrl}/events?since=${lastIdRef.current}`;
       const es = new EventSource(url);
       esRef.current = es;
 
@@ -102,7 +107,7 @@ export function useSkillEvents(options: UseSkillEventsOptions = {}) {
       setConnected(false);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [apiUrl, enabled]);
 
   const latestBySkill = events.reduce<Record<string, SkillEvent>>((acc, e) => {
     acc[e.skill] = e;

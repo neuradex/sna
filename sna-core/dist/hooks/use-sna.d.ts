@@ -1,8 +1,14 @@
 import { SkillEventHandler, SkillEvent } from './use-skill-events.js';
+import { AgentEvent } from './use-agent.js';
+import { ChatMessage } from '../stores/chat-store.js';
+import 'zustand/middleware';
+import 'zustand';
 
 interface UseSnaOptions {
     skills?: string[];
     maxEvents?: number;
+    /** Agent provider name. Defaults to "claude-code" */
+    provider?: string;
     onEvent?: SkillEventHandler;
     onCalled?: SkillEventHandler;
     onSuccess?: SkillEventHandler;
@@ -10,19 +16,25 @@ interface UseSnaOptions {
     onPermissionNeeded?: SkillEventHandler;
     onProgress?: SkillEventHandler;
     onMilestone?: SkillEventHandler;
+    /** Called when agent streams text */
+    onTextDelta?: (e: AgentEvent) => void;
+    /** Called when agent completes */
+    onComplete?: (e: AgentEvent) => void;
 }
 /**
  * useSna — the single entry point for SNA frontend primitives.
  *
  * Bundles:
  * 1. Skill Event Stream — real-time events from SQLite → SSE → UI
- * 2. Claude Event Hooks — lifecycle callbacks (onCalled, onSuccess, onPermissionNeeded...)
- * 3. Terminal primitive — control the embedded Claude Code terminal
+ * 2. Agent Session — stdio spawn of Claude Code / Codex via HTTP API
+ * 3. Chat Panel — control the right-side chat panel
  *
  * @example
- * const { events, isRunning, terminal, runSkill } = useSna({
+ * const { events, isRunning, chat, runSkill } = useSna({
  *   skills: ["devlog-collect"],
+ *   provider: "claude-code",
  *   onMilestone: (e) => console.log(e.message),
+ *   onTextDelta: (e) => appendChat(e.message),
  * });
  * <button onClick={() => runSkill("devlog-collect")}>Collect</button>
  */
@@ -33,19 +45,23 @@ declare function useSna(options?: UseSnaOptions): {
     isRunning: (skill: string) => boolean;
     isWaitingForPermission: (skill: string) => boolean;
     clearEvents: () => void;
-    terminal: {
-        isOpen: boolean;
-        /** WebSocket is open and Claude PTY is running */
+    agent: {
         connected: boolean;
-        /** WebSocket is currently connecting or reconnecting */
-        isConnecting: boolean;
+        alive: boolean;
+        start: (prompt?: string) => Promise<any>;
+        send: (message: string) => Promise<any>;
+        kill: () => Promise<void>;
+    };
+    chat: {
+        isOpen: boolean;
+        messages: ChatMessage[];
         toggle: () => void;
         setOpen: (open: boolean) => void;
-        send: (text: string) => void;
-        sendSub: (text: string) => void;
+        addMessage: (message: Omit<ChatMessage, "id" | "timestamp">) => void;
+        clearMessages: () => void;
     };
-    runSkill: (name: string) => void;
-    runSkillSub: (name: string) => void;
+    runSkill: (name: string) => Promise<void>;
+    runSkillSub: (name: string) => Promise<void>;
 };
 
-export { SkillEvent, SkillEventHandler, useSna };
+export { AgentEvent, ChatMessage, SkillEvent, SkillEventHandler, useSna };

@@ -61,6 +61,7 @@ interface WorkflowStep {
   submit?: SubmitDef;
   handler?: string;
   event?: string;
+  timeout?: number; // ms, default 30000
 }
 
 interface WorkflowDef {
@@ -79,7 +80,7 @@ interface StepStatus {
 interface TaskState {
   task_id: string;
   skill: string;
-  status: "created" | "in_progress" | "completed" | "error";
+  status: "created" | "in_progress" | "completed" | "error" | "cancelled";
   started_at: string;
   params: Record<string, unknown>;
   context: Record<string, unknown>;
@@ -404,7 +405,7 @@ function executeHandler(step: WorkflowStep, submitted: unknown, context: Record<
 
   let output: string;
   try {
-    output = execSync(cmd, { encoding: "utf8", cwd: ROOT, timeout: 30000 }).trim();
+    output = execSync(cmd, { encoding: "utf8", cwd: ROOT, timeout: step.timeout ?? 30000 }).trim();
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`handler failed: ${msg}`);
@@ -433,7 +434,7 @@ function executeExecStep(step: WorkflowStep, context: Record<string, unknown>): 
   const cmd = interpolate(step.exec!, context);
   let output: string;
   try {
-    output = execSync(cmd, { encoding: "utf8", cwd: ROOT, timeout: 30000 }).trim();
+    output = execSync(cmd, { encoding: "utf8", cwd: ROOT, timeout: step.timeout ?? 30000 }).trim();
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`exec step "${step.id}" failed: ${msg}`);
@@ -454,21 +455,50 @@ function executeExecStep(step: WorkflowStep, context: Record<string, unknown>): 
   return extracted;
 }
 
-function applyExtract(data: unknown, expr: string): unknown {
-  // "[.[] | .field]" → map array items to field
-  const mapMatch = expr.match(/^\[\.?\[\]\s*\|\s*\.(\w+)\]$/);
-  if (mapMatch && Array.isArray(data)) {
-    return data.map((item: Record<string, unknown>) => item[mapMatch[1]]);
-  }
+/**
+ * Resolve a dot-path (e.g. "a.b[0].c") against a data structure.
+ * Supports: field access (.a), nested (.a.b.c), array index (.[0], .a[0]).
+ */
+function resolvePath(data: unknown, pathStr: string): unknown {
+  const segments = pathStr.match(/[^.\[\]]+|\[\d+\]/g);
+  if (!segments) return data;
 
-  // ".field" → direct access
-  const fieldMatch = expr.match(/^\.(\w+)$/);
-  if (fieldMatch) {
-    return (data as Record<string, unknown>)[fieldMatch[1]];
+  let current: unknown = data;
+  for (const seg of segments) {
+    if (current === null || current === undefined) return undefined;
+
+    const indexMatch = seg.match(/^\[(\d+)\]$/);
+    if (indexMatch) {
+      if (Array.isArray(current)) {
+        current = current[parseInt(indexMatch[1])];
+      } else {
+        return undefined;
+      }
+    } else {
+      if (typeof current === "object" && current !== null) {
+        current = (current as Record<string, unknown>)[seg];
+      } else {
+        return undefined;
+      }
+    }
+  }
+  return current;
+}
+
+function applyExtract(data: unknown, expr: string): unknown {
+  // "[.[] | .field.nested]" → map array items through path
+  const mapMatch = expr.match(/^\[\.?\[\]\s*\|\s*\.(.+)\]$/);
+  if (mapMatch && Array.isArray(data)) {
+    return data.map((item: unknown) => resolvePath(item, mapMatch[1]));
   }
 
   // "." → identity
   if (expr === ".") return data;
+
+  // ".field", ".field.nested", ".field[0].nested" → nested path
+  if (expr.startsWith(".")) {
+    return resolvePath(data, expr.slice(1));
+  }
 
   return data;
 }
@@ -597,6 +627,19 @@ export function cmdWorkflow(taskId: string, args: string[]) {
       console.error(`Task ${taskId} is already completed.`);
       process.exit(1);
     }
+    if (task.status === "cancelled") {
+      console.error(`Task ${taskId} is cancelled. Create a new task instead.`);
+      process.exit(1);
+    }
+
+    // Error recovery: reset failed step and retry
+    if (task.status === "error") {
+      const currentStep = workflow.steps[task.current_step];
+      task.status = "in_progress";
+      task.steps[currentStep.id] = { status: "in_progress" };
+      saveTask(task);
+      console.log(`↻ Retrying from step ${task.current_step + 1}/${workflow.steps.length}: ${currentStep.name}`);
+    }
 
     const advanced = autoAdvance(task, workflow);
 
@@ -709,6 +752,96 @@ export function cmdWorkflow(taskId: string, args: string[]) {
     return;
   }
 
-  console.error(`Usage: sna ${taskId} <start|next> [--key val ...]`);
+  console.error(`Usage: sna ${taskId} <start|next|cancel> [--key val ...]`);
   process.exit(1);
 }
+
+export function cmdCancel(taskId: string) {
+  const task = loadTask(taskId);
+
+  if (task.status === "completed") {
+    console.error(`Task ${taskId} is already completed.`);
+    process.exit(1);
+  }
+  if (task.status === "cancelled") {
+    console.error(`Task ${taskId} is already cancelled.`);
+    process.exit(1);
+  }
+
+  const workflow = loadWorkflow(task.skill);
+  const currentStep = workflow.steps[task.current_step];
+  if (currentStep) {
+    task.steps[currentStep.id] = { status: "error" };
+  }
+  task.status = "cancelled";
+  saveTask(task);
+
+  emitEvent(workflow.skill, "error", `Task ${taskId} cancelled`);
+  console.log(`✗ Task ${taskId} cancelled`);
+}
+
+export function cmdTasks() {
+  ensureTasksDir();
+  const files = fs.readdirSync(TASKS_DIR).filter((f) => f.endsWith(".json")).sort();
+
+  if (files.length === 0) {
+    console.log("No tasks found.");
+    return;
+  }
+
+  console.log("── Tasks ──────────────────────────────────────────────────────");
+  console.log(
+    "  ID           Skill                Status       Step"
+  );
+  console.log("  ─────────    ──────────────────    ──────────   ────────────────");
+
+  for (const file of files) {
+    const task: TaskState = JSON.parse(fs.readFileSync(path.join(TASKS_DIR, file), "utf8"));
+    let workflow: WorkflowDef | null = null;
+    try {
+      workflow = loadWorkflow(task.skill);
+    } catch { /* workflow file may have been deleted */ }
+
+    const totalSteps = workflow ? workflow.steps.length : "?";
+    const currentStepId = workflow && task.current_step < workflow.steps.length
+      ? workflow.steps[task.current_step].id
+      : "";
+
+    const statusIcon: Record<string, string> = {
+      in_progress: "▶",
+      completed: "✓",
+      error: "✗",
+      cancelled: "■",
+      created: "·",
+    };
+    const icon = statusIcon[task.status] ?? "·";
+    const stepLabel = task.status === "completed"
+      ? `${totalSteps}/${totalSteps}`
+      : `${task.current_step + 1}/${totalSteps} ${currentStepId}`;
+
+    console.log(
+      `  ${task.task_id.padEnd(13)}${task.skill.padEnd(22)}${icon} ${task.status.padEnd(13)}${stepLabel}`
+    );
+  }
+
+  console.log("───────────────────────────────────────────────────────────────");
+}
+
+// ── Exports for testing ──────────────────────────────────────────────────────
+
+export const _test = {
+  resolvePath,
+  applyExtract,
+  interpolate,
+  coerceValue,
+  kebabToSnake,
+  parseCliFlags,
+  validateSubmitData,
+  readStdin,
+  loadWorkflow,
+  loadTask,
+  saveTask,
+  generateTaskId,
+  ensureTasksDir,
+  TASKS_DIR,
+};

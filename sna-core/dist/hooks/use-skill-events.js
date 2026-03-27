@@ -1,7 +1,9 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { useSnaContext } from "../core/sna-context.js";
 function useSkillEvents(options = {}) {
   const { skills, maxEvents = 100, onEvent, onInvoked, onCalled, onSuccess, onFailed, onNeedPermission, onProgress, onMilestone } = options;
+  const { apiUrl } = useSnaContext();
   const [events, setEvents] = useState([]);
   const [connected, setConnected] = useState(false);
   const lastIdRef = useRef(0);
@@ -27,7 +29,7 @@ function useSkillEvents(options = {}) {
     function connect() {
       if (disposed) return;
       if (esRef.current) esRef.current.close();
-      const url = `/api/events?since=${lastIdRef.current}`;
+      const url = `${apiUrl}/events?since=${lastIdRef.current}`;
       const es = new EventSource(url);
       esRef.current = es;
       es.onopen = () => setConnected(true);
@@ -64,7 +66,7 @@ function useSkillEvents(options = {}) {
       esRef.current?.close();
       setConnected(false);
     };
-  }, []);
+  }, [apiUrl]);
   const latestBySkill = events.reduce((acc, e) => {
     acc[e.skill] = e;
     return acc;

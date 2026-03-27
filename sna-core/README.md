@@ -18,11 +18,25 @@ pnpm add sna
 ## CLI
 
 ```bash
-sna up          # 全サービス起動（DB初期化 → WebSocket → dev server）
-sna down        # 全サービス停止
-sna status      # 稼働状況表示
-sna restart     # 再起動
-sna init        # .claude/settings.json + skills 初期化
+# ライフサイクル
+sna up              # 全サービス起動（DB初期化 → WebSocket → dev server）
+sna down            # 全サービス停止
+sna status          # 稼働状況表示
+sna restart         # 再起動
+sna init            # .claude/settings.json + skills 初期化
+
+# ワークフロー
+sna new <skill> [--param val ...]    # タスク生成
+sna <task-id> start                  # タスク再開（エラー時はリトライ）
+sna <task-id> next [--key val]       # スカラー値提出
+sna <task-id> next <<'EOF' ... EOF   # 構造化データ提出（stdin JSON）
+sna <task-id> cancel                 # タスクキャンセル
+sna tasks                            # タスク一覧
+
+# ヘルプ
+sna help              # 全コマンド一覧
+sna help workflow     # workflow.yml 仕様
+sna help submit       # データ提出パターン
 ```
 
 ## ワークフローエンジン
@@ -75,11 +89,13 @@ sna init        # .claude/settings.json + skills 初期化
   extract:
     existing_names: "[.[] | .company_name]"
   event: "既存データ確認完了"
+  timeout: 60000  # ms, デフォルト 30000
 ```
 
 - CLI がシェルコマンドを実行し、レスポンスからフィールドを抽出
 - 連続する exec ステップは自動で全部実行（instruction で止まる）
-- `extract` は簡易 jq: `.field`, `[.[] | .field]`, `.`
+- `extract` はパス式: `.field`, `.a.b.c`, `.items[0].name`, `[.[] | .field]`, `.`
+- `timeout` でタイムアウトを設定可能（デフォルト 30000ms）
 
 #### instruction — モデルが作業し、構造化データを提出
 
@@ -102,6 +118,7 @@ sna init        # .claude/settings.json + skills 初期化
     registered: ".registered"
     skipped: ".skipped"
   event: "{{registered}}社を登録（{{skipped}}社スキップ）"
+  timeout: 60000
 ```
 
 - `instruction` がモデルに表示される
@@ -110,6 +127,16 @@ sna init        # .claude/settings.json + skills 初期化
 - `handler` で CLI が API にリクエスト（`{{submitted}}` = JSON 文字列）
 - `extract` で API レスポンスからフィールド抽出 → context に格納
 - **API がソースオブトゥルース** — モデルの自己申告ではない
+
+### extract パス式
+
+| パターン | 意味 | 例 |
+|---------|------|-----|
+| `.` | identity | `{"a": 1}` → `{"a": 1}` |
+| `.field` | 直接アクセス | `.name` → `"foo"` |
+| `.a.b.c` | ネストパス | `.server.host` → `"localhost"` |
+| `.items[0].name` | 配列インデックス | → 最初の要素の name |
+| `[.[] \| .field]` | 配列マップ | `[.[] \| .name]` → `["a", "b"]` |
 
 ### データフロー
 
@@ -125,31 +152,41 @@ Model  ──stdin JSON──▶  CLI  ──validate──▶  CLI  ──handl
                                                           event 発行 → SQLite
 ```
 
-### CLI の使い方
+### エラーリカバリ
+
+タスクがエラーで止まった場合、`sna <id> start` で失敗ステップからリトライできる:
 
 ```bash
-# タスク生成（exec ステップは自動実行、instruction で停止）
-sna new company-search --query "東京のSaaS企業"
+$ sna 0317143052 start
+↻ Retrying from step 2/3: 会社検索
+# → 失敗したステップの指示が再表示される
+```
 
-# モデルが作業した後、構造化データを提出
-sna 0317143052 next <<'EOF'
-[
-  {"company_name": "Foo Corp", "url": "https://foo.co", "form_url": "https://foo.co/contact"},
-  {"company_name": "Bar Inc", "url": "https://bar.io", "form_url": "https://bar.io/inquiry"}
-]
-EOF
+- exec ステップ: 再実行される
+- instruction ステップ: 指示が再表示され、`next` で再提出できる
+- タスクとステップの status は自動的に `in_progress` にリセットされる
 
-# スカラー値の提出（data パターン）
-sna 0317143052 next --registered-count 8 --skipped-count 3
+### タスクキャンセル
 
-# タスク再開
-sna 0317143052 start
+```bash
+$ sna 0317143052 cancel
+✗ Task 0317143052 cancelled
+```
 
-# ヘルプ
-sna help              # 全コマンド一覧
-sna help workflow     # workflow.yml 仕様
-sna help submit       # データ提出パターン
-sna new --help        # new コマンドのヘルプ
+- status が `cancelled` に設定され、error イベントが発行される
+- キャンセルされたタスクは再開不可 — 新しいタスクを作成する
+
+### タスク一覧
+
+```bash
+$ sna tasks
+── Tasks ──────────────────────────────────────────────────────
+  ID           Skill                Status       Step
+  ─────────    ──────────────────    ──────────   ────────────────
+  0317143052   company-search       ▶ in_progress  2/2 search
+  0317150000   form-submit          ✓ completed    3/3
+  0317160000   company-search       ✗ error        1/2 get-existing
+───────────────────────────────────────────────────────────────
 ```
 
 ### workflow.yml 完全仕様
@@ -170,8 +207,9 @@ steps:
     # --- exec ステップ ---
     exec: "shell command"        # {{param}} で context 値を参照
     extract:                     # JSON レスポンスからフィールド抽出
-      key: ".json_field"
+      key: ".json_field"         # パス式: ".key", ".a.b.c", ".[0]", "[.[] | .key]"
     event: "メッセージ {{key}}"   # milestone イベント
+    timeout: 60000               # ms, デフォルト 30000
 
     # --- instruction ステップ ---
     instruction: |               # モデルに表示するテキスト
@@ -185,6 +223,7 @@ steps:
     extract:                     # API レスポンスから抽出
       result: ".field"
     event: "{{result}}"
+    timeout: 60000               # ms, デフォルト 30000
 
     # --- data (従来パターン) ---
     data:
@@ -208,7 +247,7 @@ error: "エラー: {{error}}"         # エラー時（{{error}} は自動設定
   "status": "in_progress",
   "started_at": "2026-03-17T14:30:52Z",
   "params": { "query": "東京のSaaS企業" },
-  "context": { "query": "...", "existing_names": [...], "registered": 8 },
+  "context": { "query": "...", "existing_names": ["..."], "registered": 8 },
   "current_step": 1,
   "steps": {
     "get-existing": { "status": "completed" },
@@ -216,6 +255,8 @@ error: "エラー: {{error}}"         # エラー時（{{error}} は自動設定
   }
 }
 ```
+
+ステータス遷移: `created` → `in_progress` → `completed` / `error` / `cancelled`
 
 ### バリデーション
 
@@ -250,9 +291,19 @@ Example:
 | handler 完了 | `milestone` | step.event の展開値 |
 | 全ステップ完了 | `complete` | workflow.complete の展開値 |
 | エラー発生 | `error` | workflow.error の展開値 |
+| キャンセル | `error` | Task {id} cancelled |
 
 イベントは SQLite `skill_events` テーブルに INSERT され、
 フロントエンドが `/api/events` (SSE) で購読してリアルタイム UI 更新する。
+
+## テスト
+
+```bash
+cd sna-core
+pnpm test     # node:test + tsx で実行
+```
+
+テスト対象: `resolvePath`, `applyExtract`, `interpolate`, `coerceValue`, `parseCliFlags`, `kebabToSnake`, ワークフロー読み込み、タスク永続化。
 
 ## コンポーネント
 
@@ -275,3 +326,4 @@ Example:
 - React 18+ (コンポーネント)
 - Zustand (ターミナルパネル状態)
 - tsup (ビルド)
+- node:test + tsx (テスト)
