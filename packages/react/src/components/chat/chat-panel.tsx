@@ -278,7 +278,7 @@ export function ChatPanel({ onClose, sessionId: initialSessionId = "default" }: 
   // Skill events accumulate milestones into a single "skill" card (updated in-place)
   const skillMilestonesRef = useRef<Record<string, string[]>>({});
 
-  const { events } = useSkillEvents({
+  const { events, clearEvents } = useSkillEvents({
     onCalled: (e) => {
       if (!markEventProcessed(e.id)) return;
       skillMilestonesRef.current[e.skill] = [];
@@ -395,6 +395,7 @@ export function ChatPanel({ onClose, sessionId: initialSessionId = "default" }: 
           onClose={onClose}
           onClear={async () => {
             clearMessages();
+            clearEvents();
             setThinking(true);
             setSessionUsage({
               contextUsed: 0, contextWindow: 0, totalCost: 0,

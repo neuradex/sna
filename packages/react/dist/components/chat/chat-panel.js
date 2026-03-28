@@ -245,7 +245,7 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
     }
   });
   const skillMilestonesRef = useRef({});
-  const { events } = useSkillEvents({
+  const { events, clearEvents } = useSkillEvents({
     onCalled: (e) => {
       if (!markEventProcessed(e.id)) return;
       skillMilestonesRef.current[e.skill] = [];
@@ -356,6 +356,7 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
               onClose,
               onClear: async () => {
                 clearMessages();
+                clearEvents();
                 setThinking(true);
                 setSessionUsage({
                   contextUsed: 0,
