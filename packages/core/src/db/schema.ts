@@ -9,7 +9,7 @@ import path from "path";
 const require = createRequire(path.join(process.cwd(), "node_modules", "_"));
 const BetterSqlite3: typeof Database = require("better-sqlite3");
 
-const DB_PATH = path.join(process.cwd(), "data/app.db");
+const DB_PATH = path.join(process.cwd(), "data/sna.db");
 
 let _db: Database.Database | null = null;
 

@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import path from "path";
 const require2 = createRequire(path.join(process.cwd(), "node_modules", "_"));
 const BetterSqlite3 = require2("better-sqlite3");
-const DB_PATH = path.join(process.cwd(), "data/app.db");
+const DB_PATH = path.join(process.cwd(), "data/sna.db");
 let _db = null;
 function getDb() {
   if (!_db) {

@@ -1,0 +1,18 @@
+{
+  "name": "sna",
+  "owner": {
+    "name": "Neuradex"
+  },
+  "metadata": {
+    "description": "Skills-Native Application SDK — plugins for building SNA apps with Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "sna-builder",
+      "source": "./plugins/sna-builder",
+      "description": "SNA SDK development assistant — ensures correct architecture, DB separation, event pipeline usage, and skill authoring patterns",
+      "version": "0.1.0",
+      "keywords": ["sna", "skills-native", "claude-code", "sdk"]
+    }
+  ]
+}

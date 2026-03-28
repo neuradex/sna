@@ -15,7 +15,7 @@ import { createRequire } from "module";
 import path from "path";
 var require2 = createRequire(path.join(process.cwd(), "node_modules", "_"));
 var BetterSqlite3 = require2("better-sqlite3");
-var DB_PATH = path.join(process.cwd(), "data/app.db");
+var DB_PATH = path.join(process.cwd(), "data/sna.db");
 var _db = null;
 function getDb() {
   if (!_db) {
