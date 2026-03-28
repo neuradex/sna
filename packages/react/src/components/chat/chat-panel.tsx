@@ -86,7 +86,15 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
-export function ChatPanel({ onClose, sessionId = "default" }: ChatPanelProps) {
+export function ChatPanel({ onClose, sessionId: initialSessionId = "default" }: ChatPanelProps) {
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const setActiveSession = useChatStore((s) => s.setActiveSession);
+  const allSessions = useChatStore((s) => s.sessions);
+  const removeSession = useChatStore((s) => s.removeSession);
+
+  // Use activeSessionId if it exists, otherwise fall back to prop
+  const sessionId = allSessions[activeSessionId] ? activeSessionId : initialSessionId;
+
   const messages = useChatStore((s) => s.sessions[sessionId]?.messages ?? []);
   const addMsg = useChatStore((s) => s.addMessage);
   const addMessage = (msg: Omit<import("../../stores/chat-store.js").ChatMessage, "id" | "timestamp">) => addMsg(msg, sessionId);
@@ -97,6 +105,13 @@ export function ChatPanel({ onClose, sessionId = "default" }: ChatPanelProps) {
   const width = useChatStore((s) => s.width);
   const setWidth = useChatStore((s) => s.setWidth);
   const { mode } = useResponsiveChat();
+
+  // Build session tabs for header
+  const sessionTabs = Object.entries(allSessions).map(([id, sess]) => {
+    const lastMsg = sess.messages[sess.messages.length - 1];
+    const label = lastMsg?.meta?.label as string ?? (id === "default" ? "Chat" : id);
+    return { id, label, hasNewActivity: false };
+  });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [thinking, setThinking] = useState(false);
@@ -353,9 +368,15 @@ export function ChatPanel({ onClose, sessionId = "default" }: ChatPanelProps) {
           sessionUsage={sessionUsage}
           onModelChange={(model) => {
             setSessionUsage((prev) => ({ ...prev, model }));
-            // Restart agent with new model
             agent.kill();
             agent.start();
+          }}
+          sessions={sessionTabs}
+          activeSessionId={sessionId}
+          onSessionChange={(id) => setActiveSession(id)}
+          onSessionClose={(id) => {
+            removeSession(id);
+            if (sessionId === id) setActiveSession("default");
           }}
         />
 

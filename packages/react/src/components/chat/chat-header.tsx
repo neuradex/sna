@@ -13,12 +13,22 @@ interface SessionUsage {
   model: string;
 }
 
+interface SessionTab {
+  id: string;
+  label: string;
+  hasNewActivity: boolean;
+}
+
 interface ChatHeaderProps {
   onClose: () => void;
   onClear: () => void;
   isRunning: boolean;
   sessionUsage: SessionUsage;
   onModelChange: (model: string) => void;
+  sessions?: SessionTab[];
+  activeSessionId?: string;
+  onSessionChange?: (id: string) => void;
+  onSessionClose?: (id: string) => void;
 }
 
 const MODELS = [
@@ -137,7 +147,7 @@ function ModelDropdown({
   );
 }
 
-export function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange }: ChatHeaderProps) {
+export function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, sessions, activeSessionId, onSessionChange, onSessionClose }: ChatHeaderProps) {
   const { totalInputTokens, totalOutputTokens, totalCost, contextWindow, lastTurnContextTokens, lastTurnSystemTokens, lastTurnConvTokens, model } = sessionUsage;
   const totalTokens = totalInputTokens + totalOutputTokens;
   const ctxPercent = contextWindow > 0 ? Math.min((lastTurnContextTokens / contextWindow) * 100, 100) : 0;
@@ -214,6 +224,70 @@ export function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelC
           </button>
         </div>
       </div>
+
+      {/* Session tabs */}
+      {sessions && sessions.length > 1 && (
+        <div
+          style={{
+            display: "flex",
+            gap: 0,
+            padding: "0 12px",
+            borderBottom: "1px solid var(--sna-surface-border)",
+            overflowX: "auto",
+            scrollbarWidth: "none",
+          }}
+        >
+          {sessions.map((s) => {
+            const active = s.id === activeSessionId;
+            return (
+              <button
+                key={s.id}
+                onClick={() => onSessionChange?.(s.id)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "6px 12px",
+                  fontSize: 11,
+                  fontFamily: "var(--sna-font-mono)",
+                  color: active ? "var(--sna-text)" : "var(--sna-text-muted)",
+                  background: "none",
+                  border: "none",
+                  borderBottom: active ? "2px solid var(--sna-accent)" : "2px solid transparent",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  transition: "color 0.15s, border-color 0.15s",
+                }}
+              >
+                {s.id === "default" ? "Chat" : s.label}
+                {s.hasNewActivity && !active && (
+                  <span
+                    style={{
+                      width: 6, height: 6,
+                      borderRadius: "var(--sna-radius-full)",
+                      background: "var(--sna-accent)",
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
+                {s.id !== "default" && (
+                  <span
+                    onClick={(e) => { e.stopPropagation(); onSessionClose?.(s.id); }}
+                    style={{
+                      fontSize: 10,
+                      color: "var(--sna-text-faint)",
+                      cursor: "pointer",
+                      marginLeft: 2,
+                    }}
+                  >
+                    ×
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Bottom row: context window bar + usage stats */}
       {lastTurnContextTokens > 0 && (

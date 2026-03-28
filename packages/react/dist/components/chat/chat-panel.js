@@ -75,7 +75,12 @@ function fmtTokens(n) {
   if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
   return String(n);
 }
-function ChatPanel({ onClose, sessionId = "default" }) {
+function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const setActiveSession = useChatStore((s) => s.setActiveSession);
+  const allSessions = useChatStore((s) => s.sessions);
+  const removeSession = useChatStore((s) => s.removeSession);
+  const sessionId = allSessions[activeSessionId] ? activeSessionId : initialSessionId;
   const messages = useChatStore((s) => s.sessions[sessionId]?.messages ?? []);
   const addMsg = useChatStore((s) => s.addMessage);
   const addMessage = (msg) => addMsg(msg, sessionId);
@@ -86,6 +91,11 @@ function ChatPanel({ onClose, sessionId = "default" }) {
   const width = useChatStore((s) => s.width);
   const setWidth = useChatStore((s) => s.setWidth);
   const { mode } = useResponsiveChat();
+  const sessionTabs = Object.entries(allSessions).map(([id, sess]) => {
+    const lastMsg = sess.messages[sess.messages.length - 1];
+    const label = lastMsg?.meta?.label ?? (id === "default" ? "Chat" : id);
+    return { id, label, hasNewActivity: false };
+  });
   const messagesEndRef = useRef(null);
   const [thinking, setThinking] = useState(false);
   const [sessionUsage, setSessionUsage] = useState({
@@ -329,6 +339,13 @@ function ChatPanel({ onClose, sessionId = "default" }) {
                 setSessionUsage((prev) => ({ ...prev, model }));
                 agent.kill();
                 agent.start();
+              },
+              sessions: sessionTabs,
+              activeSessionId: sessionId,
+              onSessionChange: (id) => setActiveSession(id),
+              onSessionClose: (id) => {
+                removeSession(id);
+                if (sessionId === id) setActiveSession("default");
               }
             }
           ),

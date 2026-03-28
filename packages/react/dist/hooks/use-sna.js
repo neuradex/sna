@@ -65,7 +65,7 @@ function useSna(options = {}) {
   const runSkillSub = runSkill;
   const runSkillInBackground = useCallback(async (name) => {
     const baseUrl = `${apiUrl}/agent`;
-    const addMessage = useChatStore.getState().addMessage;
+    const store = useChatStore.getState();
     let bgSessionId;
     try {
       const res = await fetch(`${baseUrl}/sessions`, {
@@ -76,15 +76,16 @@ function useSna(options = {}) {
       const data = await res.json();
       bgSessionId = data.sessionId;
     } catch (err) {
-      addMessage({ role: "error", content: `Failed to create background session: ${err}` }, sessionId);
+      store.addMessage({ role: "error", content: `Failed to create background session: ${err}` }, sessionId);
       return;
     }
-    addMessage({
+    store.initSession(bgSessionId);
+    store.addMessage({
       role: "skill",
-      content: "",
+      content: `/${name}`,
       skillName: name,
-      meta: { status: "running", milestones: [], bgSessionId }
-    }, sessionId);
+      meta: { status: "running", milestones: [], bgSessionId, label: `skill:${name}` }
+    }, bgSessionId);
     try {
       await fetch(`${baseUrl}/start?session=${encodeURIComponent(bgSessionId)}`, {
         method: "POST",
@@ -92,48 +93,44 @@ function useSna(options = {}) {
         body: JSON.stringify({ provider, prompt: `Execute the skill: ${name}`, permissionMode })
       });
     } catch (err) {
-      addMessage({ role: "error", content: `Failed to start background agent: ${err}` }, sessionId);
+      store.addMessage({ role: "error", content: `Failed to start background agent: ${err}` }, bgSessionId);
       return;
     }
     const es = new EventSource(`${baseUrl}/events?session=${encodeURIComponent(bgSessionId)}&since=0`);
     bgSessionsRef.current.set(bgSessionId, es);
-    const milestones = [];
     es.onmessage = (e) => {
       if (!e.data) return;
       try {
         const event = JSON.parse(e.data);
+        const addMsg = useChatStore.getState().addMessage;
+        if (event.type === "thinking" && event.message) {
+          addMsg({ role: "thinking", content: event.message, meta: { done: true } }, bgSessionId);
+        }
         if (event.type === "assistant" && event.message) {
-          milestones.push(event.message.slice(0, 200));
-          addMessage({
-            role: "skill",
-            content: event.message,
-            skillName: name,
-            meta: { status: "running", milestones: [...milestones], bgSessionId }
-          }, sessionId);
+          addMsg({ role: "assistant", content: event.message, meta: { animate: true } }, bgSessionId);
+        }
+        if (event.type === "tool_use") {
+          const toolName = event.data?.toolName ?? event.message ?? "tool";
+          addMsg({ role: "tool", content: toolName, meta: { toolName, input: event.data?.input } }, bgSessionId);
         }
         if (event.type === "complete") {
-          addMessage({
+          addMsg({
             role: "skill",
-            content: milestones[milestones.length - 1] ?? "Done",
+            content: "Done",
             skillName: name,
-            meta: { status: "complete", milestones: [...milestones], bgSessionId }
-          }, sessionId);
+            meta: { status: "complete", bgSessionId }
+          }, bgSessionId);
           es.close();
           bgSessionsRef.current.delete(bgSessionId);
-          fetch(`${baseUrl}/sessions/${encodeURIComponent(bgSessionId)}`, { method: "DELETE" }).catch(() => {
-          });
         }
         if (event.type === "error") {
-          addMessage({
-            role: "skill",
+          addMsg({
+            role: "error",
             content: event.message ?? "Background skill failed",
-            skillName: name,
-            meta: { status: "failed", milestones: [...milestones], bgSessionId }
-          }, sessionId);
+            skillName: name
+          }, bgSessionId);
           es.close();
           bgSessionsRef.current.delete(bgSessionId);
-          fetch(`${baseUrl}/sessions/${encodeURIComponent(bgSessionId)}`, { method: "DELETE" }).catch(() => {
-          });
         }
       } catch {
       }
@@ -142,6 +139,7 @@ function useSna(options = {}) {
       es.close();
       bgSessionsRef.current.delete(bgSessionId);
     };
+    return bgSessionId;
   }, [apiUrl, sessionId, provider, permissionMode]);
   return {
     events,

@@ -67,7 +67,7 @@ declare function useSna(options?: UseSnaOptions): {
     };
     runSkill: (name: string) => Promise<void>;
     runSkillSub: (name: string) => Promise<void>;
-    runSkillInBackground: (name: string) => Promise<void>;
+    runSkillInBackground: (name: string) => Promise<string | undefined>;
 };
 
 export { ChatMessage, SkillEventHandler, useSna };

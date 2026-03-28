@@ -5,6 +5,6 @@ interface ChatPanelProps {
     /** Session ID for multi-session support. Defaults to "default". */
     sessionId?: string;
 }
-declare function ChatPanel({ onClose, sessionId }: ChatPanelProps): react_jsx_runtime.JSX.Element;
+declare function ChatPanel({ onClose, sessionId: initialSessionId }: ChatPanelProps): react_jsx_runtime.JSX.Element;
 
 export { ChatPanel };

@@ -109,7 +109,7 @@ function ModelDropdown({
     )
   ] });
 }
-function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange }) {
+function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, sessions, activeSessionId, onSessionChange, onSessionClose }) {
   const { totalInputTokens, totalOutputTokens, totalCost, contextWindow, lastTurnContextTokens, lastTurnSystemTokens, lastTurnConvTokens, model } = sessionUsage;
   const totalTokens = totalInputTokens + totalOutputTokens;
   const ctxPercent = contextWindow > 0 ? Math.min(lastTurnContextTokens / contextWindow * 100, 100) : 0;
@@ -212,6 +212,75 @@ function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange }
             )
           ] })
         ]
+      }
+    ),
+    sessions && sessions.length > 1 && /* @__PURE__ */ jsx(
+      "div",
+      {
+        style: {
+          display: "flex",
+          gap: 0,
+          padding: "0 12px",
+          borderBottom: "1px solid var(--sna-surface-border)",
+          overflowX: "auto",
+          scrollbarWidth: "none"
+        },
+        children: sessions.map((s) => {
+          const active = s.id === activeSessionId;
+          return /* @__PURE__ */ jsxs(
+            "button",
+            {
+              onClick: () => onSessionChange?.(s.id),
+              style: {
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 12px",
+                fontSize: 11,
+                fontFamily: "var(--sna-font-mono)",
+                color: active ? "var(--sna-text)" : "var(--sna-text-muted)",
+                background: "none",
+                border: "none",
+                borderBottom: active ? "2px solid var(--sna-accent)" : "2px solid transparent",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                transition: "color 0.15s, border-color 0.15s"
+              },
+              children: [
+                s.id === "default" ? "Chat" : s.label,
+                s.hasNewActivity && !active && /* @__PURE__ */ jsx(
+                  "span",
+                  {
+                    style: {
+                      width: 6,
+                      height: 6,
+                      borderRadius: "var(--sna-radius-full)",
+                      background: "var(--sna-accent)",
+                      flexShrink: 0
+                    }
+                  }
+                ),
+                s.id !== "default" && /* @__PURE__ */ jsx(
+                  "span",
+                  {
+                    onClick: (e) => {
+                      e.stopPropagation();
+                      onSessionClose?.(s.id);
+                    },
+                    style: {
+                      fontSize: 10,
+                      color: "var(--sna-text-faint)",
+                      cursor: "pointer",
+                      marginLeft: 2
+                    },
+                    children: "\xD7"
+                  }
+                )
+              ]
+            },
+            s.id
+          );
+        })
       }
     ),
     lastTurnContextTokens > 0 && /* @__PURE__ */ jsxs("div", { style: { padding: "0 16px 8px" }, children: [

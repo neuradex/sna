@@ -105,14 +105,14 @@ export function useSna(options: UseSnaOptions = {}) {
   /**
    * Run a skill in a background session.
    * Creates a new agent session, executes the skill there,
-   * and reports progress as a skill card in the main chat.
-   * The main session stays free for chat.
+   * and writes messages to its own chat session (not main).
+   * Switch sessions in the chat panel to view progress.
    */
   const runSkillInBackground = useCallback(async (name: string) => {
     const baseUrl = `${apiUrl}/agent`;
-    const addMessage = useChatStore.getState().addMessage;
+    const store = useChatStore.getState();
 
-    // 1. Create a new session
+    // 1. Create a new server-side session
     let bgSessionId: string;
     try {
       const res = await fetch(`${baseUrl}/sessions`, {
@@ -123,17 +123,18 @@ export function useSna(options: UseSnaOptions = {}) {
       const data = await res.json();
       bgSessionId = data.sessionId;
     } catch (err) {
-      addMessage({ role: "error", content: `Failed to create background session: ${err}` }, sessionId);
+      store.addMessage({ role: "error", content: `Failed to create background session: ${err}` }, sessionId);
       return;
     }
 
-    // 2. Add a running skill card to main chat
-    addMessage({
+    // 2. Init a chat store session for the background task
+    store.initSession(bgSessionId);
+    store.addMessage({
       role: "skill",
-      content: "",
+      content: `/${name}`,
       skillName: name,
-      meta: { status: "running", milestones: [], bgSessionId },
-    }, sessionId);
+      meta: { status: "running", milestones: [], bgSessionId, label: `skill:${name}` },
+    }, bgSessionId);
 
     // 3. Start the agent in the background session
     try {
@@ -143,7 +144,7 @@ export function useSna(options: UseSnaOptions = {}) {
         body: JSON.stringify({ provider, prompt: `Execute the skill: ${name}`, permissionMode }),
       });
     } catch (err) {
-      addMessage({ role: "error", content: `Failed to start background agent: ${err}` }, sessionId);
+      store.addMessage({ role: "error", content: `Failed to start background agent: ${err}` }, bgSessionId);
       return;
     }
 
@@ -151,55 +152,54 @@ export function useSna(options: UseSnaOptions = {}) {
     const es = new EventSource(`${baseUrl}/events?session=${encodeURIComponent(bgSessionId)}&since=0`);
     bgSessionsRef.current.set(bgSessionId, es);
 
-    const milestones: string[] = [];
-
     es.onmessage = (e) => {
       if (!e.data) return;
       try {
         const event: AgentEvent = JSON.parse(e.data);
+        const addMsg = useChatStore.getState().addMessage;
+
+        if (event.type === "thinking" && event.message) {
+          addMsg({ role: "thinking", content: event.message, meta: { done: true } }, bgSessionId);
+        }
 
         if (event.type === "assistant" && event.message) {
-          milestones.push(event.message.slice(0, 200));
-          addMessage({
-            role: "skill",
-            content: event.message,
-            skillName: name,
-            meta: { status: "running", milestones: [...milestones], bgSessionId },
-          }, sessionId);
+          addMsg({ role: "assistant", content: event.message, meta: { animate: true } }, bgSessionId);
+        }
+
+        if (event.type === "tool_use") {
+          const toolName = (event.data?.toolName as string) ?? event.message ?? "tool";
+          addMsg({ role: "tool", content: toolName, meta: { toolName, input: event.data?.input } }, bgSessionId);
         }
 
         if (event.type === "complete") {
-          addMessage({
+          addMsg({
             role: "skill",
-            content: milestones[milestones.length - 1] ?? "Done",
+            content: "Done",
             skillName: name,
-            meta: { status: "complete", milestones: [...milestones], bgSessionId },
-          }, sessionId);
+            meta: { status: "complete", bgSessionId },
+          }, bgSessionId);
           es.close();
           bgSessionsRef.current.delete(bgSessionId);
-          // Cleanup: delete the background session
-          fetch(`${baseUrl}/sessions/${encodeURIComponent(bgSessionId)}`, { method: "DELETE" }).catch(() => {});
         }
 
         if (event.type === "error") {
-          addMessage({
-            role: "skill",
+          addMsg({
+            role: "error",
             content: event.message ?? "Background skill failed",
             skillName: name,
-            meta: { status: "failed", milestones: [...milestones], bgSessionId },
-          }, sessionId);
+          }, bgSessionId);
           es.close();
           bgSessionsRef.current.delete(bgSessionId);
-          fetch(`${baseUrl}/sessions/${encodeURIComponent(bgSessionId)}`, { method: "DELETE" }).catch(() => {});
         }
       } catch { /* malformed */ }
     };
 
     es.onerror = () => {
-      // Don't reconnect — if SSE fails, the session is likely done or dead
       es.close();
       bgSessionsRef.current.delete(bgSessionId);
     };
+
+    return bgSessionId;
   }, [apiUrl, sessionId, provider, permissionMode]);
 
   return {
