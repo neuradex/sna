@@ -77,7 +77,7 @@
   "scripts": {
     "build": "tsup",
     "predev": "lsof -ti:3099 | xargs kill -9 2>/dev/null; true",
-    "dev": "tsx --watch src/server/standalone.ts",
+    "dev": "tsx --watch src/server/standalone.ts || true",
     "test": "node --import tsx --test test/**/*.test.ts",
     "prepublishOnly": "pnpm build"
   },

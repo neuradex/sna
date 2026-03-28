@@ -47,20 +47,36 @@ const agentProcess = provider.spawn({ cwd: process.cwd(), permissionMode, model:
 setAgentProcess(agentProcess);
 
 let server: ReturnType<typeof serve> | null = null;
+let shuttingDown = false;
 
 function shutdown(signal: string) {
-  logger.log("sna", `${signal} — shutting down`);
-  logger.log("sna", "stopping Claude Code agent...");
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log("");
+  logger.log("sna", chalk.dim("stopping agent..."));
   agentProcess.kill();
   if (server) {
-    server.close(() => process.exit(0));
-  } else {
-    process.exit(0);
+    server.close(() => {
+      logger.log("sna", chalk.green("clean shutdown") + chalk.dim(" — see you next time"));
+      console.log("");
+      process.exit(0);
+    });
   }
+  setTimeout(() => {
+    logger.log("sna", chalk.green("shutdown complete"));
+    console.log("");
+    process.exit(0);
+  }, 3000).unref();
 }
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
+// Suppress errors during shutdown (e.g. IPC channel closed by tsx --watch)
+process.on("uncaughtException", (err) => {
+  if (shuttingDown) process.exit(0);
+  console.error(err);
+  process.exit(1);
+});
 
 // 2. Start listening immediately — agent receives messages when ready
 server = serve({ fetch: root.fetch, port }, () => {
