@@ -41,6 +41,7 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "homepage": "https://skills-native.app",
   "repository": {
     "type": "git",
     "url": "https://github.com/neuradex/sna",
