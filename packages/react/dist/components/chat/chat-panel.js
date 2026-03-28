@@ -66,42 +66,6 @@ function injectStyles() {
       from { transform: translateX(100%); }
       to { transform: translateX(0); }
     }
-    .sna-cost-tooltip {
-      visibility: hidden;
-      opacity: 0;
-      position: absolute;
-      bottom: calc(100% + 8px);
-      left: 0;
-      transform: scale(0.95);
-      padding: 6px 10px;
-      border-radius: 6px;
-      background: #1a1a2e;
-      border: 1px solid rgba(255,255,255,0.12);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-      color: rgba(255,255,255,0.8);
-      font-size: 11px;
-      font-family: var(--sna-font-mono);
-      white-space: nowrap;
-      pointer-events: none;
-      z-index: 9999;
-      transition: opacity 0.15s, visibility 0.15s, transform 0.15s;
-    }
-    .sna-cost-tooltip::after {
-      content: '';
-      position: absolute;
-      top: 100%;
-      left: 12px;
-      border: 5px solid transparent;
-      border-top-color: #1a1a2e;
-    }
-    .sna-cost-hint:hover .sna-cost-tooltip {
-      visibility: visible;
-      opacity: 1;
-      transform: scale(1);
-    }
-    .sna-cost-hint:hover svg {
-      opacity: 0.5 !important;
-    }
   `;
   document.head.appendChild(style);
 }

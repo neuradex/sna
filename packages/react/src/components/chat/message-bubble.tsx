@@ -71,7 +71,7 @@ function AssistantBubble({ message, isLast = false }: { message: ChatMessage; is
         <MarkdownContent
           text={visibleText}
           suffixHtml={done && costLabel && !isLast
-            ? ` <span class="sna-cost-hint" style="position:relative;cursor:default;margin-left:4px"><svg width="11" height="11" viewBox="0 0 16 16" style="opacity:0.2;vertical-align:middle"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M8 7v4M8 5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span class="sna-cost-tooltip">${costLabel}</span></span>`
+            ? ` <span title="${costLabel}" style="cursor:default;margin-left:4px;opacity:0.2"><svg width="11" height="11" viewBox="0 0 16 16" style="vertical-align:middle"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M8 7v4M8 5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>`
             : undefined
           }
         />
