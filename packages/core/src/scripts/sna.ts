@@ -446,7 +446,7 @@ function cmdInit(force = false) {
     fs.mkdirSync(claudeDir, { recursive: true });
   }
 
-  const hookCommand = `node "$CLAUDE_PROJECT_DIR"/node_modules/sna/dist/scripts/hook.js`;
+  const hookCommand = `node "$CLAUDE_PROJECT_DIR"/node_modules/@sna-sdk/core/dist/scripts/hook.js`;
 
   const permissionHook = {
     matcher: ".*",
@@ -477,7 +477,7 @@ function cmdInit(force = false) {
   }
 
   // Copy CLAUDE.md template → .claude/CLAUDE.md
-  const claudeMdTemplate = path.join(ROOT, "node_modules/sna/CLAUDE.md.template");
+  const claudeMdTemplate = path.join(ROOT, "node_modules/@sna-sdk/core/CLAUDE.md.template");
   const claudeMdDest = path.join(claudeDir, "CLAUDE.md");
   if (fs.existsSync(claudeMdTemplate)) {
     if (force || !fs.existsSync(claudeMdDest)) {
@@ -489,7 +489,7 @@ function cmdInit(force = false) {
   }
 
   // Copy bundled skills from sna package → .claude/skills/
-  const snaCoreSkillsDir = path.join(ROOT, "node_modules/sna/skills");
+  const snaCoreSkillsDir = path.join(ROOT, "node_modules/@sna-sdk/core/skills");
   const destSkillsDir = path.join(claudeDir, "skills");
 
   if (fs.existsSync(snaCoreSkillsDir)) {

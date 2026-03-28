@@ -373,7 +373,7 @@ function cmdInit(force2 = false) {
   if (!fs.existsSync(claudeDir)) {
     fs.mkdirSync(claudeDir, { recursive: true });
   }
-  const hookCommand = `node "$CLAUDE_PROJECT_DIR"/node_modules/sna/dist/scripts/hook.js`;
+  const hookCommand = `node "$CLAUDE_PROJECT_DIR"/node_modules/@sna-sdk/core/dist/scripts/hook.js`;
   const permissionHook = {
     matcher: ".*",
     hooks: [{ type: "command", async: true, command: hookCommand }]
@@ -398,7 +398,7 @@ function cmdInit(force2 = false) {
   } else {
     step(".claude/settings.json \u2014 hook already set, skipped");
   }
-  const claudeMdTemplate = path.join(ROOT, "node_modules/sna/CLAUDE.md.template");
+  const claudeMdTemplate = path.join(ROOT, "node_modules/@sna-sdk/core/CLAUDE.md.template");
   const claudeMdDest = path.join(claudeDir, "CLAUDE.md");
   if (fs.existsSync(claudeMdTemplate)) {
     if (force2 || !fs.existsSync(claudeMdDest)) {
@@ -408,7 +408,7 @@ function cmdInit(force2 = false) {
       step(".claude/CLAUDE.md \u2014 already exists, skipped");
     }
   }
-  const snaCoreSkillsDir = path.join(ROOT, "node_modules/sna/skills");
+  const snaCoreSkillsDir = path.join(ROOT, "node_modules/@sna-sdk/core/skills");
   const destSkillsDir = path.join(claudeDir, "skills");
   if (fs.existsSync(snaCoreSkillsDir)) {
     const skillNames = fs.readdirSync(snaCoreSkillsDir);
