@@ -10,7 +10,8 @@
     "bin/",
     "dist/",
     "skills/",
-    "CLAUDE.md.template"
+    "CLAUDE.md.template",
+    "README.md"
   ],
   "exports": {
     ".": {

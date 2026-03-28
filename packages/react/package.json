@@ -4,7 +4,8 @@
   "description": "Skills-Native Application React bindings — hooks, components, and stores",
   "type": "module",
   "files": [
-    "dist/"
+    "dist/",
+    "README.md"
   ],
   "exports": {
     "./components/sna-provider": {
