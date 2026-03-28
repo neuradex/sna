@@ -206,19 +206,19 @@ export function ChatPanel({ onClose, sessionId: initialSessionId = "default" }: 
       const ctxWindow = (d.contextWindow as number) ?? 0;
       const model = (d.model as string) ?? "";
 
-      // modelUsage values are session-cumulative — use as totals directly
-      const totalInput = inTok + cacheRead + cacheWrite;
-      setSessionUsage({
-        totalInputTokens: totalInput,
-        totalOutputTokens: outTok,
-        totalCost: cost ?? 0,
-        contextWindow: ctxWindow || sessionUsage.contextWindow,
-        lastTurnInputTokens: totalInput,
+      // usage values are per-turn (not cumulative)
+      const turnInput = inTok + cacheRead + cacheWrite;
+      setSessionUsage((prev) => ({
+        totalInputTokens: prev.totalInputTokens + turnInput,
+        totalOutputTokens: prev.totalOutputTokens + outTok,
+        totalCost: prev.totalCost + (cost ?? 0),
+        contextWindow: ctxWindow || prev.contextWindow,
+        lastTurnInputTokens: turnInput,
         lastTurnOutputTokens: outTok,
         lastTurnCacheRead: cacheRead,
         lastTurnCacheWrite: cacheWrite,
-        model: model || sessionUsage.model,
-      });
+        model: model || prev.model,
+      }));
 
       // Attach cost info to the last assistant message
       const state = useChatStore.getState();

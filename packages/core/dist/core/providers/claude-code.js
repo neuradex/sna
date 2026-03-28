@@ -174,21 +174,22 @@ class ClaudeCodeProcess {
       }
       case "result": {
         if (msg.subtype === "success") {
+          const u = msg.usage ?? {};
           const mu = msg.modelUsage ?? {};
           const modelKey = Object.keys(mu)[0] ?? "";
-          const u = mu[modelKey] ?? {};
+          const modelInfo = mu[modelKey] ?? {};
           return {
             type: "complete",
             message: msg.result ?? "Done",
             data: {
               durationMs: msg.duration_ms,
               costUsd: msg.total_cost_usd,
-              inputTokens: u.inputTokens ?? 0,
-              outputTokens: u.outputTokens ?? 0,
-              cacheReadTokens: u.cacheReadInputTokens ?? 0,
-              cacheWriteTokens: u.cacheCreationInputTokens ?? 0,
-              contextWindow: u.contextWindow ?? 0,
-              maxOutputTokens: u.maxOutputTokens ?? 0,
+              inputTokens: u.input_tokens ?? 0,
+              outputTokens: u.output_tokens ?? 0,
+              cacheReadTokens: u.cache_read_input_tokens ?? 0,
+              cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
+              contextWindow: modelInfo.contextWindow ?? 0,
+              maxOutputTokens: modelInfo.maxOutputTokens ?? 0,
               model: modelKey
             },
             timestamp: Date.now()
