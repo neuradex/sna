@@ -169,21 +169,19 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
       setThinking(false);
       const d = e.data ?? {};
       const duration = d.durationMs;
-      const turnCost = d.turnCostUsd;
-      const turnOutput = d.turnOutputTokens ?? 0;
-      const totalIn = d.totalInputTokens ?? 0;
-      const totalOut = d.totalOutputTokens ?? 0;
-      const totalCacheRead = d.totalCacheRead ?? 0;
-      const totalCacheWrite = d.totalCacheWrite ?? 0;
-      const totalCost = d.totalCostUsd ?? 0;
+      const cost = d.costUsd;
+      const inTok = d.inputTokens ?? 0;
+      const outTok = d.outputTokens ?? 0;
+      const cacheRead = d.cacheReadTokens ?? 0;
+      const cacheWrite = d.cacheWriteTokens ?? 0;
       const ctxWindow = d.contextWindow ?? 0;
       const model = d.model ?? "";
-      const contextUsed = totalIn + totalCacheRead + totalCacheWrite;
+      const contextUsed = inTok + cacheRead + cacheWrite;
       setSessionUsage((prev) => ({
         contextUsed,
         contextWindow: ctxWindow || prev.contextWindow,
-        totalCost: totalCost || prev.totalCost,
-        cacheRead: totalCacheRead,
+        totalCost: prev.totalCost + (cost ?? 0),
+        cacheRead,
         model: model || prev.model
       }));
       const state = useChatStore.getState();
@@ -194,8 +192,8 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
         if (msgs[i].role === "assistant") {
           const parts = [];
           if (duration != null) parts.push(`${(duration / 1e3).toFixed(1)}s`);
-          if (turnOutput > 0) parts.push(`${fmtTokens(turnOutput)} tokens`);
-          if (turnCost != null) parts.push(`$${turnCost.toFixed(4)}`);
+          if (outTok > 0) parts.push(`${fmtTokens(outTok)} tokens`);
+          if (cost != null) parts.push(`$${cost.toFixed(4)}`);
           const updated = [...msgs];
           updated[i] = { ...updated[i], meta: { ...updated[i].meta, costLabel: parts.join(" \xB7 ") } };
           useChatStore.setState({

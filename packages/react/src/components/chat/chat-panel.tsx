@@ -194,23 +194,21 @@ export function ChatPanel({ onClose, sessionId: initialSessionId = "default" }: 
       setThinking(false);
       const d = e.data ?? {};
       const duration = d.durationMs as number | undefined;
-      const turnCost = d.turnCostUsd as number | undefined;
-      const turnOutput = (d.turnOutputTokens as number) ?? 0;
-      // Session-cumulative values from modelUsage
-      const totalIn = (d.totalInputTokens as number) ?? 0;
-      const totalOut = (d.totalOutputTokens as number) ?? 0;
-      const totalCacheRead = (d.totalCacheRead as number) ?? 0;
-      const totalCacheWrite = (d.totalCacheWrite as number) ?? 0;
-      const totalCost = (d.totalCostUsd as number) ?? 0;
+      const cost = d.costUsd as number | undefined;
+      const inTok = (d.inputTokens as number) ?? 0;
+      const outTok = (d.outputTokens as number) ?? 0;
+      const cacheRead = (d.cacheReadTokens as number) ?? 0;
+      const cacheWrite = (d.cacheWriteTokens as number) ?? 0;
       const ctxWindow = (d.contextWindow as number) ?? 0;
       const model = (d.model as string) ?? "";
 
-      const contextUsed = totalIn + totalCacheRead + totalCacheWrite;
+      // Context used this turn = all input tokens (new + cached + cache-created)
+      const contextUsed = inTok + cacheRead + cacheWrite;
       setSessionUsage((prev) => ({
         contextUsed,
         contextWindow: ctxWindow || prev.contextWindow,
-        totalCost: totalCost || prev.totalCost,
-        cacheRead: totalCacheRead,
+        totalCost: prev.totalCost + (cost ?? 0),
+        cacheRead,
         model: model || prev.model,
       }));
 
@@ -223,8 +221,8 @@ export function ChatPanel({ onClose, sessionId: initialSessionId = "default" }: 
         if (msgs[i].role === "assistant") {
           const parts: string[] = [];
           if (duration != null) parts.push(`${(duration / 1000).toFixed(1)}s`);
-          if (turnOutput > 0) parts.push(`${fmtTokens(turnOutput)} tokens`);
-          if (turnCost != null) parts.push(`$${turnCost.toFixed(4)}`);
+          if (outTok > 0) parts.push(`${fmtTokens(outTok)} tokens`);
+          if (cost != null) parts.push(`$${cost.toFixed(4)}`);
           const updated = [...msgs];
           updated[i] = { ...updated[i], meta: { ...updated[i].meta, costLabel: parts.join(" · ") } };
           useChatStore.setState({

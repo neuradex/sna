@@ -203,27 +203,24 @@ class ClaudeCodeProcess implements AgentProcess {
 
       case "result": {
         if (msg.subtype === "success") {
-          // Per-turn usage for message-level cost labels
-          const perTurn = msg.usage ?? {};
-          // Session-cumulative modelUsage for context window tracking
+          // Per-turn usage — represents actual context size for this turn
+          const u = msg.usage ?? {};
           const mu = msg.modelUsage ?? {};
           const modelKey = Object.keys(mu)[0] ?? "";
-          const cumulative = mu[modelKey] ?? {};
+          const modelInfo = mu[modelKey] ?? {};
           return {
             type: "complete",
             message: msg.result ?? "Done",
             data: {
               durationMs: msg.duration_ms,
-              // Per-turn values (for individual message cost labels)
-              turnCostUsd: msg.total_cost_usd,
-              turnOutputTokens: perTurn.output_tokens ?? 0,
-              // Session-cumulative values (for context window header)
-              totalInputTokens: cumulative.inputTokens ?? 0,
-              totalOutputTokens: cumulative.outputTokens ?? 0,
-              totalCacheRead: cumulative.cacheReadInputTokens ?? 0,
-              totalCacheWrite: cumulative.cacheCreationInputTokens ?? 0,
-              totalCostUsd: cumulative.costUSD ?? 0,
-              contextWindow: cumulative.contextWindow ?? 0,
+              costUsd: msg.total_cost_usd,
+              // Per-turn: actual context window usage this turn
+              inputTokens: u.input_tokens ?? 0,
+              outputTokens: u.output_tokens ?? 0,
+              cacheReadTokens: u.cache_read_input_tokens ?? 0,
+              cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
+              // Static model info
+              contextWindow: modelInfo.contextWindow ?? 0,
               model: modelKey,
             },
             timestamp: Date.now(),
