@@ -44,6 +44,11 @@
       "types": "./dist/server/routes/agent.d.ts",
       "default": "./dist/server/routes/agent.js"
     },
+    "./server/routes/chat": {
+      "source": "./src/server/routes/chat.ts",
+      "types": "./dist/server/routes/chat.d.ts",
+      "default": "./dist/server/routes/chat.js"
+    },
     "./db/schema": {
       "source": "./src/db/schema.ts",
       "types": "./dist/db/schema.d.ts",

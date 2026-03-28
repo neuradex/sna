@@ -44,11 +44,15 @@ if (!VALID_TYPES.includes(flags.type)) {
   process.exit(1);
 }
 
-const db = getDb();
-db.prepare(`
-  INSERT INTO skill_events (skill, type, message, data)
-  VALUES (?, ?, ?, ?)
-`).run(flags.skill, flags.type, flags.message, flags.data ?? null);
+const sessionId = process.env.SNA_SESSION_ID;
+
+if (sessionId) {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO skill_events (session_id, skill, type, message, data)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(sessionId, flags.skill, flags.type, flags.message, flags.data ?? null);
+}
 
 const prefix: Record<string, string> = {
   called:            "→",

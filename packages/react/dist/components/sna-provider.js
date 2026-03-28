@@ -159,6 +159,8 @@ function SnaProvider({
       return fallback;
     }
     discover().then((url) => {
+      useChatStore.getState()._setApiUrl(url);
+      useChatStore.getState().hydrate();
       if (headless) return;
       fetch(`${url}/agent/start?session=${encodeURIComponent(initialSessionId)}`, {
         method: "POST",

@@ -1,4 +1,4 @@
-export { SkillEvent } from './db/schema.js';
+export { ChatMessage, ChatSession, SkillEvent } from './db/schema.js';
 export { AgentEvent, AgentProcess, AgentProvider, SpawnOptions } from './core/providers/types.js';
 export { Session, SessionInfo, SessionManagerOptions } from './server/session-manager.js';
 import 'better-sqlite3';

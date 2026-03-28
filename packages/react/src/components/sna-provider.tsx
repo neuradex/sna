@@ -228,6 +228,10 @@ export function SnaProvider({
     }
 
     discover().then((url) => {
+      // Set API URL in chat store and hydrate from DB
+      useChatStore.getState()._setApiUrl(url);
+      useChatStore.getState().hydrate();
+
       if (headless) return; // headless: no auto-start
       fetch(`${url}/agent/start?session=${encodeURIComponent(initialSessionId)}`, {
         method: "POST",

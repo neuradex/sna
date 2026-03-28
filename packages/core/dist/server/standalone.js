@@ -1,11 +1,11 @@
 // src/server/standalone.ts
 import { serve } from "@hono/node-server";
-import { Hono as Hono3 } from "hono";
+import { Hono as Hono4 } from "hono";
 import { cors } from "hono/cors";
 import chalk2 from "chalk";
 
 // src/server/index.ts
-import { Hono as Hono2 } from "hono";
+import { Hono as Hono3 } from "hono";
 
 // src/server/routes/events.ts
 import { streamSSE } from "hono/streaming";
@@ -36,8 +36,31 @@ function migrateSkillEvents(db) {
 function initSchema(db) {
   migrateSkillEvents(db);
   db.exec(`
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      id         TEXT PRIMARY KEY,
+      label      TEXT NOT NULL DEFAULT '',
+      type       TEXT NOT NULL DEFAULT 'main',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Ensure default session always exists
+    INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES ('default', 'Chat', 'main');
+
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+      role       TEXT NOT NULL,
+      content    TEXT NOT NULL DEFAULT '',
+      skill_name TEXT,
+      meta       TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
+
     CREATE TABLE IF NOT EXISTS skill_events (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT REFERENCES chat_sessions(id) ON DELETE SET NULL,
       skill      TEXT NOT NULL,
       type       TEXT NOT NULL,
       message    TEXT NOT NULL,
@@ -47,6 +70,7 @@ function initSchema(db) {
 
     CREATE INDEX IF NOT EXISTS idx_skill_events_skill ON skill_events(skill);
     CREATE INDEX IF NOT EXISTS idx_skill_events_created ON skill_events(created_at);
+    CREATE INDEX IF NOT EXISTS idx_skill_events_session ON skill_events(session_id);
   `);
 }
 
@@ -550,12 +574,23 @@ function createAgentRoutes(sessionManager2) {
     }
     session.eventBuffer.length = 0;
     const provider2 = getProvider(body.provider ?? "claude-code");
+    const skillMatch = body.prompt?.match(/^Execute the skill:\s*(\S+)/);
+    if (skillMatch) {
+      try {
+        const db = getDb();
+        db.prepare(
+          `INSERT INTO skill_events (session_id, skill, type, message) VALUES (?, ?, 'invoked', ?)`
+        ).run(sessionId, skillMatch[1], `Skill ${skillMatch[1]} invoked`);
+      } catch {
+      }
+    }
     try {
       const proc = provider2.spawn({
         cwd: session.cwd,
         prompt: body.prompt,
         model: body.model ?? "claude-sonnet-4-6",
-        permissionMode: body.permissionMode ?? "acceptEdits"
+        permissionMode: body.permissionMode ?? "acceptEdits",
+        env: { SNA_SESSION_ID: sessionId }
       });
       sessionManager2.setProcess(sessionId, proc);
       logger.log("route", `POST /start?session=${sessionId} \u2192 started`);
@@ -635,6 +670,71 @@ function createAgentRoutes(sessionManager2) {
       sessionId: session?.process?.sessionId ?? null,
       eventCount: session?.eventCounter ?? 0
     });
+  });
+  return app;
+}
+
+// src/server/routes/chat.ts
+import { Hono as Hono2 } from "hono";
+function createChatRoutes() {
+  const app = new Hono2();
+  app.get("/sessions", (c) => {
+    const db = getDb();
+    const sessions = db.prepare(
+      `SELECT id, label, type, created_at FROM chat_sessions ORDER BY created_at DESC`
+    ).all();
+    return c.json({ sessions });
+  });
+  app.post("/sessions", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const id = body.id ?? crypto.randomUUID().slice(0, 8);
+    const db = getDb();
+    db.prepare(
+      `INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, ?)`
+    ).run(id, body.label ?? id, body.type ?? "background");
+    return c.json({ status: "created", id });
+  });
+  app.delete("/sessions/:id", (c) => {
+    const id = c.req.param("id");
+    if (id === "default") {
+      return c.json({ status: "error", message: "Cannot delete default session" }, 400);
+    }
+    const db = getDb();
+    db.prepare(`DELETE FROM chat_sessions WHERE id = ?`).run(id);
+    return c.json({ status: "deleted" });
+  });
+  app.get("/sessions/:id/messages", (c) => {
+    const id = c.req.param("id");
+    const sinceParam = c.req.query("since");
+    const db = getDb();
+    const query = sinceParam ? db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY id ASC`) : db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id ASC`);
+    const messages = sinceParam ? query.all(id, parseInt(sinceParam, 10)) : query.all(id);
+    return c.json({ messages });
+  });
+  app.post("/sessions/:id/messages", async (c) => {
+    const sessionId = c.req.param("id");
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.role) {
+      return c.json({ status: "error", message: "role is required" }, 400);
+    }
+    const db = getDb();
+    db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, sessionId);
+    const result = db.prepare(
+      `INSERT INTO chat_messages (session_id, role, content, skill_name, meta) VALUES (?, ?, ?, ?, ?)`
+    ).run(
+      sessionId,
+      body.role,
+      body.content ?? "",
+      body.skill_name ?? null,
+      body.meta ? JSON.stringify(body.meta) : null
+    );
+    return c.json({ status: "created", id: result.lastInsertRowid });
+  });
+  app.delete("/sessions/:id/messages", (c) => {
+    const id = c.req.param("id");
+    const db = getDb();
+    db.prepare(`DELETE FROM chat_messages WHERE session_id = ?`).run(id);
+    return c.json({ status: "cleared" });
   });
   return app;
 }
@@ -742,11 +842,12 @@ var SessionManager = class {
 // src/server/index.ts
 function createSnaApp(options = {}) {
   const sessionManager2 = options.sessionManager ?? new SessionManager();
-  const app = new Hono2();
+  const app = new Hono3();
   app.get("/health", (c) => c.json({ ok: true, name: "sna", version: "1" }));
   app.get("/events", eventsRoute);
   app.post("/emit", emitRoute);
   app.route("/agent", createAgentRoutes(sessionManager2));
+  app.route("/chat", createChatRoutes());
   if (options.runCommands) {
     app.get("/run", createRunRoute(options.runCommands));
   }
@@ -758,7 +859,7 @@ var port = parseInt(process.env.SNA_PORT ?? "3099", 10);
 var permissionMode = process.env.SNA_PERMISSION_MODE ?? "acceptEdits";
 var defaultModel = process.env.SNA_MODEL ?? "claude-sonnet-4-6";
 var maxSessions = parseInt(process.env.SNA_MAX_SESSIONS ?? "5", 10);
-var root = new Hono3();
+var root = new Hono4();
 root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "DELETE", "OPTIONS"] }));
 var methodColor = {
   GET: chalk2.green,

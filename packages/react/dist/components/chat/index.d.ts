@@ -9,6 +9,5 @@ export { TypingIndicator } from './typing-indicator.js';
 export { ResizeHandle } from './resize-handle.js';
 import 'react/jsx-runtime';
 import '../../stores/chat-store.js';
-import 'zustand/middleware';
 import 'zustand';
 import '@sna-sdk/core';

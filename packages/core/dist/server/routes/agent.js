@@ -4,6 +4,7 @@ import {
   getProvider
 } from "../../core/providers/index.js";
 import { logger } from "../../lib/logger.js";
+import { getDb } from "../../db/schema.js";
 function getSessionId(c) {
   return c.req.query("session") ?? "default";
 }
@@ -55,12 +56,23 @@ function createAgentRoutes(sessionManager) {
     }
     session.eventBuffer.length = 0;
     const provider = getProvider(body.provider ?? "claude-code");
+    const skillMatch = body.prompt?.match(/^Execute the skill:\s*(\S+)/);
+    if (skillMatch) {
+      try {
+        const db = getDb();
+        db.prepare(
+          `INSERT INTO skill_events (session_id, skill, type, message) VALUES (?, ?, 'invoked', ?)`
+        ).run(sessionId, skillMatch[1], `Skill ${skillMatch[1]} invoked`);
+      } catch {
+      }
+    }
     try {
       const proc = provider.spawn({
         cwd: session.cwd,
         prompt: body.prompt,
         model: body.model ?? "claude-sonnet-4-6",
-        permissionMode: body.permissionMode ?? "acceptEdits"
+        permissionMode: body.permissionMode ?? "acceptEdits",
+        env: { SNA_SESSION_ID: sessionId }
       });
       sessionManager.setProcess(sessionId, proc);
       logger.log("route", `POST /start?session=${sessionId} \u2192 started`);

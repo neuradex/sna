@@ -8,6 +8,6 @@
 export const DEFAULT_SNA_PORT = 3099;
 export const DEFAULT_SNA_URL = `http://localhost:${DEFAULT_SNA_PORT}`;
 
-export type { SkillEvent } from "./db/schema.js";
+export type { SkillEvent, ChatSession, ChatMessage } from "./db/schema.js";
 export type { AgentEvent, AgentProcess, AgentProvider, SpawnOptions } from "./core/providers/types.js";
 export type { Session, SessionInfo, SessionManagerOptions } from "./server/session-manager.js";

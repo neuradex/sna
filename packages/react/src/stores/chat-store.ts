@@ -1,7 +1,6 @@
 "use client";
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 
 export interface ChatMessage {
   id: string;
@@ -27,6 +26,10 @@ interface ChatState {
   // Per-session state
   sessions: Record<string, SessionChatState>;
 
+  // API URL for DB sync (set by SnaProvider)
+  _apiUrl: string;
+  _setApiUrl: (url: string) => void;
+
   // Global actions
   setOpen: (open: boolean) => void;
   toggle: () => void;
@@ -42,6 +45,9 @@ interface ChatState {
   clearMessages: (sessionId?: string) => void;
   /** Returns true if this event has NOT been processed yet (and marks it). */
   markEventProcessed: (eventId: number, sessionId?: string) => boolean;
+
+  // DB sync
+  hydrate: () => Promise<void>;
 }
 
 let messageCounter = 0;
@@ -50,159 +56,176 @@ function emptySession(): SessionChatState {
   return { messages: [], processedEventIds: new Set() };
 }
 
-export const useChatStore = create<ChatState>()(
-  persist(
-    (set, get) => ({
-      isOpen: false,
-      width: 380,
-      activeSessionId: "default",
-      sessions: { default: emptySession() },
-
-      setOpen: (open) => set({ isOpen: open }),
-      toggle: () => set((s) => ({ isOpen: !s.isOpen })),
-      setWidth: (width) => set({ width: Math.max(320, Math.min(520, width)) }),
-
-      setActiveSession: (id) => {
-        // Lazily init session if needed
-        const s = get().sessions;
-        if (!s[id]) {
-          set({ activeSessionId: id, sessions: { ...s, [id]: emptySession() } });
-        } else {
-          set({ activeSessionId: id });
-        }
-      },
-
-      initSession: (id) => {
-        const s = get().sessions;
-        if (!s[id]) {
-          set({ sessions: { ...s, [id]: emptySession() } });
-        }
-      },
-
-      removeSession: (id) => {
-        if (id === "default") return;
-        const s = { ...get().sessions };
-        delete s[id];
-        const activeSessionId = get().activeSessionId === id ? "default" : get().activeSessionId;
-        set({ sessions: s, activeSessionId });
-      },
-
-      addMessage: (msg, sessionId?) => {
-        const id = sessionId ?? get().activeSessionId;
-        set((state) => {
-          const session = state.sessions[id] ?? emptySession();
-          return {
-            sessions: {
-              ...state.sessions,
-              [id]: {
-                ...session,
-                messages: [
-                  ...session.messages,
-                  { ...msg, id: `msg-${++messageCounter}`, timestamp: Date.now() },
-                ],
-              },
-            },
-          };
-        });
-      },
-
-      clearMessages: (sessionId?) => {
-        const id = sessionId ?? get().activeSessionId;
-        set((state) => ({
-          sessions: {
-            ...state.sessions,
-            [id]: emptySession(),
-          },
-        }));
-      },
-
-      markEventProcessed: (eventId, sessionId?) => {
-        const id = sessionId ?? get().activeSessionId;
-        const session = get().sessions[id];
-        if (!session) return true; // no session = treat as new
-        if (session.processedEventIds.has(eventId)) return false;
-        const next = new Set(session.processedEventIds);
-        next.add(eventId);
-        // Prevent unbounded growth: when exceeding 10000, keep only the newest half
-        if (next.size > 10000) {
-          const arr = Array.from(next);
-          const keep = arr.slice(arr.length >> 1);
-          next.clear();
-          for (const id of keep) next.add(id);
-        }
-        set((state) => ({
-          sessions: {
-            ...state.sessions,
-            [id]: { ...state.sessions[id], processedEventIds: next },
-          },
-        }));
-        return true;
-      },
+/** Fire-and-forget POST to chat persistence API */
+function syncMessage(apiUrl: string, sessionId: string, msg: Omit<ChatMessage, "id" | "timestamp">) {
+  if (!apiUrl) return;
+  fetch(`${apiUrl}/chat/sessions/${encodeURIComponent(sessionId)}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      role: msg.role,
+      content: msg.content,
+      skill_name: msg.skillName,
+      meta: msg.meta,
     }),
-    {
-      name: "sna-chat-panel",
-      partialize: (s) => ({
-        isOpen: s.isOpen,
-        width: s.width,
-        activeSessionId: s.activeSessionId,
-        sessions: Object.fromEntries(
-          Object.entries(s.sessions).map(([sid, sess]) => [
-            sid,
-            {
-              // Strip transient flags (animate) so they don't replay on reload
-              messages: sess.messages.map((m) =>
-                m.meta?.animate ? { ...m, meta: { ...m.meta, animate: undefined } } : m
-              ),
-              processedEventIds: [...sess.processedEventIds],
-            },
-          ])
-        ),
-      }),
-      merge: (persisted: any, current): ChatState => {
-        if (!persisted) return current;
+  }).catch(() => { /* non-fatal */ });
+}
 
-        // Migration: old flat format → session-partitioned
-        if (persisted.messages && !persisted.sessions) {
-          const mainSession: SessionChatState = {
-            messages: persisted.messages ?? [],
-            processedEventIds: new Set<number>(persisted.processedEventIds ?? []),
-          };
-          return {
-            ...current,
-            isOpen: persisted.isOpen ?? current.isOpen,
-            width: persisted.width ?? current.width,
-            activeSessionId: "default",
-            sessions: { default: mainSession },
-          };
-        }
+function syncCreateSession(apiUrl: string, id: string, label?: string, type?: string) {
+  if (!apiUrl) return;
+  fetch(`${apiUrl}/chat/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, label: label ?? id, type: type ?? "background" }),
+  }).catch(() => { /* non-fatal */ });
+}
 
-        // New format: restore Sets from arrays in each session
-        const sessions: Record<string, SessionChatState> = {};
-        for (const [sid, sess] of Object.entries(persisted.sessions ?? {})) {
-          const s = sess as any;
-          sessions[sid] = {
-            messages: s.messages ?? [],
-            processedEventIds: new Set<number>(s.processedEventIds ?? []),
-          };
-        }
+function syncDeleteSession(apiUrl: string, id: string) {
+  if (!apiUrl) return;
+  fetch(`${apiUrl}/chat/sessions/${encodeURIComponent(id)}`, { method: "DELETE" })
+    .catch(() => { /* non-fatal */ });
+}
 
+function syncClearMessages(apiUrl: string, sessionId: string) {
+  if (!apiUrl) return;
+  fetch(`${apiUrl}/chat/sessions/${encodeURIComponent(sessionId)}/messages`, { method: "DELETE" })
+    .catch(() => { /* non-fatal */ });
+}
+
+export const useChatStore = create<ChatState>()(
+  (set, get) => ({
+    isOpen: false,
+    width: 380,
+    activeSessionId: "default",
+    sessions: { default: emptySession() },
+    _apiUrl: "",
+    _setApiUrl: (url) => set({ _apiUrl: url }),
+
+    setOpen: (open) => set({ isOpen: open }),
+    toggle: () => set((s) => ({ isOpen: !s.isOpen })),
+    setWidth: (width) => set({ width: Math.max(320, Math.min(520, width)) }),
+
+    setActiveSession: (id) => {
+      const s = get().sessions;
+      if (!s[id]) {
+        set({ activeSessionId: id, sessions: { ...s, [id]: emptySession() } });
+      } else {
+        set({ activeSessionId: id });
+      }
+    },
+
+    initSession: (id) => {
+      const s = get().sessions;
+      if (!s[id]) {
+        set({ sessions: { ...s, [id]: emptySession() } });
+        syncCreateSession(get()._apiUrl, id);
+      }
+    },
+
+    removeSession: (id) => {
+      if (id === "default") return;
+      const s = { ...get().sessions };
+      delete s[id];
+      const activeSessionId = get().activeSessionId === id ? "default" : get().activeSessionId;
+      set({ sessions: s, activeSessionId });
+      syncDeleteSession(get()._apiUrl, id);
+    },
+
+    addMessage: (msg, sessionId?) => {
+      const id = sessionId ?? get().activeSessionId;
+      const fullMsg = { ...msg, id: `msg-${++messageCounter}`, timestamp: Date.now() };
+      set((state) => {
+        const session = state.sessions[id] ?? emptySession();
         return {
-          ...current,
-          isOpen: persisted.isOpen ?? current.isOpen,
-          width: persisted.width ?? current.width,
-          activeSessionId: persisted.activeSessionId ?? "default",
-          sessions: { ...current.sessions, ...sessions },
+          sessions: {
+            ...state.sessions,
+            [id]: {
+              ...session,
+              messages: [...session.messages, fullMsg],
+            },
+          },
         };
-      },
-      onRehydrateStorage: () => (state) => {
-        if (!state) return;
-        // Restore messageCounter from total persisted messages
-        let total = 0;
-        for (const sess of Object.values(state.sessions)) {
-          total += sess.messages.length;
+      });
+      syncMessage(get()._apiUrl, id, msg);
+    },
+
+    clearMessages: (sessionId?) => {
+      const id = sessionId ?? get().activeSessionId;
+      set((state) => ({
+        sessions: {
+          ...state.sessions,
+          [id]: emptySession(),
+        },
+      }));
+      syncClearMessages(get()._apiUrl, id);
+    },
+
+    markEventProcessed: (eventId, sessionId?) => {
+      const id = sessionId ?? get().activeSessionId;
+      const session = get().sessions[id];
+      if (!session) return true;
+      if (session.processedEventIds.has(eventId)) return false;
+      const next = new Set(session.processedEventIds);
+      next.add(eventId);
+      if (next.size > 10000) {
+        const arr = Array.from(next);
+        const keep = arr.slice(arr.length >> 1);
+        next.clear();
+        for (const id of keep) next.add(id);
+      }
+      set((state) => ({
+        sessions: {
+          ...state.sessions,
+          [id]: { ...state.sessions[id], processedEventIds: next },
+        },
+      }));
+      return true;
+    },
+
+    hydrate: async () => {
+      const apiUrl = get()._apiUrl;
+      if (!apiUrl) return;
+
+      try {
+        // Fetch all sessions
+        const sessRes = await fetch(`${apiUrl}/chat/sessions`);
+        const sessData = await sessRes.json();
+        const dbSessions = sessData.sessions as Array<{ id: string; label: string; type: string }>;
+
+        const sessions: Record<string, SessionChatState> = {};
+
+        // Fetch messages for each session
+        for (const sess of dbSessions) {
+          try {
+            const msgRes = await fetch(`${apiUrl}/chat/sessions/${encodeURIComponent(sess.id)}/messages`);
+            const msgData = await msgRes.json();
+            const messages = (msgData.messages as Array<{
+              id: number; role: string; content: string;
+              skill_name: string | null; meta: string | null; created_at: string;
+            }>).map((m) => ({
+              id: `db-${m.id}`,
+              role: m.role as ChatMessage["role"],
+              content: m.content,
+              timestamp: new Date(m.created_at).getTime(),
+              skillName: m.skill_name ?? undefined,
+              meta: m.meta ? JSON.parse(m.meta) : undefined,
+            }));
+            sessions[sess.id] = { messages, processedEventIds: new Set() };
+            if (messages.length > messageCounter) messageCounter = messages.length;
+          } catch {
+            sessions[sess.id] = emptySession();
+          }
         }
-        if (total > 0) messageCounter = total;
-      },
-    }
-  )
+
+        // Ensure default session exists
+        if (!sessions.default) {
+          sessions.default = emptySession();
+        }
+
+        set({ sessions });
+      } catch {
+        // Server not ready — start with empty state
+      }
+    },
+  }),
 );

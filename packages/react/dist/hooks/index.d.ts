@@ -5,5 +5,4 @@ export { ChatMode, useResponsiveChat } from './use-responsive-chat.js';
 export { useSessionManager } from './use-session-manager.js';
 export { AgentEvent, SessionInfo, SkillEvent } from '@sna-sdk/core';
 import '../stores/chat-store.js';
-import 'zustand/middleware';
 import 'zustand';

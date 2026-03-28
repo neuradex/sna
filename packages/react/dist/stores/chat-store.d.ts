@@ -1,4 +1,3 @@
-import * as zustand_middleware from 'zustand/middleware';
 import * as zustand from 'zustand';
 
 interface ChatMessage {
@@ -19,6 +18,8 @@ interface ChatState {
     width: number;
     activeSessionId: string;
     sessions: Record<string, SessionChatState>;
+    _apiUrl: string;
+    _setApiUrl: (url: string) => void;
     setOpen: (open: boolean) => void;
     toggle: () => void;
     setWidth: (width: number) => void;
@@ -29,39 +30,8 @@ interface ChatState {
     clearMessages: (sessionId?: string) => void;
     /** Returns true if this event has NOT been processed yet (and marks it). */
     markEventProcessed: (eventId: number, sessionId?: string) => boolean;
+    hydrate: () => Promise<void>;
 }
-declare const useChatStore: zustand.UseBoundStore<Omit<zustand.StoreApi<ChatState>, "setState" | "persist"> & {
-    setState(partial: ChatState | Partial<ChatState> | ((state: ChatState) => ChatState | Partial<ChatState>), replace?: false | undefined): unknown;
-    setState(state: ChatState | ((state: ChatState) => ChatState), replace: true): unknown;
-    persist: {
-        setOptions: (options: Partial<zustand_middleware.PersistOptions<ChatState, {
-            isOpen: boolean;
-            width: number;
-            activeSessionId: string;
-            sessions: {
-                [k: string]: {
-                    messages: ChatMessage[];
-                    processedEventIds: number[];
-                };
-            };
-        }, unknown>>) => void;
-        clearStorage: () => void;
-        rehydrate: () => Promise<void> | void;
-        hasHydrated: () => boolean;
-        onHydrate: (fn: (state: ChatState) => void) => () => void;
-        onFinishHydration: (fn: (state: ChatState) => void) => () => void;
-        getOptions: () => Partial<zustand_middleware.PersistOptions<ChatState, {
-            isOpen: boolean;
-            width: number;
-            activeSessionId: string;
-            sessions: {
-                [k: string]: {
-                    messages: ChatMessage[];
-                    processedEventIds: number[];
-                };
-            };
-        }, unknown>>;
-    };
-}>;
+declare const useChatStore: zustand.UseBoundStore<zustand.StoreApi<ChatState>>;
 
 export { type ChatMessage, useChatStore };

@@ -2,7 +2,6 @@ import { SkillEventHandler } from './use-skill-events.js';
 import { AgentEvent, SkillEvent } from '@sna-sdk/core';
 export { AgentEvent, SkillEvent } from '@sna-sdk/core';
 import { ChatMessage } from '../stores/chat-store.js';
-import 'zustand/middleware';
 import 'zustand';
 
 interface UseSnaOptions {

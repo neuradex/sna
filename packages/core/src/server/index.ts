@@ -27,6 +27,7 @@ import { eventsRoute } from "./routes/events.js";
 import { emitRoute } from "./routes/emit.js";
 import { createRunRoute } from "./routes/run.js";
 import { createAgentRoutes } from "./routes/agent.js";
+import { createChatRoutes } from "./routes/chat.js";
 import { SessionManager } from "./session-manager.js";
 
 export interface SnaAppOptions {
@@ -50,6 +51,9 @@ export function createSnaApp(options: SnaAppOptions = {}) {
   // Agent routes (stdio spawn → SSE)
   app.route("/agent", createAgentRoutes(sessionManager));
 
+  // Chat persistence routes
+  app.route("/chat", createChatRoutes());
+
   if (options.runCommands) {
     app.get("/run", createRunRoute(options.runCommands));
   }
@@ -61,6 +65,7 @@ export { eventsRoute } from "./routes/events.js";
 export { emitRoute } from "./routes/emit.js";
 export { createRunRoute } from "./routes/run.js";
 export { createAgentRoutes } from "./routes/agent.js";
+export { createChatRoutes } from "./routes/chat.js";
 export { SessionManager } from "./session-manager.js";
 export type { Session, SessionInfo, SessionManagerOptions } from "./session-manager.js";
 

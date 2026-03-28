@@ -6,6 +6,7 @@ export { eventsRoute } from './routes/events.js';
 export { emitRoute } from './routes/emit.js';
 export { createRunRoute } from './routes/run.js';
 export { createAgentRoutes } from './routes/agent.js';
+export { createChatRoutes } from './routes/chat.js';
 import '../core/providers/types.js';
 import 'hono/utils/http-status';
 
