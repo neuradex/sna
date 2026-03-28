@@ -51,7 +51,7 @@ const MARKDOWN_STYLES = `
 .sna-md a:hover { text-decoration: underline; }
 .sna-md strong { color: var(--sna-text); }
 .sna-md hr { border: none; border-top: 1px solid var(--sna-surface-border); margin: 12px 0; }
-.sna-md-inline-end > p:last-of-type { display: inline; }
+.sna-md-inline-end > p:last-of-type { display: inline-flex; align-items: center; gap: 4px; }
 `;
 let stylesInjected = false;
 function injectMarkdownStyles() {
