@@ -4,91 +4,112 @@ import {
   getProvider
 } from "../../core/providers/index.js";
 import { logger } from "../../lib/logger.js";
-let currentProcess = null;
-const eventBuffer = [];
-let eventCounter = 0;
-function setAgentProcess(proc) {
-  currentProcess = proc;
-  subscribeEvents(proc);
+function getSessionId(c) {
+  return c.req.query("session") ?? "default";
 }
-function subscribeEvents(proc) {
-  proc.on("event", (e) => {
-    eventBuffer.push(e);
-    eventCounter++;
-    if (eventBuffer.length > 500) {
-      eventBuffer.splice(0, eventBuffer.length - 500);
+function createAgentRoutes(sessionManager) {
+  const app = new Hono();
+  app.post("/sessions", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      const session = sessionManager.createSession({
+        label: body.label,
+        cwd: body.cwd
+      });
+      logger.log("route", `POST /sessions \u2192 created "${session.id}"`);
+      return c.json({ status: "created", sessionId: session.id, label: session.label });
+    } catch (e) {
+      logger.err("err", `POST /sessions \u2192 ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 409);
     }
   });
-}
-function createAgentRoutes() {
-  const app = new Hono();
+  app.get("/sessions", (c) => {
+    return c.json({ sessions: sessionManager.listSessions() });
+  });
+  app.delete("/sessions/:id", (c) => {
+    const id = c.req.param("id");
+    if (id === "default") {
+      return c.json({ status: "error", message: "Cannot remove default session" }, 400);
+    }
+    const removed = sessionManager.removeSession(id);
+    if (!removed) {
+      return c.json({ status: "error", message: "Session not found" }, 404);
+    }
+    logger.log("route", `DELETE /sessions/${id} \u2192 removed`);
+    return c.json({ status: "removed" });
+  });
   app.post("/start", async (c) => {
+    const sessionId = getSessionId(c);
     const body = await c.req.json().catch(() => ({}));
-    if (currentProcess?.alive && !body.force) {
-      logger.log("route", "POST /start \u2192 already_running");
+    const session = sessionManager.getOrCreateSession(sessionId);
+    if (session.process?.alive && !body.force) {
+      logger.log("route", `POST /start?session=${sessionId} \u2192 already_running`);
       return c.json({
         status: "already_running",
         provider: "claude-code",
-        sessionId: currentProcess.sessionId
+        sessionId: session.process.sessionId
       });
     }
-    if (currentProcess?.alive) {
-      currentProcess.kill();
+    if (session.process?.alive) {
+      session.process.kill();
     }
-    eventBuffer.length = 0;
+    session.eventBuffer.length = 0;
     const provider = getProvider(body.provider ?? "claude-code");
     try {
-      currentProcess = provider.spawn({
-        cwd: process.cwd(),
+      const proc = provider.spawn({
+        cwd: session.cwd,
         prompt: body.prompt,
         model: body.model ?? "claude-sonnet-4-6",
         permissionMode: body.permissionMode ?? "acceptEdits"
       });
-      subscribeEvents(currentProcess);
-      logger.log("route", "POST /start \u2192 started");
+      sessionManager.setProcess(sessionId, proc);
+      logger.log("route", `POST /start?session=${sessionId} \u2192 started`);
       return c.json({
         status: "started",
-        provider: provider.name
+        provider: provider.name,
+        sessionId: session.id
       });
     } catch (e) {
-      logger.err("err", "POST /start failed:", e.message);
+      logger.err("err", `POST /start?session=${sessionId} failed: ${e.message}`);
       return c.json({ status: "error", message: e.message }, 500);
     }
   });
   app.post("/send", async (c) => {
-    if (!currentProcess?.alive) {
-      logger.err("err", "POST /send \u2192 no active session (alive=false)");
+    const sessionId = getSessionId(c);
+    const session = sessionManager.getSession(sessionId);
+    if (!session?.process?.alive) {
+      logger.err("err", `POST /send?session=${sessionId} \u2192 no active session`);
       return c.json(
-        {
-          status: "error",
-          message: "No active agent session. Call POST /start first."
-        },
+        { status: "error", message: `No active agent session "${sessionId}". Call POST /start first.` },
         400
       );
     }
     const body = await c.req.json().catch(() => ({}));
     if (!body.message) {
-      logger.err("err", "POST /send \u2192 empty message");
+      logger.err("err", `POST /send?session=${sessionId} \u2192 empty message`);
       return c.json({ status: "error", message: "message is required" }, 400);
     }
-    logger.log("route", `POST /send \u2192 "${body.message.slice(0, 80)}"`);
-    currentProcess.send(body.message);
+    sessionManager.touch(sessionId);
+    logger.log("route", `POST /send?session=${sessionId} \u2192 "${body.message.slice(0, 80)}"`);
+    session.process.send(body.message);
     return c.json({ status: "sent" });
   });
   app.get("/events", (c) => {
+    const sessionId = getSessionId(c);
+    const session = sessionManager.getOrCreateSession(sessionId);
     const sinceParam = c.req.query("since");
-    let cursor = sinceParam ? parseInt(sinceParam, 10) : eventCounter;
+    let cursor = sinceParam ? parseInt(sinceParam, 10) : session.eventCounter;
     return streamSSE(c, async (stream) => {
       const POLL_MS = 300;
       const KEEPALIVE_MS = 15e3;
       let lastSend = Date.now();
       while (true) {
-        if (cursor < eventCounter) {
+        if (cursor < session.eventCounter) {
           const startIdx = Math.max(
             0,
-            eventBuffer.length - (eventCounter - cursor)
+            session.eventBuffer.length - (session.eventCounter - cursor)
           );
-          const newEvents = eventBuffer.slice(startIdx);
+          const newEvents = session.eventBuffer.slice(startIdx);
           for (const event of newEvents) {
             cursor++;
             await stream.writeSSE({
@@ -107,22 +128,21 @@ function createAgentRoutes() {
     });
   });
   app.post("/kill", async (c) => {
-    if (currentProcess?.alive) {
-      currentProcess.kill();
-      return c.json({ status: "killed" });
-    }
-    return c.json({ status: "no_session" });
+    const sessionId = getSessionId(c);
+    const killed = sessionManager.killSession(sessionId);
+    return c.json({ status: killed ? "killed" : "no_session" });
   });
   app.get("/status", (c) => {
+    const sessionId = getSessionId(c);
+    const session = sessionManager.getSession(sessionId);
     return c.json({
-      alive: currentProcess?.alive ?? false,
-      sessionId: currentProcess?.sessionId ?? null,
-      eventCount: eventCounter
+      alive: session?.process?.alive ?? false,
+      sessionId: session?.process?.sessionId ?? null,
+      eventCount: session?.eventCounter ?? 0
     });
   });
   return app;
 }
 export {
-  createAgentRoutes,
-  setAgentProcess
+  createAgentRoutes
 };

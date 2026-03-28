@@ -5,6 +5,8 @@ interface AgentEvent {
     timestamp: number;
 }
 interface UseAgentOptions {
+    /** Session ID. Defaults to "default". */
+    sessionId?: string;
     /** Override base URL for agent API. Defaults to SnaContext apiUrl + "/agent" */
     baseUrl?: string;
     /** Provider name. Defaults to "claude-code" */

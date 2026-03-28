@@ -7,9 +7,10 @@ import { useSkillEvents } from "../hooks/use-skill-events.js";
 import { useResponsiveChat } from "../hooks/use-responsive-chat.js";
 import { SnaContext, DEFAULT_SNA_URL } from "../core/sna-context.js";
 const StableChatPanel = memo(function StableChatPanel2({
-  onClose
+  onClose,
+  sessionId = "default"
 }) {
-  return /* @__PURE__ */ jsx(ChatPanel, { onClose });
+  return /* @__PURE__ */ jsx(ChatPanel, { onClose, sessionId });
 });
 function PermissionAutoOpen() {
   const setOpen = useChatStore((s) => s.setOpen);
@@ -155,7 +156,7 @@ function SnaProvider({
       return fallback;
     }
     discover().then((url) => {
-      fetch(`${url}/agent/start`, {
+      fetch(`${url}/agent/start?session=default`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider: "claude-code", permissionMode })
@@ -183,10 +184,10 @@ function SnaProvider({
     !agentReady && /* @__PURE__ */ jsx(ConnectingOverlay, {}),
     useFlex ? /* @__PURE__ */ jsxs("div", { style: { display: "flex", height: "100dvh" }, children: [
       /* @__PURE__ */ jsx("div", { style: { flex: 1, overflow: "auto", minWidth: 0 }, children }),
-      /* @__PURE__ */ jsx(StableChatPanel, { onClose: () => setChatOpen(false) })
+      /* @__PURE__ */ jsx(StableChatPanel, { onClose: () => setChatOpen(false), sessionId: "default" })
     ] }) : /* @__PURE__ */ jsxs(Fragment, { children: [
       children,
-      chatOpen && /* @__PURE__ */ jsx(StableChatPanel, { onClose: () => setChatOpen(false) })
+      chatOpen && /* @__PURE__ */ jsx(StableChatPanel, { onClose: () => setChatOpen(false), sessionId: "default" })
     ] }),
     !chatOpen && /* @__PURE__ */ jsx(FloatingChatButton, { onClick: () => setChatOpen(true) }),
     /* @__PURE__ */ jsx(PermissionAutoOpen, {})

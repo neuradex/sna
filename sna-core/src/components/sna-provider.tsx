@@ -10,10 +10,12 @@ import { SnaContext, DEFAULT_SNA_URL } from "../core/sna-context.js";
 // memo prevents re-mount when parent (children) re-renders
 const StableChatPanel = memo(function StableChatPanel({
   onClose,
+  sessionId = "default",
 }: {
   onClose: () => void;
+  sessionId?: string;
 }) {
-  return <ChatPanel onClose={onClose} />;
+  return <ChatPanel onClose={onClose} sessionId={sessionId} />;
 });
 
 /** Auto-opens chat panel when a permission request arrives.
@@ -211,7 +213,7 @@ export function SnaProvider({
     }
 
     discover().then((url) => {
-      fetch(`${url}/agent/start`, {
+      fetch(`${url}/agent/start?session=default`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider: "claude-code", permissionMode }),
@@ -254,12 +256,12 @@ export function SnaProvider({
           <div style={{ flex: 1, overflow: "auto", minWidth: 0 }}>
             {children}
           </div>
-          <StableChatPanel onClose={() => setChatOpen(false)} />
+          <StableChatPanel onClose={() => setChatOpen(false)} sessionId="default" />
         </div>
       ) : (
         <>
           {children}
-          {chatOpen && <StableChatPanel onClose={() => setChatOpen(false)} />}
+          {chatOpen && <StableChatPanel onClose={() => setChatOpen(false)} sessionId="default" />}
         </>
       )}
 

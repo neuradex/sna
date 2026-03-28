@@ -1,15 +1,19 @@
 import * as hono_types from 'hono/types';
 import { Hono } from 'hono';
+import { SessionManager } from './session-manager.js';
+export { Session, SessionInfo, SessionManagerOptions } from './session-manager.js';
 export { eventsRoute } from './routes/events.js';
 export { emitRoute } from './routes/emit.js';
 export { createRunRoute } from './routes/run.js';
 export { createAgentRoutes } from './routes/agent.js';
-import 'hono/utils/http-status';
 import '../core/providers/types.js';
+import 'hono/utils/http-status';
 
 interface SnaAppOptions {
     /** Commands available via GET /run?skill=<name> */
     runCommands?: Record<string, string[]>;
+    /** Session manager for multi-session support. Auto-created if omitted. */
+    sessionManager?: SessionManager;
 }
 declare function createSnaApp(options?: SnaAppOptions): Hono<hono_types.BlankEnv, hono_types.BlankSchema, "/">;
 
@@ -23,4 +27,4 @@ declare function createSnaApp(options?: SnaAppOptions): Hono<hono_types.BlankEnv
  */
 declare function snaPortRoute(c: any): any;
 
-export { type SnaAppOptions, createSnaApp, snaPortRoute };
+export { SessionManager, type SnaAppOptions, createSnaApp, snaPortRoute };

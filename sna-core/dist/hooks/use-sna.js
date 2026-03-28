@@ -4,6 +4,7 @@ import { useAgent } from "./use-agent.js";
 import { useChatStore } from "../stores/chat-store.js";
 function useSna(options = {}) {
   const {
+    sessionId = "default",
     skills,
     maxEvents,
     onEvent,
@@ -36,19 +37,20 @@ function useSna(options = {}) {
     onMilestone
   });
   const agent = useAgent({
+    sessionId,
     provider,
     onAssistant: onTextDelta,
     onComplete
   });
   const chatIsOpen = useChatStore((s) => s.isOpen);
-  const chatMessages = useChatStore((s) => s.messages);
+  const chatMessages = useChatStore((s) => s.sessions[sessionId]?.messages ?? []);
   const toggleChat = useChatStore((s) => s.toggle);
   const openChat = useChatStore((s) => s.setOpen);
   const addChatMessage = useChatStore((s) => s.addMessage);
   const clearChatMessages = useChatStore((s) => s.clearMessages);
   const runSkill = async (name) => {
     openChat(true);
-    addChatMessage({ role: "user", content: `/${name}` });
+    addChatMessage({ role: "user", content: `/${name}` }, sessionId);
     if (agent.alive) {
       await agent.send(`Execute the skill: ${name}`);
     } else {
@@ -57,7 +59,7 @@ function useSna(options = {}) {
   };
   const runSkillSub = async (name) => {
     openChat(true);
-    addChatMessage({ role: "user", content: `/${name}` });
+    addChatMessage({ role: "user", content: `/${name}` }, sessionId);
     if (agent.alive) {
       await agent.send(`Execute the skill: ${name}`);
     } else {
@@ -77,8 +79,8 @@ function useSna(options = {}) {
       messages: chatMessages,
       toggle: toggleChat,
       setOpen: openChat,
-      addMessage: addChatMessage,
-      clearMessages: clearChatMessages
+      addMessage: (msg) => addChatMessage(msg, sessionId),
+      clearMessages: () => clearChatMessages(sessionId)
     },
     runSkill,
     runSkillSub

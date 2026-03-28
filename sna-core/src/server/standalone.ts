@@ -13,38 +13,44 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import chalk from "chalk";
 import { createSnaApp } from "./index.js";
+import { SessionManager } from "./session-manager.js";
 import { getProvider } from "../core/providers/index.js";
-import { setAgentProcess } from "./routes/agent.js";
 import { logger } from "../lib/logger.js";
 
 const port = parseInt(process.env.SNA_PORT ?? "3099", 10);
 const permissionMode = (process.env.SNA_PERMISSION_MODE ?? "acceptEdits") as "acceptEdits" | "bypassPermissions";
 const defaultModel = process.env.SNA_MODEL ?? "claude-sonnet-4-6";
+const maxSessions = parseInt(process.env.SNA_MAX_SESSIONS ?? "5", 10);
 
 const root = new Hono();
-root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "OPTIONS"] }));
+root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "DELETE", "OPTIONS"] }));
 
 // Request logger with method coloring
 const methodColor: Record<string, (s: string) => string> = {
   GET: chalk.green,
   POST: chalk.yellow,
+  DELETE: chalk.red,
   OPTIONS: chalk.gray,
 };
 root.use("*", async (c, next) => {
   const m = c.req.method;
   const colorFn = methodColor[m] ?? chalk.white;
   const path = new URL(c.req.url).pathname;
-  logger.log("req", `${colorFn(m.padEnd(4))} ${path}`);
+  logger.log("req", `${colorFn(m.padEnd(6))} ${path}`);
   await next();
 });
 
-root.route("/", createSnaApp());
+// 1. Create session manager and main session
+const sessionManager = new SessionManager({ maxSessions });
+sessionManager.createSession({ id: "default", cwd: process.cwd() });
 
-// 1. Spawn agent first
+// 2. Spawn agent into main session
 const provider = getProvider("claude-code");
 logger.log("sna", "spawning agent...");
 const agentProcess = provider.spawn({ cwd: process.cwd(), permissionMode, model: defaultModel });
-setAgentProcess(agentProcess);
+sessionManager.setProcess("default", agentProcess);
+
+root.route("/", createSnaApp({ sessionManager }));
 
 let server: ReturnType<typeof serve> | null = null;
 let shuttingDown = false;
@@ -53,8 +59,8 @@ function shutdown(signal: string) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log("");
-  logger.log("sna", chalk.dim("stopping agent..."));
-  agentProcess.kill();
+  logger.log("sna", chalk.dim("stopping all sessions..."));
+  sessionManager.killAll();
   if (server) {
     server.close(() => {
       logger.log("sna", chalk.green("clean shutdown") + chalk.dim(" — see you next time"));
@@ -78,7 +84,7 @@ process.on("uncaughtException", (err) => {
   process.exit(1);
 });
 
-// 2. Start listening immediately — agent receives messages when ready
+// 3. Start listening immediately — agent receives messages when ready
 server = serve({ fetch: root.fetch, port }, () => {
   console.log("");
   logger.log("sna", chalk.green.bold(`API server ready → http://localhost:${port}`));

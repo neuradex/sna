@@ -5,6 +5,8 @@ import { useAgent, type AgentEvent } from "./use-agent.js";
 import { useChatStore, type ChatMessage } from "../stores/chat-store.js";
 
 interface UseSnaOptions {
+  /** Session ID. Defaults to "default". */
+  sessionId?: string;
   skills?: string[];
   maxEvents?: number;
   /** Agent provider name. Defaults to "claude-code" */
@@ -43,6 +45,7 @@ interface UseSnaOptions {
  */
 export function useSna(options: UseSnaOptions = {}) {
   const {
+    sessionId = "default",
     skills, maxEvents, onEvent,
     onCalled, onSuccess, onFailed, onPermissionNeeded, onProgress, onMilestone,
     provider = "claude-code",
@@ -60,16 +63,17 @@ export function useSna(options: UseSnaOptions = {}) {
     onProgress, onMilestone,
   });
 
-  // 2. Agent session (stdio spawn)
+  // 2. Agent session (stdio spawn) — session-scoped
   const agent = useAgent({
+    sessionId,
     provider,
     onAssistant: onTextDelta,
     onComplete,
   });
 
-  // 3. Chat panel state
+  // 3. Chat panel state — session-scoped
   const chatIsOpen = useChatStore((s) => s.isOpen);
-  const chatMessages = useChatStore((s) => s.messages);
+  const chatMessages = useChatStore((s) => s.sessions[sessionId]?.messages ?? []);
   const toggleChat = useChatStore((s) => s.toggle);
   const openChat = useChatStore((s) => s.setOpen);
   const addChatMessage = useChatStore((s) => s.addMessage);
@@ -78,7 +82,7 @@ export function useSna(options: UseSnaOptions = {}) {
   /** Run a skill — opens chat, sends prompt to agent */
   const runSkill = async (name: string) => {
     openChat(true);
-    addChatMessage({ role: "user", content: `/${name}` });
+    addChatMessage({ role: "user", content: `/${name}` }, sessionId);
     // If agent is alive, send as a message; otherwise start a new session
     if (agent.alive) {
       await agent.send(`Execute the skill: ${name}`);
@@ -90,7 +94,7 @@ export function useSna(options: UseSnaOptions = {}) {
   /** Run skill as subagent (kept for compat — same as runSkill for now) */
   const runSkillSub = async (name: string) => {
     openChat(true);
-    addChatMessage({ role: "user", content: `/${name}` });
+    addChatMessage({ role: "user", content: `/${name}` }, sessionId);
     if (agent.alive) {
       await agent.send(`Execute the skill: ${name}`);
     } else {
@@ -111,8 +115,8 @@ export function useSna(options: UseSnaOptions = {}) {
       messages: chatMessages,
       toggle: toggleChat,
       setOpen: openChat,
-      addMessage: addChatMessage,
-      clearMessages: clearChatMessages,
+      addMessage: (msg: Omit<ChatMessage, "id" | "timestamp">) => addChatMessage(msg, sessionId),
+      clearMessages: () => clearChatMessages(sessionId),
     },
     runSkill,
     runSkillSub,

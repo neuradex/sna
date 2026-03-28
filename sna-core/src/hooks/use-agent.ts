@@ -11,6 +11,8 @@ export interface AgentEvent {
 }
 
 interface UseAgentOptions {
+  /** Session ID. Defaults to "default". */
+  sessionId?: string;
   /** Override base URL for agent API. Defaults to SnaContext apiUrl + "/agent" */
   baseUrl?: string;
   /** Provider name. Defaults to "claude-code" */
@@ -36,10 +38,13 @@ interface UseAgentOptions {
 export function useAgent(options: UseAgentOptions = {}) {
   const { apiUrl } = useSnaContext();
   const {
+    sessionId = "default",
     baseUrl = `${apiUrl}/agent`,
     provider = "claude-code",
     permissionMode = "acceptEdits",
   } = options;
+
+  const sessionParam = `session=${encodeURIComponent(sessionId)}`;
 
   const [connected, setConnected] = useState(false);
   const [alive, setAlive] = useState(false);
@@ -68,7 +73,7 @@ export function useAgent(options: UseAgentOptions = {}) {
       // Get current event count so we only receive NEW events
       let cursor = 0;
       try {
-        const res = await fetch(`${baseUrl}/status`);
+        const res = await fetch(`${baseUrl}/status?${sessionParam}`);
         const data = await res.json();
         cursor = data.eventCount ?? 0;
         if (data.alive) setAlive(true);
@@ -78,7 +83,7 @@ export function useAgent(options: UseAgentOptions = {}) {
         if (disposed) return;
         if (esRef.current) esRef.current.close();
 
-        const es = new EventSource(`${baseUrl}/events?since=${cursor}`);
+        const es = new EventSource(`${baseUrl}/events?${sessionParam}&since=${cursor}`);
         esRef.current = es;
 
         es.onopen = () => setConnected(true);
@@ -117,14 +122,14 @@ export function useAgent(options: UseAgentOptions = {}) {
       esRef.current?.close();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseUrl]);
+  }, [baseUrl, sessionParam]);
 
   // Send message to agent
   const send = useCallback(async (message: string) => {
-    console.log(`[useAgent:send] baseUrl=${baseUrl}, message=${message.slice(0, 50)}`);
+    console.log(`[useAgent:send] session=${sessionId}, message=${message.slice(0, 50)}`);
     setAlive(true);
     try {
-      const res = await fetch(`${baseUrl}/send`, {
+      const res = await fetch(`${baseUrl}/send?${sessionParam}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message }),
@@ -136,11 +141,11 @@ export function useAgent(options: UseAgentOptions = {}) {
       console.error("[useAgent:send] FAILED:", err);
       return { status: "error", message: String(err) };
     }
-  }, [baseUrl]);
+  }, [baseUrl, sessionParam, sessionId]);
 
   // Start agent session (if not already running)
   const start = useCallback(async (prompt?: string) => {
-    const res = await fetch(`${baseUrl}/start`, {
+    const res = await fetch(`${baseUrl}/start?${sessionParam}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ provider, prompt, permissionMode }),
@@ -150,13 +155,13 @@ export function useAgent(options: UseAgentOptions = {}) {
       setAlive(true);
     }
     return data;
-  }, [baseUrl, provider, permissionMode]);
+  }, [baseUrl, sessionParam, provider, permissionMode]);
 
   // Kill agent
   const kill = useCallback(async () => {
     setAlive(false);
-    await fetch(`${baseUrl}/kill`, { method: "POST" });
-  }, [baseUrl]);
+    await fetch(`${baseUrl}/kill?${sessionParam}`, { method: "POST" });
+  }, [baseUrl, sessionParam]);
 
   return { connected, alive, start, send, kill };
 }

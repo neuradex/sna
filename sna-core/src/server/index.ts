@@ -25,13 +25,17 @@ import { eventsRoute } from "./routes/events.js";
 import { emitRoute } from "./routes/emit.js";
 import { createRunRoute } from "./routes/run.js";
 import { createAgentRoutes } from "./routes/agent.js";
+import { SessionManager } from "./session-manager.js";
 
 export interface SnaAppOptions {
   /** Commands available via GET /run?skill=<name> */
   runCommands?: Record<string, string[]>;
+  /** Session manager for multi-session support. Auto-created if omitted. */
+  sessionManager?: SessionManager;
 }
 
 export function createSnaApp(options: SnaAppOptions = {}) {
+  const sessionManager = options.sessionManager ?? new SessionManager();
   const app = new Hono();
 
   // Health check — used by consumers to verify this is an SNA server
@@ -42,7 +46,7 @@ export function createSnaApp(options: SnaAppOptions = {}) {
   app.post("/emit", emitRoute);
 
   // Agent routes (stdio spawn → SSE)
-  app.route("/agent", createAgentRoutes());
+  app.route("/agent", createAgentRoutes(sessionManager));
 
   if (options.runCommands) {
     app.get("/run", createRunRoute(options.runCommands));
@@ -55,6 +59,8 @@ export { eventsRoute } from "./routes/events.js";
 export { emitRoute } from "./routes/emit.js";
 export { createRunRoute } from "./routes/run.js";
 export { createAgentRoutes } from "./routes/agent.js";
+export { SessionManager } from "./session-manager.js";
+export type { Session, SessionInfo, SessionManagerOptions } from "./session-manager.js";
 
 /**
  * GET /api/sna-port handler for consumer servers.

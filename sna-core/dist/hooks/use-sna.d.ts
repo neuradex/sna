@@ -5,6 +5,8 @@ import 'zustand/middleware';
 import 'zustand';
 
 interface UseSnaOptions {
+    /** Session ID. Defaults to "default". */
+    sessionId?: string;
     skills?: string[];
     maxEvents?: number;
     /** Agent provider name. Defaults to "claude-code" */
@@ -57,7 +59,7 @@ declare function useSna(options?: UseSnaOptions): {
         messages: ChatMessage[];
         toggle: () => void;
         setOpen: (open: boolean) => void;
-        addMessage: (message: Omit<ChatMessage, "id" | "timestamp">) => void;
+        addMessage: (msg: Omit<ChatMessage, "id" | "timestamp">) => void;
         clearMessages: () => void;
     };
     runSkill: (name: string) => Promise<void>;

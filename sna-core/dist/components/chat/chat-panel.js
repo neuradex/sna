@@ -75,11 +75,14 @@ function fmtTokens(n) {
   if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
   return String(n);
 }
-function ChatPanel({ onClose }) {
-  const messages = useChatStore((s) => s.messages);
-  const addMessage = useChatStore((s) => s.addMessage);
-  const clearMessages = useChatStore((s) => s.clearMessages);
-  const markEventProcessed = useChatStore((s) => s.markEventProcessed);
+function ChatPanel({ onClose, sessionId = "default" }) {
+  const messages = useChatStore((s) => s.sessions[sessionId]?.messages ?? []);
+  const addMsg = useChatStore((s) => s.addMessage);
+  const addMessage = (msg) => addMsg(msg, sessionId);
+  const clearMsg = useChatStore((s) => s.clearMessages);
+  const clearMessages = () => clearMsg(sessionId);
+  const markEvt = useChatStore((s) => s.markEventProcessed);
+  const markEventProcessed = (eventId) => markEvt(eventId, sessionId);
   const width = useChatStore((s) => s.width);
   const setWidth = useChatStore((s) => s.setWidth);
   const { mode } = useResponsiveChat();
@@ -97,6 +100,7 @@ function ChatPanel({ onClose }) {
   });
   useEffect(() => injectStyles(), []);
   const agent = useAgent({
+    sessionId,
     onEvent: (e) => {
       if (e.type === "tool_use") {
         const toolName = e.data?.toolName ?? e.message ?? "tool";
@@ -119,7 +123,10 @@ function ChatPanel({ onClose }) {
       addMessage({ role: "assistant", content: e.message ?? "", meta: { animate: true } });
     },
     onToolResult: (e) => {
-      const msgs = useChatStore.getState().messages;
+      const state = useChatStore.getState();
+      const session = state.sessions[sessionId];
+      if (!session) return;
+      const msgs = session.messages;
       for (let i = msgs.length - 1; i >= 0; i--) {
         if (msgs[i].role === "tool" && !msgs[i].meta?.result) {
           const updated = [...msgs];
@@ -131,7 +138,9 @@ function ChatPanel({ onClose }) {
               isError: !!e.data?.isError
             }
           };
-          useChatStore.setState({ messages: updated });
+          useChatStore.setState({
+            sessions: { ...state.sessions, [sessionId]: { ...session, messages: updated } }
+          });
           return;
         }
       }
@@ -163,7 +172,10 @@ function ChatPanel({ onClose }) {
         lastTurnConvTokens: convTok,
         model: model || prev.model
       }));
-      const msgs = useChatStore.getState().messages;
+      const state = useChatStore.getState();
+      const session = state.sessions[sessionId];
+      if (!session) return;
+      const msgs = session.messages;
       for (let i = msgs.length - 1; i >= 0; i--) {
         if (msgs[i].role === "assistant") {
           const parts = [];
@@ -172,7 +184,9 @@ function ChatPanel({ onClose }) {
           if (cost != null) parts.push(`$${cost.toFixed(4)}`);
           const updated = [...msgs];
           updated[i] = { ...updated[i], meta: { ...updated[i].meta, costLabel: parts.join(" \xB7 ") } };
-          useChatStore.setState({ messages: updated });
+          useChatStore.setState({
+            sessions: { ...state.sessions, [sessionId]: { ...session, messages: updated } }
+          });
           break;
         }
       }

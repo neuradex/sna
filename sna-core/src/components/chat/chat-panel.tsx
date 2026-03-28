@@ -13,6 +13,8 @@ import { useResponsiveChat, type ChatMode } from "../../hooks/use-responsive-cha
 
 interface ChatPanelProps {
   onClose: () => void;
+  /** Session ID for multi-session support. Defaults to "default". */
+  sessionId?: string;
 }
 
 /** Inject keyframe animations + CSS variable defaults once */
@@ -84,11 +86,14 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
-export function ChatPanel({ onClose }: ChatPanelProps) {
-  const messages = useChatStore((s) => s.messages);
-  const addMessage = useChatStore((s) => s.addMessage);
-  const clearMessages = useChatStore((s) => s.clearMessages);
-  const markEventProcessed = useChatStore((s) => s.markEventProcessed);
+export function ChatPanel({ onClose, sessionId = "default" }: ChatPanelProps) {
+  const messages = useChatStore((s) => s.sessions[sessionId]?.messages ?? []);
+  const addMsg = useChatStore((s) => s.addMessage);
+  const addMessage = (msg: Omit<import("../../stores/chat-store.js").ChatMessage, "id" | "timestamp">) => addMsg(msg, sessionId);
+  const clearMsg = useChatStore((s) => s.clearMessages);
+  const clearMessages = () => clearMsg(sessionId);
+  const markEvt = useChatStore((s) => s.markEventProcessed);
+  const markEventProcessed = (eventId: number) => markEvt(eventId, sessionId);
   const width = useChatStore((s) => s.width);
   const setWidth = useChatStore((s) => s.setWidth);
   const { mode } = useResponsiveChat();
@@ -108,8 +113,9 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
 
   useEffect(() => injectStyles(), []);
 
-  // Subscribe to agent events (from stdio spawn)
+  // Subscribe to agent events (from stdio spawn) — session-scoped
   const agent = useAgent({
+    sessionId,
     onEvent: (e) => {
       if (e.type === "tool_use") {
         const toolName = (e.data?.toolName as string) ?? e.message ?? "tool";
@@ -134,7 +140,10 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
     },
     onToolResult: (e) => {
       // Attach result to the last tool message instead of creating a new one
-      const msgs = useChatStore.getState().messages;
+      const state = useChatStore.getState();
+      const session = state.sessions[sessionId];
+      if (!session) return;
+      const msgs = session.messages;
       for (let i = msgs.length - 1; i >= 0; i--) {
         if (msgs[i].role === "tool" && !msgs[i].meta?.result) {
           const updated = [...msgs];
@@ -146,7 +155,9 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
               isError: !!e.data?.isError,
             },
           };
-          useChatStore.setState({ messages: updated });
+          useChatStore.setState({
+            sessions: { ...state.sessions, [sessionId]: { ...session, messages: updated } },
+          });
           return;
         }
       }
@@ -182,17 +193,21 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
       }));
 
       // Attach cost info to the last assistant message
-      const msgs = useChatStore.getState().messages;
+      const state = useChatStore.getState();
+      const session = state.sessions[sessionId];
+      if (!session) return;
+      const msgs = session.messages;
       for (let i = msgs.length - 1; i >= 0; i--) {
         if (msgs[i].role === "assistant") {
           const parts: string[] = [];
           if (duration != null) parts.push(`${(duration / 1000).toFixed(1)}s`);
           if (outTok > 0) parts.push(`${fmtTokens(outTok)} tokens`);
           if (cost != null) parts.push(`$${cost.toFixed(4)}`);
-          // Update the message meta with cost info
           const updated = [...msgs];
           updated[i] = { ...updated[i], meta: { ...updated[i].meta, costLabel: parts.join(" · ") } };
-          useChatStore.setState({ messages: updated });
+          useChatStore.setState({
+            sessions: { ...state.sessions, [sessionId]: { ...session, messages: updated } },
+          });
           break;
         }
       }
