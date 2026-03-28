@@ -71,8 +71,8 @@ function injectStyles() {
       opacity: 0;
       position: absolute;
       bottom: calc(100% + 8px);
-      left: 50%;
-      transform: translateX(-50%) scale(0.95);
+      left: 0;
+      transform: scale(0.95);
       padding: 6px 10px;
       border-radius: 6px;
       background: #1a1a2e;
@@ -90,15 +90,14 @@ function injectStyles() {
       content: '';
       position: absolute;
       top: 100%;
-      left: 50%;
-      transform: translateX(-50%);
+      left: 12px;
       border: 5px solid transparent;
       border-top-color: #1a1a2e;
     }
     .sna-cost-hint:hover .sna-cost-tooltip {
       visibility: visible;
       opacity: 1;
-      transform: translateX(-50%) scale(1);
+      transform: scale(1);
     }
     .sna-cost-hint:hover svg {
       opacity: 0.5 !important;
