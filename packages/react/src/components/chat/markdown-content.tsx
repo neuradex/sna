@@ -53,6 +53,7 @@ const MARKDOWN_STYLES = `
 .sna-md a:hover { text-decoration: underline; }
 .sna-md strong { color: var(--sna-text); }
 .sna-md hr { border: none; border-top: 1px solid var(--sna-surface-border); margin: 12px 0; }
+.sna-md-inline-end > p:last-of-type { display: inline; }
 `;
 
 let stylesInjected = false;
@@ -76,7 +77,6 @@ export function MarkdownContent({ text, suffixHtml }: MarkdownContentProps) {
   const html = useMemo(() => {
     let parsed = marked.parse(text) as string;
     if (suffixHtml) {
-      // Insert suffix before the last closing </p> tag
       const lastP = parsed.lastIndexOf("</p>");
       if (lastP !== -1) {
         parsed = parsed.slice(0, lastP) + suffixHtml + parsed.slice(lastP);
@@ -86,5 +86,5 @@ export function MarkdownContent({ text, suffixHtml }: MarkdownContentProps) {
     }
     return parsed;
   }, [text, suffixHtml]);
-  return <div className="sna-md" dangerouslySetInnerHTML={{ __html: html }} />;
+  return <div className={suffixHtml ? "sna-md sna-md-inline-end" : "sna-md"} dangerouslySetInnerHTML={{ __html: html }} />;
 }

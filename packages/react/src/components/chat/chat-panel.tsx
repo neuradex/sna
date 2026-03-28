@@ -77,14 +77,13 @@ function injectStyles() {
     .sna-cost-tooltip {
       display: none;
       position: absolute;
-      bottom: calc(100% + 6px);
-      left: 50%;
-      transform: translateX(-50%);
+      top: calc(100% + 4px);
+      left: 0;
       padding: 4px 8px;
       border-radius: 4px;
       background: rgba(0,0,0,0.92);
-      border: 1px solid rgba(255,255,255,0.1);
-      color: rgba(255,255,255,0.7);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: rgba(255,255,255,0.75);
       font-size: 10px;
       font-family: var(--sna-font-mono);
       white-space: nowrap;
@@ -96,9 +95,6 @@ function injectStyles() {
     }
     .sna-cost-hint:hover svg {
       opacity: 0.5 !important;
-    }
-    .sna-inline-cost .sna-md > p:last-child {
-      display: inline;
     }
   `;
   document.head.appendChild(style);
