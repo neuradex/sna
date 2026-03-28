@@ -1,30 +1,30 @@
 # SNA — Skills-Native Application SDK
 
-**Claude Code をランタイムとして使うアプリケーションフレームワーク。**
+**An application framework that uses Claude Code as the runtime.**
 
-従来のAIアプリは LLM API を呼び出してレスポンスをパースする。SNA はその逆 — Claude Code 自体がアプリのロジックを実行する。
+Traditional AI apps call an LLM API and parse the response. SNA flips this — Claude Code itself executes the application logic.
 
 ```
-従来:   あなたのコード → LLM API → パース → 実行
-SNA:   SKILL.md → Claude Code → スクリプト → SQLite → SSE → UI
+Traditional:  your code → LLM API → parse → act
+SNA:          SKILL.md → Claude Code → scripts → SQLite → SSE → UI
 ```
 
-## 仕組み
+## How It Works
 
-1. ユーザーがアプリ内のチャットUIまたはターミナルでスキルを実行（例: `/form-register`）
-2. Claude Code が `.claude/skills/<name>/SKILL.md` を読み、TypeScript スクリプトを実行
-3. スクリプトがアプリの SQLite DB を読み書き
-4. 実行中のイベント（開始・進捗・完了）を SDK 経由でリアルタイムにフロントエンドへ配信
-5. フロントエンドが自動更新
+1. User invokes a skill in the app's chat UI or terminal (e.g. `/form-register`)
+2. Claude Code reads `.claude/skills/<name>/SKILL.md` and executes TypeScript scripts
+3. Scripts read/write to the app's SQLite database
+4. Events (start, progress, complete) are delivered to the frontend in real-time via the SDK
+5. Frontend auto-refreshes
 
-## パッケージ
+## Packages
 
-| パッケージ | npm名 | 役割 |
-|---------|--------|------|
-| `packages/core` | `@sna-sdk/core` | サーバーランタイム、DB、CLI、イベントパイプライン |
-| `packages/react` | `@sna-sdk/react` | React hooks、コンポーネント、ストア |
+| Package | npm name | Role |
+|---------|----------|------|
+| `packages/core` | `@sna-sdk/core` | Server runtime, DB, CLI, event pipeline |
+| `packages/react` | `@sna-sdk/react` | React hooks, components, stores |
 
-## クイックスタート
+## Quick Start
 
 ```bash
 pnpm install
@@ -32,26 +32,26 @@ cd packages/core && pnpm build
 cd packages/react && pnpm build
 ```
 
-アプリ側の設定は [App Setup ガイド](docs/app-setup.md) を参照。
+See the [App Setup guide](docs/app-setup.md) for application-side configuration.
 
-## ドキュメント
+## Documentation
 
-| ドキュメント | 内容 |
-|-----------|------|
-| [Architecture](docs/architecture.md) | DB 分離、イベントパイプライン、パッケージ構造 |
-| [Skill Authoring](docs/skill-authoring.md) | スキル作成ガイド |
-| [App Setup](docs/app-setup.md) | フロントエンド・サーバー・Vite 設定 |
-| [Contributing](CONTRIBUTING.md) | リポジトリ構造、キーファイル、テックスタック |
+| Document | Contents |
+|----------|----------|
+| [Architecture](docs/architecture.md) | DB separation, event pipeline, package structure |
+| [Skill Authoring](docs/skill-authoring.md) | How to write skills |
+| [App Setup](docs/app-setup.md) | Frontend, server, Vite configuration |
+| [Contributing](CONTRIBUTING.md) | Repository structure, key files, tech stack |
 
-## Claude Code プラグイン
+## Claude Code Plugin
 
-SNA アプリ開発を支援するプラグインを同梱。SDK の規約を自動的に守るエージェント。
+Includes a Claude Code plugin for SNA app development. An agent that automatically follows SDK conventions.
 
 ```bash
-# ローカルテスト
+# Local testing
 claude --plugin-dir ./plugins/sna-builder
 
-# マーケットプレイスからインストール
+# Install from marketplace
 /plugin marketplace add neuradex/sna
 /plugin install sna-builder@sna
 ```
