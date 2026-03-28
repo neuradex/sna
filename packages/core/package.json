@@ -1,0 +1,92 @@
+{
+  "name": "@sna-sdk/core",
+  "version": "0.1.0",
+  "description": "Skills-Native Application runtime — server, providers, session management, database, and CLI",
+  "type": "module",
+  "bin": {
+    "sna": "bin/sna.js"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "skills/",
+    "CLAUDE.md.template"
+  ],
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./server": {
+      "source": "./src/server/index.ts",
+      "types": "./dist/server/index.d.ts",
+      "default": "./dist/server/index.js"
+    },
+    "./server/routes/events": {
+      "source": "./src/server/routes/events.ts",
+      "types": "./dist/server/routes/events.d.ts",
+      "default": "./dist/server/routes/events.js"
+    },
+    "./server/routes/emit": {
+      "source": "./src/server/routes/emit.ts",
+      "types": "./dist/server/routes/emit.d.ts",
+      "default": "./dist/server/routes/emit.js"
+    },
+    "./server/routes/run": {
+      "source": "./src/server/routes/run.ts",
+      "types": "./dist/server/routes/run.d.ts",
+      "default": "./dist/server/routes/run.js"
+    },
+    "./server/routes/agent": {
+      "source": "./src/server/routes/agent.ts",
+      "types": "./dist/server/routes/agent.d.ts",
+      "default": "./dist/server/routes/agent.js"
+    },
+    "./db/schema": {
+      "source": "./src/db/schema.ts",
+      "types": "./dist/db/schema.d.ts",
+      "default": "./dist/db/schema.js"
+    },
+    "./providers": {
+      "source": "./src/core/providers/index.ts",
+      "types": "./dist/core/providers/index.d.ts",
+      "default": "./dist/core/providers/index.js"
+    },
+    "./lib/sna-run": {
+      "source": "./src/lib/sna-run.ts",
+      "types": "./dist/lib/sna-run.d.ts",
+      "default": "./dist/lib/sna-run.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx --watch src/server/standalone.ts || true",
+    "test": "node --import tsx --test test/**/*.test.ts",
+    "prepublishOnly": "pnpm build"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "claude-code",
+    "sna",
+    "skills-native",
+    "hono"
+  ],
+  "dependencies": {
+    "@hono/node-server": "^1.19.11",
+    "better-sqlite3": "^12.6.2",
+    "chalk": "^5.0.0",
+    "hono": "^4.12.7",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}
