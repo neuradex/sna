@@ -330,7 +330,8 @@ export function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelC
               style={{
                 height: "100%",
                 width: `${cachedBarPercent}%`,
-                background: "rgba(255,255,255,0.10)",
+                background: "var(--sna-success, #22c55e)",
+                opacity: 0.5,
                 transition: "width 0.3s ease",
               }}
               title={`Cached: ${fmtTokens(lastTurnCacheRead)}`}
@@ -342,7 +343,7 @@ export function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelC
                 background: "var(--sna-accent)",
                 transition: "width 0.3s ease",
               }}
-              title={`Uncached: ${fmtTokens(lastTurnInputTokens - lastTurnCacheRead)}`}
+              title={`New input: ${fmtTokens(lastTurnInputTokens - lastTurnCacheRead)}`}
             />
           </div>
           {/* Stats */}
