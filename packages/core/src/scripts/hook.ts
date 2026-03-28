@@ -3,7 +3,7 @@
  *
  * Configured in .claude/settings.json:
  *   "PermissionRequest": [{ "matcher": ".*", "hooks": [{ "type": "command", "async": true,
- *     "command": "\"$CLAUDE_PROJECT_DIR\"/node_modules/.bin/tsx \"$CLAUDE_PROJECT_DIR\"/node_modules/sna/src/scripts/hook.ts" }] }]
+ *     "command": "\"$CLAUDE_PROJECT_DIR\"/node_modules/.bin/tsx \"$CLAUDE_PROJECT_DIR\"/node_modules/@sna-sdk/core/src/scripts/hook.ts" }] }]
  *
  * Fires exactly when a permission dialog is about to appear to the user.
  * Emits "permission_needed" to SQLite for the currently running skill.

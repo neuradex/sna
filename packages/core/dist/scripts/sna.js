@@ -13,7 +13,7 @@ const SNA_API_LOG_FILE = path.join(STATE_DIR, "sna-api.log");
 const PORT = process.env.PORT ?? "3000";
 const DB_PATH = path.join(ROOT, "data/app.db");
 const CLAUDE_PATH_FILE = path.join(STATE_DIR, "claude-path");
-const SNA_CORE_DIR = path.join(ROOT, "node_modules/sna");
+const SNA_CORE_DIR = path.join(ROOT, "node_modules/@sna-sdk/core");
 function ensureStateDir() {
   if (!fs.existsSync(STATE_DIR)) fs.mkdirSync(STATE_DIR, { recursive: true });
 }

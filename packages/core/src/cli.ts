@@ -12,7 +12,7 @@ import { fileURLToPath } from "url";
 import chalk from "chalk";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// node_modules/sna/src/ → node_modules/sna/
+// node_modules/@sna-sdk/core/src/ → node_modules/@sna-sdk/core/
 const PACKAGE_ROOT = path.resolve(__dirname, "..");
 
 const [, , command] = process.argv;
@@ -61,7 +61,7 @@ function cmdLink() {
 
   for (const skill of skills) {
     const linkPath = path.join(skillsDir, skill);
-    // Relative path from .claude/skills/<skill> to node_modules/sna/skills/<skill>
+    // Relative path from .claude/skills/<skill> to node_modules/@sna-sdk/core/skills/<skill>
     const target = path.relative(skillsDir, path.join(coreSkillsDir, skill));
 
     // Use try/catch with lstatSync to detect both existing files AND broken symlinks.

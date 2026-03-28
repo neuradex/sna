@@ -29,7 +29,7 @@ const PORT = process.env.PORT ?? "3000";
 const DB_PATH = path.join(ROOT, "data/app.db");
 const CLAUDE_PATH_FILE = path.join(STATE_DIR, "claude-path");
 
-const SNA_CORE_DIR = path.join(ROOT, "node_modules/sna");
+const SNA_CORE_DIR = path.join(ROOT, "node_modules/@sna-sdk/core");
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
