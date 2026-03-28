@@ -5,7 +5,7 @@ const KEEPALIVE_INTERVAL_MS = 15e3;
 function eventsRoute(c) {
   const sinceParam = c.req.query("since");
   let lastId = sinceParam ? parseInt(sinceParam) : -1;
-  if (lastId === -1) {
+  if (lastId <= 0) {
     const db = getDb();
     const row = db.prepare("SELECT MAX(id) as maxId FROM skill_events").get();
     lastId = row.maxId ?? 0;

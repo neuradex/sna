@@ -16,7 +16,7 @@ export function eventsRoute(c: Context) {
   const sinceParam = c.req.query("since");
   let lastId = sinceParam ? parseInt(sinceParam) : -1;
 
-  if (lastId === -1) {
+  if (lastId <= 0) {
     const db = getDb();
     const row = db.prepare("SELECT MAX(id) as maxId FROM skill_events").get() as { maxId: number | null };
     lastId = row.maxId ?? 0;
