@@ -1,5 +1,5 @@
 "use client";
-import { jsx, jsxs } from "react/jsx-runtime";
+import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 import { useState, useRef, useEffect } from "react";
 const MODELS = [
   { id: "claude-opus-4-6", label: "Opus 4.6", tier: "max" },
@@ -109,7 +109,7 @@ function ModelDropdown({
     )
   ] });
 }
-function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, sessions, activeSessionId, onSessionChange, onSessionClose }) {
+function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, sessions, viewMode = "chat", bgCount = 0, bgSessionLabel, onViewChat, onViewBgDashboard, onViewBgBack }) {
   const { totalInputTokens, totalOutputTokens, totalCost, contextWindow, lastTurnContextTokens, lastTurnSystemTokens, lastTurnConvTokens, model } = sessionUsage;
   const totalTokens = totalInputTokens + totalOutputTokens;
   const ctxPercent = contextWindow > 0 ? Math.min(lastTurnContextTokens / contextWindow * 100, 100) : 0;
@@ -214,33 +214,52 @@ function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, 
         ]
       }
     ),
-    sessions && sessions.length > 1 && (() => {
-      const bgSessions = sessions.filter((s) => s.id !== "default");
-      const isOnBg = activeSessionId !== "default";
-      const currentBg = isOnBg ? sessions.find((s) => s.id === activeSessionId) : null;
-      return /* @__PURE__ */ jsxs(
-        "div",
-        {
-          style: {
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "4px 12px",
-            borderBottom: "1px solid var(--sna-surface-border)",
-            fontSize: 11,
-            fontFamily: "var(--sna-font-mono)"
-          },
-          children: [
+    bgCount > 0 && /* @__PURE__ */ jsxs(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          padding: "4px 12px",
+          borderBottom: "1px solid var(--sna-surface-border)",
+          fontSize: 11,
+          fontFamily: "var(--sna-font-mono)"
+        },
+        children: [
+          viewMode === "bg-session" && /* @__PURE__ */ jsxs(
+            "button",
+            {
+              onClick: onViewBgBack,
+              style: {
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "var(--sna-text-muted)",
+                padding: "4px 6px",
+                fontSize: 11,
+                fontFamily: "inherit",
+                display: "flex",
+                alignItems: "center",
+                gap: 4
+              },
+              children: [
+                /* @__PURE__ */ jsx("svg", { width: 10, height: 10, viewBox: "0 0 10 10", children: /* @__PURE__ */ jsx("path", { d: "M6 2L3 5L6 8", stroke: "currentColor", strokeWidth: "1.5", fill: "none", strokeLinecap: "round", strokeLinejoin: "round" }) }),
+                "Back"
+              ]
+            }
+          ),
+          viewMode !== "bg-session" && /* @__PURE__ */ jsxs(Fragment, { children: [
             /* @__PURE__ */ jsx(
               "button",
               {
-                onClick: () => onSessionChange?.("default"),
+                onClick: onViewChat,
                 style: {
                   padding: "4px 10px",
                   borderRadius: "var(--sna-radius-sm)",
-                  background: !isOnBg ? "var(--sna-accent-soft)" : "transparent",
+                  background: viewMode === "chat" ? "var(--sna-accent-soft)" : "transparent",
                   border: "none",
-                  color: !isOnBg ? "var(--sna-text)" : "var(--sna-text-muted)",
+                  color: viewMode === "chat" ? "var(--sna-text)" : "var(--sna-text-muted)",
                   cursor: "pointer",
                   fontFamily: "inherit",
                   fontSize: "inherit"
@@ -248,61 +267,48 @@ function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, 
                 children: "Chat"
               }
             ),
-            /* @__PURE__ */ jsx("div", { style: { position: "relative" }, children: /* @__PURE__ */ jsxs(
-              "select",
+            /* @__PURE__ */ jsxs(
+              "button",
               {
-                value: isOnBg ? activeSessionId : "",
-                onChange: (e) => {
-                  if (e.target.value) onSessionChange?.(e.target.value);
-                },
+                onClick: onViewBgDashboard,
                 style: {
-                  padding: "4px 8px",
-                  paddingRight: 20,
+                  padding: "4px 10px",
                   borderRadius: "var(--sna-radius-sm)",
-                  background: isOnBg ? "var(--sna-accent-soft)" : "var(--sna-surface)",
-                  border: "1px solid var(--sna-surface-border)",
-                  color: isOnBg ? "var(--sna-text)" : "var(--sna-text-muted)",
+                  background: viewMode === "bg-dashboard" ? "var(--sna-accent-soft)" : "transparent",
+                  border: "none",
+                  color: viewMode === "bg-dashboard" ? "var(--sna-text)" : "var(--sna-text-muted)",
                   cursor: "pointer",
                   fontFamily: "inherit",
                   fontSize: "inherit",
-                  appearance: "none",
-                  WebkitAppearance: "none",
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg width='8' height='8' viewBox='0 0 8 8' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 3L4 6L7 3' stroke='%23888' stroke-width='1.2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E")`,
-                  backgroundRepeat: "no-repeat",
-                  backgroundPosition: "right 6px center"
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5
                 },
                 children: [
-                  /* @__PURE__ */ jsxs("option", { value: "", disabled: isOnBg, children: [
-                    "Background ",
-                    bgSessions.length
-                  ] }),
-                  bgSessions.map((s) => /* @__PURE__ */ jsx("option", { value: s.id, children: s.label }, s.id))
+                  "Background",
+                  /* @__PURE__ */ jsx(
+                    "span",
+                    {
+                      style: {
+                        background: "var(--sna-accent)",
+                        color: "#fff",
+                        borderRadius: "var(--sna-radius-full)",
+                        padding: "0 5px",
+                        fontSize: 10,
+                        lineHeight: "16px",
+                        fontWeight: 600
+                      },
+                      children: bgCount
+                    }
+                  )
                 ]
               }
-            ) }),
-            isOnBg && currentBg && /* @__PURE__ */ jsx(
-              "button",
-              {
-                onClick: () => {
-                  onSessionClose?.(currentBg.id);
-                  onSessionChange?.("default");
-                },
-                style: {
-                  background: "none",
-                  border: "none",
-                  color: "var(--sna-text-faint)",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  padding: "2px 4px"
-                },
-                title: "Close this background session",
-                children: "\xD7"
-              }
             )
-          ]
-        }
-      );
-    })(),
+          ] }),
+          viewMode === "bg-session" && bgSessionLabel && /* @__PURE__ */ jsx("span", { style: { color: "var(--sna-text)", fontSize: 11 }, children: bgSessionLabel })
+        ]
+      }
+    ),
     lastTurnContextTokens > 0 && /* @__PURE__ */ jsxs("div", { style: { padding: "0 16px 8px" }, children: [
       /* @__PURE__ */ jsxs(
         "div",

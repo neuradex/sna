@@ -91,11 +91,16 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
   const width = useChatStore((s) => s.width);
   const setWidth = useChatStore((s) => s.setWidth);
   const { mode } = useResponsiveChat();
-  const sessionTabs = Object.entries(allSessions).map(([id, sess]) => {
+  const [viewMode, setViewMode] = useState("chat");
+  const bgSessions = Object.entries(allSessions).filter(([id]) => id !== "default").map(([id, sess]) => {
+    const firstMsg = sess.messages[0];
     const lastMsg = sess.messages[sess.messages.length - 1];
-    const label = lastMsg?.meta?.label ?? (id === "default" ? "Chat" : id);
-    return { id, label, hasNewActivity: false };
+    const label = firstMsg?.meta?.label ?? id;
+    const status = lastMsg?.meta?.status ?? (sess.messages.length > 0 ? "running" : "idle");
+    const messageCount = sess.messages.length;
+    return { id, label, status, messageCount, lastMessage: lastMsg?.content?.slice(0, 100) ?? "" };
   });
+  const currentBgLabel = viewMode === "bg-session" ? bgSessions.find((s) => s.id === sessionId)?.label ?? sessionId : void 0;
   const messagesEndRef = useRef(null);
   const [thinking, setThinking] = useState(false);
   const [sessionUsage, setSessionUsage] = useState({
@@ -340,16 +345,106 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
                 agent.kill();
                 agent.start();
               },
-              sessions: sessionTabs,
-              activeSessionId: sessionId,
-              onSessionChange: (id) => setActiveSession(id),
-              onSessionClose: (id) => {
-                removeSession(id);
-                if (sessionId === id) setActiveSession("default");
-              }
+              viewMode,
+              bgCount: bgSessions.length,
+              bgSessionLabel: currentBgLabel,
+              onViewChat: () => {
+                setViewMode("chat");
+                setActiveSession("default");
+              },
+              onViewBgDashboard: () => setViewMode("bg-dashboard"),
+              onViewBgBack: () => setViewMode("bg-dashboard")
             }
           ),
-          /* @__PURE__ */ jsxs(
+          viewMode === "bg-dashboard" && /* @__PURE__ */ jsxs(
+            "div",
+            {
+              style: {
+                flex: 1,
+                overflowY: "auto",
+                padding: 16,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8
+              },
+              children: [
+                bgSessions.length === 0 && /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", textAlign: "center" }, children: [
+                  /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-text-icon)", fontSize: 14, margin: 0 }, children: "No background tasks" }),
+                  /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-text-faint)", fontSize: 12, marginTop: 4, fontFamily: "var(--sna-font-mono)" }, children: "Skills run via the UI will appear here" })
+                ] }),
+                bgSessions.map((bg) => {
+                  const statusColor = bg.status === "complete" ? "var(--sna-success)" : bg.status === "failed" ? "var(--sna-error)" : "var(--sna-accent)";
+                  return /* @__PURE__ */ jsxs(
+                    "button",
+                    {
+                      onClick: () => {
+                        setActiveSession(bg.id);
+                        setViewMode("bg-session");
+                      },
+                      style: {
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        padding: "10px 12px",
+                        borderRadius: "var(--sna-radius-md)",
+                        background: "var(--sna-surface)",
+                        border: "1px solid var(--sna-surface-border)",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        width: "100%",
+                        fontFamily: "var(--sna-font-mono)",
+                        fontSize: 12,
+                        color: "var(--sna-text)",
+                        transition: "background 0.15s"
+                      },
+                      onMouseEnter: (e) => {
+                        e.currentTarget.style.background = "var(--sna-surface-hover)";
+                      },
+                      onMouseLeave: (e) => {
+                        e.currentTarget.style.background = "var(--sna-surface)";
+                      },
+                      children: [
+                        /* @__PURE__ */ jsx(
+                          "span",
+                          {
+                            style: {
+                              width: 8,
+                              height: 8,
+                              borderRadius: "var(--sna-radius-full)",
+                              background: statusColor,
+                              flexShrink: 0,
+                              animation: bg.status === "running" ? "sna-pulse 2s ease-in-out infinite" : "none"
+                            }
+                          }
+                        ),
+                        /* @__PURE__ */ jsxs("div", { style: { flex: 1, minWidth: 0 }, children: [
+                          /* @__PURE__ */ jsx("div", { style: { fontWeight: 500, marginBottom: 2 }, children: bg.label }),
+                          bg.lastMessage && /* @__PURE__ */ jsx("div", { style: { color: "var(--sna-text-faint)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: bg.lastMessage })
+                        ] }),
+                        /* @__PURE__ */ jsxs("span", { style: { color: "var(--sna-text-faint)", fontSize: 10, flexShrink: 0 }, children: [
+                          bg.messageCount,
+                          " msg"
+                        ] }),
+                        /* @__PURE__ */ jsx(
+                          "button",
+                          {
+                            onClick: (e) => {
+                              e.stopPropagation();
+                              removeSession(bg.id);
+                            },
+                            style: { background: "none", border: "none", color: "var(--sna-text-faint)", cursor: "pointer", fontSize: 14, padding: "0 4px" },
+                            children: "\xD7"
+                          }
+                        )
+                      ]
+                    },
+                    bg.id
+                  );
+                })
+              ]
+            }
+          ),
+          viewMode !== "bg-dashboard" && /* @__PURE__ */ jsxs(
             "div",
             {
               ref: scrollContainerRef,
@@ -399,18 +494,18 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
                           ) })
                         }
                       ),
-                      /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-text-icon)", fontSize: 14, margin: 0 }, children: "Run a skill or ask a question" }),
-                      /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-text-faint)", fontSize: 12, marginTop: 4, fontFamily: "var(--sna-font-mono)" }, children: "Type /skill-name or ask in natural language" })
+                      /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-text-icon)", fontSize: 14, margin: 0 }, children: viewMode === "chat" ? "Run a skill or ask a question" : "Background session log" }),
+                      /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-text-faint)", fontSize: 12, marginTop: 4, fontFamily: "var(--sna-font-mono)" }, children: viewMode === "chat" ? "Type /skill-name or ask in natural language" : "Waiting for events..." })
                     ]
                   }
                 ),
                 messages.map((msg) => /* @__PURE__ */ jsx(MessageBubble, { message: msg }, msg.id)),
-                thinking && /* @__PURE__ */ jsx(TypingIndicator, {}),
+                thinking && viewMode === "chat" && /* @__PURE__ */ jsx(TypingIndicator, {}),
                 /* @__PURE__ */ jsx("div", { ref: messagesEndRef })
               ]
             }
           ),
-          /* @__PURE__ */ jsx(ChatInput, { onSend: handleSend, disabled: false })
+          /* @__PURE__ */ jsx(ChatInput, { onSend: handleSend, disabled: viewMode !== "chat" })
         ]
       }
     )

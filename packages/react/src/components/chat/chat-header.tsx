@@ -19,6 +19,8 @@ interface SessionTab {
   hasNewActivity: boolean;
 }
 
+type ViewMode = "chat" | "bg-dashboard" | "bg-session";
+
 interface ChatHeaderProps {
   onClose: () => void;
   onClear: () => void;
@@ -26,9 +28,12 @@ interface ChatHeaderProps {
   sessionUsage: SessionUsage;
   onModelChange: (model: string) => void;
   sessions?: SessionTab[];
-  activeSessionId?: string;
-  onSessionChange?: (id: string) => void;
-  onSessionClose?: (id: string) => void;
+  viewMode?: ViewMode;
+  bgCount?: number;
+  bgSessionLabel?: string;
+  onViewChat?: () => void;
+  onViewBgDashboard?: () => void;
+  onViewBgBack?: () => void;
 }
 
 const MODELS = [
@@ -147,7 +152,7 @@ function ModelDropdown({
   );
 }
 
-export function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, sessions, activeSessionId, onSessionChange, onSessionClose }: ChatHeaderProps) {
+export function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, sessions, viewMode = "chat", bgCount = 0, bgSessionLabel, onViewChat, onViewBgDashboard, onViewBgBack }: ChatHeaderProps) {
   const { totalInputTokens, totalOutputTokens, totalCost, contextWindow, lastTurnContextTokens, lastTurnSystemTokens, lastTurnConvTokens, model } = sessionUsage;
   const totalTokens = totalInputTokens + totalOutputTokens;
   const ctxPercent = contextWindow > 0 ? Math.min((lastTurnContextTokens / contextWindow) * 100, 100) : 0;
@@ -225,90 +230,85 @@ export function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelC
         </div>
       </div>
 
-      {/* Session switcher: Chat button + Background dropdown */}
-      {sessions && sessions.length > 1 && (() => {
-        const bgSessions = sessions.filter((s) => s.id !== "default");
-        const isOnBg = activeSessionId !== "default";
-        const currentBg = isOnBg ? sessions.find((s) => s.id === activeSessionId) : null;
-        return (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "4px 12px",
-              borderBottom: "1px solid var(--sna-surface-border)",
-              fontSize: 11,
-              fontFamily: "var(--sna-font-mono)",
-            }}
-          >
+      {/* Session nav bar */}
+      {bgCount > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "4px 12px",
+            borderBottom: "1px solid var(--sna-surface-border)",
+            fontSize: 11,
+            fontFamily: "var(--sna-font-mono)",
+          }}
+        >
+          {viewMode === "bg-session" && (
             <button
-              onClick={() => onSessionChange?.("default")}
+              onClick={onViewBgBack}
               style={{
-                padding: "4px 10px",
-                borderRadius: "var(--sna-radius-sm)",
-                background: !isOnBg ? "var(--sna-accent-soft)" : "transparent",
-                border: "none",
-                color: !isOnBg ? "var(--sna-text)" : "var(--sna-text-muted)",
-                cursor: "pointer",
-                fontFamily: "inherit",
-                fontSize: "inherit",
+                background: "none", border: "none", cursor: "pointer",
+                color: "var(--sna-text-muted)", padding: "4px 6px", fontSize: 11,
+                fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4,
               }}
             >
-              Chat
+              <svg width={10} height={10} viewBox="0 0 10 10">
+                <path d="M6 2L3 5L6 8" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Back
             </button>
-            <div style={{ position: "relative" }}>
-              <select
-                value={isOnBg ? activeSessionId : ""}
-                onChange={(e) => {
-                  if (e.target.value) onSessionChange?.(e.target.value);
-                }}
-                style={{
-                  padding: "4px 8px",
-                  paddingRight: 20,
-                  borderRadius: "var(--sna-radius-sm)",
-                  background: isOnBg ? "var(--sna-accent-soft)" : "var(--sna-surface)",
-                  border: "1px solid var(--sna-surface-border)",
-                  color: isOnBg ? "var(--sna-text)" : "var(--sna-text-muted)",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  fontSize: "inherit",
-                  appearance: "none",
-                  WebkitAppearance: "none",
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg width='8' height='8' viewBox='0 0 8 8' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 3L4 6L7 3' stroke='%23888' stroke-width='1.2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E")`,
-                  backgroundRepeat: "no-repeat",
-                  backgroundPosition: "right 6px center",
-                }}
-              >
-                <option value="" disabled={isOnBg}>
-                  Background {bgSessions.length}
-                </option>
-                {bgSessions.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {isOnBg && currentBg && (
+          )}
+          {viewMode !== "bg-session" && (
+            <>
               <button
-                onClick={() => { onSessionClose?.(currentBg.id); onSessionChange?.("default"); }}
+                onClick={onViewChat}
                 style={{
-                  background: "none",
+                  padding: "4px 10px",
+                  borderRadius: "var(--sna-radius-sm)",
+                  background: viewMode === "chat" ? "var(--sna-accent-soft)" : "transparent",
                   border: "none",
-                  color: "var(--sna-text-faint)",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  padding: "2px 4px",
+                  color: viewMode === "chat" ? "var(--sna-text)" : "var(--sna-text-muted)",
+                  cursor: "pointer", fontFamily: "inherit", fontSize: "inherit",
                 }}
-                title="Close this background session"
               >
-                ×
+                Chat
               </button>
-            )}
-          </div>
-        );
-      })()}
+              <button
+                onClick={onViewBgDashboard}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: "var(--sna-radius-sm)",
+                  background: viewMode === "bg-dashboard" ? "var(--sna-accent-soft)" : "transparent",
+                  border: "none",
+                  color: viewMode === "bg-dashboard" ? "var(--sna-text)" : "var(--sna-text-muted)",
+                  cursor: "pointer", fontFamily: "inherit", fontSize: "inherit",
+                  display: "flex", alignItems: "center", gap: 5,
+                }}
+              >
+                Background
+                <span
+                  style={{
+                    background: "var(--sna-accent)",
+                    color: "#fff",
+                    borderRadius: "var(--sna-radius-full)",
+                    padding: "0 5px",
+                    fontSize: 10,
+                    lineHeight: "16px",
+                    fontWeight: 600,
+                  }}
+                >
+                  {bgCount}
+                </span>
+              </button>
+            </>
+          )}
+          {viewMode === "bg-session" && bgSessionLabel && (
+            <span style={{ color: "var(--sna-text)", fontSize: 11 }}>
+              {bgSessionLabel}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Bottom row: context window bar + usage stats */}
       {lastTurnContextTokens > 0 && (

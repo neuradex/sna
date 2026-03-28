@@ -15,6 +15,7 @@ interface SessionTab {
     label: string;
     hasNewActivity: boolean;
 }
+type ViewMode = "chat" | "bg-dashboard" | "bg-session";
 interface ChatHeaderProps {
     onClose: () => void;
     onClear: () => void;
@@ -22,10 +23,13 @@ interface ChatHeaderProps {
     sessionUsage: SessionUsage;
     onModelChange: (model: string) => void;
     sessions?: SessionTab[];
-    activeSessionId?: string;
-    onSessionChange?: (id: string) => void;
-    onSessionClose?: (id: string) => void;
+    viewMode?: ViewMode;
+    bgCount?: number;
+    bgSessionLabel?: string;
+    onViewChat?: () => void;
+    onViewBgDashboard?: () => void;
+    onViewBgBack?: () => void;
 }
-declare function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, sessions, activeSessionId, onSessionChange, onSessionClose }: ChatHeaderProps): react_jsx_runtime.JSX.Element;
+declare function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, sessions, viewMode, bgCount, bgSessionLabel, onViewChat, onViewBgDashboard, onViewBgBack }: ChatHeaderProps): react_jsx_runtime.JSX.Element;
 
 export { ChatHeader };

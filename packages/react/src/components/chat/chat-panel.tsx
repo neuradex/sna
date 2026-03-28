@@ -106,12 +106,24 @@ export function ChatPanel({ onClose, sessionId: initialSessionId = "default" }: 
   const setWidth = useChatStore((s) => s.setWidth);
   const { mode } = useResponsiveChat();
 
-  // Build session tabs for header
-  const sessionTabs = Object.entries(allSessions).map(([id, sess]) => {
-    const lastMsg = sess.messages[sess.messages.length - 1];
-    const label = lastMsg?.meta?.label as string ?? (id === "default" ? "Chat" : id);
-    return { id, label, hasNewActivity: false };
-  });
+  // View mode: chat (main), bg-dashboard (overview), bg-session (inside one)
+  const [viewMode, setViewMode] = useState<"chat" | "bg-dashboard" | "bg-session">("chat");
+
+  // Build background session list
+  const bgSessions = Object.entries(allSessions)
+    .filter(([id]) => id !== "default")
+    .map(([id, sess]) => {
+      const firstMsg = sess.messages[0];
+      const lastMsg = sess.messages[sess.messages.length - 1];
+      const label = (firstMsg?.meta?.label as string) ?? id;
+      const status = (lastMsg?.meta?.status as string) ?? (sess.messages.length > 0 ? "running" : "idle");
+      const messageCount = sess.messages.length;
+      return { id, label, status, messageCount, lastMessage: lastMsg?.content?.slice(0, 100) ?? "" };
+    });
+
+  const currentBgLabel = viewMode === "bg-session"
+    ? bgSessions.find((s) => s.id === sessionId)?.label ?? sessionId
+    : undefined;
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [thinking, setThinking] = useState(false);
@@ -371,68 +383,149 @@ export function ChatPanel({ onClose, sessionId: initialSessionId = "default" }: 
             agent.kill();
             agent.start();
           }}
-          sessions={sessionTabs}
-          activeSessionId={sessionId}
-          onSessionChange={(id) => setActiveSession(id)}
-          onSessionClose={(id) => {
-            removeSession(id);
-            if (sessionId === id) setActiveSession("default");
-          }}
+          viewMode={viewMode}
+          bgCount={bgSessions.length}
+          bgSessionLabel={currentBgLabel}
+          onViewChat={() => { setViewMode("chat"); setActiveSession("default"); }}
+          onViewBgDashboard={() => setViewMode("bg-dashboard")}
+          onViewBgBack={() => setViewMode("bg-dashboard")}
         />
 
-        <div
-          ref={scrollContainerRef}
-          style={{
-            flex: 1,
-            overflowY: "auto",
-            padding: 16,
-            display: "flex",
-            flexDirection: "column",
-            gap: 12,
-          }}
-        >
-          {messages.length === 0 && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                height: "100%",
-                textAlign: "center",
-              }}
-            >
+        {/* Background dashboard view */}
+        {viewMode === "bg-dashboard" && (
+          <div
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              padding: 16,
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
+            {bgSessions.length === 0 && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", textAlign: "center" }}>
+                <p style={{ color: "var(--sna-text-icon)", fontSize: 14, margin: 0 }}>No background tasks</p>
+                <p style={{ color: "var(--sna-text-faint)", fontSize: 12, marginTop: 4, fontFamily: "var(--sna-font-mono)" }}>
+                  Skills run via the UI will appear here
+                </p>
+              </div>
+            )}
+            {bgSessions.map((bg) => {
+              const statusColor = bg.status === "complete" ? "var(--sna-success)"
+                : bg.status === "failed" ? "var(--sna-error)"
+                : "var(--sna-accent)";
+              return (
+                <button
+                  key={bg.id}
+                  onClick={() => { setActiveSession(bg.id); setViewMode("bg-session"); }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "10px 12px",
+                    borderRadius: "var(--sna-radius-md)",
+                    background: "var(--sna-surface)",
+                    border: "1px solid var(--sna-surface-border)",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    width: "100%",
+                    fontFamily: "var(--sna-font-mono)",
+                    fontSize: 12,
+                    color: "var(--sna-text)",
+                    transition: "background 0.15s",
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--sna-surface-hover)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--sna-surface)"; }}
+                >
+                  <span
+                    style={{
+                      width: 8, height: 8,
+                      borderRadius: "var(--sna-radius-full)",
+                      background: statusColor,
+                      flexShrink: 0,
+                      animation: bg.status === "running" ? "sna-pulse 2s ease-in-out infinite" : "none",
+                    }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 500, marginBottom: 2 }}>{bg.label}</div>
+                    {bg.lastMessage && (
+                      <div style={{ color: "var(--sna-text-faint)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {bg.lastMessage}
+                      </div>
+                    )}
+                  </div>
+                  <span style={{ color: "var(--sna-text-faint)", fontSize: 10, flexShrink: 0 }}>
+                    {bg.messageCount} msg
+                  </span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); removeSession(bg.id); }}
+                    style={{ background: "none", border: "none", color: "var(--sna-text-faint)", cursor: "pointer", fontSize: 14, padding: "0 4px" }}
+                  >
+                    ×
+                  </button>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Messages view (chat or bg-session) */}
+        {viewMode !== "bg-dashboard" && (
+          <div
+            ref={scrollContainerRef}
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              padding: 16,
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
+            {messages.length === 0 && (
               <div
                 style={{
-                  width: 40, height: 40,
-                  borderRadius: "var(--sna-radius-lg)",
-                  background: "var(--sna-accent-soft)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  marginBottom: 12,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  height: "100%",
+                  textAlign: "center",
                 }}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width={20} height={20}>
-                  <polygon points="332,56 192,272 284,272 178,460 340,232 248,232"
-                    fill="var(--sna-accent-muted)" stroke="var(--sna-accent-muted)"
-                    strokeWidth="8" strokeLinejoin="round" />
-                </svg>
+                <div
+                  style={{
+                    width: 40, height: 40,
+                    borderRadius: "var(--sna-radius-lg)",
+                    background: "var(--sna-accent-soft)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    marginBottom: 12,
+                  }}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width={20} height={20}>
+                    <polygon points="332,56 192,272 284,272 178,460 340,232 248,232"
+                      fill="var(--sna-accent-muted)" stroke="var(--sna-accent-muted)"
+                      strokeWidth="8" strokeLinejoin="round" />
+                  </svg>
+                </div>
+                <p style={{ color: "var(--sna-text-icon)", fontSize: 14, margin: 0 }}>
+                  {viewMode === "chat" ? "Run a skill or ask a question" : "Background session log"}
+                </p>
+                <p style={{ color: "var(--sna-text-faint)", fontSize: 12, marginTop: 4, fontFamily: "var(--sna-font-mono)" }}>
+                  {viewMode === "chat" ? "Type /skill-name or ask in natural language" : "Waiting for events..."}
+                </p>
               </div>
-              <p style={{ color: "var(--sna-text-icon)", fontSize: 14, margin: 0 }}>
-                Run a skill or ask a question
-              </p>
-              <p style={{ color: "var(--sna-text-faint)", fontSize: 12, marginTop: 4, fontFamily: "var(--sna-font-mono)" }}>
-                Type /skill-name or ask in natural language
-              </p>
-            </div>
-          )}
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
-          ))}
-          {thinking && <TypingIndicator />}
-          <div ref={messagesEndRef} />
-        </div>
+            )}
+            {messages.map((msg) => (
+              <MessageBubble key={msg.id} message={msg} />
+            ))}
+            {thinking && viewMode === "chat" && <TypingIndicator />}
+            <div ref={messagesEndRef} />
+          </div>
+        )}
 
-        <ChatInput onSend={handleSend} disabled={false} />
+        <ChatInput onSend={handleSend} disabled={viewMode !== "chat"} />
       </aside>
     </>
   );
