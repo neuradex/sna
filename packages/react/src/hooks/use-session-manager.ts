@@ -1,17 +1,10 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
+import type { SessionInfo } from "@sna-sdk/core";
 import { useSnaContext } from "../context.js";
 
-export interface SessionInfo {
-  id: string;
-  label: string;
-  alive: boolean;
-  cwd: string;
-  eventCount: number;
-  createdAt: number;
-  lastActivityAt: number;
-}
+export type { SessionInfo };
 
 /**
  * useSessionManager — manage multiple agent sessions via HTTP API.

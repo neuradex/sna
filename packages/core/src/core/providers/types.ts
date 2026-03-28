@@ -1,6 +1,3 @@
-import type { ChildProcess } from "child_process";
-import type { EventEmitter } from "events";
-
 /**
  * Normalized event type emitted by all agent providers.
  *

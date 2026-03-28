@@ -1,12 +1,6 @@
-interface SessionInfo {
-    id: string;
-    label: string;
-    alive: boolean;
-    cwd: string;
-    eventCount: number;
-    createdAt: number;
-    lastActivityAt: number;
-}
+import { SessionInfo } from '@sna-sdk/core';
+export { SessionInfo } from '@sna-sdk/core';
+
 /**
  * useSessionManager — manage multiple agent sessions via HTTP API.
  *
@@ -28,4 +22,4 @@ declare function useSessionManager(): {
     refresh: () => Promise<void>;
 };
 
-export { type SessionInfo, useSessionManager };
+export { useSessionManager };

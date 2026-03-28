@@ -70,6 +70,12 @@ const useChatStore = create()(
         if (session.processedEventIds.has(eventId)) return false;
         const next = new Set(session.processedEventIds);
         next.add(eventId);
+        if (next.size > 1e4) {
+          const arr = Array.from(next);
+          const keep = arr.slice(arr.length >> 1);
+          next.clear();
+          for (const id2 of keep) next.add(id2);
+        }
         set((state) => ({
           sessions: {
             ...state.sessions,

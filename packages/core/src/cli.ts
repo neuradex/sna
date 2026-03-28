@@ -64,8 +64,16 @@ function cmdLink() {
     // Relative path from .claude/skills/<skill> to node_modules/sna/skills/<skill>
     const target = path.relative(skillsDir, path.join(coreSkillsDir, skill));
 
-    if (fs.existsSync(linkPath) || fs.lstatSync(linkPath).isSymbolicLink()) {
-      const existing = fs.lstatSync(linkPath);
+    // Use try/catch with lstatSync to detect both existing files AND broken symlinks.
+    // fs.existsSync returns false for broken symlinks, but lstatSync succeeds.
+    let existing: fs.Stats | null = null;
+    try {
+      existing = fs.lstatSync(linkPath);
+    } catch {
+      // ENOENT — path does not exist at all (not even a broken symlink)
+    }
+
+    if (existing) {
       if (existing.isSymbolicLink()) {
         const currentTarget = fs.readlinkSync(linkPath);
         if (currentTarget === target) {

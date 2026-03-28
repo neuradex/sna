@@ -43,8 +43,12 @@ function cmdLink() {
   for (const skill of skills) {
     const linkPath = path.join(skillsDir, skill);
     const target = path.relative(skillsDir, path.join(coreSkillsDir, skill));
-    if (fs.existsSync(linkPath) || fs.lstatSync(linkPath).isSymbolicLink()) {
-      const existing = fs.lstatSync(linkPath);
+    let existing = null;
+    try {
+      existing = fs.lstatSync(linkPath);
+    } catch {
+    }
+    if (existing) {
       if (existing.isSymbolicLink()) {
         const currentTarget = fs.readlinkSync(linkPath);
         if (currentTarget === target) {

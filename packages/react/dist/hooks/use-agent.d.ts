@@ -1,9 +1,6 @@
-interface AgentEvent {
-    type: string;
-    message?: string;
-    data?: Record<string, unknown>;
-    timestamp: number;
-}
+import { AgentEvent } from '@sna-sdk/core';
+export { AgentEvent } from '@sna-sdk/core';
+
 interface UseAgentOptions {
     /** Session ID. Defaults to "default". */
     sessionId?: string;
@@ -35,4 +32,4 @@ declare function useAgent(options?: UseAgentOptions): {
     kill: () => Promise<void>;
 };
 
-export { type AgentEvent, useAgent };
+export { useAgent };

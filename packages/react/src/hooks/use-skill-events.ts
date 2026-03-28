@@ -1,19 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { SkillEvent } from "@sna-sdk/core";
 import { useSnaContext } from "../context.js";
 
-export interface SkillEvent {
-  id: number;
-  skill: string;
-  type: "invoked" | "called" | "success" | "failed" | "permission_needed"
-      | "start" | "progress" | "milestone" | "complete" | "error";
-  message: string;
-  data: string | null;
-  created_at: string;
-}
+export type { SkillEvent };
 
 export type SkillEventHandler = (event: SkillEvent) => void;
+
+const TERMINAL_TYPES = new Set(["success", "failed", "complete", "error"]);
 
 interface UseSkillEventsOptions {
   /** Set to false to disable the SSE connection (saves browser connection slots). */
@@ -109,12 +104,13 @@ export function useSkillEvents(options: UseSkillEventsOptions = {}) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiUrl, enabled]);
 
-  const latestBySkill = events.reduce<Record<string, SkillEvent>>((acc, e) => {
-    acc[e.skill] = e;
-    return acc;
-  }, {});
-
-  const TERMINAL_TYPES = new Set(["success", "failed", "complete", "error"]);
+  const latestBySkill = useMemo(
+    () => events.reduce<Record<string, SkillEvent>>((acc, e) => {
+      acc[e.skill] = e;
+      return acc;
+    }, {}),
+    [events],
+  );
 
   const isRunning = (skill: string) => {
     const latest = latestBySkill[skill];

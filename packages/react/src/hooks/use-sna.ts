@@ -92,15 +92,7 @@ export function useSna(options: UseSnaOptions = {}) {
   };
 
   /** Run skill as subagent (kept for compat — same as runSkill for now) */
-  const runSkillSub = async (name: string) => {
-    openChat(true);
-    addChatMessage({ role: "user", content: `/${name}` }, sessionId);
-    if (agent.alive) {
-      await agent.send(`Execute the skill: ${name}`);
-    } else {
-      await agent.start(`Execute the skill: ${name}`);
-    }
-  };
+  const runSkillSub = runSkill;
 
   return {
     events,

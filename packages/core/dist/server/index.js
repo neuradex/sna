@@ -1,3 +1,5 @@
+import _fs from "fs";
+import _path from "path";
 import { Hono } from "hono";
 import { eventsRoute } from "./routes/events.js";
 import { emitRoute } from "./routes/emit.js";
@@ -22,11 +24,9 @@ import { createRunRoute as createRunRoute2 } from "./routes/run.js";
 import { createAgentRoutes as createAgentRoutes2 } from "./routes/agent.js";
 import { SessionManager as SessionManager2 } from "./session-manager.js";
 function snaPortRoute(c) {
-  const fs = require("fs");
-  const path = require("path");
-  const portFile = path.join(process.cwd(), ".sna/sna-api.port");
+  const portFile = _path.join(process.cwd(), ".sna/sna-api.port");
   try {
-    const port = fs.readFileSync(portFile, "utf8").trim();
+    const port = _fs.readFileSync(portFile, "utf8").trim();
     return c.json({ port });
   } catch {
     return c.json({ port: null, error: "SNA API not running" }, 503);

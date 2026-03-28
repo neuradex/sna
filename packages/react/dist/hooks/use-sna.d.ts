@@ -1,5 +1,6 @@
-import { SkillEventHandler, SkillEvent } from './use-skill-events.js';
-import { AgentEvent } from './use-agent.js';
+import { SkillEventHandler } from './use-skill-events.js';
+import { AgentEvent, SkillEvent } from '@sna-sdk/core';
+export { AgentEvent, SkillEvent } from '@sna-sdk/core';
 import { ChatMessage } from '../stores/chat-store.js';
 import 'zustand/middleware';
 import 'zustand';
@@ -66,4 +67,4 @@ declare function useSna(options?: UseSnaOptions): {
     runSkillSub: (name: string) => Promise<void>;
 };
 
-export { AgentEvent, ChatMessage, SkillEvent, SkillEventHandler, useSna };
+export { ChatMessage, SkillEventHandler, useSna };

@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSnaContext } from "../context.js";
+const TERMINAL_TYPES = /* @__PURE__ */ new Set(["success", "failed", "complete", "error"]);
 function useSkillEvents(options = {}) {
   const { enabled = true, skills, maxEvents = 100, onEvent, onInvoked, onCalled, onSuccess, onFailed, onNeedPermission, onProgress, onMilestone } = options;
   const { apiUrl } = useSnaContext();
@@ -68,11 +69,13 @@ function useSkillEvents(options = {}) {
       setConnected(false);
     };
   }, [apiUrl, enabled]);
-  const latestBySkill = events.reduce((acc, e) => {
-    acc[e.skill] = e;
-    return acc;
-  }, {});
-  const TERMINAL_TYPES = /* @__PURE__ */ new Set(["success", "failed", "complete", "error"]);
+  const latestBySkill = useMemo(
+    () => events.reduce((acc, e) => {
+      acc[e.skill] = e;
+      return acc;
+    }, {}),
+    [events]
+  );
   const isRunning = (skill) => {
     const latest = latestBySkill[skill];
     return !!latest && !TERMINAL_TYPES.has(latest.type);

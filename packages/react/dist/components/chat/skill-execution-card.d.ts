@@ -1,5 +1,5 @@
 import * as react_jsx_runtime from 'react/jsx-runtime';
-import { SkillEvent } from '../../hooks/use-skill-events.js';
+import { SkillEvent } from '@sna-sdk/core';
 
 interface SkillExecutionCardProps {
     skillName: string;

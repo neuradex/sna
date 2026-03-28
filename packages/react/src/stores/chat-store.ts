@@ -123,6 +123,13 @@ export const useChatStore = create<ChatState>()(
         if (session.processedEventIds.has(eventId)) return false;
         const next = new Set(session.processedEventIds);
         next.add(eventId);
+        // Prevent unbounded growth: when exceeding 10000, keep only the newest half
+        if (next.size > 10000) {
+          const arr = Array.from(next);
+          const keep = arr.slice(arr.length >> 1);
+          next.clear();
+          for (const id of keep) next.add(id);
+        }
         set((state) => ({
           sessions: {
             ...state.sessions,

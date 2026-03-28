@@ -11,4 +11,4 @@ import 'react/jsx-runtime';
 import '../../stores/chat-store.js';
 import 'zustand/middleware';
 import 'zustand';
-import '../../hooks/use-skill-events.js';
+import '@sna-sdk/core';

@@ -57,15 +57,7 @@ function useSna(options = {}) {
       await agent.start(`Execute the skill: ${name}`);
     }
   };
-  const runSkillSub = async (name) => {
-    openChat(true);
-    addChatMessage({ role: "user", content: `/${name}` }, sessionId);
-    if (agent.alive) {
-      await agent.send(`Execute the skill: ${name}`);
-    } else {
-      await agent.start(`Execute the skill: ${name}`);
-    }
-  };
+  const runSkillSub = runSkill;
   return {
     events,
     connected: eventsConnected && agent.connected,

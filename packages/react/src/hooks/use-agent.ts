@@ -1,14 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import type { AgentEvent } from "@sna-sdk/core";
 import { useSnaContext } from "../context.js";
 
-export interface AgentEvent {
-  type: string;
-  message?: string;
-  data?: Record<string, unknown>;
-  timestamp: number;
-}
+export type { AgentEvent };
 
 interface UseAgentOptions {
   /** Session ID. Defaults to "default". */

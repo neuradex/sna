@@ -442,13 +442,16 @@ function executeExecStep(step: WorkflowStep, context: Record<string, unknown>): 
 
   const extracted: Record<string, unknown> = {};
   if (step.extract) {
+    let parsed: unknown;
+    let parseOk = false;
+    try {
+      parsed = JSON.parse(output);
+      parseOk = true;
+    } catch {
+      // output is not valid JSON — will fall back to raw string per key
+    }
     for (const [key, jqExpr] of Object.entries(step.extract)) {
-      try {
-        const parsed = JSON.parse(output);
-        extracted[key] = applyExtract(parsed, jqExpr);
-      } catch {
-        extracted[key] = output;
-      }
+      extracted[key] = parseOk ? applyExtract(parsed, jqExpr) : output;
     }
   }
 

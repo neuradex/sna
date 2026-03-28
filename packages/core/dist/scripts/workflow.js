@@ -289,13 +289,15 @@ function executeExecStep(step, context) {
   }
   const extracted = {};
   if (step.extract) {
+    let parsed;
+    let parseOk = false;
+    try {
+      parsed = JSON.parse(output);
+      parseOk = true;
+    } catch {
+    }
     for (const [key, jqExpr] of Object.entries(step.extract)) {
-      try {
-        const parsed = JSON.parse(output);
-        extracted[key] = applyExtract(parsed, jqExpr);
-      } catch {
-        extracted[key] = output;
-      }
+      extracted[key] = parseOk ? applyExtract(parsed, jqExpr) : output;
     }
   }
   return extracted;

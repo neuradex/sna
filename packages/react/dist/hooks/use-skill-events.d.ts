@@ -1,11 +1,6 @@
-interface SkillEvent {
-    id: number;
-    skill: string;
-    type: "invoked" | "called" | "success" | "failed" | "permission_needed" | "start" | "progress" | "milestone" | "complete" | "error";
-    message: string;
-    data: string | null;
-    created_at: string;
-}
+import { SkillEvent } from '@sna-sdk/core';
+export { SkillEvent } from '@sna-sdk/core';
+
 type SkillEventHandler = (event: SkillEvent) => void;
 interface UseSkillEventsOptions {
     /** Set to false to disable the SSE connection (saves browser connection slots). */
@@ -36,4 +31,4 @@ declare function useSkillEvents(options?: UseSkillEventsOptions): {
     clearEvents: () => void;
 };
 
-export { type SkillEvent, type SkillEventHandler, useSkillEvents };
+export { type SkillEventHandler, useSkillEvents };
