@@ -419,22 +419,25 @@ var ClaudeCodeProcess = class {
       }
       case "result": {
         if (msg.subtype === "success") {
-          const u = msg.usage ?? {};
+          const perTurn = msg.usage ?? {};
           const mu = msg.modelUsage ?? {};
           const modelKey = Object.keys(mu)[0] ?? "";
-          const modelInfo = mu[modelKey] ?? {};
+          const cumulative = mu[modelKey] ?? {};
           return {
             type: "complete",
             message: msg.result ?? "Done",
             data: {
               durationMs: msg.duration_ms,
-              costUsd: msg.total_cost_usd,
-              inputTokens: u.input_tokens ?? 0,
-              outputTokens: u.output_tokens ?? 0,
-              cacheReadTokens: u.cache_read_input_tokens ?? 0,
-              cacheWriteTokens: u.cache_creation_input_tokens ?? 0,
-              contextWindow: modelInfo.contextWindow ?? 0,
-              maxOutputTokens: modelInfo.maxOutputTokens ?? 0,
+              // Per-turn values (for individual message cost labels)
+              turnCostUsd: msg.total_cost_usd,
+              turnOutputTokens: perTurn.output_tokens ?? 0,
+              // Session-cumulative values (for context window header)
+              totalInputTokens: cumulative.inputTokens ?? 0,
+              totalOutputTokens: cumulative.outputTokens ?? 0,
+              totalCacheRead: cumulative.cacheReadInputTokens ?? 0,
+              totalCacheWrite: cumulative.cacheCreationInputTokens ?? 0,
+              totalCostUsd: cumulative.costUSD ?? 0,
+              contextWindow: cumulative.contextWindow ?? 0,
               model: modelKey
             },
             timestamp: Date.now()

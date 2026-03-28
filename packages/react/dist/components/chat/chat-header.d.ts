@@ -1,14 +1,10 @@
 import * as react_jsx_runtime from 'react/jsx-runtime';
 
 interface SessionUsage {
-    totalInputTokens: number;
-    totalOutputTokens: number;
-    totalCost: number;
+    contextUsed: number;
     contextWindow: number;
-    lastTurnInputTokens: number;
-    lastTurnOutputTokens: number;
-    lastTurnCacheRead: number;
-    lastTurnCacheWrite: number;
+    totalCost: number;
+    cacheRead: number;
     model: string;
 }
 interface SessionTab {

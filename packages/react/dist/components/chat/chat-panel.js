@@ -104,14 +104,14 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
   const messagesEndRef = useRef(null);
   const [thinking, setThinking] = useState(false);
   const [sessionUsage, setSessionUsage] = useState({
-    totalInputTokens: 0,
-    totalOutputTokens: 0,
-    totalCost: 0,
+    contextUsed: 0,
+    // total input tokens (cumulative)
     contextWindow: 0,
-    lastTurnInputTokens: 0,
-    lastTurnOutputTokens: 0,
-    lastTurnCacheRead: 0,
-    lastTurnCacheWrite: 0,
+    // max context window
+    totalCost: 0,
+    // session cumulative cost
+    cacheRead: 0,
+    // cumulative cache read tokens
     model: "claude-sonnet-4-6"
   });
   useEffect(() => injectStyles(), []);
@@ -169,23 +169,21 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
       setThinking(false);
       const d = e.data ?? {};
       const duration = d.durationMs;
-      const cost = d.costUsd;
-      const inTok = d.inputTokens ?? 0;
-      const outTok = d.outputTokens ?? 0;
-      const cacheRead = d.cacheReadTokens ?? 0;
-      const cacheWrite = d.cacheWriteTokens ?? 0;
+      const turnCost = d.turnCostUsd;
+      const turnOutput = d.turnOutputTokens ?? 0;
+      const totalIn = d.totalInputTokens ?? 0;
+      const totalOut = d.totalOutputTokens ?? 0;
+      const totalCacheRead = d.totalCacheRead ?? 0;
+      const totalCacheWrite = d.totalCacheWrite ?? 0;
+      const totalCost = d.totalCostUsd ?? 0;
       const ctxWindow = d.contextWindow ?? 0;
       const model = d.model ?? "";
-      const turnInput = inTok + cacheRead + cacheWrite;
+      const contextUsed = totalIn + totalCacheRead + totalCacheWrite;
       setSessionUsage((prev) => ({
-        totalInputTokens: prev.totalInputTokens + turnInput,
-        totalOutputTokens: prev.totalOutputTokens + outTok,
-        totalCost: prev.totalCost + (cost ?? 0),
+        contextUsed,
         contextWindow: ctxWindow || prev.contextWindow,
-        lastTurnInputTokens: turnInput,
-        lastTurnOutputTokens: outTok,
-        lastTurnCacheRead: cacheRead,
-        lastTurnCacheWrite: cacheWrite,
+        totalCost: totalCost || prev.totalCost,
+        cacheRead: totalCacheRead,
         model: model || prev.model
       }));
       const state = useChatStore.getState();
@@ -196,8 +194,8 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
         if (msgs[i].role === "assistant") {
           const parts = [];
           if (duration != null) parts.push(`${(duration / 1e3).toFixed(1)}s`);
-          if (outTok > 0) parts.push(`${fmtTokens(outTok)} tokens`);
-          if (cost != null) parts.push(`$${cost.toFixed(4)}`);
+          if (turnOutput > 0) parts.push(`${fmtTokens(turnOutput)} tokens`);
+          if (turnCost != null) parts.push(`$${turnCost.toFixed(4)}`);
           const updated = [...msgs];
           updated[i] = { ...updated[i], meta: { ...updated[i].meta, costLabel: parts.join(" \xB7 ") } };
           useChatStore.setState({
@@ -326,14 +324,10 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
                 clearMessages();
                 setThinking(true);
                 setSessionUsage({
-                  totalInputTokens: 0,
-                  totalOutputTokens: 0,
-                  totalCost: 0,
+                  contextUsed: 0,
                   contextWindow: 0,
-                  lastTurnInputTokens: 0,
-                  lastTurnOutputTokens: 0,
-                  lastTurnCacheRead: 0,
-                  lastTurnCacheWrite: 0,
+                  totalCost: 0,
+                  cacheRead: 0,
                   model: sessionUsage.model
                 });
                 await agent.kill();

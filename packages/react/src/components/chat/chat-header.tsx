@@ -3,14 +3,10 @@
 import { useState, useRef, useEffect } from "react";
 
 interface SessionUsage {
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  totalCost: number;
+  contextUsed: number;
   contextWindow: number;
-  lastTurnInputTokens: number;
-  lastTurnOutputTokens: number;
-  lastTurnCacheRead: number;
-  lastTurnCacheWrite: number;
+  totalCost: number;
+  cacheRead: number;
   model: string;
 }
 
@@ -154,12 +150,10 @@ function ModelDropdown({
 }
 
 export function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, sessions, viewMode = "chat", bgCount = 0, bgSessionLabel, onViewChat, onViewBgDashboard, onViewBgBack }: ChatHeaderProps) {
-  const { totalInputTokens, totalOutputTokens, totalCost, contextWindow, lastTurnInputTokens, lastTurnOutputTokens, lastTurnCacheRead, lastTurnCacheWrite, model } = sessionUsage;
-  const lastTurnTotal = lastTurnInputTokens + lastTurnOutputTokens;
-  const cachedPercent = lastTurnInputTokens > 0 ? Math.round((lastTurnCacheRead / lastTurnInputTokens) * 100) : 0;
-  const ctxPercent = contextWindow > 0 ? Math.min((lastTurnInputTokens / contextWindow) * 100, 100) : 0;
-  const cachedBarPercent = contextWindow > 0 ? Math.min((lastTurnCacheRead / contextWindow) * 100, 100) : 0;
-  const uncachedBarPercent = contextWindow > 0 ? Math.min(((lastTurnInputTokens - lastTurnCacheRead) / contextWindow) * 100, 100) : 0;
+  const { contextUsed, contextWindow, totalCost, cacheRead, model } = sessionUsage;
+  const ctxPercent = contextWindow > 0 ? Math.min((contextUsed / contextWindow) * 100, 100) : 0;
+  const cachedPercent = contextUsed > 0 ? Math.round((cacheRead / contextUsed) * 100) : 0;
+  const usedBarPercent = contextWindow > 0 ? Math.min((contextUsed / contextWindow) * 100, 100) : 0;
 
   return (
     <div style={{ borderBottom: "1px solid var(--sna-chat-border)", flexShrink: 0 }}>
@@ -312,10 +306,10 @@ export function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelC
         </div>
       )}
 
-      {/* Bottom row: context window bar + usage stats */}
-      {lastTurnTotal > 0 && (
+      {/* Bottom row: context window usage */}
+      {contextUsed > 0 && (
         <div style={{ padding: "0 16px 8px" }}>
-          {/* Context bar: cached (dim) + uncached (accent) */}
+          {/* Context bar */}
           <div
             style={{
               height: 3,
@@ -323,30 +317,18 @@ export function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelC
               background: "var(--sna-surface)",
               overflow: "hidden",
               marginBottom: 6,
-              display: "flex",
             }}
           >
             <div
               style={{
                 height: "100%",
-                width: `${cachedBarPercent}%`,
-                background: "var(--sna-success, #22c55e)",
-                opacity: 0.5,
+                width: `${usedBarPercent}%`,
+                background: ctxPercent > 80 ? "var(--sna-error, #ef4444)" : "var(--sna-accent)",
                 transition: "width 0.3s ease",
               }}
-              title={`Cached: ${fmtTokens(lastTurnCacheRead)}`}
-            />
-            <div
-              style={{
-                height: "100%",
-                width: `${uncachedBarPercent}%`,
-                background: "var(--sna-accent)",
-                transition: "width 0.3s ease",
-              }}
-              title={`New input: ${fmtTokens(lastTurnInputTokens - lastTurnCacheRead)}`}
+              title={`${fmtTokens(contextUsed)} / ${fmtTokens(contextWindow)}`}
             />
           </div>
-          {/* Stats */}
           <div
             style={{
               display: "flex",
@@ -357,22 +339,10 @@ export function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelC
               color: "var(--sna-text-faint)",
             }}
           >
-            <span title={`Input: ${fmtTokens(lastTurnInputTokens)} (${cachedPercent}% cached)`}>
-              in {fmtTokens(lastTurnInputTokens)}
+            <span title={`${fmtTokens(contextUsed)} / ${fmtTokens(contextWindow)}`}>
+              {fmtTokens(contextUsed)} / {fmtTokens(contextWindow)}
             </span>
-            <span title={`Output: ${fmtTokens(lastTurnOutputTokens)}`}>
-              out {fmtTokens(lastTurnOutputTokens)}
-            </span>
-            {contextWindow > 0 && (
-              <span title={`${fmtTokens(lastTurnInputTokens)} / ${fmtTokens(contextWindow)}`}>
-                {ctxPercent.toFixed(0)}%
-              </span>
-            )}
-            {cachedPercent > 0 && (
-              <span title={`${fmtTokens(lastTurnCacheRead)} tokens from cache`} style={{ color: "var(--sna-success)" }}>
-                {cachedPercent}% cached
-              </span>
-            )}
+            <span>{ctxPercent.toFixed(0)}%</span>
             <span title="Session cost" style={{ marginLeft: "auto" }}>
               ${totalCost.toFixed(4)}
             </span>
