@@ -60,29 +60,13 @@ function AssistantBubble({ message, isLast = false }) {
       },
       title: done ? void 0 : "Click to skip animation",
       children: [
-        /* @__PURE__ */ jsxs("span", { className: !isLast && costLabel ? "sna-inline-cost" : void 0, children: [
-          /* @__PURE__ */ jsx(MarkdownContent, { text: visibleText }),
-          done && costLabel && !isLast && /* @__PURE__ */ jsxs(
-            "span",
-            {
-              style: {
-                display: "inline",
-                marginLeft: 4,
-                position: "relative",
-                verticalAlign: "middle",
-                cursor: "default"
-              },
-              className: "sna-cost-hint",
-              children: [
-                /* @__PURE__ */ jsxs("svg", { width: 11, height: 11, viewBox: "0 0 16 16", style: { opacity: 0.2, verticalAlign: "middle" }, children: [
-                  /* @__PURE__ */ jsx("circle", { cx: "8", cy: "8", r: "7", stroke: "currentColor", strokeWidth: "1.5", fill: "none" }),
-                  /* @__PURE__ */ jsx("path", { d: "M8 7v4M8 5v.5", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round" })
-                ] }),
-                /* @__PURE__ */ jsx("span", { className: "sna-cost-tooltip", children: costLabel })
-              ]
-            }
-          )
-        ] }),
+        /* @__PURE__ */ jsx(
+          MarkdownContent,
+          {
+            text: visibleText,
+            suffixHtml: done && costLabel && !isLast ? ` <span class="sna-cost-hint" style="position:relative;cursor:default;margin-left:4px"><svg width="11" height="11" viewBox="0 0 16 16" style="opacity:0.2;vertical-align:middle"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M8 7v4M8 5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span class="sna-cost-tooltip">${costLabel}</span></span>` : void 0
+          }
+        ),
         !done && /* @__PURE__ */ jsx(
           "span",
           {

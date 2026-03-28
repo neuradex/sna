@@ -67,10 +67,24 @@ function injectMarkdownStyles() {
 
 interface MarkdownContentProps {
   text: string;
+  /** Inline HTML to append at the end of the last paragraph */
+  suffixHtml?: string;
 }
 
-export function MarkdownContent({ text }: MarkdownContentProps) {
+export function MarkdownContent({ text, suffixHtml }: MarkdownContentProps) {
   injectMarkdownStyles();
-  const html = useMemo(() => marked.parse(text) as string, [text]);
+  const html = useMemo(() => {
+    let parsed = marked.parse(text) as string;
+    if (suffixHtml) {
+      // Insert suffix before the last closing </p> tag
+      const lastP = parsed.lastIndexOf("</p>");
+      if (lastP !== -1) {
+        parsed = parsed.slice(0, lastP) + suffixHtml + parsed.slice(lastP);
+      } else {
+        parsed += suffixHtml;
+      }
+    }
+    return parsed;
+  }, [text, suffixHtml]);
   return <div className="sna-md" dangerouslySetInnerHTML={{ __html: html }} />;
 }

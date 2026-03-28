@@ -61,9 +61,20 @@ function injectMarkdownStyles() {
   document.head.appendChild(style);
   stylesInjected = true;
 }
-function MarkdownContent({ text }) {
+function MarkdownContent({ text, suffixHtml }) {
   injectMarkdownStyles();
-  const html = useMemo(() => marked.parse(text), [text]);
+  const html = useMemo(() => {
+    let parsed = marked.parse(text);
+    if (suffixHtml) {
+      const lastP = parsed.lastIndexOf("</p>");
+      if (lastP !== -1) {
+        parsed = parsed.slice(0, lastP) + suffixHtml + parsed.slice(lastP);
+      } else {
+        parsed += suffixHtml;
+      }
+    }
+    return parsed;
+  }, [text, suffixHtml]);
   return /* @__PURE__ */ jsx("div", { className: "sna-md", dangerouslySetInnerHTML: { __html: html } });
 }
 export {
