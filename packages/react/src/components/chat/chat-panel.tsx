@@ -74,8 +74,27 @@ function injectStyles() {
       from { transform: translateX(100%); }
       to { transform: translateX(0); }
     }
-    .sna-msg-bubble:hover .sna-cost-label {
-      opacity: 1 !important;
+    .sna-cost-tooltip {
+      display: none;
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 4px 8px;
+      border-radius: 4px;
+      background: rgba(0,0,0,0.85);
+      color: rgba(255,255,255,0.7);
+      font-size: 10px;
+      font-family: var(--sna-font-mono);
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 100;
+    }
+    .sna-cost-hint:hover .sna-cost-tooltip {
+      display: block;
+    }
+    .sna-cost-hint:hover svg {
+      opacity: 0.5 !important;
     }
   `;
   document.head.appendChild(style);

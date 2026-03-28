@@ -75,7 +75,7 @@ function AssistantBubble({ message, isLast = false }) {
             }
           }
         ),
-        done && costLabel && /* @__PURE__ */ jsx(
+        done && costLabel && isLast && /* @__PURE__ */ jsx(
           "div",
           {
             style: {
@@ -85,12 +85,29 @@ function AssistantBubble({ message, isLast = false }) {
               fontSize: 10,
               fontFamily: "var(--sna-font-mono)",
               color: "var(--sna-text-faint)",
-              textAlign: "left",
-              opacity: isLast ? 1 : 0,
-              transition: "opacity 0.15s"
+              textAlign: "left"
             },
-            className: "sna-cost-label",
             children: costLabel
+          }
+        ),
+        done && costLabel && !isLast && /* @__PURE__ */ jsxs(
+          "span",
+          {
+            style: {
+              display: "inline-block",
+              marginLeft: 6,
+              position: "relative",
+              verticalAlign: "middle",
+              cursor: "default"
+            },
+            className: "sna-cost-hint",
+            children: [
+              /* @__PURE__ */ jsxs("svg", { width: 12, height: 12, viewBox: "0 0 16 16", style: { opacity: 0.25, verticalAlign: "middle" }, children: [
+                /* @__PURE__ */ jsx("circle", { cx: "8", cy: "8", r: "7", stroke: "currentColor", strokeWidth: "1.5", fill: "none" }),
+                /* @__PURE__ */ jsx("path", { d: "M8 7v4M8 5v.5", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round" })
+              ] }),
+              /* @__PURE__ */ jsx("span", { className: "sna-cost-tooltip", children: costLabel })
+            ]
           }
         )
       ]

@@ -82,7 +82,7 @@ function AssistantBubble({ message, isLast = false }: { message: ChatMessage; is
             }}
           />
         )}
-        {done && costLabel && (
+        {done && costLabel && isLast && (
           <div
             style={{
               marginTop: 6,
@@ -92,13 +92,28 @@ function AssistantBubble({ message, isLast = false }: { message: ChatMessage; is
               fontFamily: "var(--sna-font-mono)",
               color: "var(--sna-text-faint)",
               textAlign: "left",
-              opacity: isLast ? 1 : 0,
-              transition: "opacity 0.15s",
             }}
-            className="sna-cost-label"
           >
             {costLabel}
           </div>
+        )}
+        {done && costLabel && !isLast && (
+          <span
+            style={{
+              display: "inline-block",
+              marginLeft: 6,
+              position: "relative",
+              verticalAlign: "middle",
+              cursor: "default",
+            }}
+            className="sna-cost-hint"
+          >
+            <svg width={12} height={12} viewBox="0 0 16 16" style={{ opacity: 0.25, verticalAlign: "middle" }}>
+              <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none" />
+              <path d="M8 7v4M8 5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            <span className="sna-cost-tooltip">{costLabel}</span>
+          </span>
         )}
       </div>
     </div>
