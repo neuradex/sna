@@ -4,7 +4,8 @@ import 'zustand';
 
 interface MessageBubbleProps {
     message: ChatMessage;
+    isLast?: boolean;
 }
-declare function MessageBubble({ message }: MessageBubbleProps): react_jsx_runtime.JSX.Element;
+declare function MessageBubble({ message, isLast }: MessageBubbleProps): react_jsx_runtime.JSX.Element;
 
 export { MessageBubble };

@@ -9,6 +9,7 @@ import { SkillCard } from "./skill-card.js";
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  isLast?: boolean;
 }
 
 const bubbleBase: React.CSSProperties = {
@@ -20,7 +21,7 @@ const bubbleBase: React.CSSProperties = {
 };
 
 /** Typewriter effect for assistant messages */
-function AssistantBubble({ message }: { message: ChatMessage }) {
+function AssistantBubble({ message, isLast = false }: { message: ChatMessage; isLast?: boolean }) {
   const animate = !!message.meta?.animate;
   const text = message.content;
   const costLabel = (message.meta?.costLabel as string) ?? "";
@@ -52,7 +53,7 @@ function AssistantBubble({ message }: { message: ChatMessage }) {
   const visibleText = done ? text : wordsRef.current.slice(0, visibleCount).join("");
 
   return (
-    <div style={{ display: "flex", justifyContent: "flex-start" }}>
+    <div style={{ display: "flex", justifyContent: "flex-start" }} className="sna-msg-bubble">
       <div
         style={{
           ...bubbleBase,
@@ -91,7 +92,10 @@ function AssistantBubble({ message }: { message: ChatMessage }) {
               fontFamily: "var(--sna-font-mono)",
               color: "var(--sna-text-faint)",
               textAlign: "left",
+              opacity: isLast ? 1 : 0,
+              transition: "opacity 0.15s",
             }}
+            className="sna-cost-label"
           >
             {costLabel}
           </div>
@@ -152,7 +156,7 @@ function ToolResultCard({ message }: { message: ChatMessage }) {
   );
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, isLast = false }: MessageBubbleProps) {
   switch (message.role) {
     case "user":
       return (
@@ -172,7 +176,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       );
 
     case "assistant":
-      return <AssistantBubble message={message} />;
+      return <AssistantBubble message={message} isLast={isLast} />;
 
     case "thinking":
       return <ThinkingCard message={message} />;

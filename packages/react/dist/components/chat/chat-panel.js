@@ -66,6 +66,9 @@ function injectStyles() {
       from { transform: translateX(100%); }
       to { transform: translateX(0); }
     }
+    .sna-msg-bubble:hover .sna-cost-label {
+      opacity: 1 !important;
+    }
   `;
   document.head.appendChild(style);
 }
@@ -493,7 +496,7 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
                     ]
                   }
                 ),
-                messages.map((msg) => /* @__PURE__ */ jsx(MessageBubble, { message: msg }, msg.id)),
+                messages.map((msg, i) => /* @__PURE__ */ jsx(MessageBubble, { message: msg, isLast: i === messages.length - 1 }, msg.id)),
                 thinking && viewMode === "chat" && /* @__PURE__ */ jsx(TypingIndicator, {}),
                 /* @__PURE__ */ jsx("div", { ref: messagesEndRef })
               ]

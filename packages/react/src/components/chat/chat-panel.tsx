@@ -74,6 +74,9 @@ function injectStyles() {
       from { transform: translateX(100%); }
       to { transform: translateX(0); }
     }
+    .sna-msg-bubble:hover .sna-cost-label {
+      opacity: 1 !important;
+    }
   `;
   document.head.appendChild(style);
 }
@@ -509,8 +512,8 @@ export function ChatPanel({ onClose, sessionId: initialSessionId = "default" }: 
                 </p>
               </div>
             )}
-            {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
+            {messages.map((msg, i) => (
+              <MessageBubble key={msg.id} message={msg} isLast={i === messages.length - 1} />
             ))}
             {thinking && viewMode === "chat" && <TypingIndicator />}
             <div ref={messagesEndRef} />

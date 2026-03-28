@@ -12,7 +12,7 @@ const bubbleBase = {
   maxWidth: "85%",
   wordBreak: "break-word"
 };
-function AssistantBubble({ message }) {
+function AssistantBubble({ message, isLast = false }) {
   const animate = !!message.meta?.animate;
   const text = message.content;
   const costLabel = message.meta?.costLabel ?? "";
@@ -41,7 +41,7 @@ function AssistantBubble({ message }) {
     return () => clearInterval(timer);
   }, [text, animate]);
   const visibleText = done ? text : wordsRef.current.slice(0, visibleCount).join("");
-  return /* @__PURE__ */ jsx("div", { style: { display: "flex", justifyContent: "flex-start" }, children: /* @__PURE__ */ jsxs(
+  return /* @__PURE__ */ jsx("div", { style: { display: "flex", justifyContent: "flex-start" }, className: "sna-msg-bubble", children: /* @__PURE__ */ jsxs(
     "div",
     {
       style: {
@@ -85,8 +85,11 @@ function AssistantBubble({ message }) {
               fontSize: 10,
               fontFamily: "var(--sna-font-mono)",
               color: "var(--sna-text-faint)",
-              textAlign: "left"
+              textAlign: "left",
+              opacity: isLast ? 1 : 0,
+              transition: "opacity 0.15s"
             },
+            className: "sna-cost-label",
             children: costLabel
           }
         )
@@ -147,7 +150,7 @@ function ToolResultCard({ message }) {
     }
   );
 }
-function MessageBubble({ message }) {
+function MessageBubble({ message, isLast = false }) {
   switch (message.role) {
     case "user":
       return /* @__PURE__ */ jsx("div", { style: { display: "flex", justifyContent: "flex-end" }, children: /* @__PURE__ */ jsx(
@@ -164,7 +167,7 @@ function MessageBubble({ message }) {
         }
       ) });
     case "assistant":
-      return /* @__PURE__ */ jsx(AssistantBubble, { message });
+      return /* @__PURE__ */ jsx(AssistantBubble, { message, isLast });
     case "thinking":
       return /* @__PURE__ */ jsx(ThinkingCard, { message });
     case "tool":
