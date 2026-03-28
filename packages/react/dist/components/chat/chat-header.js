@@ -214,75 +214,95 @@ function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, 
         ]
       }
     ),
-    sessions && sessions.length > 1 && /* @__PURE__ */ jsx(
-      "div",
-      {
-        style: {
-          display: "flex",
-          gap: 0,
-          padding: "0 12px",
-          borderBottom: "1px solid var(--sna-surface-border)",
-          overflowX: "auto",
-          scrollbarWidth: "none"
-        },
-        children: sessions.map((s) => {
-          const active = s.id === activeSessionId;
-          return /* @__PURE__ */ jsxs(
-            "button",
-            {
-              onClick: () => onSessionChange?.(s.id),
-              style: {
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "6px 12px",
-                fontSize: 11,
-                fontFamily: "var(--sna-font-mono)",
-                color: active ? "var(--sna-text)" : "var(--sna-text-muted)",
-                background: "none",
-                border: "none",
-                borderBottom: active ? "2px solid var(--sna-accent)" : "2px solid transparent",
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-                transition: "color 0.15s, border-color 0.15s"
-              },
-              children: [
-                s.id === "default" ? "Chat" : s.label,
-                s.hasNewActivity && !active && /* @__PURE__ */ jsx(
-                  "span",
-                  {
-                    style: {
-                      width: 6,
-                      height: 6,
-                      borderRadius: "var(--sna-radius-full)",
-                      background: "var(--sna-accent)",
-                      flexShrink: 0
-                    }
-                  }
-                ),
-                s.id !== "default" && /* @__PURE__ */ jsx(
-                  "span",
-                  {
-                    onClick: (e) => {
-                      e.stopPropagation();
-                      onSessionClose?.(s.id);
-                    },
-                    style: {
-                      fontSize: 10,
-                      color: "var(--sna-text-faint)",
-                      cursor: "pointer",
-                      marginLeft: 2
-                    },
-                    children: "\xD7"
-                  }
-                )
-              ]
-            },
-            s.id
-          );
-        })
-      }
-    ),
+    sessions && sessions.length > 1 && (() => {
+      const bgSessions = sessions.filter((s) => s.id !== "default");
+      const isOnBg = activeSessionId !== "default";
+      const currentBg = isOnBg ? sessions.find((s) => s.id === activeSessionId) : null;
+      return /* @__PURE__ */ jsxs(
+        "div",
+        {
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "4px 12px",
+            borderBottom: "1px solid var(--sna-surface-border)",
+            fontSize: 11,
+            fontFamily: "var(--sna-font-mono)"
+          },
+          children: [
+            /* @__PURE__ */ jsx(
+              "button",
+              {
+                onClick: () => onSessionChange?.("default"),
+                style: {
+                  padding: "4px 10px",
+                  borderRadius: "var(--sna-radius-sm)",
+                  background: !isOnBg ? "var(--sna-accent-soft)" : "transparent",
+                  border: "none",
+                  color: !isOnBg ? "var(--sna-text)" : "var(--sna-text-muted)",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  fontSize: "inherit"
+                },
+                children: "Chat"
+              }
+            ),
+            /* @__PURE__ */ jsx("div", { style: { position: "relative" }, children: /* @__PURE__ */ jsxs(
+              "select",
+              {
+                value: isOnBg ? activeSessionId : "",
+                onChange: (e) => {
+                  if (e.target.value) onSessionChange?.(e.target.value);
+                },
+                style: {
+                  padding: "4px 8px",
+                  paddingRight: 20,
+                  borderRadius: "var(--sna-radius-sm)",
+                  background: isOnBg ? "var(--sna-accent-soft)" : "var(--sna-surface)",
+                  border: "1px solid var(--sna-surface-border)",
+                  color: isOnBg ? "var(--sna-text)" : "var(--sna-text-muted)",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  fontSize: "inherit",
+                  appearance: "none",
+                  WebkitAppearance: "none",
+                  backgroundImage: `url("data:image/svg+xml,%3Csvg width='8' height='8' viewBox='0 0 8 8' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 3L4 6L7 3' stroke='%23888' stroke-width='1.2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E")`,
+                  backgroundRepeat: "no-repeat",
+                  backgroundPosition: "right 6px center"
+                },
+                children: [
+                  /* @__PURE__ */ jsxs("option", { value: "", disabled: isOnBg, children: [
+                    "Background ",
+                    bgSessions.length
+                  ] }),
+                  bgSessions.map((s) => /* @__PURE__ */ jsx("option", { value: s.id, children: s.label }, s.id))
+                ]
+              }
+            ) }),
+            isOnBg && currentBg && /* @__PURE__ */ jsx(
+              "button",
+              {
+                onClick: () => {
+                  onSessionClose?.(currentBg.id);
+                  onSessionChange?.("default");
+                },
+                style: {
+                  background: "none",
+                  border: "none",
+                  color: "var(--sna-text-faint)",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  padding: "2px 4px"
+                },
+                title: "Close this background session",
+                children: "\xD7"
+              }
+            )
+          ]
+        }
+      );
+    })(),
     lastTurnContextTokens > 0 && /* @__PURE__ */ jsxs("div", { style: { padding: "0 16px 8px" }, children: [
       /* @__PURE__ */ jsxs(
         "div",
