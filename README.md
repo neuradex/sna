@@ -9,6 +9,15 @@ Traditional:  your code → LLM API → parse → act
 SNA:          SKILL.md → Claude Code → scripts → SQLite → SSE → UI
 ```
 
+## Design Philosophy
+
+- **Claude Code IS the runtime** — Not a wrapper around an LLM API. Claude Code directly executes application logic through skills.
+- **SDK owns the pipeline, app owns the data** — The event pipeline (emit → DB → SSE → hooks) is entirely managed by the SDK. Applications only manage their own domain data.
+- **Skills are the logic layer** — Business logic lives in `SKILL.md` files, not application code. Markdown is both the spec and the implementation.
+- **Real-time by default** — Skill execution is async and can take minutes. The event protocol (`start` → `milestone` → `complete`) is mandatory, keeping the UI always in sync.
+- **Zero config for non-engineers** — One command (`sna up`) starts everything. Local SQLite, no cloud dependency.
+- **Agents enforce conventions** — SDK rules are taught to coding agents via the `sna-builder` plugin, not just documented for humans.
+
 ## How It Works
 
 1. User invokes a skill in the app's chat UI or terminal (e.g. `/form-register`)
