@@ -1,7 +1,9 @@
 "use client";
+import { useCallback, useRef } from "react";
 import { useSkillEvents } from "./use-skill-events.js";
 import { useAgent } from "./use-agent.js";
 import { useChatStore } from "../stores/chat-store.js";
+import { useSnaContext } from "../context.js";
 function useSna(options = {}) {
   const {
     sessionId = "default",
@@ -15,9 +17,12 @@ function useSna(options = {}) {
     onProgress,
     onMilestone,
     provider = "claude-code",
+    permissionMode = "acceptEdits",
     onTextDelta,
     onComplete
   } = options;
+  const { apiUrl } = useSnaContext();
+  const bgSessionsRef = useRef(/* @__PURE__ */ new Map());
   const {
     events,
     connected: eventsConnected,
@@ -58,6 +63,86 @@ function useSna(options = {}) {
     }
   };
   const runSkillSub = runSkill;
+  const runSkillInBackground = useCallback(async (name) => {
+    const baseUrl = `${apiUrl}/agent`;
+    const addMessage = useChatStore.getState().addMessage;
+    let bgSessionId;
+    try {
+      const res = await fetch(`${baseUrl}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: `skill:${name}` })
+      });
+      const data = await res.json();
+      bgSessionId = data.sessionId;
+    } catch (err) {
+      addMessage({ role: "error", content: `Failed to create background session: ${err}` }, sessionId);
+      return;
+    }
+    addMessage({
+      role: "skill",
+      content: "",
+      skillName: name,
+      meta: { status: "running", milestones: [], bgSessionId }
+    }, sessionId);
+    try {
+      await fetch(`${baseUrl}/start?session=${encodeURIComponent(bgSessionId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, prompt: `Execute the skill: ${name}`, permissionMode })
+      });
+    } catch (err) {
+      addMessage({ role: "error", content: `Failed to start background agent: ${err}` }, sessionId);
+      return;
+    }
+    const es = new EventSource(`${baseUrl}/events?session=${encodeURIComponent(bgSessionId)}&since=0`);
+    bgSessionsRef.current.set(bgSessionId, es);
+    const milestones = [];
+    es.onmessage = (e) => {
+      if (!e.data) return;
+      try {
+        const event = JSON.parse(e.data);
+        if (event.type === "assistant" && event.message) {
+          milestones.push(event.message.slice(0, 200));
+          addMessage({
+            role: "skill",
+            content: event.message,
+            skillName: name,
+            meta: { status: "running", milestones: [...milestones], bgSessionId }
+          }, sessionId);
+        }
+        if (event.type === "complete") {
+          addMessage({
+            role: "skill",
+            content: milestones[milestones.length - 1] ?? "Done",
+            skillName: name,
+            meta: { status: "complete", milestones: [...milestones], bgSessionId }
+          }, sessionId);
+          es.close();
+          bgSessionsRef.current.delete(bgSessionId);
+          fetch(`${baseUrl}/sessions/${encodeURIComponent(bgSessionId)}`, { method: "DELETE" }).catch(() => {
+          });
+        }
+        if (event.type === "error") {
+          addMessage({
+            role: "skill",
+            content: event.message ?? "Background skill failed",
+            skillName: name,
+            meta: { status: "failed", milestones: [...milestones], bgSessionId }
+          }, sessionId);
+          es.close();
+          bgSessionsRef.current.delete(bgSessionId);
+          fetch(`${baseUrl}/sessions/${encodeURIComponent(bgSessionId)}`, { method: "DELETE" }).catch(() => {
+          });
+        }
+      } catch {
+      }
+    };
+    es.onerror = () => {
+      es.close();
+      bgSessionsRef.current.delete(bgSessionId);
+    };
+  }, [apiUrl, sessionId, provider, permissionMode]);
   return {
     events,
     connected: eventsConnected && agent.connected,
@@ -75,7 +160,8 @@ function useSna(options = {}) {
       clearMessages: () => clearChatMessages(sessionId)
     },
     runSkill,
-    runSkillSub
+    runSkillSub,
+    runSkillInBackground
   };
 }
 export {

@@ -12,6 +12,8 @@ interface UseSnaOptions {
     maxEvents?: number;
     /** Agent provider name. Defaults to "claude-code" */
     provider?: string;
+    /** Permission mode for background sessions. Defaults to "acceptEdits" */
+    permissionMode?: string;
     onEvent?: SkillEventHandler;
     onCalled?: SkillEventHandler;
     onSuccess?: SkillEventHandler;
@@ -65,6 +67,7 @@ declare function useSna(options?: UseSnaOptions): {
     };
     runSkill: (name: string) => Promise<void>;
     runSkillSub: (name: string) => Promise<void>;
+    runSkillInBackground: (name: string) => Promise<void>;
 };
 
 export { ChatMessage, SkillEventHandler, useSna };
