@@ -113,7 +113,9 @@ function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, 
   const { contextUsed, contextWindow, totalCost, cacheRead, model } = sessionUsage;
   const ctxPercent = contextWindow > 0 ? Math.min(contextUsed / contextWindow * 100, 100) : 0;
   const cachedPercent = contextUsed > 0 ? Math.round(cacheRead / contextUsed * 100) : 0;
-  const usedBarPercent = contextWindow > 0 ? Math.min(contextUsed / contextWindow * 100, 100) : 0;
+  const uncached = contextUsed - cacheRead;
+  const cachedBarPercent = contextWindow > 0 ? Math.min(cacheRead / contextWindow * 100, 100) : 0;
+  const uncachedBarPercent = contextWindow > 0 ? Math.min(uncached / contextWindow * 100, 100) : 0;
   return /* @__PURE__ */ jsxs("div", { style: { borderBottom: "1px solid var(--sna-chat-border)", flexShrink: 0 }, children: [
     /* @__PURE__ */ jsxs(
       "div",
@@ -309,7 +311,7 @@ function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, 
       }
     ),
     contextUsed > 0 && /* @__PURE__ */ jsxs("div", { style: { padding: "0 16px 8px" }, children: [
-      /* @__PURE__ */ jsx(
+      /* @__PURE__ */ jsxs(
         "div",
         {
           style: {
@@ -317,20 +319,36 @@ function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, 
             borderRadius: 2,
             background: "var(--sna-surface)",
             overflow: "hidden",
-            marginBottom: 6
+            marginBottom: 6,
+            display: "flex"
           },
-          children: /* @__PURE__ */ jsx(
-            "div",
-            {
-              style: {
-                height: "100%",
-                width: `${usedBarPercent}%`,
-                background: ctxPercent > 80 ? "var(--sna-error, #ef4444)" : "var(--sna-accent)",
-                transition: "width 0.3s ease"
-              },
-              title: `${fmtTokens(contextUsed)} / ${fmtTokens(contextWindow)}`
-            }
-          )
+          children: [
+            /* @__PURE__ */ jsx(
+              "div",
+              {
+                style: {
+                  height: "100%",
+                  width: `${cachedBarPercent}%`,
+                  background: "var(--sna-success, #22c55e)",
+                  opacity: 0.6,
+                  transition: "width 0.3s ease"
+                },
+                title: `Cached: ${fmtTokens(cacheRead)}`
+              }
+            ),
+            /* @__PURE__ */ jsx(
+              "div",
+              {
+                style: {
+                  height: "100%",
+                  width: `${uncachedBarPercent}%`,
+                  background: ctxPercent > 80 ? "var(--sna-error, #ef4444)" : "var(--sna-accent)",
+                  transition: "width 0.3s ease"
+                },
+                title: `Uncached: ${fmtTokens(uncached)}`
+              }
+            )
+          ]
         }
       ),
       /* @__PURE__ */ jsxs(
@@ -353,6 +371,10 @@ function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, 
             /* @__PURE__ */ jsxs("span", { children: [
               ctxPercent.toFixed(0),
               "%"
+            ] }),
+            cachedPercent > 0 && /* @__PURE__ */ jsxs("span", { style: { color: "var(--sna-success, #22c55e)" }, title: `${fmtTokens(cacheRead)} cached`, children: [
+              cachedPercent,
+              "% cached"
             ] }),
             /* @__PURE__ */ jsxs("span", { title: "Session cost", style: { marginLeft: "auto" }, children: [
               "$",
