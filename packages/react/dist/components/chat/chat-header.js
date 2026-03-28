@@ -110,11 +110,12 @@ function ModelDropdown({
   ] });
 }
 function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, sessions, viewMode = "chat", bgCount = 0, bgSessionLabel, onViewChat, onViewBgDashboard, onViewBgBack }) {
-  const { totalInputTokens, totalOutputTokens, totalCost, contextWindow, lastTurnContextTokens, lastTurnSystemTokens, lastTurnConvTokens, model } = sessionUsage;
-  const totalTokens = totalInputTokens + totalOutputTokens;
-  const ctxPercent = contextWindow > 0 ? Math.min(lastTurnContextTokens / contextWindow * 100, 100) : 0;
-  const sysPercent = contextWindow > 0 ? Math.min(lastTurnSystemTokens / contextWindow * 100, 100) : 0;
-  const convPercent = contextWindow > 0 ? Math.min(lastTurnConvTokens / contextWindow * 100, 100) : 0;
+  const { totalInputTokens, totalOutputTokens, totalCost, contextWindow, lastTurnInputTokens, lastTurnOutputTokens, lastTurnCacheRead, lastTurnCacheWrite, model } = sessionUsage;
+  const lastTurnTotal = lastTurnInputTokens + lastTurnOutputTokens;
+  const cachedPercent = lastTurnInputTokens > 0 ? Math.round(lastTurnCacheRead / lastTurnInputTokens * 100) : 0;
+  const ctxPercent = contextWindow > 0 ? Math.min(lastTurnInputTokens / contextWindow * 100, 100) : 0;
+  const cachedBarPercent = contextWindow > 0 ? Math.min(lastTurnCacheRead / contextWindow * 100, 100) : 0;
+  const uncachedBarPercent = contextWindow > 0 ? Math.min((lastTurnInputTokens - lastTurnCacheRead) / contextWindow * 100, 100) : 0;
   return /* @__PURE__ */ jsxs("div", { style: { borderBottom: "1px solid var(--sna-chat-border)", flexShrink: 0 }, children: [
     /* @__PURE__ */ jsxs(
       "div",
@@ -309,7 +310,7 @@ function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, 
         ]
       }
     ),
-    lastTurnContextTokens > 0 && /* @__PURE__ */ jsxs("div", { style: { padding: "0 16px 8px" }, children: [
+    lastTurnTotal > 0 && /* @__PURE__ */ jsxs("div", { style: { padding: "0 16px 8px" }, children: [
       /* @__PURE__ */ jsxs(
         "div",
         {
@@ -327,11 +328,11 @@ function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, 
               {
                 style: {
                   height: "100%",
-                  width: `${sysPercent}%`,
+                  width: `${cachedBarPercent}%`,
                   background: "rgba(255,255,255,0.10)",
                   transition: "width 0.3s ease"
                 },
-                title: `System: ${fmtTokens(lastTurnSystemTokens)} (tools, prompts, project files)`
+                title: `Cached: ${fmtTokens(lastTurnCacheRead)}`
               }
             ),
             /* @__PURE__ */ jsx(
@@ -339,11 +340,11 @@ function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, 
               {
                 style: {
                   height: "100%",
-                  width: `${convPercent}%`,
+                  width: `${uncachedBarPercent}%`,
                   background: "var(--sna-accent)",
                   transition: "width 0.3s ease"
                 },
-                title: `Conversation: ${fmtTokens(lastTurnConvTokens)}`
+                title: `Uncached: ${fmtTokens(lastTurnInputTokens - lastTurnCacheRead)}`
               }
             )
           ]
@@ -361,33 +362,21 @@ function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, 
             color: "var(--sna-text-faint)"
           },
           children: [
-            /* @__PURE__ */ jsxs(
-              "span",
-              {
-                style: { display: "flex", alignItems: "center", gap: 4 },
-                title: "System overhead: tools, prompts, project files",
-                children: [
-                  /* @__PURE__ */ jsx("span", { style: { display: "inline-block", width: 6, height: 6, borderRadius: 1, background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)" } }),
-                  "sys ",
-                  fmtTokens(lastTurnSystemTokens)
-                ]
-              }
-            ),
-            /* @__PURE__ */ jsxs(
-              "span",
-              {
-                style: { display: "flex", alignItems: "center", gap: 4 },
-                title: "Conversation tokens (your messages + responses)",
-                children: [
-                  /* @__PURE__ */ jsx("span", { style: { display: "inline-block", width: 6, height: 6, borderRadius: 1, background: "var(--sna-accent)" } }),
-                  "conv ",
-                  fmtTokens(lastTurnConvTokens)
-                ]
-              }
-            ),
-            contextWindow > 0 && /* @__PURE__ */ jsxs("span", { title: `${fmtTokens(lastTurnContextTokens)} / ${fmtTokens(contextWindow)}`, children: [
+            /* @__PURE__ */ jsxs("span", { title: `Input: ${fmtTokens(lastTurnInputTokens)} (${cachedPercent}% cached)`, children: [
+              "in ",
+              fmtTokens(lastTurnInputTokens)
+            ] }),
+            /* @__PURE__ */ jsxs("span", { title: `Output: ${fmtTokens(lastTurnOutputTokens)}`, children: [
+              "out ",
+              fmtTokens(lastTurnOutputTokens)
+            ] }),
+            contextWindow > 0 && /* @__PURE__ */ jsxs("span", { title: `${fmtTokens(lastTurnInputTokens)} / ${fmtTokens(contextWindow)}`, children: [
               ctxPercent.toFixed(0),
               "%"
+            ] }),
+            cachedPercent > 0 && /* @__PURE__ */ jsxs("span", { title: `${fmtTokens(lastTurnCacheRead)} tokens from cache`, style: { color: "var(--sna-success)" }, children: [
+              cachedPercent,
+              "% cached"
             ] }),
             /* @__PURE__ */ jsxs("span", { title: "Session cost", style: { marginLeft: "auto" }, children: [
               "$",

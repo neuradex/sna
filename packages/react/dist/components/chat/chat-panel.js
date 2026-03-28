@@ -108,9 +108,10 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
     totalOutputTokens: 0,
     totalCost: 0,
     contextWindow: 0,
-    lastTurnContextTokens: 0,
-    lastTurnSystemTokens: 0,
-    lastTurnConvTokens: 0,
+    lastTurnInputTokens: 0,
+    lastTurnOutputTokens: 0,
+    lastTurnCacheRead: 0,
+    lastTurnCacheWrite: 0,
     model: "claude-sonnet-4-6"
   });
   useEffect(() => injectStyles(), []);
@@ -175,16 +176,16 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
       const cacheWrite = d.cacheWriteTokens ?? 0;
       const ctxWindow = d.contextWindow ?? 0;
       const model = d.model ?? "";
-      const systemTok = cacheRead + cacheWrite;
-      const convTok = inTok + outTok;
+      const totalInput = inTok + cacheRead + cacheWrite;
       setSessionUsage((prev) => ({
-        totalInputTokens: prev.totalInputTokens + inTok,
+        totalInputTokens: prev.totalInputTokens + totalInput,
         totalOutputTokens: prev.totalOutputTokens + outTok,
         totalCost: prev.totalCost + (cost ?? 0),
         contextWindow: ctxWindow || prev.contextWindow,
-        lastTurnContextTokens: systemTok + convTok,
-        lastTurnSystemTokens: systemTok,
-        lastTurnConvTokens: convTok,
+        lastTurnInputTokens: totalInput,
+        lastTurnOutputTokens: outTok,
+        lastTurnCacheRead: cacheRead,
+        lastTurnCacheWrite: cacheWrite,
         model: model || prev.model
       }));
       const state = useChatStore.getState();
@@ -329,9 +330,10 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
                   totalOutputTokens: 0,
                   totalCost: 0,
                   contextWindow: 0,
-                  lastTurnContextTokens: 0,
-                  lastTurnSystemTokens: 0,
-                  lastTurnConvTokens: 0,
+                  lastTurnInputTokens: 0,
+                  lastTurnOutputTokens: 0,
+                  lastTurnCacheRead: 0,
+                  lastTurnCacheWrite: 0,
                   model: sessionUsage.model
                 });
                 await agent.kill();

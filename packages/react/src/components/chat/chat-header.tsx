@@ -7,9 +7,10 @@ interface SessionUsage {
   totalOutputTokens: number;
   totalCost: number;
   contextWindow: number;
-  lastTurnContextTokens: number;
-  lastTurnSystemTokens: number;
-  lastTurnConvTokens: number;
+  lastTurnInputTokens: number;
+  lastTurnOutputTokens: number;
+  lastTurnCacheRead: number;
+  lastTurnCacheWrite: number;
   model: string;
 }
 
@@ -153,11 +154,12 @@ function ModelDropdown({
 }
 
 export function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelChange, sessions, viewMode = "chat", bgCount = 0, bgSessionLabel, onViewChat, onViewBgDashboard, onViewBgBack }: ChatHeaderProps) {
-  const { totalInputTokens, totalOutputTokens, totalCost, contextWindow, lastTurnContextTokens, lastTurnSystemTokens, lastTurnConvTokens, model } = sessionUsage;
-  const totalTokens = totalInputTokens + totalOutputTokens;
-  const ctxPercent = contextWindow > 0 ? Math.min((lastTurnContextTokens / contextWindow) * 100, 100) : 0;
-  const sysPercent = contextWindow > 0 ? Math.min((lastTurnSystemTokens / contextWindow) * 100, 100) : 0;
-  const convPercent = contextWindow > 0 ? Math.min((lastTurnConvTokens / contextWindow) * 100, 100) : 0;
+  const { totalInputTokens, totalOutputTokens, totalCost, contextWindow, lastTurnInputTokens, lastTurnOutputTokens, lastTurnCacheRead, lastTurnCacheWrite, model } = sessionUsage;
+  const lastTurnTotal = lastTurnInputTokens + lastTurnOutputTokens;
+  const cachedPercent = lastTurnInputTokens > 0 ? Math.round((lastTurnCacheRead / lastTurnInputTokens) * 100) : 0;
+  const ctxPercent = contextWindow > 0 ? Math.min((lastTurnInputTokens / contextWindow) * 100, 100) : 0;
+  const cachedBarPercent = contextWindow > 0 ? Math.min((lastTurnCacheRead / contextWindow) * 100, 100) : 0;
+  const uncachedBarPercent = contextWindow > 0 ? Math.min(((lastTurnInputTokens - lastTurnCacheRead) / contextWindow) * 100, 100) : 0;
 
   return (
     <div style={{ borderBottom: "1px solid var(--sna-chat-border)", flexShrink: 0 }}>
@@ -311,9 +313,9 @@ export function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelC
       )}
 
       {/* Bottom row: context window bar + usage stats */}
-      {lastTurnContextTokens > 0 && (
+      {lastTurnTotal > 0 && (
         <div style={{ padding: "0 16px 8px" }}>
-          {/* Segmented context bar: system (dim) + conversation (accent) */}
+          {/* Context bar: cached (dim) + uncached (accent) */}
           <div
             style={{
               height: 3,
@@ -327,20 +329,20 @@ export function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelC
             <div
               style={{
                 height: "100%",
-                width: `${sysPercent}%`,
+                width: `${cachedBarPercent}%`,
                 background: "rgba(255,255,255,0.10)",
                 transition: "width 0.3s ease",
               }}
-              title={`System: ${fmtTokens(lastTurnSystemTokens)} (tools, prompts, project files)`}
+              title={`Cached: ${fmtTokens(lastTurnCacheRead)}`}
             />
             <div
               style={{
                 height: "100%",
-                width: `${convPercent}%`,
+                width: `${uncachedBarPercent}%`,
                 background: "var(--sna-accent)",
                 transition: "width 0.3s ease",
               }}
-              title={`Conversation: ${fmtTokens(lastTurnConvTokens)}`}
+              title={`Uncached: ${fmtTokens(lastTurnInputTokens - lastTurnCacheRead)}`}
             />
           </div>
           {/* Stats */}
@@ -354,23 +356,20 @@ export function ChatHeader({ onClose, onClear, isRunning, sessionUsage, onModelC
               color: "var(--sna-text-faint)",
             }}
           >
-            <span
-              style={{ display: "flex", alignItems: "center", gap: 4 }}
-              title="System overhead: tools, prompts, project files"
-            >
-              <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 1, background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)" }} />
-              sys {fmtTokens(lastTurnSystemTokens)}
+            <span title={`Input: ${fmtTokens(lastTurnInputTokens)} (${cachedPercent}% cached)`}>
+              in {fmtTokens(lastTurnInputTokens)}
             </span>
-            <span
-              style={{ display: "flex", alignItems: "center", gap: 4 }}
-              title="Conversation tokens (your messages + responses)"
-            >
-              <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 1, background: "var(--sna-accent)" }} />
-              conv {fmtTokens(lastTurnConvTokens)}
+            <span title={`Output: ${fmtTokens(lastTurnOutputTokens)}`}>
+              out {fmtTokens(lastTurnOutputTokens)}
             </span>
             {contextWindow > 0 && (
-              <span title={`${fmtTokens(lastTurnContextTokens)} / ${fmtTokens(contextWindow)}`}>
+              <span title={`${fmtTokens(lastTurnInputTokens)} / ${fmtTokens(contextWindow)}`}>
                 {ctxPercent.toFixed(0)}%
+              </span>
+            )}
+            {cachedPercent > 0 && (
+              <span title={`${fmtTokens(lastTurnCacheRead)} tokens from cache`} style={{ color: "var(--sna-success)" }}>
+                {cachedPercent}% cached
               </span>
             )}
             <span title="Session cost" style={{ marginLeft: "auto" }}>

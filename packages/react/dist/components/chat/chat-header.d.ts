@@ -5,9 +5,10 @@ interface SessionUsage {
     totalOutputTokens: number;
     totalCost: number;
     contextWindow: number;
-    lastTurnContextTokens: number;
-    lastTurnSystemTokens: number;
-    lastTurnConvTokens: number;
+    lastTurnInputTokens: number;
+    lastTurnOutputTokens: number;
+    lastTurnCacheRead: number;
+    lastTurnCacheWrite: number;
     model: string;
 }
 interface SessionTab {
