@@ -39,10 +39,6 @@ jobs:
 
       - name: Publish @sna-sdk/core
         run: cd packages/core && npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish @sna-sdk/react
         run: cd packages/react && npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
