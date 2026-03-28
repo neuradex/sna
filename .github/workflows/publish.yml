@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -37,11 +38,11 @@ jobs:
           pnpm --filter @sna-sdk/react build
 
       - name: Publish @sna-sdk/core
-        run: cd packages/core && npm publish --access public
+        run: cd packages/core && npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish @sna-sdk/react
-        run: cd packages/react && npm publish --access public
+        run: cd packages/react && npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
