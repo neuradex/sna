@@ -13,6 +13,7 @@
 
 import { execSync, spawn } from "child_process";
 import fs from "fs";
+import net from "net";
 import path from "path";
 import { cmdNew, cmdWorkflow, cmdCancel, cmdTasks } from "./workflow.js";
 
@@ -83,11 +84,10 @@ function clearSnaApiState() {
 }
 
 function findFreePort(): string {
-  // Use net to find a free port
-  const net = require("net");
   const srv = net.createServer();
   srv.listen(0);
-  const port = String(srv.address().port);
+  const addr = srv.address();
+  const port = String((addr as net.AddressInfo).port);
   srv.close();
   return port;
 }
