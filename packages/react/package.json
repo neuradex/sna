@@ -41,6 +41,12 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/neuradex/sna",
+    "directory": "packages/react"
+  },
+  "license": "MIT",
   "keywords": [
     "claude-code",
     "sna",
