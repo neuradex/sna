@@ -5,7 +5,7 @@
  * Codex JSONL, etc.) into these common types.
  */
 interface AgentEvent {
-    type: "init" | "text_delta" | "assistant" | "tool_use" | "tool_result" | "permission_needed" | "milestone" | "error" | "complete";
+    type: "init" | "thinking" | "text_delta" | "assistant" | "tool_use" | "tool_result" | "permission_needed" | "milestone" | "error" | "complete";
     message?: string;
     data?: Record<string, unknown>;
     timestamp: number;
@@ -33,6 +33,7 @@ interface AgentProcess {
 interface SpawnOptions {
     cwd: string;
     prompt?: string;
+    model?: string;
     permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan";
     env?: Record<string, string>;
 }

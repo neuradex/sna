@@ -12,7 +12,9 @@ interface UseAgentOptions {
     /** Permission mode for the agent */
     permissionMode?: string;
     onEvent?: (e: AgentEvent) => void;
+    onThinking?: (e: AgentEvent) => void;
     onAssistant?: (e: AgentEvent) => void;
+    onToolResult?: (e: AgentEvent) => void;
     onComplete?: (e: AgentEvent) => void;
     onError?: (e: AgentEvent) => void;
     onInit?: (e: AgentEvent) => void;

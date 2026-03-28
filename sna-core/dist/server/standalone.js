@@ -2,6 +2,7 @@
 import { serve } from "@hono/node-server";
 import { Hono as Hono3 } from "hono";
 import { cors } from "hono/cors";
+import chalk2 from "chalk";
 
 // src/server/index.ts
 import { Hono as Hono2 } from "hono";
@@ -153,8 +154,8 @@ data: [done]
           await stream.writeSSE({ data: "[done]" });
           resolve();
         });
-        child.on("error", async (err) => {
-          await stream.writeSSE({ data: `Error: ${err.message}` });
+        child.on("error", async (err2) => {
+          await stream.writeSSE({ data: `Error: ${err2.message}` });
           await stream.writeSSE({ data: "[done]" });
           resolve();
         });
@@ -170,13 +171,64 @@ import { streamSSE as streamSSE3 } from "hono/streaming";
 // src/core/providers/claude-code.ts
 import { spawn as spawn2, execSync } from "child_process";
 import { EventEmitter } from "events";
+import fs2 from "fs";
+import path3 from "path";
+
+// src/lib/logger.ts
+import chalk from "chalk";
 import fs from "fs";
 import path2 from "path";
+var LOG_PATH = path2.join(process.cwd(), ".dev.log");
+try {
+  fs.writeFileSync(LOG_PATH, "");
+} catch {
+}
+function tsPlain() {
+  return (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+function tsColored() {
+  return chalk.gray(tsPlain());
+}
+var tags = {
+  sna: chalk.bold.magenta(" SNA "),
+  req: chalk.bold.blue(" REQ "),
+  agent: chalk.bold.cyan(" AGT "),
+  stdin: chalk.bold.green(" IN  "),
+  stdout: chalk.bold.yellow(" OUT "),
+  route: chalk.bold.blue(" API "),
+  err: chalk.bold.red(" ERR ")
+};
+var tagPlain = {
+  sna: " SNA ",
+  req: " REQ ",
+  agent: " AGT ",
+  stdin: " IN  ",
+  stdout: " OUT ",
+  route: " API ",
+  err: " ERR "
+};
+function appendFile(tag, args) {
+  const line = `${tsPlain()} ${tag} ${args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}
+`;
+  fs.appendFile(LOG_PATH, line, () => {
+  });
+}
+function log(tag, ...args) {
+  console.log(`${tsColored()} ${tags[tag]}`, ...args);
+  appendFile(tagPlain[tag], args);
+}
+function err(tag, ...args) {
+  console.error(`${tsColored()} ${tags[tag]}`, ...args);
+  appendFile(tagPlain[tag], args);
+}
+var logger = { log, err };
+
+// src/core/providers/claude-code.ts
 var SHELL = process.env.SHELL || "/bin/zsh";
 function resolveClaudePath(cwd) {
-  const cached = path2.join(cwd, ".sna/claude-path");
-  if (fs.existsSync(cached)) {
-    const p = fs.readFileSync(cached, "utf8").trim();
+  const cached = path3.join(cwd, ".sna/claude-path");
+  if (fs2.existsSync(cached)) {
+    const p = fs2.readFileSync(cached, "utf8").trim();
     if (p) {
       try {
         execSync(`test -x "${p}"`, { stdio: "pipe" });
@@ -215,7 +267,7 @@ var ClaudeCodeProcess = class {
       this.buffer = lines.pop() ?? "";
       for (const line of lines) {
         if (!line.trim()) continue;
-        console.log(`[agent:stdout] ${line.slice(0, 200)}`);
+        logger.log("stdout", line);
         try {
           const msg = JSON.parse(line);
           if (msg.session_id && !this._sessionId) {
@@ -240,11 +292,11 @@ var ClaudeCodeProcess = class {
         }
       }
       this.emitter.emit("exit", code);
-      console.log(`[agent] process exited (code=${code})`);
+      logger.log("agent", `process exited (code=${code})`);
     });
-    proc.on("error", (err) => {
+    proc.on("error", (err2) => {
       this._alive = false;
-      this.emitter.emit("error", err);
+      this.emitter.emit("error", err2);
     });
     if (options.prompt) {
       this.send(options.prompt);
@@ -265,7 +317,7 @@ var ClaudeCodeProcess = class {
       type: "user",
       message: { role: "user", content: input }
     });
-    console.log(`[agent:stdin] ${msg.slice(0, 200)}`);
+    logger.log("stdin", msg.slice(0, 200));
     this.proc.stdin.write(msg + "\n");
   }
   kill() {
@@ -298,18 +350,25 @@ var ClaudeCodeProcess = class {
         if (!Array.isArray(content)) return null;
         const events = [];
         for (const block of content) {
-          if (block.type === "tool_use") {
+          if (block.type === "thinking") {
+            events.push({
+              type: "thinking",
+              message: block.thinking ?? "",
+              timestamp: Date.now()
+            });
+          } else if (block.type === "tool_use") {
             events.push({
               type: "tool_use",
               message: block.name,
               data: { toolName: block.name, input: block.input, id: block.id },
               timestamp: Date.now()
             });
+          } else if (block.type === "text") {
+            const text = (block.text ?? "").trim();
+            if (text) {
+              events.push({ type: "assistant", message: text, timestamp: Date.now() });
+            }
           }
-        }
-        const text = content.filter((c) => c.type === "text").map((c) => c.text).join("").trim();
-        if (text) {
-          events.push({ type: "assistant", message: text, timestamp: Date.now() });
         }
         if (events.length > 0) {
           for (let i = 1; i < events.length; i++) {
@@ -319,12 +378,40 @@ var ClaudeCodeProcess = class {
         }
         return null;
       }
+      case "user": {
+        const userContent = msg.message?.content;
+        if (!Array.isArray(userContent)) return null;
+        for (const block of userContent) {
+          if (block.type === "tool_result") {
+            return {
+              type: "tool_result",
+              message: typeof block.content === "string" ? block.content.slice(0, 300) : JSON.stringify(block.content).slice(0, 300),
+              data: { toolUseId: block.tool_use_id, isError: block.is_error },
+              timestamp: Date.now()
+            };
+          }
+        }
+        return null;
+      }
       case "result": {
         if (msg.subtype === "success") {
+          const mu = msg.modelUsage ?? {};
+          const modelKey = Object.keys(mu)[0] ?? "";
+          const u = mu[modelKey] ?? {};
           return {
             type: "complete",
             message: msg.result ?? "Done",
-            data: { durationMs: msg.duration_ms, costUsd: msg.total_cost_usd },
+            data: {
+              durationMs: msg.duration_ms,
+              costUsd: msg.total_cost_usd,
+              inputTokens: u.inputTokens ?? 0,
+              outputTokens: u.outputTokens ?? 0,
+              cacheReadTokens: u.cacheReadInputTokens ?? 0,
+              cacheWriteTokens: u.cacheCreationInputTokens ?? 0,
+              contextWindow: u.contextWindow ?? 0,
+              maxOutputTokens: u.maxOutputTokens ?? 0,
+              model: modelKey
+            },
             timestamp: Date.now()
           };
         }
@@ -340,7 +427,7 @@ var ClaudeCodeProcess = class {
       case "rate_limit_event":
         return null;
       default:
-        console.log(`[agent] unhandled event type: ${msg.type}`, JSON.stringify(msg).substring(0, 200));
+        logger.log("agent", `unhandled event: ${msg.type}`, JSON.stringify(msg).substring(0, 200));
         return null;
     }
   }
@@ -361,13 +448,15 @@ var ClaudeCodeProvider = class {
   spawn(options) {
     const claudePath = resolveClaudePath(options.cwd);
     const args = [
-      "--print",
       "--output-format",
       "stream-json",
       "--input-format",
       "stream-json",
       "--verbose"
     ];
+    if (options.model) {
+      args.push("--model", options.model);
+    }
     if (options.permissionMode) {
       args.push("--permission-mode", options.permissionMode);
     }
@@ -380,7 +469,7 @@ var ClaudeCodeProvider = class {
       env: cleanEnv,
       stdio: ["pipe", "pipe", "pipe"]
     });
-    console.log(`[agent] spawned claude-code (pid=${proc.pid})`);
+    logger.log("agent", `spawned claude-code (pid=${proc.pid})`);
     return new ClaudeCodeProcess(proc, options);
   }
 };
@@ -431,6 +520,7 @@ function createAgentRoutes() {
   app.post("/start", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     if (currentProcess?.alive && !body.force) {
+      logger.log("route", "POST /start \u2192 already_running");
       return c.json({
         status: "already_running",
         provider: "claude-code",
@@ -441,25 +531,28 @@ function createAgentRoutes() {
       currentProcess.kill();
     }
     eventBuffer.length = 0;
-    eventCounter = 0;
     const provider2 = getProvider(body.provider ?? "claude-code");
     try {
       currentProcess = provider2.spawn({
         cwd: process.cwd(),
         prompt: body.prompt,
+        model: body.model ?? "claude-sonnet-4-6",
         permissionMode: body.permissionMode ?? "acceptEdits"
       });
       subscribeEvents(currentProcess);
+      logger.log("route", "POST /start \u2192 started");
       return c.json({
         status: "started",
         provider: provider2.name
       });
-    } catch (err) {
-      return c.json({ status: "error", message: err.message }, 500);
+    } catch (e) {
+      logger.err("err", "POST /start failed:", e.message);
+      return c.json({ status: "error", message: e.message }, 500);
     }
   });
   app.post("/send", async (c) => {
     if (!currentProcess?.alive) {
+      logger.err("err", "POST /send \u2192 no active session (alive=false)");
       return c.json(
         {
           status: "error",
@@ -469,10 +562,11 @@ function createAgentRoutes() {
       );
     }
     const body = await c.req.json().catch(() => ({}));
-    console.log(body);
     if (!body.message) {
+      logger.err("err", "POST /send \u2192 empty message");
       return c.json({ status: "error", message: "message is required" }, 400);
     }
+    logger.log("route", `POST /send \u2192 "${body.message.slice(0, 80)}"`);
     currentProcess.send(body.message);
     return c.json({ status: "sent" });
   });
@@ -540,32 +634,61 @@ function createSnaApp(options = {}) {
 // src/server/standalone.ts
 var port = parseInt(process.env.SNA_PORT ?? "3099", 10);
 var permissionMode = process.env.SNA_PERMISSION_MODE ?? "acceptEdits";
+var defaultModel = process.env.SNA_MODEL ?? "claude-sonnet-4-6";
 var root = new Hono3();
 root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "OPTIONS"] }));
+var methodColor = {
+  GET: chalk2.green,
+  POST: chalk2.yellow,
+  OPTIONS: chalk2.gray
+};
+root.use("*", async (c, next) => {
+  const m = c.req.method;
+  const colorFn = methodColor[m] ?? chalk2.white;
+  const path4 = new URL(c.req.url).pathname;
+  logger.log("req", `${colorFn(m.padEnd(4))} ${path4}`);
+  await next();
+});
 root.route("/", createSnaApp());
 var provider = getProvider("claude-code");
-console.log("[sna] spawning agent...");
-var agentProcess = provider.spawn({ cwd: process.cwd(), permissionMode });
+logger.log("sna", "spawning agent...");
+var agentProcess = provider.spawn({ cwd: process.cwd(), permissionMode, model: defaultModel });
 setAgentProcess(agentProcess);
 var server = null;
+var shuttingDown = false;
 function shutdown(signal) {
-  console.log(`[sna] ${signal} \u2014 shutting down`);
-  console.log("[sna] stopping Claude Code agent...");
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log("");
+  logger.log("sna", chalk2.dim("stopping agent..."));
   agentProcess.kill();
   if (server) {
-    server.close(() => process.exit(0));
-  } else {
-    process.exit(0);
+    server.close(() => {
+      logger.log("sna", chalk2.green("clean shutdown") + chalk2.dim(" \u2014 see you next time"));
+      console.log("");
+      process.exit(0);
+    });
   }
+  setTimeout(() => {
+    logger.log("sna", chalk2.green("shutdown complete"));
+    console.log("");
+    process.exit(0);
+  }, 3e3).unref();
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
-console.log(`[sna] listening on http://localhost:${port}`);
+process.on("uncaughtException", (err2) => {
+  if (shuttingDown) process.exit(0);
+  console.error(err2);
+  process.exit(1);
+});
 server = serve({ fetch: root.fetch, port }, () => {
-  console.log(`[sna] API server ready \u2192 http://localhost:${port}`);
+  console.log("");
+  logger.log("sna", chalk2.green.bold(`API server ready \u2192 http://localhost:${port}`));
+  console.log("");
 });
 agentProcess.on("event", (e) => {
   if (e.type === "init") {
-    console.log(`[sna] agent ready (session=${e.data?.sessionId ?? "?"})`);
+    logger.log("agent", chalk2.green(`agent ready (session=${e.data?.sessionId ?? "?"})`));
   }
 });

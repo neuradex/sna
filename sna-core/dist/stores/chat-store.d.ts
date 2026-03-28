@@ -3,7 +3,7 @@ import * as zustand from 'zustand';
 
 interface ChatMessage {
     id: string;
-    role: "user" | "assistant" | "status" | "error" | "permission" | "tool" | "skill";
+    role: "user" | "assistant" | "thinking" | "status" | "error" | "permission" | "tool" | "tool_result" | "skill";
     content: string;
     timestamp: number;
     skillName?: string;

@@ -13,4 +13,14 @@ interface SnaAppOptions {
 }
 declare function createSnaApp(options?: SnaAppOptions): Hono<hono_types.BlankEnv, hono_types.BlankSchema, "/">;
 
-export { type SnaAppOptions, createSnaApp };
+/**
+ * GET /api/sna-port handler for consumer servers.
+ * Reads the dynamically allocated SNA API port from .sna/sna-api.port.
+ *
+ * @example
+ * import { snaPortRoute } from "sna/server";
+ * app.get("/api/sna-port", snaPortRoute);
+ */
+declare function snaPortRoute(c: any): any;
+
+export { type SnaAppOptions, createSnaApp, snaPortRoute };

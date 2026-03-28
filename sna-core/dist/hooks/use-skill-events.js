@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSnaContext } from "../core/sna-context.js";
 function useSkillEvents(options = {}) {
-  const { skills, maxEvents = 100, onEvent, onInvoked, onCalled, onSuccess, onFailed, onNeedPermission, onProgress, onMilestone } = options;
+  const { enabled = true, skills, maxEvents = 100, onEvent, onInvoked, onCalled, onSuccess, onFailed, onNeedPermission, onProgress, onMilestone } = options;
   const { apiUrl } = useSnaContext();
   const [events, setEvents] = useState([]);
   const [connected, setConnected] = useState(false);
@@ -25,6 +25,7 @@ function useSkillEvents(options = {}) {
   const onMilestoneRef = useRef(onMilestone);
   onMilestoneRef.current = onMilestone;
   useEffect(() => {
+    if (!enabled) return;
     let disposed = false;
     function connect() {
       if (disposed) return;
@@ -66,7 +67,7 @@ function useSkillEvents(options = {}) {
       esRef.current?.close();
       setConnected(false);
     };
-  }, [apiUrl]);
+  }, [apiUrl, enabled]);
   const latestBySkill = events.reduce((acc, e) => {
     acc[e.skill] = e;
     return acc;

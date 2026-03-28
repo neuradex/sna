@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import type { ChatMessage } from "../../stores/chat-store.js";
 
 /** Tabler-style SVG icons (24x24 viewBox, 1.5px stroke) */
@@ -37,7 +37,7 @@ function IconFileText() {
   return <svg width={16} height={16} viewBox="0 0 24 24" {...s}><path d="M14 3v4a1 1 0 001 1h4"/><path d="M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z"/><line x1="9" y1="9" x2="10" y2="9"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>;
 }
 
-const TOOL_ICONS: Record<string, () => JSX.Element> = {
+const TOOL_ICONS: Record<string, () => React.JSX.Element> = {
   Read: IconFile,
   Edit: IconPencil,
   Write: IconFileText,

@@ -12,12 +12,16 @@ function useAgent(options = {}) {
   const [alive, setAlive] = useState(false);
   const esRef = useRef(null);
   const onEventRef = useRef(options.onEvent);
+  const onThinkingRef = useRef(options.onThinking);
   const onAssistantRef = useRef(options.onAssistant);
+  const onToolResultRef = useRef(options.onToolResult);
   const onCompleteRef = useRef(options.onComplete);
   const onErrorRef = useRef(options.onError);
   const onInitRef = useRef(options.onInit);
   onEventRef.current = options.onEvent;
+  onThinkingRef.current = options.onThinking;
   onAssistantRef.current = options.onAssistant;
+  onToolResultRef.current = options.onToolResult;
   onCompleteRef.current = options.onComplete;
   onErrorRef.current = options.onError;
   onInitRef.current = options.onInit;
@@ -45,7 +49,9 @@ function useAgent(options = {}) {
             const event = JSON.parse(e.data);
             onEventRef.current?.(event);
             if (event.type === "init") onInitRef.current?.(event);
+            if (event.type === "thinking") onThinkingRef.current?.(event);
             if (event.type === "assistant") onAssistantRef.current?.(event);
+            if (event.type === "tool_result") onToolResultRef.current?.(event);
             if (event.type === "complete") onCompleteRef.current?.(event);
             if (event.type === "error") onErrorRef.current?.(event);
           } catch {
@@ -66,13 +72,21 @@ function useAgent(options = {}) {
     };
   }, [baseUrl]);
   const send = useCallback(async (message) => {
+    console.log(`[useAgent:send] baseUrl=${baseUrl}, message=${message.slice(0, 50)}`);
     setAlive(true);
-    const res = await fetch(`${baseUrl}/send`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message })
-    });
-    return res.json();
+    try {
+      const res = await fetch(`${baseUrl}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message })
+      });
+      const data = await res.json();
+      console.log("[useAgent:send] response:", data);
+      return data;
+    } catch (err) {
+      console.error("[useAgent:send] FAILED:", err);
+      return { status: "error", message: String(err) };
+    }
   }, [baseUrl]);
   const start = useCallback(async (prompt) => {
     const res = await fetch(`${baseUrl}/start`, {

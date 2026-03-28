@@ -1,21 +1,89 @@
 "use client";
 import { jsx, jsxs } from "react/jsx-runtime";
+import { useState } from "react";
+const s = { stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round", strokeLinejoin: "round", fill: "none" };
+function IconFile() {
+  return /* @__PURE__ */ jsxs("svg", { width: 16, height: 16, viewBox: "0 0 24 24", ...s, children: [
+    /* @__PURE__ */ jsx("path", { d: "M14 3v4a1 1 0 001 1h4" }),
+    /* @__PURE__ */ jsx("path", { d: "M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z" })
+  ] });
+}
+function IconPencil() {
+  return /* @__PURE__ */ jsxs("svg", { width: 16, height: 16, viewBox: "0 0 24 24", ...s, children: [
+    /* @__PURE__ */ jsx("path", { d: "M4 20h4L18.5 9.5a1.5 1.5 0 00-4-4L4 16v4" }),
+    /* @__PURE__ */ jsx("path", { d: "M13.5 6.5l4 4" })
+  ] });
+}
+function IconTerminal() {
+  return /* @__PURE__ */ jsxs("svg", { width: 16, height: 16, viewBox: "0 0 24 24", ...s, children: [
+    /* @__PURE__ */ jsx("path", { d: "M5 7l5 5-5 5" }),
+    /* @__PURE__ */ jsx("line", { x1: "12", y1: "19", x2: "19", y2: "19" })
+  ] });
+}
+function IconSearch() {
+  return /* @__PURE__ */ jsxs("svg", { width: 16, height: 16, viewBox: "0 0 24 24", ...s, children: [
+    /* @__PURE__ */ jsx("circle", { cx: "10", cy: "10", r: "7" }),
+    /* @__PURE__ */ jsx("path", { d: "M21 21l-6-6" })
+  ] });
+}
+function IconFolderSearch() {
+  return /* @__PURE__ */ jsxs("svg", { width: 16, height: 16, viewBox: "0 0 24 24", ...s, children: [
+    /* @__PURE__ */ jsx("path", { d: "M11 19H4a2 2 0 01-2-2V5a2 2 0 012-2h4l3 3h7a2 2 0 012 2v2.5" }),
+    /* @__PURE__ */ jsx("circle", { cx: "17", cy: "17", r: "3" }),
+    /* @__PURE__ */ jsx("path", { d: "M20.5 20.5L22 22" })
+  ] });
+}
+function IconGlobe() {
+  return /* @__PURE__ */ jsxs("svg", { width: 16, height: 16, viewBox: "0 0 24 24", ...s, children: [
+    /* @__PURE__ */ jsx("circle", { cx: "12", cy: "12", r: "10" }),
+    /* @__PURE__ */ jsx("path", { d: "M2 12h20" }),
+    /* @__PURE__ */ jsx("path", { d: "M12 2a15 15 0 014 10 15 15 0 01-4 10 15 15 0 01-4-10 15 15 0 014-10" })
+  ] });
+}
+function IconBot() {
+  return /* @__PURE__ */ jsxs("svg", { width: 16, height: 16, viewBox: "0 0 24 24", ...s, children: [
+    /* @__PURE__ */ jsx("rect", { x: "3", y: "11", width: "18", height: "10", rx: "2" }),
+    /* @__PURE__ */ jsx("circle", { cx: "12", cy: "5", r: "2" }),
+    /* @__PURE__ */ jsx("path", { d: "M12 7v4" }),
+    /* @__PURE__ */ jsx("circle", { cx: "9", cy: "16", r: "1" }),
+    /* @__PURE__ */ jsx("circle", { cx: "15", cy: "16", r: "1" })
+  ] });
+}
+function IconBolt() {
+  return /* @__PURE__ */ jsx("svg", { width: 16, height: 16, viewBox: "0 0 24 24", ...s, children: /* @__PURE__ */ jsx("path", { d: "M13 3L4 14h7l-2 7 9-11h-7l2-7" }) });
+}
+function IconTool() {
+  return /* @__PURE__ */ jsx("svg", { width: 16, height: 16, viewBox: "0 0 24 24", ...s, children: /* @__PURE__ */ jsx("path", { d: "M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94L6.73 20.2a2 2 0 11-2.93-2.93l6.73-6.73A6 6 0 016.3 2.73l3.77 3.77z" }) });
+}
+function IconFileText() {
+  return /* @__PURE__ */ jsxs("svg", { width: 16, height: 16, viewBox: "0 0 24 24", ...s, children: [
+    /* @__PURE__ */ jsx("path", { d: "M14 3v4a1 1 0 001 1h4" }),
+    /* @__PURE__ */ jsx("path", { d: "M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z" }),
+    /* @__PURE__ */ jsx("line", { x1: "9", y1: "9", x2: "10", y2: "9" }),
+    /* @__PURE__ */ jsx("line", { x1: "9", y1: "13", x2: "15", y2: "13" }),
+    /* @__PURE__ */ jsx("line", { x1: "9", y1: "17", x2: "15", y2: "17" })
+  ] });
+}
 const TOOL_ICONS = {
-  Read: "\u{1F4C4}",
-  Edit: "\u270F\uFE0F",
-  Write: "\u{1F4DD}",
-  Bash: "\u2B1B",
-  Glob: "\u{1F50D}",
-  Grep: "\u{1F50E}",
-  WebFetch: "\u{1F310}",
-  WebSearch: "\u{1F310}",
-  Agent: "\u{1F916}",
-  Skill: "\u26A1"
+  Read: IconFile,
+  Edit: IconPencil,
+  Write: IconFileText,
+  Bash: IconTerminal,
+  Glob: IconFolderSearch,
+  Grep: IconSearch,
+  WebFetch: IconGlobe,
+  WebSearch: IconGlobe,
+  Agent: IconBot,
+  Skill: IconBolt
 };
 function ToolUseCard({ message }) {
+  const [expanded, setExpanded] = useState(false);
   const toolName = message.meta?.toolName ?? message.content;
   const input = message.meta?.input;
-  const icon = TOOL_ICONS[toolName] ?? "\u{1F527}";
+  const result = message.meta?.result;
+  const isError = !!message.meta?.isError;
+  const hasResult = result != null;
+  const IconComponent = TOOL_ICONS[toolName] ?? IconTool;
   let preview = "";
   if (input) {
     if (input.command) preview = String(input.command);
@@ -25,53 +93,87 @@ function ToolUseCard({ message }) {
     else if (input.prompt) preview = String(input.prompt).substring(0, 80);
     else if (input.skill) preview = String(input.skill);
   }
-  if (preview.length > 100) preview = preview.substring(0, 100) + "\u2026";
-  return /* @__PURE__ */ jsxs(
-    "div",
-    {
-      style: {
-        display: "flex",
-        alignItems: "flex-start",
-        gap: 10,
-        padding: "10px 14px",
-        background: "var(--sna-surface)",
-        border: "1px solid var(--sna-surface-border)",
-        borderRadius: "var(--sna-radius-lg)"
-      },
-      children: [
-        /* @__PURE__ */ jsx("span", { style: { fontSize: 16, lineHeight: 1, flexShrink: 0, marginTop: 1 }, children: icon }),
-        /* @__PURE__ */ jsxs("div", { style: { minWidth: 0 }, children: [
+  if (preview.length > 100) preview = preview.substring(0, 100) + "...";
+  const resultPreview = result && result.length > 120 ? result.slice(0, 120) + "..." : result;
+  return /* @__PURE__ */ jsxs("div", { children: [
+    /* @__PURE__ */ jsxs(
+      "div",
+      {
+        onClick: () => hasResult && setExpanded(!expanded),
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "2px 0",
+          cursor: hasResult ? "pointer" : void 0
+        },
+        children: [
+          hasResult && /* @__PURE__ */ jsx(
+            "svg",
+            {
+              width: 8,
+              height: 8,
+              viewBox: "0 0 8 8",
+              style: {
+                transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+                transition: "transform 0.15s",
+                flexShrink: 0,
+                opacity: 0.4
+              },
+              children: /* @__PURE__ */ jsx("path", { d: "M2 1L6 4L2 7", stroke: "currentColor", strokeWidth: "1.2", fill: "none", strokeLinecap: "round" })
+            }
+          ),
+          /* @__PURE__ */ jsx("span", { style: { color: isError ? "var(--sna-error-text)" : "var(--sna-text-faint)", flexShrink: 0, display: "flex" }, children: /* @__PURE__ */ jsx(IconComponent, {}) }),
           /* @__PURE__ */ jsx(
-            "div",
+            "span",
             {
               style: {
-                fontSize: 12,
-                fontWeight: 600,
-                color: "var(--sna-text-muted)",
-                fontFamily: "var(--sna-font-mono)"
+                fontSize: 11,
+                fontWeight: 500,
+                color: isError ? "var(--sna-error-text)" : "var(--sna-text-muted)",
+                fontFamily: "var(--sna-font-mono)",
+                flexShrink: 0
               },
               children: toolName
             }
           ),
           preview && /* @__PURE__ */ jsx(
-            "div",
+            "span",
             {
               style: {
-                fontSize: 11,
-                color: "var(--sna-text-faint)",
+                fontSize: 10,
+                color: isError ? "rgba(252,165,165,0.5)" : "var(--sna-text-faint)",
                 fontFamily: "var(--sna-font-mono)",
-                marginTop: 3,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
-                whiteSpace: "nowrap"
+                whiteSpace: "nowrap",
+                minWidth: 0,
+                opacity: 0.6
               },
               children: preview
             }
-          )
-        ] })
-      ]
-    }
-  );
+          ),
+          hasResult && !expanded && /* @__PURE__ */ jsx("span", { style: { color: isError ? "var(--sna-error-text)" : "var(--sna-success)", display: "flex", flexShrink: 0, opacity: 0.6, marginLeft: "auto" }, children: isError ? /* @__PURE__ */ jsx("svg", { width: 10, height: 10, viewBox: "0 0 24 24", stroke: "currentColor", strokeWidth: "2", fill: "none", strokeLinecap: "round", children: /* @__PURE__ */ jsx("path", { d: "M18 6L6 18M6 6l12 12" }) }) : /* @__PURE__ */ jsx("svg", { width: 10, height: 10, viewBox: "0 0 24 24", stroke: "currentColor", strokeWidth: "2", fill: "none", strokeLinecap: "round", children: /* @__PURE__ */ jsx("path", { d: "M5 12l5 5L20 7" }) }) })
+        ]
+      }
+    ),
+    expanded && result && /* @__PURE__ */ jsx(
+      "div",
+      {
+        style: {
+          padding: "2px 0 2px 24px",
+          fontSize: 10,
+          fontFamily: "var(--sna-font-mono)",
+          color: isError ? "var(--sna-error-text)" : "var(--sna-text-faint)",
+          whiteSpace: "pre-wrap",
+          lineHeight: 1.4,
+          wordBreak: "break-all",
+          opacity: 0.7
+        },
+        children: resultPreview
+      }
+    )
+  ] });
 }
 export {
   ToolUseCard

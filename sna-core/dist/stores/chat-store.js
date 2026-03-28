@@ -37,7 +37,10 @@ const useChatStore = create()(
       partialize: (s) => ({
         isOpen: s.isOpen,
         width: s.width,
-        messages: s.messages,
+        // Strip transient flags (animate) so they don't replay on reload
+        messages: s.messages.map(
+          (m) => m.meta?.animate ? { ...m, meta: { ...m.meta, animate: void 0 } } : m
+        ),
         // processedEventIds as array for JSON serialization
         processedEventIds: [...s.processedEventIds]
       }),

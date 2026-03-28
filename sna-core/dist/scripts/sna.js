@@ -8,8 +8,8 @@ const PID_FILE = path.join(STATE_DIR, "server.pid");
 const PORT_FILE = path.join(STATE_DIR, "port");
 const LOG_FILE = path.join(STATE_DIR, "server.log");
 const SNA_API_PID_FILE = path.join(STATE_DIR, "sna-api.pid");
+const SNA_API_PORT_FILE = path.join(STATE_DIR, "sna-api.port");
 const SNA_API_LOG_FILE = path.join(STATE_DIR, "sna-api.log");
-const SNA_API_PORT = process.env.SNA_PORT ?? "3099";
 const PORT = process.env.PORT ?? "3000";
 const DB_PATH = path.join(ROOT, "data/app.db");
 const CLAUDE_PATH_FILE = path.join(STATE_DIR, "claude-path");
@@ -46,8 +46,22 @@ function readSnaApiPid() {
   const pid = parseInt(raw);
   return isNaN(pid) ? null : pid;
 }
+function readSnaApiPort() {
+  if (!fs.existsSync(SNA_API_PORT_FILE)) return null;
+  return fs.readFileSync(SNA_API_PORT_FILE, "utf8").trim() || null;
+}
 function clearSnaApiState() {
-  if (fs.existsSync(SNA_API_PID_FILE)) fs.unlinkSync(SNA_API_PID_FILE);
+  for (const f of [SNA_API_PID_FILE, SNA_API_PORT_FILE]) {
+    if (fs.existsSync(f)) fs.unlinkSync(f);
+  }
+}
+function findFreePort() {
+  const net = require("net");
+  const srv = net.createServer();
+  srv.listen(0);
+  const port = String(srv.address().port);
+  srv.close();
+  return port;
 }
 async function checkSnaApiHealth(port) {
   try {
@@ -62,17 +76,13 @@ async function checkSnaApiHealth(port) {
 }
 async function cmdApiUp() {
   const standaloneEntry = path.join(SNA_CORE_DIR, "dist/server/standalone.js");
-  if (isPortInUse(SNA_API_PORT)) {
-    const healthy = await checkSnaApiHealth(SNA_API_PORT);
+  const existingPort = process.env.SNA_PORT ?? readSnaApiPort();
+  if (existingPort && isPortInUse(existingPort)) {
+    const healthy = await checkSnaApiHealth(existingPort);
     if (healthy) {
-      step(`SNA API already running on :${SNA_API_PORT} \u2014 reusing`);
+      step(`SNA API already running on :${existingPort} \u2014 reusing`);
       return;
     }
-    console.error(`
-\u2717  Port ${SNA_API_PORT} is occupied by a non-SNA process.`);
-    console.error(`   Free it or set SNA_PORT to a different port.
-`);
-    process.exit(1);
   }
   if (!fs.existsSync(standaloneEntry)) {
     console.error(`
@@ -88,28 +98,47 @@ async function cmdApiUp() {
     } catch {
     }
   }
+  const port = process.env.SNA_PORT ?? (existingPort && !isPortInUse(existingPort) ? existingPort : findFreePort());
   ensureStateDir();
   const logStream = fs.openSync(SNA_API_LOG_FILE, "w");
   const child = spawn("node", [standaloneEntry], {
     cwd: ROOT,
     detached: true,
     stdio: ["ignore", logStream, logStream],
-    env: { ...process.env, SNA_PORT: SNA_API_PORT }
+    env: { ...process.env, SNA_PORT: port }
   });
   child.unref();
   fs.writeFileSync(SNA_API_PID_FILE, String(child.pid));
-  step(`SNA API server \u2192 http://localhost:${SNA_API_PORT}`);
+  fs.writeFileSync(SNA_API_PORT_FILE, port);
+  step(`SNA API server \u2192 http://localhost:${port}`);
 }
 function cmdApiDown() {
   const pid = readSnaApiPid();
+  const port = readSnaApiPort();
   if (pid && isProcessRunning(pid)) {
     try {
       process.kill(pid, "SIGTERM");
     } catch {
     }
+    for (let i = 0; i < 6; i++) {
+      if (!isProcessRunning(pid)) break;
+      execSync("sleep 0.5", { stdio: "pipe" });
+    }
+    if (isProcessRunning(pid)) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+      }
+    }
     console.log(`   SNA API     \u2713  stopped (pid=${pid})`);
   } else {
     console.log(`   SNA API     \u2014  not running`);
+  }
+  if (port) {
+    try {
+      execSync(`lsof -ti:${port} | xargs kill -9 2>/dev/null`, { stdio: "pipe" });
+    } catch {
+    }
   }
   clearSnaApiState();
 }
@@ -209,29 +238,32 @@ function cmdUp() {
   const standaloneEntry = path.join(SNA_CORE_DIR, "dist/server/standalone.js");
   if (fs.existsSync(standaloneEntry)) {
     const staleApiPid = readSnaApiPid();
+    const staleApiPort = readSnaApiPort();
     if (staleApiPid && isProcessRunning(staleApiPid)) {
       try {
         process.kill(staleApiPid, "SIGTERM");
       } catch {
       }
     }
-    if (isPortInUse(SNA_API_PORT)) {
+    if (staleApiPort && isPortInUse(staleApiPort)) {
       try {
-        execSync(`lsof -ti:${SNA_API_PORT} | xargs kill -9`, { stdio: "pipe" });
+        execSync(`lsof -ti:${staleApiPort} | xargs kill -9`, { stdio: "pipe" });
       } catch {
       }
     }
+    const snaApiPort = process.env.SNA_PORT ?? findFreePort();
     const snaApiLogStream = fs.openSync(SNA_API_LOG_FILE, "w");
     const snaApiChild = spawn("node", [standaloneEntry], {
       cwd: ROOT,
       detached: true,
       stdio: ["ignore", snaApiLogStream, snaApiLogStream],
-      env: { ...process.env, SNA_PORT: SNA_API_PORT }
+      env: { ...process.env, SNA_PORT: snaApiPort }
     });
     snaApiChild.unref();
     ensureStateDir();
     fs.writeFileSync(SNA_API_PID_FILE, String(snaApiChild.pid));
-    step(`SNA API server \u2192 http://localhost:${SNA_API_PORT}`);
+    fs.writeFileSync(SNA_API_PORT_FILE, snaApiPort);
+    step(`SNA API server \u2192 http://localhost:${snaApiPort}`);
   }
   const logStream = fs.openSync(LOG_FILE, "w");
   const child = spawn("pnpm", ["dev"], {
@@ -317,8 +349,9 @@ function cmdStatus() {
     if (pid) clearState();
   }
   const snaApiPid = readSnaApiPid();
+  const snaApiPort = readSnaApiPort();
   if (snaApiPid && isProcessRunning(snaApiPid)) {
-    console.log(`  SNA API      \u2713  running  (pid=${snaApiPid}, port=${SNA_API_PORT})`);
+    console.log(`  SNA API      \u2713  running  (pid=${snaApiPid}, port=${snaApiPort ?? "?"})`);
   } else {
     console.log(`  SNA API      \u2717  stopped`);
     if (snaApiPid) clearSnaApiState();

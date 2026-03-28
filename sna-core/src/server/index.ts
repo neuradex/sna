@@ -55,3 +55,23 @@ export { eventsRoute } from "./routes/events.js";
 export { emitRoute } from "./routes/emit.js";
 export { createRunRoute } from "./routes/run.js";
 export { createAgentRoutes } from "./routes/agent.js";
+
+/**
+ * GET /api/sna-port handler for consumer servers.
+ * Reads the dynamically allocated SNA API port from .sna/sna-api.port.
+ *
+ * @example
+ * import { snaPortRoute } from "sna/server";
+ * app.get("/api/sna-port", snaPortRoute);
+ */
+export function snaPortRoute(c: any) {
+  const fs = require("fs");
+  const path = require("path");
+  const portFile = path.join(process.cwd(), ".sna/sna-api.port");
+  try {
+    const port = fs.readFileSync(portFile, "utf8").trim();
+    return c.json({ port });
+  } catch {
+    return c.json({ port: null, error: "SNA API not running" }, 503);
+  }
+}

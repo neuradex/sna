@@ -3,9 +3,8 @@ import { ChatMessage } from '../../stores/chat-store.js';
 import 'zustand/middleware';
 import 'zustand';
 
-interface MessageBubbleProps {
+declare function ThinkingCard({ message }: {
     message: ChatMessage;
-}
-declare function MessageBubble({ message }: MessageBubbleProps): react_jsx_runtime.JSX.Element;
+}): react_jsx_runtime.JSX.Element;
 
-export { MessageBubble };
+export { ThinkingCard };

@@ -103,7 +103,7 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
     lastTurnContextTokens: 0,
     lastTurnSystemTokens: 0,
     lastTurnConvTokens: 0,
-    model: "",
+    model: "claude-sonnet-4-6",
   });
 
   useEffect(() => injectStyles(), []);
@@ -322,15 +322,17 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
       >
         <ChatHeader
           onClose={onClose}
-          onClear={() => {
+          onClear={async () => {
             clearMessages();
-            agent.kill();
-            agent.start();
+            setThinking(true);
             setSessionUsage({
               totalInputTokens: 0, totalOutputTokens: 0, totalCost: 0,
               contextWindow: 0, lastTurnContextTokens: 0,
               lastTurnSystemTokens: 0, lastTurnConvTokens: 0, model: sessionUsage.model,
             });
+            await agent.kill();
+            await agent.start();
+            setThinking(false);
           }}
           isRunning={thinking || (anyRunning ?? false)}
           sessionUsage={sessionUsage}

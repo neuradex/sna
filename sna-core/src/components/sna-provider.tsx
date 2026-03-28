@@ -172,14 +172,15 @@ export function SnaProvider({
   children,
   defaultOpen = false,
   dangerouslySkipPermissions = false,
-  snaUrl = DEFAULT_SNA_URL,
+  snaUrl,
 }: SnaProviderProps) {
   const [agentReady, setAgentReady] = useState(false);
+  const [resolvedUrl, setResolvedUrl] = useState(snaUrl ?? "");
   const chatOpen = useChatStore((s) => s.isOpen);
   const setChatOpen = useChatStore((s) => s.setOpen);
   const { mode } = useResponsiveChat();
 
-  // 1. Start agent session on mount
+  // 1. Discover SNA API port and start agent
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -187,21 +188,39 @@ export function SnaProvider({
       ? "bypassPermissions"
       : "acceptEdits";
 
-    fetch(`${snaUrl}/agent/start`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: "claude-code", permissionMode }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        console.log("[sna] agent/start response:", data);
-        setAgentReady(true);
+    async function discover() {
+      // If explicit URL provided, use it directly
+      if (snaUrl) {
+        setResolvedUrl(snaUrl);
+        return snaUrl;
+      }
+      // Try reading port from consumer's server endpoint
+      try {
+        const res = await fetch("/api/sna-port");
+        const data = await res.json();
+        if (data.port) {
+          const url = `http://localhost:${data.port}`;
+          setResolvedUrl(url);
+          return url;
+        }
+      } catch { /* no endpoint — try default */ }
+      // Fallback: try default port
+      const fallback = DEFAULT_SNA_URL;
+      setResolvedUrl(fallback);
+      return fallback;
+    }
+
+    discover().then((url) => {
+      fetch(`${url}/agent/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "claude-code", permissionMode }),
       })
-      .catch((err) => {
-        console.error("[sna] Failed to start agent:", err);
-        setAgentReady(true);
-      });
-  }, [dangerouslySkipPermissions]);
+        .then((res) => res.json())
+        .then(() => setAgentReady(true))
+        .catch(() => setAgentReady(true));
+    });
+  }, [dangerouslySkipPermissions, snaUrl]);
 
   // 2. Auto-open chat on first mount
   useEffect(() => {
@@ -227,7 +246,7 @@ export function SnaProvider({
   const useFlex = chatOpen && mode === "side-by-side";
 
   return (
-    <SnaContext.Provider value={{ apiUrl: snaUrl }}>
+    <SnaContext.Provider value={{ apiUrl: resolvedUrl }}>
       {!agentReady && <ConnectingOverlay />}
 
       {useFlex ? (

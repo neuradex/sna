@@ -1,5 +1,8 @@
 "use client";
 import { jsx, jsxs } from "react/jsx-runtime";
+import { useEffect, useRef, useState } from "react";
+import { MarkdownContent } from "./markdown-content.js";
+import { ThinkingCard } from "./thinking-card.js";
 import { ToolUseCard } from "./tool-use-card.js";
 import { SkillCard } from "./skill-card.js";
 const bubbleBase = {
@@ -9,7 +12,142 @@ const bubbleBase = {
   maxWidth: "85%",
   wordBreak: "break-word"
 };
-function MessageBubble({ message, onPermissionApprove, onPermissionDeny }) {
+function AssistantBubble({ message }) {
+  const animate = !!message.meta?.animate;
+  const text = message.content;
+  const costLabel = message.meta?.costLabel ?? "";
+  const [visibleCount, setVisibleCount] = useState(animate ? 0 : Infinity);
+  const [done, setDone] = useState(!animate);
+  const wordsRef = useRef([]);
+  useEffect(() => {
+    if (!animate) {
+      setDone(true);
+      return;
+    }
+    const words = text.split(/(\s+)/);
+    wordsRef.current = words;
+    const total = words.length;
+    const speed = total > 400 ? 5 : total > 200 ? 10 : total > 80 ? 18 : 25;
+    let i = 0;
+    const timer = setInterval(() => {
+      i += 2;
+      if (i >= total) {
+        i = total;
+        clearInterval(timer);
+        setDone(true);
+      }
+      setVisibleCount(i);
+    }, speed);
+    return () => clearInterval(timer);
+  }, [text, animate]);
+  const visibleText = done ? text : wordsRef.current.slice(0, visibleCount).join("");
+  return /* @__PURE__ */ jsx("div", { style: { display: "flex", justifyContent: "flex-start" }, children: /* @__PURE__ */ jsxs(
+    "div",
+    {
+      style: {
+        ...bubbleBase,
+        padding: "4px 0",
+        background: "none",
+        color: "var(--sna-text-secondary)",
+        cursor: done ? void 0 : "pointer",
+        maxWidth: "100%"
+      },
+      onClick: () => {
+        if (!done) {
+          setVisibleCount(Infinity);
+          setDone(true);
+        }
+      },
+      title: done ? void 0 : "Click to skip animation",
+      children: [
+        /* @__PURE__ */ jsx(MarkdownContent, { text: visibleText }),
+        !done && /* @__PURE__ */ jsx(
+          "span",
+          {
+            style: {
+              display: "inline-block",
+              width: 2,
+              height: "1em",
+              background: "var(--sna-accent)",
+              marginLeft: 2,
+              verticalAlign: "text-bottom",
+              animation: "sna-pulse 1s infinite"
+            }
+          }
+        ),
+        done && costLabel && /* @__PURE__ */ jsx(
+          "div",
+          {
+            style: {
+              marginTop: 6,
+              paddingTop: 4,
+              borderTop: "1px solid rgba(255,255,255,0.04)",
+              fontSize: 10,
+              fontFamily: "var(--sna-font-mono)",
+              color: "var(--sna-text-faint)",
+              textAlign: "left"
+            },
+            children: costLabel
+          }
+        )
+      ]
+    }
+  ) });
+}
+const sIco = { stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round", strokeLinejoin: "round", fill: "none" };
+function IconCheck() {
+  return /* @__PURE__ */ jsx("svg", { width: 12, height: 12, viewBox: "0 0 24 24", ...sIco, children: /* @__PURE__ */ jsx("path", { d: "M5 12l5 5L20 7" }) });
+}
+function IconX() {
+  return /* @__PURE__ */ jsx("svg", { width: 12, height: 12, viewBox: "0 0 24 24", ...sIco, children: /* @__PURE__ */ jsx("path", { d: "M18 6L6 18M6 6l12 12" }) });
+}
+function IconAlertTriangle() {
+  return /* @__PURE__ */ jsxs("svg", { width: 14, height: 14, viewBox: "0 0 24 24", ...sIco, children: [
+    /* @__PURE__ */ jsx("path", { d: "M12 9v4" }),
+    /* @__PURE__ */ jsx("path", { d: "M12 17h.01" }),
+    /* @__PURE__ */ jsx("path", { d: "M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" })
+  ] });
+}
+function ToolResultCard({ message }) {
+  const [expanded, setExpanded] = useState(false);
+  const isError = !!message.meta?.isError;
+  const content = message.content;
+  const isLong = content.length > 120;
+  const display = expanded || !isLong ? content : content.slice(0, 120) + "...";
+  return /* @__PURE__ */ jsxs(
+    "div",
+    {
+      onClick: () => isLong && setExpanded(!expanded),
+      style: {
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 5,
+        padding: "1px 0 1px 24px",
+        cursor: isLong ? "pointer" : void 0
+      },
+      children: [
+        /* @__PURE__ */ jsx("span", { style: { color: isError ? "var(--sna-error-text)" : "var(--sna-text-faint)", flexShrink: 0, marginTop: 1, display: "flex", opacity: 0.7 }, children: isError ? /* @__PURE__ */ jsx(IconX, {}) : /* @__PURE__ */ jsx(IconCheck, {}) }),
+        /* @__PURE__ */ jsx(
+          "div",
+          {
+            style: {
+              fontSize: 10,
+              fontFamily: "var(--sna-font-mono)",
+              color: isError ? "var(--sna-error-text)" : "var(--sna-text-faint)",
+              whiteSpace: "pre-wrap",
+              lineHeight: 1.4,
+              wordBreak: "break-all",
+              minWidth: 0,
+              opacity: 0.7
+            },
+            children: display
+          }
+        )
+      ]
+    }
+  );
+}
+function MessageBubble({ message }) {
   switch (message.role) {
     case "user":
       return /* @__PURE__ */ jsx("div", { style: { display: "flex", justifyContent: "flex-end" }, children: /* @__PURE__ */ jsx(
@@ -26,61 +164,28 @@ function MessageBubble({ message, onPermissionApprove, onPermissionDeny }) {
         }
       ) });
     case "assistant":
-      return /* @__PURE__ */ jsx("div", { style: { display: "flex", justifyContent: "flex-start" }, children: /* @__PURE__ */ jsx(
-        "div",
+      return /* @__PURE__ */ jsx(AssistantBubble, { message });
+    case "thinking":
+      return /* @__PURE__ */ jsx(ThinkingCard, { message });
+    case "tool":
+      return /* @__PURE__ */ jsx(ToolUseCard, { message });
+    case "tool_result":
+      return /* @__PURE__ */ jsx(ToolResultCard, { message });
+    case "status":
+      return /* @__PURE__ */ jsx("div", { style: { display: "flex", justifyContent: "center" }, children: /* @__PURE__ */ jsx(
+        "span",
         {
           style: {
-            ...bubbleBase,
-            background: "var(--sna-surface)",
-            border: "1px solid var(--sna-surface-border)",
-            borderRadius: "var(--sna-radius-xl) var(--sna-radius-xl) var(--sna-radius-xl) var(--sna-radius-sm)",
-            color: "var(--sna-text-secondary)"
+            color: "var(--sna-text-faint)",
+            fontSize: 10,
+            fontFamily: "var(--sna-font-mono)",
+            padding: "2px 0"
           },
           children: message.content
         }
       ) });
-    case "status":
-      return /* @__PURE__ */ jsx("div", { style: { display: "flex", justifyContent: "center" }, children: /* @__PURE__ */ jsxs(
-        "div",
-        {
-          style: {
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "6px 12px",
-            borderRadius: "var(--sna-radius-full)",
-            background: "var(--sna-surface)",
-            border: "1px solid var(--sna-surface-border)"
-          },
-          children: [
-            /* @__PURE__ */ jsx(
-              "span",
-              {
-                style: {
-                  width: 6,
-                  height: 6,
-                  borderRadius: "var(--sna-radius-full)",
-                  background: "var(--sna-success)",
-                  flexShrink: 0
-                }
-              }
-            ),
-            /* @__PURE__ */ jsx(
-              "span",
-              {
-                style: {
-                  color: "var(--sna-text-muted)",
-                  fontSize: 12,
-                  fontFamily: "var(--sna-font-mono)"
-                },
-                children: message.content
-              }
-            )
-          ]
-        }
-      ) });
     case "permission":
-      return /* @__PURE__ */ jsxs(
+      return /* @__PURE__ */ jsx(
         "div",
         {
           style: {
@@ -89,60 +194,28 @@ function MessageBubble({ message, onPermissionApprove, onPermissionDeny }) {
             borderRadius: "var(--sna-radius-lg)",
             padding: 16
           },
-          children: [
-            /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-warning-text)", fontSize: 14, margin: "0 0 12px 0" }, children: message.content }),
-            /* @__PURE__ */ jsxs("div", { style: { display: "flex", gap: 8 }, children: [
-              /* @__PURE__ */ jsx(
-                "button",
-                {
-                  onClick: onPermissionApprove,
-                  style: {
-                    padding: "6px 12px",
-                    borderRadius: "var(--sna-radius-md)",
-                    background: "var(--sna-success-approve)",
-                    border: "none",
-                    color: "white",
-                    fontSize: 12,
-                    cursor: "pointer"
-                  },
-                  children: "Approve"
-                }
-              ),
-              /* @__PURE__ */ jsx(
-                "button",
-                {
-                  onClick: onPermissionDeny,
-                  style: {
-                    padding: "6px 12px",
-                    borderRadius: "var(--sna-radius-md)",
-                    background: "none",
-                    border: "1px solid var(--sna-surface-border)",
-                    color: "var(--sna-text-muted)",
-                    fontSize: 12,
-                    cursor: "pointer"
-                  },
-                  children: "Deny"
-                }
-              )
-            ] })
-          ]
+          children: /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-warning-text)", fontSize: 14, margin: 0 }, children: message.content })
         }
       );
     case "error":
-      return /* @__PURE__ */ jsx(
+      return /* @__PURE__ */ jsxs(
         "div",
         {
           style: {
-            border: "1px solid var(--sna-error-border)",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+            padding: "8px 12px",
             background: "var(--sna-error-bg)",
-            borderRadius: "var(--sna-radius-lg)",
-            padding: "10px 16px"
+            border: "1px solid var(--sna-error-border)",
+            borderRadius: "var(--sna-radius-md)"
           },
-          children: /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-error-text)", fontSize: 14, margin: 0 }, children: message.content })
+          children: [
+            /* @__PURE__ */ jsx("span", { style: { color: "var(--sna-error-text)", flexShrink: 0, marginTop: 1, display: "flex" }, children: /* @__PURE__ */ jsx(IconAlertTriangle, {}) }),
+            /* @__PURE__ */ jsx("span", { style: { color: "var(--sna-error-text)", fontSize: 12, lineHeight: 1.5 }, children: message.content })
+          ]
         }
       );
-    case "tool":
-      return /* @__PURE__ */ jsx(ToolUseCard, { message });
     case "skill":
       return /* @__PURE__ */ jsx(SkillCard, { message });
   }

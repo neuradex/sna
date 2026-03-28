@@ -13,7 +13,9 @@ const StableChatPanel = memo(function StableChatPanel2({
 });
 function PermissionAutoOpen() {
   const setOpen = useChatStore((s) => s.setOpen);
+  const chatOpen = useChatStore((s) => s.isOpen);
   useSkillEvents({
+    enabled: !chatOpen,
     onNeedPermission: () => setOpen(true)
   });
   return null;
@@ -123,28 +125,43 @@ function SnaProvider({
   children,
   defaultOpen = false,
   dangerouslySkipPermissions = false,
-  snaUrl = DEFAULT_SNA_URL
+  snaUrl
 }) {
   const [agentReady, setAgentReady] = useState(false);
+  const [resolvedUrl, setResolvedUrl] = useState(snaUrl ?? "");
   const chatOpen = useChatStore((s) => s.isOpen);
   const setChatOpen = useChatStore((s) => s.setOpen);
   const { mode } = useResponsiveChat();
   useEffect(() => {
     if (typeof window === "undefined") return;
     const permissionMode = dangerouslySkipPermissions ? "bypassPermissions" : "acceptEdits";
-    fetch(`${snaUrl}/agent/start`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: "claude-code", permissionMode })
-    }).then((res) => res.json()).then((data) => {
-      if (data.status === "started" || data.status === "already_running") {
-        setAgentReady(true);
+    async function discover() {
+      if (snaUrl) {
+        setResolvedUrl(snaUrl);
+        return snaUrl;
       }
-    }).catch((err) => {
-      console.error("[sna] Failed to start agent:", err);
-      setAgentReady(true);
+      try {
+        const res = await fetch("/api/sna-port");
+        const data = await res.json();
+        if (data.port) {
+          const url = `http://localhost:${data.port}`;
+          setResolvedUrl(url);
+          return url;
+        }
+      } catch {
+      }
+      const fallback = DEFAULT_SNA_URL;
+      setResolvedUrl(fallback);
+      return fallback;
+    }
+    discover().then((url) => {
+      fetch(`${url}/agent/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "claude-code", permissionMode })
+      }).then((res) => res.json()).then(() => setAgentReady(true)).catch(() => setAgentReady(true));
     });
-  }, [dangerouslySkipPermissions]);
+  }, [dangerouslySkipPermissions, snaUrl]);
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!localStorage.getItem("sna-chat-panel")) {
@@ -162,7 +179,7 @@ function SnaProvider({
     return () => window.removeEventListener("keydown", handleKeydown);
   }, []);
   const useFlex = chatOpen && mode === "side-by-side";
-  return /* @__PURE__ */ jsxs(SnaContext.Provider, { value: { apiUrl: snaUrl }, children: [
+  return /* @__PURE__ */ jsxs(SnaContext.Provider, { value: { apiUrl: resolvedUrl }, children: [
     !agentReady && /* @__PURE__ */ jsx(ConnectingOverlay, {}),
     useFlex ? /* @__PURE__ */ jsxs("div", { style: { display: "flex", height: "100dvh" }, children: [
       /* @__PURE__ */ jsx("div", { style: { flex: 1, overflow: "auto", minWidth: 0 }, children }),

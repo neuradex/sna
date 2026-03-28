@@ -3,6 +3,7 @@ import { streamSSE } from "hono/streaming";
 import {
   getProvider
 } from "../../core/providers/index.js";
+import { logger } from "../../lib/logger.js";
 let currentProcess = null;
 const eventBuffer = [];
 let eventCounter = 0;
@@ -24,6 +25,7 @@ function createAgentRoutes() {
   app.post("/start", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     if (currentProcess?.alive && !body.force) {
+      logger.log("route", "POST /start \u2192 already_running");
       return c.json({
         status: "already_running",
         provider: "claude-code",
@@ -34,25 +36,28 @@ function createAgentRoutes() {
       currentProcess.kill();
     }
     eventBuffer.length = 0;
-    eventCounter = 0;
     const provider = getProvider(body.provider ?? "claude-code");
     try {
       currentProcess = provider.spawn({
         cwd: process.cwd(),
         prompt: body.prompt,
+        model: body.model ?? "claude-sonnet-4-6",
         permissionMode: body.permissionMode ?? "acceptEdits"
       });
       subscribeEvents(currentProcess);
+      logger.log("route", "POST /start \u2192 started");
       return c.json({
         status: "started",
         provider: provider.name
       });
-    } catch (err) {
-      return c.json({ status: "error", message: err.message }, 500);
+    } catch (e) {
+      logger.err("err", "POST /start failed:", e.message);
+      return c.json({ status: "error", message: e.message }, 500);
     }
   });
   app.post("/send", async (c) => {
     if (!currentProcess?.alive) {
+      logger.err("err", "POST /send \u2192 no active session (alive=false)");
       return c.json(
         {
           status: "error",
@@ -62,10 +67,11 @@ function createAgentRoutes() {
       );
     }
     const body = await c.req.json().catch(() => ({}));
-    console.log(body);
     if (!body.message) {
+      logger.err("err", "POST /send \u2192 empty message");
       return c.json({ status: "error", message: "message is required" }, 400);
     }
+    logger.log("route", `POST /send \u2192 "${body.message.slice(0, 80)}"`);
     currentProcess.send(body.message);
     return c.json({ status: "sent" });
   });

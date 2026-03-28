@@ -70,6 +70,11 @@ function injectStyles() {
   document.head.appendChild(style);
 }
 const TERMINAL_EVENT_TYPES = /* @__PURE__ */ new Set(["success", "failed", "complete", "error"]);
+function fmtTokens(n) {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return String(n);
+}
 function ChatPanel({ onClose }) {
   const messages = useChatStore((s) => s.messages);
   const addMessage = useChatStore((s) => s.addMessage);
@@ -80,10 +85,19 @@ function ChatPanel({ onClose }) {
   const { mode } = useResponsiveChat();
   const messagesEndRef = useRef(null);
   const [thinking, setThinking] = useState(false);
+  const [sessionUsage, setSessionUsage] = useState({
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalCost: 0,
+    contextWindow: 0,
+    lastTurnContextTokens: 0,
+    lastTurnSystemTokens: 0,
+    lastTurnConvTokens: 0,
+    model: "claude-sonnet-4-6"
+  });
   useEffect(() => injectStyles(), []);
   const agent = useAgent({
     onEvent: (e) => {
-      console.log("[sna:agent-event]", e.type, e.message ?? "", e.data ?? "");
       if (e.type === "tool_use") {
         const toolName = e.data?.toolName ?? e.message ?? "tool";
         addMessage({
@@ -93,12 +107,75 @@ function ChatPanel({ onClose }) {
         });
       }
     },
+    onThinking: (e) => {
+      addMessage({
+        role: "thinking",
+        content: e.message ?? "",
+        meta: { done: true }
+      });
+    },
     onAssistant: (e) => {
       setThinking(false);
-      addMessage({ role: "assistant", content: e.message ?? "" });
+      addMessage({ role: "assistant", content: e.message ?? "", meta: { animate: true } });
     },
-    onComplete: () => {
+    onToolResult: (e) => {
+      const msgs = useChatStore.getState().messages;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === "tool" && !msgs[i].meta?.result) {
+          const updated = [...msgs];
+          updated[i] = {
+            ...updated[i],
+            meta: {
+              ...updated[i].meta,
+              result: e.message ?? "",
+              isError: !!e.data?.isError
+            }
+          };
+          useChatStore.setState({ messages: updated });
+          return;
+        }
+      }
+    },
+    onInit: (e) => {
+      const model = e.data?.model ?? "";
+      if (model) setSessionUsage((prev) => ({ ...prev, model }));
+    },
+    onComplete: (e) => {
       setThinking(false);
+      const d = e.data ?? {};
+      const duration = d.durationMs;
+      const cost = d.costUsd;
+      const inTok = d.inputTokens ?? 0;
+      const outTok = d.outputTokens ?? 0;
+      const cacheRead = d.cacheReadTokens ?? 0;
+      const cacheWrite = d.cacheWriteTokens ?? 0;
+      const ctxWindow = d.contextWindow ?? 0;
+      const model = d.model ?? "";
+      const systemTok = cacheRead + cacheWrite;
+      const convTok = inTok + outTok;
+      setSessionUsage((prev) => ({
+        totalInputTokens: prev.totalInputTokens + inTok,
+        totalOutputTokens: prev.totalOutputTokens + outTok,
+        totalCost: prev.totalCost + (cost ?? 0),
+        contextWindow: ctxWindow || prev.contextWindow,
+        lastTurnContextTokens: systemTok + convTok,
+        lastTurnSystemTokens: systemTok,
+        lastTurnConvTokens: convTok,
+        model: model || prev.model
+      }));
+      const msgs = useChatStore.getState().messages;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === "assistant") {
+          const parts = [];
+          if (duration != null) parts.push(`${(duration / 1e3).toFixed(1)}s`);
+          if (outTok > 0) parts.push(`${fmtTokens(outTok)} tokens`);
+          if (cost != null) parts.push(`$${cost.toFixed(4)}`);
+          const updated = [...msgs];
+          updated[i] = { ...updated[i], meta: { ...updated[i].meta, costLabel: parts.join(" \xB7 ") } };
+          useChatStore.setState({ messages: updated });
+          break;
+        }
+      }
     },
     onError: (e) => {
       setThinking(false);
@@ -163,15 +240,28 @@ function ChatPanel({ onClose }) {
     }, {});
     return Object.values(latestBySkill).some((e) => !TERMINAL_EVENT_TYPES.has(e.type));
   })();
+  const scrollContainerRef = useRef(null);
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const observer = new MutationObserver(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    });
+    observer.observe(container, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, []);
   const handleSend = async (text) => {
     addMessage({ role: "user", content: text });
     setThinking(true);
-    const res = await agent.send(text);
-    if (res?.status === "error") {
-      await agent.start(text);
+    try {
+      const res = await agent.send(text);
+      console.log("[ChatPanel:handleSend] send result:", res);
+      if (res?.status === "error") {
+        await agent.start(text);
+      }
+    } catch (err) {
+      console.error("[ChatPanel:handleSend] error:", err);
+      setThinking(false);
     }
   };
   const panelStyle = getPanelStyle(mode, width);
@@ -198,10 +288,40 @@ function ChatPanel({ onClose }) {
           animation: "sna-slide-in 0.2s ease-out"
         },
         children: [
-          /* @__PURE__ */ jsx(ChatHeader, { onClose, onClear: clearMessages, isRunning: thinking || (anyRunning ?? false) }),
+          /* @__PURE__ */ jsx(
+            ChatHeader,
+            {
+              onClose,
+              onClear: async () => {
+                clearMessages();
+                setThinking(true);
+                setSessionUsage({
+                  totalInputTokens: 0,
+                  totalOutputTokens: 0,
+                  totalCost: 0,
+                  contextWindow: 0,
+                  lastTurnContextTokens: 0,
+                  lastTurnSystemTokens: 0,
+                  lastTurnConvTokens: 0,
+                  model: sessionUsage.model
+                });
+                await agent.kill();
+                await agent.start();
+                setThinking(false);
+              },
+              isRunning: thinking || (anyRunning ?? false),
+              sessionUsage,
+              onModelChange: (model) => {
+                setSessionUsage((prev) => ({ ...prev, model }));
+                agent.kill();
+                agent.start();
+              }
+            }
+          ),
           /* @__PURE__ */ jsxs(
             "div",
             {
+              ref: scrollContainerRef,
               style: {
                 flex: 1,
                 overflowY: "auto",

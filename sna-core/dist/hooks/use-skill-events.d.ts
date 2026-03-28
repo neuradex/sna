@@ -8,6 +8,8 @@ interface SkillEvent {
 }
 type SkillEventHandler = (event: SkillEvent) => void;
 interface UseSkillEventsOptions {
+    /** Set to false to disable the SSE connection (saves browser connection slots). */
+    enabled?: boolean;
     skills?: string[];
     maxEvents?: number;
     onEvent?: SkillEventHandler;
