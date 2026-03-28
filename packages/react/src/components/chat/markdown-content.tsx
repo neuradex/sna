@@ -53,7 +53,6 @@ const MARKDOWN_STYLES = `
 .sna-md a:hover { text-decoration: underline; }
 .sna-md strong { color: var(--sna-text); }
 .sna-md hr { border: none; border-top: 1px solid var(--sna-surface-border); margin: 12px 0; }
-.sna-md-inline-end > p:last-of-type { display: inline-flex; align-items: center; gap: 4px; }
 `;
 
 let stylesInjected = false;
@@ -68,23 +67,10 @@ function injectMarkdownStyles() {
 
 interface MarkdownContentProps {
   text: string;
-  /** Inline HTML to append at the end of the last paragraph */
-  suffixHtml?: string;
 }
 
-export function MarkdownContent({ text, suffixHtml }: MarkdownContentProps) {
+export function MarkdownContent({ text }: MarkdownContentProps) {
   injectMarkdownStyles();
-  const html = useMemo(() => {
-    let parsed = marked.parse(text) as string;
-    if (suffixHtml) {
-      const lastP = parsed.lastIndexOf("</p>");
-      if (lastP !== -1) {
-        parsed = parsed.slice(0, lastP) + suffixHtml + parsed.slice(lastP);
-      } else {
-        parsed += suffixHtml;
-      }
-    }
-    return parsed;
-  }, [text, suffixHtml]);
-  return <div className={suffixHtml ? "sna-md sna-md-inline-end" : "sna-md"} dangerouslySetInnerHTML={{ __html: html }} />;
+  const html = useMemo(() => marked.parse(text) as string, [text]);
+  return <div className="sna-md" dangerouslySetInnerHTML={{ __html: html }} />;
 }

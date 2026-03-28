@@ -6,6 +6,7 @@ import { MarkdownContent } from "./markdown-content.js";
 import { ThinkingCard } from "./thinking-card.js";
 import { ToolUseCard } from "./tool-use-card.js";
 import { SkillCard } from "./skill-card.js";
+import { Tooltip } from "./tooltip.js";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -68,13 +69,17 @@ function AssistantBubble({ message, isLast = false }: { message: ChatMessage; is
         }}
         title={done ? undefined : "Click to skip animation"}
       >
-        <MarkdownContent
-          text={visibleText}
-          suffixHtml={done && costLabel && !isLast
-            ? ` <span title="${costLabel}" style="cursor:default;margin-left:4px;opacity:0.2"><svg width="11" height="11" viewBox="0 0 16 16" style="vertical-align:middle"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M8 7v4M8 5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>`
-            : undefined
-          }
-        />
+        <MarkdownContent text={visibleText} />
+        {done && costLabel && !isLast && (
+          <Tooltip content={costLabel}>
+            <span style={{ display: "inline-block", marginLeft: 4, opacity: 0.2, cursor: "default", verticalAlign: "middle" }}>
+              <svg width={11} height={11} viewBox="0 0 16 16" style={{ verticalAlign: "middle" }}>
+                <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                <path d="M8 7v4M8 5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </span>
+          </Tooltip>
+        )}
         {!done && (
           <span
             style={{

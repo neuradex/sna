@@ -5,6 +5,7 @@ import { MarkdownContent } from "./markdown-content.js";
 import { ThinkingCard } from "./thinking-card.js";
 import { ToolUseCard } from "./tool-use-card.js";
 import { SkillCard } from "./skill-card.js";
+import { Tooltip } from "./tooltip.js";
 const bubbleBase = {
   padding: "10px 16px",
   fontSize: 14,
@@ -60,13 +61,11 @@ function AssistantBubble({ message, isLast = false }) {
       },
       title: done ? void 0 : "Click to skip animation",
       children: [
-        /* @__PURE__ */ jsx(
-          MarkdownContent,
-          {
-            text: visibleText,
-            suffixHtml: done && costLabel && !isLast ? ` <span title="${costLabel}" style="cursor:default;margin-left:4px;opacity:0.2"><svg width="11" height="11" viewBox="0 0 16 16" style="vertical-align:middle"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M8 7v4M8 5v.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>` : void 0
-          }
-        ),
+        /* @__PURE__ */ jsx(MarkdownContent, { text: visibleText }),
+        done && costLabel && !isLast && /* @__PURE__ */ jsx(Tooltip, { content: costLabel, children: /* @__PURE__ */ jsx("span", { style: { display: "inline-block", marginLeft: 4, opacity: 0.2, cursor: "default", verticalAlign: "middle" }, children: /* @__PURE__ */ jsxs("svg", { width: 11, height: 11, viewBox: "0 0 16 16", style: { verticalAlign: "middle" }, children: [
+          /* @__PURE__ */ jsx("circle", { cx: "8", cy: "8", r: "7", stroke: "currentColor", strokeWidth: "1.5", fill: "none" }),
+          /* @__PURE__ */ jsx("path", { d: "M8 7v4M8 5v.5", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round" })
+        ] }) }) }),
         !done && /* @__PURE__ */ jsx(
           "span",
           {
