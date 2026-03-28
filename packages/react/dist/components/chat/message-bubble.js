@@ -60,7 +60,29 @@ function AssistantBubble({ message, isLast = false }) {
       },
       title: done ? void 0 : "Click to skip animation",
       children: [
-        /* @__PURE__ */ jsx(MarkdownContent, { text: visibleText }),
+        /* @__PURE__ */ jsxs("span", { className: !isLast && costLabel ? "sna-inline-cost" : void 0, children: [
+          /* @__PURE__ */ jsx(MarkdownContent, { text: visibleText }),
+          done && costLabel && !isLast && /* @__PURE__ */ jsxs(
+            "span",
+            {
+              style: {
+                display: "inline",
+                marginLeft: 4,
+                position: "relative",
+                verticalAlign: "middle",
+                cursor: "default"
+              },
+              className: "sna-cost-hint",
+              children: [
+                /* @__PURE__ */ jsxs("svg", { width: 11, height: 11, viewBox: "0 0 16 16", style: { opacity: 0.2, verticalAlign: "middle" }, children: [
+                  /* @__PURE__ */ jsx("circle", { cx: "8", cy: "8", r: "7", stroke: "currentColor", strokeWidth: "1.5", fill: "none" }),
+                  /* @__PURE__ */ jsx("path", { d: "M8 7v4M8 5v.5", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round" })
+                ] }),
+                /* @__PURE__ */ jsx("span", { className: "sna-cost-tooltip", children: costLabel })
+              ]
+            }
+          )
+        ] }),
         !done && /* @__PURE__ */ jsx(
           "span",
           {
@@ -88,26 +110,6 @@ function AssistantBubble({ message, isLast = false }) {
               textAlign: "left"
             },
             children: costLabel
-          }
-        ),
-        done && costLabel && !isLast && /* @__PURE__ */ jsxs(
-          "span",
-          {
-            style: {
-              display: "inline-block",
-              marginLeft: 6,
-              position: "relative",
-              verticalAlign: "middle",
-              cursor: "default"
-            },
-            className: "sna-cost-hint",
-            children: [
-              /* @__PURE__ */ jsxs("svg", { width: 12, height: 12, viewBox: "0 0 16 16", style: { opacity: 0.25, verticalAlign: "middle" }, children: [
-                /* @__PURE__ */ jsx("circle", { cx: "8", cy: "8", r: "7", stroke: "currentColor", strokeWidth: "1.5", fill: "none" }),
-                /* @__PURE__ */ jsx("path", { d: "M8 7v4M8 5v.5", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round" })
-              ] }),
-              /* @__PURE__ */ jsx("span", { className: "sna-cost-tooltip", children: costLabel })
-            ]
           }
         )
       ]

@@ -74,19 +74,23 @@ function injectStyles() {
       transform: translateX(-50%);
       padding: 4px 8px;
       border-radius: 4px;
-      background: rgba(0,0,0,0.85);
+      background: rgba(0,0,0,0.92);
+      border: 1px solid rgba(255,255,255,0.1);
       color: rgba(255,255,255,0.7);
       font-size: 10px;
       font-family: var(--sna-font-mono);
       white-space: nowrap;
       pointer-events: none;
-      z-index: 100;
+      z-index: 9999;
     }
     .sna-cost-hint:hover .sna-cost-tooltip {
       display: block;
     }
     .sna-cost-hint:hover svg {
       opacity: 0.5 !important;
+    }
+    .sna-inline-cost .sna-md > p:last-child {
+      display: inline;
     }
   `;
   document.head.appendChild(style);

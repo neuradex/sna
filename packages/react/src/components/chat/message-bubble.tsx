@@ -68,7 +68,27 @@ function AssistantBubble({ message, isLast = false }: { message: ChatMessage; is
         }}
         title={done ? undefined : "Click to skip animation"}
       >
-        <MarkdownContent text={visibleText} />
+        <span className={!isLast && costLabel ? "sna-inline-cost" : undefined}>
+          <MarkdownContent text={visibleText} />
+          {done && costLabel && !isLast && (
+            <span
+              style={{
+                display: "inline",
+                marginLeft: 4,
+                position: "relative",
+                verticalAlign: "middle",
+                cursor: "default",
+              }}
+              className="sna-cost-hint"
+            >
+              <svg width={11} height={11} viewBox="0 0 16 16" style={{ opacity: 0.2, verticalAlign: "middle" }}>
+                <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                <path d="M8 7v4M8 5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              <span className="sna-cost-tooltip">{costLabel}</span>
+            </span>
+          )}
+        </span>
         {!done && (
           <span
             style={{
@@ -96,24 +116,6 @@ function AssistantBubble({ message, isLast = false }: { message: ChatMessage; is
           >
             {costLabel}
           </div>
-        )}
-        {done && costLabel && !isLast && (
-          <span
-            style={{
-              display: "inline-block",
-              marginLeft: 6,
-              position: "relative",
-              verticalAlign: "middle",
-              cursor: "default",
-            }}
-            className="sna-cost-hint"
-          >
-            <svg width={12} height={12} viewBox="0 0 16 16" style={{ opacity: 0.25, verticalAlign: "middle" }}>
-              <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.5" fill="none" />
-              <path d="M8 7v4M8 5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-            <span className="sna-cost-tooltip">{costLabel}</span>
-          </span>
         )}
       </div>
     </div>
