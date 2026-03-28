@@ -177,17 +177,17 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
       const ctxWindow = d.contextWindow ?? 0;
       const model = d.model ?? "";
       const totalInput = inTok + cacheRead + cacheWrite;
-      setSessionUsage((prev) => ({
-        totalInputTokens: prev.totalInputTokens + totalInput,
-        totalOutputTokens: prev.totalOutputTokens + outTok,
-        totalCost: prev.totalCost + (cost ?? 0),
-        contextWindow: ctxWindow || prev.contextWindow,
+      setSessionUsage({
+        totalInputTokens: totalInput,
+        totalOutputTokens: outTok,
+        totalCost: cost ?? 0,
+        contextWindow: ctxWindow || sessionUsage.contextWindow,
         lastTurnInputTokens: totalInput,
         lastTurnOutputTokens: outTok,
         lastTurnCacheRead: cacheRead,
         lastTurnCacheWrite: cacheWrite,
-        model: model || prev.model
-      }));
+        model: model || sessionUsage.model
+      });
       const state = useChatStore.getState();
       const session = state.sessions[sessionId];
       if (!session) return;
