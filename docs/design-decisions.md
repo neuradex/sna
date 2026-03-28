@@ -1,86 +1,72 @@
 ## Design Decisions
 
-### Prisma as the DB layer (planned)
+### SDK DB scope (`sna.db`)
 
-SNA will adopt Prisma as the standard database layer for applications.
+The SDK database (`data/sna.db`) manages two concerns:
+
+```
+sna.db:
+  skill_events   — Skill execution state tracking + SSE delivery
+  chat_sessions  — Session management (main + background)
+  chat_messages  — Chat history persistence (replaces localStorage)
+```
+
+**`skill_events`** has a foreign key to `chat_sessions`:
+```sql
+skill_events:
+  id, session_id (FK → chat_sessions.id), skill, type, message, data, created_at
+```
+
+**Key rule:** Application DB is entirely separate. The SDK does not dictate what DB technology or ORM the application uses. Applications can use PostgreSQL, Supabase, SQLite, Prisma, Drizzle, or raw SQL — the SDK does not care.
+
+### `emit.js` behavior depends on context
+
+`emit.js` checks for `SNA_SESSION_ID` environment variable:
+
+- **Present** (running inside SDK-managed session): writes to `sna.db` with session FK, participates in the event pipeline
+- **Absent** (running outside SDK, e.g., terminal): console output only, skips DB write and lifecycle processing
+
+This ensures `emit.js` never breaks when called outside the SDK, while fully participating when running inside it.
+
+The SDK sets `SNA_SESSION_ID` when spawning agent processes:
+```
+SessionManager.spawn(sessionId) → env: SNA_SESSION_ID=<id> → Claude Code → emit.js reads env
+```
+
+### Skill execution locking is application responsibility
+
+**Conclusion after analysis:** Mutual exclusion for skill execution belongs to the application, not the SDK.
 
 **Rationale:**
-- The SDK needs to understand application schema for skill execution locking
-- Prisma schema files are declarative and machine-readable
-- Relationships between models are explicit, enabling automatic dependency inference
-- Migration management comes for free
-- Widely adopted — minimal learning curve for developers
+- Locking requires domain knowledge (which resources conflict, at what granularity)
+- Domain knowledge lives in the application, not the SDK
+- The SDK cannot know application schema, relations, or business rules
+- Forcing schema declaration (Prisma, YAML, etc.) on applications is overreach — applications should be free to use any DB technology
 
-**How it works:**
-- Applications define their schema in `prisma/schema.prisma`
-- `sna init` generates the DB and runs migrations
-- SDK reads the schema to understand table structure and relations
-- No raw SQL for schema management
+**What the SDK provides:**
+- Session management (create, start, stop, list)
+- Event pipeline (invoked, start, milestone, complete)
+- `runSkillInBackground` as the execution mechanism
 
-### Skill execution locking (planned)
+**What the application does:**
+- Checks for conflicts before calling `runSkillInBackground`
+- Manages its own locks using whatever mechanism fits (in-memory, DB, etc.)
 
-Multi-session skill execution requires mutual exclusion when skills operate on related data.
-
-**Problem:**
-- `template-edit` modifies a template while `form-analyze` reads that template's data
-- `form-fill session:123` and `form-submit session:123` should not run concurrently
-- Different sessions (e.g., session:123 vs session:456) can run in parallel
-- Locking at the table level is too coarse — row-level locking is needed
-
-**Design:**
-- Each skill declares which Prisma model it targets in SKILL.md
-- The skill argument maps to the model's primary key
-- SDK reads the Prisma schema to resolve relations between models
-- Before execution, SDK checks for conflicting locks by traversing relations
-
-**Example:**
-
-```prisma
-// prisma/schema.prisma
-model Template {
-  id       Int       @id @default(autoincrement())
-  name     String
-  sessions Session[]
-}
-
-model Session {
-  id          Int      @id @default(autoincrement())
-  template_id Int
-  template    Template @relation(fields: [template_id], references: [id])
-}
+```ts
+// Application-level locking example
+const handleAnalyze = (sessionId: number) => {
+  if (isResourceBusy(sessionId)) {
+    toast.error("This session is being processed");
+    return;
+  }
+  markBusy(sessionId);
+  runSkillInBackground(`form-analyze ${sessionId}`);
+};
 ```
 
-```yaml
-# form-fill/SKILL.md frontmatter
----
-description: Fill a form for a session
-resource: Session
----
-```
+### Skill execution status: `invoked` event (planned)
 
-```yaml
-# template-edit/SKILL.md frontmatter
----
-description: Edit a template
-resource: Template
----
-```
-
-When `template-edit Template:5` is running:
-- SDK knows `Session` depends on `Template` via `template_id`
-- Any `form-fill` targeting a Session where `template_id = 5` is blocked
-- `form-fill` targeting a Session where `template_id = 3` is allowed
-
-**Lock lifecycle:**
-- Acquired: when SDK receives skill execution request (before agent spawn)
-- Released: on skill completion, error, or session death
-- Stale lock cleanup: on process startup
-
-**Opt-in:** Skills without a `resource` declaration run without locking (backward compatible).
-
-### Skill execution status (planned)
-
-SDK should record an `invoked` event in `skill_events` immediately when a skill execution is requested, before the agent process starts.
+SDK records an `invoked` event immediately when a skill execution is requested, before the agent process starts.
 
 **Current flow:**
 ```
@@ -96,3 +82,20 @@ User clicks → /agent/start → SDK writes "invoked" → UI updates immediately
 - `invoked` = request accepted, about to execute
 - `start` = skill logic has begun (from emit.js inside the skill)
 - These are separate phases, not duplicates
+
+### Chat history persistence (planned)
+
+Chat messages currently live in frontend `localStorage` (via Zustand persist). This will move to `sna.db`.
+
+**Schema:**
+```sql
+chat_sessions (id, label, type, created_at)
+chat_messages (id, session_id FK, role, content, meta, created_at)
+```
+
+**Benefits:**
+- Survives browser cache clears
+- Backend sessions and frontend messages in sync
+- Background session history preserved across page reloads
+
+**Frontend `useChatStore`** remains as a cache layer. On load, hydrate from DB instead of localStorage.
