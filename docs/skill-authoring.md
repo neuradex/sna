@@ -9,6 +9,12 @@ Skills live in the application's `.claude/skills/<name>/SKILL.md`.
 ```markdown
 ---
 description: What this skill does (used by Claude to decide when to invoke)
+sna:
+  args:
+    paramName:
+      type: number
+      required: true
+      description: What this parameter is
 ---
 
 ## Instructions
@@ -18,9 +24,37 @@ description: What this skill does (used by Claude to decide when to invoke)
 3. Report results
 ```
 
-### Emitting Events (REQUIRED)
+### Typed Arguments (`sna.args`)
 
-Every skill that performs work MUST emit events using the SDK script:
+Define skill arguments in frontmatter under `sna.args`. This enables typed client generation via `sna gen client`.
+
+```yaml
+---
+description: Fill a form for a session
+sna:
+  args:
+    sessionId:
+      type: number
+      required: true
+      description: Session ID to fill
+    verbose:
+      type: boolean
+---
+```
+
+**Supported types:** `string`, `number`, `boolean`, `string[]`, `number[]`
+
+Frontmatter is stripped before the skill content is passed to Claude — it does NOT consume context window tokens.
+
+After adding or changing `sna.args`, regenerate the client:
+
+```bash
+sna gen client --out src/sna-client.ts
+```
+
+### Emitting Events
+
+Skills emit events using the SDK script:
 
 ```bash
 # Start
@@ -44,7 +78,7 @@ node node_modules/@sna-sdk/core/dist/scripts/emit.js \
 - Use `node node_modules/@sna-sdk/core/dist/scripts/emit.js` — NOT `tsx scripts/emit.ts`
 - The `--skill` name should match the skill folder name
 - `complete` triggers automatic frontend data refresh
-- Always emit `start` at the beginning and `complete` or `error` at the end
+- `emit.js` is context-aware: writes to DB only when `SNA_SESSION_ID` is set (SDK-managed sessions)
 
 ### Event Data
 
@@ -57,21 +91,16 @@ node node_modules/@sna-sdk/core/dist/scripts/emit.js \
   --data '{"count": 5, "duration_ms": 1200}'
 ```
 
-### Reading App Data
-
-Skills run TypeScript scripts via `tsx` that can access the app's database:
-
-```bash
-tsx scripts/my-script.ts --arg value
-```
-
-These scripts import the app's `getDb()` for app-specific data. They use the SDK's emit script for events.
-
 ### Skill Template
 
 ```markdown
 ---
 description: Brief description for Claude
+sna:
+  args:
+    id:
+      type: number
+      required: true
 ---
 
 ## <Skill Name>

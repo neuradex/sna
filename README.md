@@ -16,6 +16,7 @@ SNA:          SKILL.md → Claude Code → scripts → SQLite → SSE → UI
 - **Skills are the logic layer** — Business logic lives in `SKILL.md` files, not application code. Markdown is both the spec and the implementation.
 - **Real-time by default** — Skill execution is async and can take minutes. The event protocol (`start` → `milestone` → `complete`) is mandatory, keeping the UI always in sync.
 - **Zero config for non-engineers** — One command (`sna up`) starts everything. Local SQLite, no cloud dependency.
+- **Type-safe skill invocation** — `sna gen client` generates a typed TypeScript client from SKILL.md frontmatter, so skill calls are checked at compile time.
 - **Agents enforce conventions** — SDK rules are taught to coding agents via the `sna-builder` plugin, not just documented for humans.
 
 ## How It Works
@@ -30,8 +31,8 @@ SNA:          SKILL.md → Claude Code → scripts → SQLite → SSE → UI
 
 | Package | npm name | Role |
 |---------|----------|------|
-| `packages/core` | `@sna-sdk/core` | Server runtime, DB, CLI, event pipeline |
-| `packages/react` | `@sna-sdk/react` | React hooks, components, stores |
+| `packages/core` | `@sna-sdk/core` | Server runtime, DB, CLI, event pipeline, code generation |
+| `packages/react` | `@sna-sdk/react` | React hooks, components, stores, typed client |
 
 ## Quick Start
 
@@ -48,8 +49,9 @@ See the [App Setup guide](docs/app-setup.md) for application-side configuration.
 | Document | Contents |
 |----------|----------|
 | [Architecture](docs/architecture.md) | DB separation, event pipeline, package structure |
-| [Skill Authoring](docs/skill-authoring.md) | How to write skills |
-| [App Setup](docs/app-setup.md) | Frontend, server, Vite configuration |
+| [Skill Authoring](docs/skill-authoring.md) | How to write skills with typed args |
+| [App Setup](docs/app-setup.md) | Frontend, server, Vite configuration, typed client |
+| [Design Decisions](docs/design-decisions.md) | DB scope, locking, invoked status |
 | [Contributing](CONTRIBUTING.md) | Repository structure, key files, tech stack |
 
 ## Claude Code Plugin
