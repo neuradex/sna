@@ -10,6 +10,7 @@ import { ChatInput } from "./chat-input.js";
 import { TypingIndicator } from "./typing-indicator.js";
 import { ResizeHandle } from "./resize-handle.js";
 import { useResponsiveChat } from "../../hooks/use-responsive-chat.js";
+import { useSessionManager } from "../../hooks/use-session-manager.js";
 function injectStyles() {
   if (typeof document === "undefined") return;
   if (document.getElementById("sna-chat-styles")) return;
@@ -92,13 +93,17 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
   const setWidth = useChatStore((s) => s.setWidth);
   const { mode } = useResponsiveChat();
   const [viewMode, setViewMode] = useState("chat");
+  const { sessions: serverSessions, killSession: killServerSession, deleteSession: deleteServerSession, refresh: refreshSessions } = useSessionManager();
   const bgSessions = Object.entries(allSessions).filter(([id]) => id !== "default").map(([id, sess]) => {
     const firstMsg = sess.messages[0];
     const lastMsg = sess.messages[sess.messages.length - 1];
     const label = firstMsg?.meta?.label ?? id;
-    const status = lastMsg?.meta?.status ?? (sess.messages.length > 0 ? "running" : "idle");
+    const serverSession = serverSessions.find((s) => s.id === id);
+    const alive = serverSession?.alive ?? false;
+    const lastMsgStatus = lastMsg?.meta?.status ?? "";
+    const status = alive ? "running" : lastMsgStatus === "complete" ? "complete" : lastMsgStatus === "failed" ? "failed" : "stopped";
     const messageCount = sess.messages.length;
-    return { id, label, status, messageCount, lastMessage: lastMsg?.content?.slice(0, 100) ?? "" };
+    return { id, label, status, alive, messageCount, lastMessage: lastMsg?.content?.slice(0, 100) ?? "" };
   });
   const currentBgLabel = viewMode === "bg-session" ? bgSessions.find((s) => s.id === sessionId)?.label ?? sessionId : void 0;
   const messagesEndRef = useRef(null);
@@ -368,69 +373,113 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
                   /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-text-faint)", fontSize: 12, marginTop: 4, fontFamily: "var(--sna-font-mono)" }, children: "Skills run via the UI will appear here" })
                 ] }),
                 bgSessions.map((bg) => {
-                  const statusColor = bg.status === "complete" ? "var(--sna-success)" : bg.status === "failed" ? "var(--sna-error)" : "var(--sna-accent)";
+                  const statusColor = bg.status === "running" ? "var(--sna-accent)" : bg.status === "complete" ? "var(--sna-success)" : bg.status === "failed" ? "var(--sna-error, #ef4444)" : "var(--sna-text-faint)";
+                  const statusLabel = bg.status === "running" ? "Running" : bg.status === "complete" ? "Complete" : bg.status === "failed" ? "Failed" : "Stopped";
                   return /* @__PURE__ */ jsxs(
-                    "button",
+                    "div",
                     {
-                      onClick: () => {
-                        setActiveSession(bg.id);
-                        setViewMode("bg-session");
-                      },
                       style: {
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 10,
                         padding: "10px 12px",
                         borderRadius: "var(--sna-radius-md)",
                         background: "var(--sna-surface)",
                         border: "1px solid var(--sna-surface-border)",
-                        cursor: "pointer",
-                        textAlign: "left",
                         width: "100%",
                         fontFamily: "var(--sna-font-mono)",
                         fontSize: 12,
                         color: "var(--sna-text)",
-                        transition: "background 0.15s"
-                      },
-                      onMouseEnter: (e) => {
-                        e.currentTarget.style.background = "var(--sna-surface-hover)";
-                      },
-                      onMouseLeave: (e) => {
-                        e.currentTarget.style.background = "var(--sna-surface)";
+                        opacity: bg.alive ? 1 : 0.6
                       },
                       children: [
-                        /* @__PURE__ */ jsx(
-                          "span",
-                          {
-                            style: {
-                              width: 8,
-                              height: 8,
-                              borderRadius: "var(--sna-radius-full)",
-                              background: statusColor,
-                              flexShrink: 0,
-                              animation: bg.status === "running" ? "sna-pulse 2s ease-in-out infinite" : "none"
+                        /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }, children: [
+                          /* @__PURE__ */ jsx(
+                            "span",
+                            {
+                              style: {
+                                width: 8,
+                                height: 8,
+                                borderRadius: "var(--sna-radius-full)",
+                                background: statusColor,
+                                flexShrink: 0,
+                                animation: bg.alive ? "sna-pulse 2s ease-in-out infinite" : "none"
+                              }
                             }
-                          }
-                        ),
-                        /* @__PURE__ */ jsxs("div", { style: { flex: 1, minWidth: 0 }, children: [
-                          /* @__PURE__ */ jsx("div", { style: { fontWeight: 500, marginBottom: 2 }, children: bg.label }),
-                          bg.lastMessage && /* @__PURE__ */ jsx("div", { style: { color: "var(--sna-text-faint)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: bg.lastMessage })
+                          ),
+                          /* @__PURE__ */ jsx("span", { style: { fontWeight: 500, flex: 1 }, children: bg.label }),
+                          /* @__PURE__ */ jsx("span", { style: {
+                            fontSize: 9,
+                            padding: "2px 6px",
+                            borderRadius: "var(--sna-radius-full)",
+                            background: bg.alive ? "rgba(124,58,237,0.15)" : "rgba(255,255,255,0.05)",
+                            color: bg.alive ? "var(--sna-accent)" : "var(--sna-text-faint)",
+                            fontWeight: 600,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.05em"
+                          }, children: statusLabel })
                         ] }),
-                        /* @__PURE__ */ jsxs("span", { style: { color: "var(--sna-text-faint)", fontSize: 10, flexShrink: 0 }, children: [
-                          bg.messageCount,
-                          " msg"
-                        ] }),
-                        /* @__PURE__ */ jsx(
-                          "button",
-                          {
-                            onClick: (e) => {
-                              e.stopPropagation();
-                              removeSession(bg.id);
-                            },
-                            style: { background: "none", border: "none", color: "var(--sna-text-faint)", cursor: "pointer", fontSize: 14, padding: "0 4px" },
-                            children: "\xD7"
-                          }
-                        )
+                        bg.lastMessage && /* @__PURE__ */ jsx("div", { style: { color: "var(--sna-text-faint)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 8 }, children: bg.lastMessage }),
+                        /* @__PURE__ */ jsxs("div", { style: { display: "flex", alignItems: "center", gap: 6 }, children: [
+                          /* @__PURE__ */ jsx(
+                            "button",
+                            {
+                              onClick: () => {
+                                setActiveSession(bg.id);
+                                setViewMode("bg-session");
+                              },
+                              style: {
+                                padding: "3px 8px",
+                                borderRadius: "var(--sna-radius-sm)",
+                                background: "var(--sna-surface-hover)",
+                                border: "none",
+                                color: "var(--sna-text-muted)",
+                                cursor: "pointer",
+                                fontSize: 10,
+                                fontFamily: "inherit"
+                              },
+                              children: "View"
+                            }
+                          ),
+                          bg.alive && /* @__PURE__ */ jsx(
+                            "button",
+                            {
+                              onClick: () => {
+                                killServerSession(bg.id);
+                                setTimeout(refreshSessions, 500);
+                              },
+                              style: {
+                                padding: "3px 8px",
+                                borderRadius: "var(--sna-radius-sm)",
+                                background: "rgba(239,68,68,0.1)",
+                                border: "none",
+                                color: "rgba(248,113,113,0.9)",
+                                cursor: "pointer",
+                                fontSize: 10,
+                                fontFamily: "inherit"
+                              },
+                              children: "Stop"
+                            }
+                          ),
+                          /* @__PURE__ */ jsx(
+                            "button",
+                            {
+                              onClick: () => {
+                                removeSession(bg.id);
+                                deleteServerSession(bg.id);
+                              },
+                              style: {
+                                padding: "3px 8px",
+                                borderRadius: "var(--sna-radius-sm)",
+                                background: "none",
+                                border: "none",
+                                color: "var(--sna-text-faint)",
+                                cursor: "pointer",
+                                fontSize: 10,
+                                fontFamily: "inherit",
+                                marginLeft: "auto"
+                              },
+                              children: "Delete"
+                            }
+                          )
+                        ] })
                       ]
                     },
                     bg.id
