@@ -6,6 +6,7 @@ import { useChatStore } from "../stores/chat-store.js";
 import { useSkillEvents } from "../hooks/use-skill-events.js";
 import { useResponsiveChat } from "../hooks/use-responsive-chat.js";
 import { SnaContext, DEFAULT_SNA_URL } from "../context.js";
+import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 const StableChatPanel = memo(function StableChatPanel2({
   onClose,
   sessionId = "default"
@@ -190,7 +191,7 @@ function SnaProvider({
     return /* @__PURE__ */ jsx(SnaContext.Provider, { value: { apiUrl: resolvedUrl }, children });
   }
   const useFlex = chatOpen && mode === "side-by-side";
-  return /* @__PURE__ */ jsxs(SnaContext.Provider, { value: { apiUrl: resolvedUrl }, children: [
+  return /* @__PURE__ */ jsx(SnaContext.Provider, { value: { apiUrl: resolvedUrl }, children: /* @__PURE__ */ jsxs(TooltipPrimitive.Provider, { delayDuration: 200, children: [
     !agentReady && /* @__PURE__ */ jsx(ConnectingOverlay, {}),
     useFlex ? /* @__PURE__ */ jsxs("div", { style: { display: "flex", height: "100dvh" }, children: [
       /* @__PURE__ */ jsx("div", { style: { flex: 1, overflow: "auto", minWidth: 0 }, children }),
@@ -201,7 +202,7 @@ function SnaProvider({
     ] }),
     !chatOpen && /* @__PURE__ */ jsx(FloatingChatButton, { onClick: () => setChatOpen(true) }),
     /* @__PURE__ */ jsx(PermissionAutoOpen, {})
-  ] });
+  ] }) });
 }
 export {
   SnaProvider

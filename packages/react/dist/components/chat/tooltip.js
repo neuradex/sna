@@ -2,7 +2,7 @@
 import { jsx, jsxs } from "react/jsx-runtime";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 function Tooltip({ content, children }) {
-  return /* @__PURE__ */ jsx(TooltipPrimitive.Provider, { delayDuration: 200, children: /* @__PURE__ */ jsxs(TooltipPrimitive.Root, { children: [
+  return /* @__PURE__ */ jsxs(TooltipPrimitive.Root, { children: [
     /* @__PURE__ */ jsx(TooltipPrimitive.Trigger, { asChild: true, children }),
     /* @__PURE__ */ jsx(TooltipPrimitive.Portal, { children: /* @__PURE__ */ jsxs(
       TooltipPrimitive.Content,
@@ -35,8 +35,9 @@ function Tooltip({ content, children }) {
         ]
       }
     ) })
-  ] }) });
+  ] });
 }
 export {
-  Tooltip
+  Tooltip,
+  TooltipPrimitive
 };

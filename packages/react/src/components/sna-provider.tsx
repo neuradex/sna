@@ -6,6 +6,7 @@ import { useChatStore } from "../stores/chat-store.js";
 import { useSkillEvents } from "../hooks/use-skill-events.js";
 import { useResponsiveChat } from "../hooks/use-responsive-chat.js";
 import { SnaContext, DEFAULT_SNA_URL } from "../context.js";
+import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 
 // memo prevents re-mount when parent (children) re-renders
 const StableChatPanel = memo(function StableChatPanel({
@@ -279,24 +280,26 @@ export function SnaProvider({
 
   return (
     <SnaContext.Provider value={{ apiUrl: resolvedUrl }}>
-      {!agentReady && <ConnectingOverlay />}
+      <TooltipPrimitive.Provider delayDuration={200}>
+        {!agentReady && <ConnectingOverlay />}
 
-      {useFlex ? (
-        <div style={{ display: "flex", height: "100dvh" }}>
-          <div style={{ flex: 1, overflow: "auto", minWidth: 0 }}>
-            {children}
+        {useFlex ? (
+          <div style={{ display: "flex", height: "100dvh" }}>
+            <div style={{ flex: 1, overflow: "auto", minWidth: 0 }}>
+              {children}
+            </div>
+            <StableChatPanel onClose={() => setChatOpen(false)} sessionId={activeSessionId} />
           </div>
-          <StableChatPanel onClose={() => setChatOpen(false)} sessionId={activeSessionId} />
-        </div>
-      ) : (
-        <>
-          {children}
-          {chatOpen && <StableChatPanel onClose={() => setChatOpen(false)} sessionId={activeSessionId} />}
-        </>
-      )}
+        ) : (
+          <>
+            {children}
+            {chatOpen && <StableChatPanel onClose={() => setChatOpen(false)} sessionId={activeSessionId} />}
+          </>
+        )}
 
-      {!chatOpen && <FloatingChatButton onClick={() => setChatOpen(true)} />}
-      <PermissionAutoOpen />
+        {!chatOpen && <FloatingChatButton onClick={() => setChatOpen(true)} />}
+        <PermissionAutoOpen />
+      </TooltipPrimitive.Provider>
     </SnaContext.Provider>
   );
 }
