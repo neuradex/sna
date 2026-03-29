@@ -47,6 +47,12 @@ interface UseSnaOptions {
  * });
  * <button onClick={() => runSkill("devlog-collect")}>Collect</button>
  */
+export interface SkillResult {
+  status: "complete" | "error";
+  message: string;
+  sessionId: string;
+}
+
 export function useSna(options: UseSnaOptions = {}) {
   const {
     sessionId = "default",
@@ -104,102 +110,117 @@ export function useSna(options: UseSnaOptions = {}) {
 
   /**
    * Run a skill in a background session.
-   * Creates a new agent session, executes the skill there,
-   * and writes messages to its own chat session (not main).
-   * Switch sessions in the chat panel to view progress.
+   * Returns a promise that resolves on complete, rejects on error.
+   *
+   * @example
+   * // Fire-and-forget
+   * runSkillInBackground("form-fill 123");
+   *
+   * // Await result like an API call
+   * try {
+   *   const result = await runSkillInBackground("form-analyze 123");
+   *   console.log("Done:", result.message);
+   *   refreshData();
+   * } catch (err) {
+   *   console.error("Failed:", err.message);
+   * }
    */
-  const runSkillInBackground = useCallback(async (name: string) => {
+  const runSkillInBackground = useCallback((name: string): Promise<SkillResult> => {
     const baseUrl = `${apiUrl}/agent`;
     const store = useChatStore.getState();
 
-    // 1. Create a new server-side session
-    let bgSessionId: string;
-    try {
-      const res = await fetch(`${baseUrl}/sessions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label: `skill:${name}` }),
-      });
-      const data = await res.json();
-      bgSessionId = data.sessionId;
-    } catch (err) {
-      store.addMessage({ role: "error", content: `Failed to create background session: ${err}` }, sessionId);
-      return;
-    }
-
-    // 2. Init a chat store session for the background task
-    store.initSession(bgSessionId);
-    store.addMessage({
-      role: "skill",
-      content: `/${name}`,
-      skillName: name,
-      meta: { status: "running", milestones: [], bgSessionId, label: `skill:${name}` },
-    }, bgSessionId);
-
-    // 3. Start the agent in the background session
-    try {
-      await fetch(`${baseUrl}/start?session=${encodeURIComponent(bgSessionId)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider, prompt: `Execute the skill: ${name}`, permissionMode }),
-      });
-    } catch (err) {
-      store.addMessage({ role: "error", content: `Failed to start background agent: ${err}` }, bgSessionId);
-      return;
-    }
-
-    // 4. Subscribe to background session events via SSE
-    const es = new EventSource(`${baseUrl}/events?session=${encodeURIComponent(bgSessionId)}&since=0`);
-    bgSessionsRef.current.set(bgSessionId, es);
-
-    es.onmessage = (e) => {
-      if (!e.data) return;
+    return new Promise(async (resolve, reject) => {
+      // 1. Create a new server-side session
+      let bgSessionId: string;
       try {
-        const event: AgentEvent = JSON.parse(e.data);
-        const addMsg = useChatStore.getState().addMessage;
+        const res = await fetch(`${baseUrl}/sessions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ label: `skill:${name}` }),
+        });
+        const data = await res.json();
+        bgSessionId = data.sessionId;
+      } catch (err) {
+        const msg = `Failed to create background session: ${err}`;
+        store.addMessage({ role: "error", content: msg }, sessionId);
+        reject({ status: "error", message: msg, sessionId: "" });
+        return;
+      }
 
-        if (event.type === "thinking" && event.message) {
-          addMsg({ role: "thinking", content: event.message, meta: { done: true } }, bgSessionId);
-        }
+      // 2. Init a chat store session for the background task
+      store.initSession(bgSessionId);
+      store.addMessage({
+        role: "skill",
+        content: `/${name}`,
+        skillName: name,
+        meta: { status: "running", milestones: [], bgSessionId, label: `skill:${name}` },
+      }, bgSessionId);
 
-        if (event.type === "assistant" && event.message) {
-          addMsg({ role: "assistant", content: event.message, meta: { animate: true } }, bgSessionId);
-        }
+      // 3. Start the agent in the background session
+      try {
+        await fetch(`${baseUrl}/start?session=${encodeURIComponent(bgSessionId)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider, prompt: `Execute the skill: ${name}`, permissionMode }),
+        });
+      } catch (err) {
+        const msg = `Failed to start background agent: ${err}`;
+        store.addMessage({ role: "error", content: msg }, bgSessionId);
+        reject({ status: "error", message: msg, sessionId: bgSessionId });
+        return;
+      }
 
-        if (event.type === "tool_use") {
-          const toolName = (event.data?.toolName as string) ?? event.message ?? "tool";
-          addMsg({ role: "tool", content: toolName, meta: { toolName, input: event.data?.input } }, bgSessionId);
-        }
+      // 4. Subscribe to background session events via SSE
+      const es = new EventSource(`${baseUrl}/events?session=${encodeURIComponent(bgSessionId)}&since=0`);
+      bgSessionsRef.current.set(bgSessionId, es);
 
-        if (event.type === "complete") {
-          addMsg({
-            role: "skill",
-            content: "Done",
-            skillName: name,
-            meta: { status: "complete", bgSessionId },
-          }, bgSessionId);
-          es.close();
-          bgSessionsRef.current.delete(bgSessionId);
-        }
+      es.onmessage = (e) => {
+        if (!e.data) return;
+        try {
+          const event: AgentEvent = JSON.parse(e.data);
+          const addMsg = useChatStore.getState().addMessage;
 
-        if (event.type === "error") {
-          addMsg({
-            role: "error",
-            content: event.message ?? "Background skill failed",
-            skillName: name,
-          }, bgSessionId);
-          es.close();
-          bgSessionsRef.current.delete(bgSessionId);
-        }
-      } catch { /* malformed */ }
-    };
+          if (event.type === "thinking" && event.message) {
+            addMsg({ role: "thinking", content: event.message, meta: { done: true } }, bgSessionId);
+          }
 
-    es.onerror = () => {
-      es.close();
-      bgSessionsRef.current.delete(bgSessionId);
-    };
+          if (event.type === "assistant" && event.message) {
+            addMsg({ role: "assistant", content: event.message, meta: { animate: true } }, bgSessionId);
+          }
 
-    return bgSessionId;
+          if (event.type === "tool_use") {
+            const toolName = (event.data?.toolName as string) ?? event.message ?? "tool";
+            addMsg({ role: "tool", content: toolName, meta: { toolName, input: event.data?.input } }, bgSessionId);
+          }
+
+          if (event.type === "complete") {
+            addMsg({
+              role: "skill",
+              content: "Done",
+              skillName: name,
+              meta: { status: "complete", bgSessionId },
+            }, bgSessionId);
+            es.close();
+            bgSessionsRef.current.delete(bgSessionId);
+            resolve({ status: "complete", message: event.message ?? "Done", sessionId: bgSessionId });
+          }
+
+          if (event.type === "error") {
+            const msg = event.message ?? "Background skill failed";
+            addMsg({ role: "error", content: msg, skillName: name }, bgSessionId);
+            es.close();
+            bgSessionsRef.current.delete(bgSessionId);
+            reject({ status: "error", message: msg, sessionId: bgSessionId });
+          }
+        } catch { /* malformed */ }
+      };
+
+      es.onerror = () => {
+        es.close();
+        bgSessionsRef.current.delete(bgSessionId);
+        reject({ status: "error", message: "SSE connection lost", sessionId: bgSessionId });
+      };
+    });
   }, [apiUrl, sessionId, provider, permissionMode]);
 
   return {

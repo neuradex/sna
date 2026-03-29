@@ -42,6 +42,11 @@ interface UseSnaOptions {
  * });
  * <button onClick={() => runSkill("devlog-collect")}>Collect</button>
  */
+interface SkillResult {
+    status: "complete" | "error";
+    message: string;
+    sessionId: string;
+}
 declare function useSna(options?: UseSnaOptions): {
     events: SkillEvent[];
     connected: boolean;
@@ -66,7 +71,7 @@ declare function useSna(options?: UseSnaOptions): {
     };
     runSkill: (name: string) => Promise<void>;
     runSkillSub: (name: string) => Promise<void>;
-    runSkillInBackground: (name: string) => Promise<string | undefined>;
+    runSkillInBackground: (name: string) => Promise<SkillResult>;
 };
 
-export { ChatMessage, SkillEventHandler, useSna };
+export { ChatMessage, SkillEventHandler, type SkillResult, useSna };
