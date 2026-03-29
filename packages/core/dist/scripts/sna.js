@@ -217,15 +217,6 @@ function cmdUp() {
     step("Dependencies ready");
   }
   cmdInit();
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
-    if (pkg.scripts?.["db:init"]) {
-      process.stdout.write("  \u2026  Setting up database");
-      execSync("pnpm db:init", { cwd: ROOT, stdio: "pipe" });
-      console.log("\r  \u2713  Database initialized              ");
-    }
-  } catch {
-  }
   if (isPortInUse(PORT)) {
     process.stdout.write(`  \u2026  Port ${PORT} busy \u2014 freeing`);
     try {

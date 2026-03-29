@@ -271,18 +271,8 @@ function cmdUp() {
   // 4. Init .claude/settings.json
   cmdInit();
 
-  // 5. Run app's db:init if defined (optional — app manages its own DB)
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
-    if (pkg.scripts?.["db:init"]) {
-      process.stdout.write("  …  Setting up database");
-      execSync("pnpm db:init", { cwd: ROOT, stdio: "pipe" });
-      console.log("\r  ✓  Database initialized              ");
-    }
-    // SDK's sna.db is auto-initialized by getDb() — no action needed
-  } catch {
-    // db:init not found or failed — non-fatal
-  }
+  // SDK's sna.db auto-initializes on first getDb() call — no explicit init needed
+  // App's DB is the app's responsibility (e.g., app's own db:init script)
 
   // 5. Kill anything already on the web port
   if (isPortInUse(PORT)) {
