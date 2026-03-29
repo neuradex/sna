@@ -55,11 +55,11 @@
     "react"
   ],
   "dependencies": {
-    "@radix-ui/react-tooltip": "^1.2.8",
     "@sna-sdk/core": "workspace:*",
     "marked": "^17.0.5"
   },
   "peerDependencies": {
+    "@radix-ui/react-tooltip": ">=1.0.0",
     "react": ">=18.0.0",
     "zustand": ">=4.0.0"
   },

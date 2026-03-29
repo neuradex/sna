@@ -12,6 +12,7 @@ export default defineConfig({
     "react-dom",
     "zustand",
     "zustand/middleware",
+    "@radix-ui/react-tooltip",
     // own deps
     "@sna-sdk/core",
     "marked",
