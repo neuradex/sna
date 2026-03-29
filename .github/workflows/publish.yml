@@ -42,7 +42,7 @@ jobs:
           pnpm --filter @sna-sdk/react build
 
       - name: Publish @sna-sdk/core
-        run: cd packages/core && npm publish --access public --provenance
+        run: pnpm --filter @sna-sdk/core publish --access public --provenance --no-git-checks
 
       - name: Publish @sna-sdk/react
-        run: cd packages/react && npm publish --access public --provenance
+        run: pnpm --filter @sna-sdk/react publish --access public --provenance --no-git-checks
