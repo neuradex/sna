@@ -1,10 +1,15 @@
 {
   "name": "sna-builder",
   "description": "SNA SDK development assistant — ensures correct architecture, DB separation, event pipeline usage, and skill authoring patterns",
-  "version": "0.1.0",
+  "version": "0.0.9",
   "author": {
     "name": "Neuradex"
   },
   "repository": "https://github.com/neuradex/sna",
-  "keywords": ["sna", "skills-native", "claude-code", "sdk"]
+  "keywords": [
+    "sna",
+    "skills-native",
+    "claude-code",
+    "sdk"
+  ]
 }
