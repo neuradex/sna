@@ -21,17 +21,20 @@ const bubbleBase: React.CSSProperties = {
   wordBreak: "break-word",
 };
 
+/** Track which messages have already been animated (survives re-mounts) */
+const animatedMessages = new Set<string>();
+
 /** Typewriter effect for assistant messages */
 function AssistantBubble({ message, isLast = false }: { message: ChatMessage; isLast?: boolean }) {
-  const animate = !!message.meta?.animate;
+  const shouldAnimate = !!message.meta?.animate && !animatedMessages.has(message.id);
   const text = message.content;
   const costLabel = (message.meta?.costLabel as string) ?? "";
-  const [visibleCount, setVisibleCount] = useState(animate ? 0 : Infinity);
-  const [done, setDone] = useState(!animate);
+  const [visibleCount, setVisibleCount] = useState(shouldAnimate ? 0 : Infinity);
+  const [done, setDone] = useState(!shouldAnimate);
   const wordsRef = useRef<string[]>([]);
 
   useEffect(() => {
-    if (!animate) { setDone(true); return; }
+    if (!shouldAnimate) { setDone(true); return; }
     const words = text.split(/(\s+)/);
     wordsRef.current = words;
     const total = words.length;
@@ -44,12 +47,13 @@ function AssistantBubble({ message, isLast = false }: { message: ChatMessage; is
         i = total;
         clearInterval(timer);
         setDone(true);
+        animatedMessages.add(message.id);
       }
       setVisibleCount(i);
     }, speed);
 
     return () => clearInterval(timer);
-  }, [text, animate]);
+  }, [text, shouldAnimate, message.id]);
 
   const visibleText = done ? text : wordsRef.current.slice(0, visibleCount).join("");
 

@@ -13,15 +13,16 @@ const bubbleBase = {
   maxWidth: "85%",
   wordBreak: "break-word"
 };
+const animatedMessages = /* @__PURE__ */ new Set();
 function AssistantBubble({ message, isLast = false }) {
-  const animate = !!message.meta?.animate;
+  const shouldAnimate = !!message.meta?.animate && !animatedMessages.has(message.id);
   const text = message.content;
   const costLabel = message.meta?.costLabel ?? "";
-  const [visibleCount, setVisibleCount] = useState(animate ? 0 : Infinity);
-  const [done, setDone] = useState(!animate);
+  const [visibleCount, setVisibleCount] = useState(shouldAnimate ? 0 : Infinity);
+  const [done, setDone] = useState(!shouldAnimate);
   const wordsRef = useRef([]);
   useEffect(() => {
-    if (!animate) {
+    if (!shouldAnimate) {
       setDone(true);
       return;
     }
@@ -36,11 +37,12 @@ function AssistantBubble({ message, isLast = false }) {
         i = total;
         clearInterval(timer);
         setDone(true);
+        animatedMessages.add(message.id);
       }
       setVisibleCount(i);
     }, speed);
     return () => clearInterval(timer);
-  }, [text, animate]);
+  }, [text, shouldAnimate, message.id]);
   const visibleText = done ? text : wordsRef.current.slice(0, visibleCount).join("");
   return /* @__PURE__ */ jsx("div", { style: { display: "flex", justifyContent: "flex-start" }, className: "sna-msg-bubble", children: /* @__PURE__ */ jsxs(
     "div",
