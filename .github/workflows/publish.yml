@@ -29,8 +29,14 @@ jobs:
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          # npm packages
           cd packages/core && npm version "$VERSION" --no-git-tag-version
           cd ../react && npm version "$VERSION" --no-git-tag-version
+          cd ../..
+          # plugin
+          node -e "const f='plugins/sna-builder/.claude-plugin/plugin.json';const j=JSON.parse(require('fs').readFileSync(f));j.version='$VERSION';require('fs').writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
+          # marketplace
+          node -e "const f='.claude-plugin/marketplace.json';const j=JSON.parse(require('fs').readFileSync(f));j.plugins.forEach(p=>p.version='$VERSION');require('fs').writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
 
       - name: Build
         run: |
