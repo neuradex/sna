@@ -1,5 +1,6 @@
 import { useSkillEvents } from "./use-skill-events.js";
 import { useSna } from "./use-sna.js";
+import { useSnaClient } from "./use-sna-client.js";
 import { useAgent } from "./use-agent.js";
 import { useResponsiveChat } from "./use-responsive-chat.js";
 import { useSessionManager } from "./use-session-manager.js";
@@ -8,5 +9,6 @@ export {
   useResponsiveChat,
   useSessionManager,
   useSkillEvents,
-  useSna
+  useSna,
+  useSnaClient
 };

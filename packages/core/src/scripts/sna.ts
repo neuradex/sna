@@ -724,6 +724,16 @@ Run "sna help submit" for data submission patterns.`);
       console.log();
       cmdUp();
       break;
+    case "gen":
+      if (args[0] === "client") {
+        // Delegate to gen-client script
+        const { execSync: exec } = require("child_process");
+        const genScript = path.join(__dirname, "gen-client.js");
+        exec(`node "${genScript}" ${args.slice(1).join(" ")}`, { stdio: "inherit", cwd: ROOT });
+      } else {
+        console.log("Usage: sna gen client [--out <path>] [--skills-dir <path>]");
+      }
+      break;
     default:
       printHelp();
   }
