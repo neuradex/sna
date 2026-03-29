@@ -27,6 +27,7 @@ jobs:
       - name: Set version and commit
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
+          VERSION="${VERSION#.}"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           npx tsx scripts/set-version.ts "$VERSION"
           git config user.name "github-actions[bot]"
