@@ -12,7 +12,6 @@ const SNA_API_PID_FILE = path.join(STATE_DIR, "sna-api.pid");
 const SNA_API_PORT_FILE = path.join(STATE_DIR, "sna-api.port");
 const SNA_API_LOG_FILE = path.join(STATE_DIR, "sna-api.log");
 const PORT = process.env.PORT ?? "3000";
-const DB_PATH = path.join(ROOT, "data/app.db");
 const CLAUDE_PATH_FILE = path.join(STATE_DIR, "claude-path");
 const SNA_CORE_DIR = path.join(ROOT, "node_modules/@sna-sdk/core");
 function ensureStateDir() {
@@ -218,12 +217,14 @@ function cmdUp() {
     step("Dependencies ready");
   }
   cmdInit();
-  if (!fs.existsSync(DB_PATH)) {
-    process.stdout.write("  \u2026  Setting up database");
-    execSync("pnpm db:init", { cwd: ROOT, stdio: "pipe" });
-    console.log("\r  \u2713  Database initialized              ");
-  } else {
-    step("Database ready");
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+    if (pkg.scripts?.["db:init"]) {
+      process.stdout.write("  \u2026  Setting up database");
+      execSync("pnpm db:init", { cwd: ROOT, stdio: "pipe" });
+      console.log("\r  \u2713  Database initialized              ");
+    }
+  } catch {
   }
   if (isPortInUse(PORT)) {
     process.stdout.write(`  \u2026  Port ${PORT} busy \u2014 freeing`);
@@ -357,12 +358,13 @@ function cmdStatus() {
     console.log(`  SNA API      \u2717  stopped`);
     if (snaApiPid) clearSnaApiState();
   }
-  if (fs.existsSync(DB_PATH)) {
-    const stat = fs.statSync(DB_PATH);
+  const snaDbPath = path.join(ROOT, "data/sna.db");
+  if (fs.existsSync(snaDbPath)) {
+    const stat = fs.statSync(snaDbPath);
     const kb = (stat.size / 1024).toFixed(1);
-    console.log(`  Database     \u2713  ${kb} KB  (${DB_PATH})`);
+    console.log(`  SDK DB       \u2713  ${kb} KB  (${snaDbPath})`);
   } else {
-    console.log(`  Database     \u2717  not initialized`);
+    console.log(`  SDK DB       \u2014  not yet created (auto-initializes on first use)`);
   }
   console.log("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
 }

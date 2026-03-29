@@ -27,7 +27,6 @@ const SNA_API_PORT_FILE = path.join(STATE_DIR, "sna-api.port");
 const SNA_API_LOG_FILE = path.join(STATE_DIR, "sna-api.log");
 
 const PORT = process.env.PORT ?? "3000";
-const DB_PATH = path.join(ROOT, "data/app.db");
 const CLAUDE_PATH_FILE = path.join(STATE_DIR, "claude-path");
 
 const SNA_CORE_DIR = path.join(ROOT, "node_modules/@sna-sdk/core");
@@ -272,13 +271,17 @@ function cmdUp() {
   // 4. Init .claude/settings.json
   cmdInit();
 
-  // 5. Init DB if needed
-  if (!fs.existsSync(DB_PATH)) {
-    process.stdout.write("  …  Setting up database");
-    execSync("pnpm db:init", { cwd: ROOT, stdio: "pipe" });
-    console.log("\r  ✓  Database initialized              ");
-  } else {
-    step("Database ready");
+  // 5. Run app's db:init if defined (optional — app manages its own DB)
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+    if (pkg.scripts?.["db:init"]) {
+      process.stdout.write("  …  Setting up database");
+      execSync("pnpm db:init", { cwd: ROOT, stdio: "pipe" });
+      console.log("\r  ✓  Database initialized              ");
+    }
+    // SDK's sna.db is auto-initialized by getDb() — no action needed
+  } catch {
+    // db:init not found or failed — non-fatal
   }
 
   // 5. Kill anything already on the web port
@@ -425,12 +428,13 @@ function cmdStatus() {
     if (snaApiPid) clearSnaApiState();
   }
 
-  if (fs.existsSync(DB_PATH)) {
-    const stat = fs.statSync(DB_PATH);
+  const snaDbPath = path.join(ROOT, "data/sna.db");
+  if (fs.existsSync(snaDbPath)) {
+    const stat = fs.statSync(snaDbPath);
     const kb = (stat.size / 1024).toFixed(1);
-    console.log(`  Database     ✓  ${kb} KB  (${DB_PATH})`);
+    console.log(`  SDK DB       ✓  ${kb} KB  (${snaDbPath})`);
   } else {
-    console.log(`  Database     ✗  not initialized`);
+    console.log(`  SDK DB       —  not yet created (auto-initializes on first use)`);
   }
 
   console.log("────────────────────────────────");
