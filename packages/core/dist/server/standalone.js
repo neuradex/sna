@@ -15,11 +15,20 @@ import { createRequire } from "module";
 import fs from "fs";
 import path from "path";
 var DB_PATH = path.join(process.cwd(), "data/sna.db");
+var NATIVE_DIR = path.join(process.cwd(), ".sna/native");
 var _db = null;
+function loadBetterSqlite3() {
+  const nativeEntry = path.join(NATIVE_DIR, "node_modules", "better-sqlite3");
+  if (fs.existsSync(nativeEntry)) {
+    const req2 = createRequire(path.join(NATIVE_DIR, "noop.js"));
+    return req2("better-sqlite3");
+  }
+  const req = createRequire(import.meta.url);
+  return req("better-sqlite3");
+}
 function getDb() {
   if (!_db) {
-    const req = createRequire(import.meta.url);
-    const BetterSqlite3 = req("better-sqlite3");
+    const BetterSqlite3 = loadBetterSqlite3();
     const dir = path.dirname(DB_PATH);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     _db = new BetterSqlite3(DB_PATH);
@@ -1555,7 +1564,8 @@ try {
   if (err2.message?.includes("NODE_MODULE_VERSION")) {
     console.error(`
 \u2717  better-sqlite3 was compiled for a different Node.js version.`);
-    console.error(`   Run: pnpm rebuild better-sqlite3
+    console.error(`   This usually happens when electron-rebuild overwrites the native binary.`);
+    console.error(`   Fix: run "sna api:up" which auto-installs an isolated copy in .sna/native/
 `);
   } else {
     console.error(`

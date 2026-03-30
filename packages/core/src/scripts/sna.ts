@@ -34,6 +34,7 @@ const PORT = process.env.PORT ?? "3000";
 const CLAUDE_PATH_FILE = path.join(STATE_DIR, "claude-path");
 
 const SNA_CORE_DIR = path.join(ROOT, "node_modules/@sna-sdk/core");
+const NATIVE_DIR = path.join(STATE_DIR, "native");
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -115,8 +116,72 @@ async function checkSnaApiHealth(port: string): Promise<boolean> {
  *   - Port occupied (non-SNA) → error + exit 1
  *   - Not running             → spawn standalone.js as background daemon
  */
+/**
+ * Ensure better-sqlite3 is installed in .sna/native/ for system Node.js.
+ * This isolates the native binary from the host app's node_modules,
+ * preventing electron-rebuild from clobbering it.
+ */
+function ensureNativeDeps() {
+  const marker = path.join(NATIVE_DIR, "node_modules", "better-sqlite3", "build", "Release", "better_sqlite3.node");
+
+  // Already installed — verify it loads with current Node.js
+  if (fs.existsSync(marker)) {
+    try {
+      const { createRequire } = require("module");
+      const req = createRequire(path.join(NATIVE_DIR, "noop.js"));
+      const BS3 = req("better-sqlite3");
+      new BS3(":memory:").close();
+      return; // Works
+    } catch (err: any) {
+      if (!err.message?.includes("NODE_MODULE_VERSION")) return; // non-version error, keep going
+      // Version mismatch — reinstall below
+      step("Native binary version mismatch — reinstalling...");
+    }
+  }
+
+  // Resolve the version from SDK's own package.json
+  let version: string;
+  try {
+    const pkgPath = require.resolve("better-sqlite3/package.json", { paths: [SNA_CORE_DIR, ROOT] });
+    version = JSON.parse(fs.readFileSync(pkgPath, "utf8")).version;
+  } catch {
+    version = "^12.0.0"; // safe fallback
+  }
+
+  step(`Installing isolated better-sqlite3@${version} in .sna/native/`);
+  fs.mkdirSync(NATIVE_DIR, { recursive: true });
+  fs.writeFileSync(path.join(NATIVE_DIR, "package.json"), JSON.stringify({
+    name: "sna-native-deps",
+    private: true,
+    dependencies: { "better-sqlite3": version },
+  }));
+
+  try {
+    execSync("npm install --no-package-lock --ignore-scripts", { cwd: NATIVE_DIR, stdio: "pipe" });
+    // Download prebuilt binary for current Node.js
+    execSync("npx --yes prebuild-install -r napi", {
+      cwd: path.join(NATIVE_DIR, "node_modules", "better-sqlite3"),
+      stdio: "pipe",
+    });
+    step("Native deps ready");
+  } catch (err: any) {
+    // prebuild-install may fail — try node-gyp rebuild as fallback
+    try {
+      execSync("npm rebuild better-sqlite3", { cwd: NATIVE_DIR, stdio: "pipe" });
+      step("Native deps ready (compiled from source)");
+    } catch {
+      console.error(`\n✗  Failed to install isolated better-sqlite3: ${err.message}`);
+      console.error(`   Try manually: cd .sna/native && npm install\n`);
+      process.exit(1);
+    }
+  }
+}
+
 async function cmdApiUp() {
   const standaloneEntry = path.join(SNA_CORE_DIR, "dist/server/standalone.js");
+
+  // 0. Ensure native dependencies are available for system Node.js
+  ensureNativeDeps();
 
   // 1. Check if we already have a running instance for this project
   const existingPort = process.env.SNA_PORT ?? readSnaApiPort();

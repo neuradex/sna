@@ -16,6 +16,7 @@ const SNA_API_LOG_FILE = path.join(STATE_DIR, "sna-api.log");
 const PORT = process.env.PORT ?? "3000";
 const CLAUDE_PATH_FILE = path.join(STATE_DIR, "claude-path");
 const SNA_CORE_DIR = path.join(ROOT, "node_modules/@sna-sdk/core");
+const NATIVE_DIR = path.join(STATE_DIR, "native");
 function ensureStateDir() {
   if (!fs.existsSync(STATE_DIR)) fs.mkdirSync(STATE_DIR, { recursive: true });
 }
@@ -76,8 +77,57 @@ async function checkSnaApiHealth(port) {
     return false;
   }
 }
+function ensureNativeDeps() {
+  const marker = path.join(NATIVE_DIR, "node_modules", "better-sqlite3", "build", "Release", "better_sqlite3.node");
+  if (fs.existsSync(marker)) {
+    try {
+      const { createRequire } = require("module");
+      const req = createRequire(path.join(NATIVE_DIR, "noop.js"));
+      const BS3 = req("better-sqlite3");
+      new BS3(":memory:").close();
+      return;
+    } catch (err) {
+      if (!err.message?.includes("NODE_MODULE_VERSION")) return;
+      step("Native binary version mismatch \u2014 reinstalling...");
+    }
+  }
+  let version;
+  try {
+    const pkgPath = require.resolve("better-sqlite3/package.json", { paths: [SNA_CORE_DIR, ROOT] });
+    version = JSON.parse(fs.readFileSync(pkgPath, "utf8")).version;
+  } catch {
+    version = "^12.0.0";
+  }
+  step(`Installing isolated better-sqlite3@${version} in .sna/native/`);
+  fs.mkdirSync(NATIVE_DIR, { recursive: true });
+  fs.writeFileSync(path.join(NATIVE_DIR, "package.json"), JSON.stringify({
+    name: "sna-native-deps",
+    private: true,
+    dependencies: { "better-sqlite3": version }
+  }));
+  try {
+    execSync("npm install --no-package-lock --ignore-scripts", { cwd: NATIVE_DIR, stdio: "pipe" });
+    execSync("npx --yes prebuild-install -r napi", {
+      cwd: path.join(NATIVE_DIR, "node_modules", "better-sqlite3"),
+      stdio: "pipe"
+    });
+    step("Native deps ready");
+  } catch (err) {
+    try {
+      execSync("npm rebuild better-sqlite3", { cwd: NATIVE_DIR, stdio: "pipe" });
+      step("Native deps ready (compiled from source)");
+    } catch {
+      console.error(`
+\u2717  Failed to install isolated better-sqlite3: ${err.message}`);
+      console.error(`   Try manually: cd .sna/native && npm install
+`);
+      process.exit(1);
+    }
+  }
+}
 async function cmdApiUp() {
   const standaloneEntry = path.join(SNA_CORE_DIR, "dist/server/standalone.js");
+  ensureNativeDeps();
   const existingPort = process.env.SNA_PORT ?? readSnaApiPort();
   if (existingPort && isPortInUse(existingPort)) {
     const healthy = await checkSnaApiHealth(existingPort);

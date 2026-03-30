@@ -5,15 +5,35 @@ import path from "path";
 
 const DB_PATH = path.join(process.cwd(), "data/sna.db");
 
+/**
+ * Directory for isolated native dependencies.
+ * `sna api:up` installs better-sqlite3 here, outside the host app's
+ * node_modules tree. This prevents electron-rebuild from clobbering
+ * the binary — the SNA API server always uses system Node.js.
+ */
+const NATIVE_DIR = path.join(process.cwd(), ".sna/native");
+
 let _db: Database.Database | null = null;
+
+/**
+ * Load better-sqlite3 from the isolated .sna/native/ directory.
+ * Falls back to SDK's own node_modules only if .sna/native/ doesn't exist
+ * (e.g., during SDK development or `pnpm build`).
+ */
+function loadBetterSqlite3(): typeof Database {
+  const nativeEntry = path.join(NATIVE_DIR, "node_modules", "better-sqlite3");
+  if (fs.existsSync(nativeEntry)) {
+    const req = createRequire(path.join(NATIVE_DIR, "noop.js"));
+    return req("better-sqlite3");
+  }
+  // Fallback for SDK development (no .sna/native/) or DB init scripts
+  const req = createRequire(import.meta.url);
+  return req("better-sqlite3");
+}
 
 export function getDb(): Database.Database {
   if (!_db) {
-    // Resolve better-sqlite3 from SDK's own node_modules (not consumer's).
-    // This avoids NODE_MODULE_VERSION conflicts when the consumer uses
-    // a different Node.js (e.g., Electron).
-    const req = createRequire(import.meta.url);
-    const BetterSqlite3: typeof Database = req("better-sqlite3");
+    const BetterSqlite3 = loadBetterSqlite3();
     const dir = path.dirname(DB_PATH);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     _db = new BetterSqlite3(DB_PATH);

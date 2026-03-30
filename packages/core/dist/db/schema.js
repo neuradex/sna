@@ -2,11 +2,20 @@ import { createRequire } from "node:module";
 import fs from "fs";
 import path from "path";
 const DB_PATH = path.join(process.cwd(), "data/sna.db");
+const NATIVE_DIR = path.join(process.cwd(), ".sna/native");
 let _db = null;
+function loadBetterSqlite3() {
+  const nativeEntry = path.join(NATIVE_DIR, "node_modules", "better-sqlite3");
+  if (fs.existsSync(nativeEntry)) {
+    const req2 = createRequire(path.join(NATIVE_DIR, "noop.js"));
+    return req2("better-sqlite3");
+  }
+  const req = createRequire(import.meta.url);
+  return req("better-sqlite3");
+}
 function getDb() {
   if (!_db) {
-    const req = createRequire(import.meta.url);
-    const BetterSqlite3 = req("better-sqlite3");
+    const BetterSqlite3 = loadBetterSqlite3();
     const dir = path.dirname(DB_PATH);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     _db = new BetterSqlite3(DB_PATH);

@@ -25,7 +25,8 @@ try {
 } catch (err: any) {
   if (err.message?.includes("NODE_MODULE_VERSION")) {
     console.error(`\n✗  better-sqlite3 was compiled for a different Node.js version.`);
-    console.error(`   Run: pnpm rebuild better-sqlite3\n`);
+    console.error(`   This usually happens when electron-rebuild overwrites the native binary.`);
+    console.error(`   Fix: run "sna api:up" which auto-installs an isolated copy in .sna/native/\n`);
   } else {
     console.error(`\n✗  Database initialization failed: ${err.message}\n`);
   }
