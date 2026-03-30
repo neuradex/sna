@@ -11,6 +11,8 @@
  *   POST /sessions             — create a new session
  *   GET  /sessions             — list all sessions
  *   DELETE /sessions/:id       — remove a session
+ *
+ *   POST /run-once             — one-shot: spawn → execute → return result → cleanup
  */
 
 import { Hono } from "hono";
@@ -26,6 +28,95 @@ import { SessionManager } from "../session-manager.js";
 /** Helper: read session ID from query string, default "default". */
 function getSessionId(c: { req: { query: (k: string) => string | undefined } }): string {
   return c.req.query("session") ?? "default";
+}
+
+// ── run-once shared logic ─────────────────────────────────────────
+
+const DEFAULT_RUN_ONCE_TIMEOUT = 120_000; // 2 minutes
+
+export interface RunOnceOptions {
+  message: string;
+  model?: string;
+  systemPrompt?: string;
+  appendSystemPrompt?: string;
+  permissionMode?: string;
+  cwd?: string;
+  timeout?: number;
+  provider?: string;
+  extraArgs?: string[];
+}
+
+export interface RunOnceResult {
+  result: string;
+  usage: Record<string, unknown> | null;
+}
+
+/**
+ * One-shot agent execution: create temp session → spawn → wait for result → cleanup.
+ * Used by both HTTP POST /run-once and WS agent.run-once.
+ */
+export async function runOnce(
+  sessionManager: SessionManager,
+  opts: RunOnceOptions,
+): Promise<RunOnceResult> {
+  const sessionId = `run-once-${crypto.randomUUID().slice(0, 8)}`;
+  const timeout = opts.timeout ?? DEFAULT_RUN_ONCE_TIMEOUT;
+
+  const session = sessionManager.createSession({
+    id: sessionId,
+    label: "run-once",
+    cwd: opts.cwd ?? process.cwd(),
+  });
+
+  const provider = getProvider(opts.provider ?? "claude-code");
+
+  const extraArgs: string[] = opts.extraArgs ? [...opts.extraArgs] : [];
+  if (opts.systemPrompt) extraArgs.push("--system-prompt", opts.systemPrompt);
+  if (opts.appendSystemPrompt) extraArgs.push("--append-system-prompt", opts.appendSystemPrompt);
+
+  const proc = provider.spawn({
+    cwd: session.cwd,
+    prompt: opts.message,
+    model: opts.model ?? "claude-sonnet-4-6",
+    permissionMode: (opts.permissionMode as any) ?? "bypassPermissions",
+    env: { SNA_SESSION_ID: sessionId },
+    extraArgs: extraArgs.length > 0 ? extraArgs : undefined,
+  });
+
+  sessionManager.setProcess(sessionId, proc);
+
+  try {
+    const result = await new Promise<RunOnceResult>((resolve, reject) => {
+      const texts: string[] = [];
+      let usage: Record<string, unknown> | null = null;
+
+      const timer = setTimeout(() => {
+        reject(new Error(`run-once timed out after ${timeout}ms`));
+      }, timeout);
+
+      const unsub = sessionManager.onSessionEvent(sessionId, (_cursor, e) => {
+        if (e.type === "assistant" && e.message) {
+          texts.push(e.message);
+        }
+        if (e.type === "complete") {
+          clearTimeout(timer);
+          unsub();
+          usage = (e.data as Record<string, unknown>) ?? null;
+          resolve({ result: texts.join("\n"), usage });
+        }
+        if (e.type === "error") {
+          clearTimeout(timer);
+          unsub();
+          reject(new Error(e.message ?? "Agent error"));
+        }
+      });
+    });
+
+    return result;
+  } finally {
+    sessionManager.killSession(sessionId);
+    sessionManager.removeSession(sessionId);
+  }
 }
 
 export function createAgentRoutes(sessionManager: SessionManager) {
@@ -81,6 +172,23 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     }
     logger.log("route", `DELETE /sessions/${id} → removed`);
     return c.json({ status: "removed" });
+  });
+
+  // ── One-shot execution ─────────────────────────────────────────
+
+  // POST /run-once — spawn → execute → return result → cleanup
+  app.post("/run-once", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as RunOnceOptions;
+    if (!body.message) {
+      return c.json({ status: "error", message: "message is required" }, 400);
+    }
+    try {
+      const result = await runOnce(sessionManager, body);
+      return c.json(result);
+    } catch (e: any) {
+      logger.err("err", `POST /run-once → ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 500);
+    }
   });
 
   // ── Agent lifecycle (session-scoped) ──────────────────────────

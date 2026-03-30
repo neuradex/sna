@@ -21,6 +21,7 @@
  *   agent.status      { session? }
  *   agent.subscribe   { session?, since? }
  *   agent.unsubscribe { session? }
+ *   agent.run-once    { message, model?, systemPrompt?, permissionMode?, timeout? }
  *
  *   events.subscribe  { since? }
  *   events.unsubscribe {}
@@ -43,6 +44,7 @@ import type { AgentEvent } from "../core/providers/types.js";
 import { getProvider } from "../core/providers/index.js";
 import { getDb } from "../db/schema.js";
 import { logger } from "../lib/logger.js";
+import { runOnce, type RunOnceOptions } from "./routes/agent.js";
 import type { SessionManager } from "./session-manager.js";
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -156,6 +158,9 @@ function handleMessage(
       return handleAgentKill(ws, msg, sm);
     case "agent.status":
       return handleAgentStatus(ws, msg, sm);
+    case "agent.run-once":
+      handleAgentRunOnce(ws, msg, sm);
+      return;
 
     // ── Agent event subscription ──────────────────────
     case "agent.subscribe":
@@ -314,6 +319,16 @@ function handleAgentStatus(ws: WebSocket, msg: WsRequest, sm: SessionManager): v
     sessionId: session?.process?.sessionId ?? null,
     eventCount: session?.eventCounter ?? 0,
   });
+}
+
+async function handleAgentRunOnce(ws: WebSocket, msg: WsRequest, sm: SessionManager): Promise<void> {
+  if (!msg.message) return replyError(ws, msg, "message is required");
+  try {
+    const { result, usage } = await runOnce(sm, msg as unknown as RunOnceOptions);
+    reply(ws, msg, { result, usage });
+  } catch (e: any) {
+    replyError(ws, msg, e.message);
+  }
 }
 
 // ── Agent event subscription handlers ─────────────────────────────

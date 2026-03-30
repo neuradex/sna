@@ -580,6 +580,58 @@ function getProvider(name = "claude-code") {
 function getSessionId(c) {
   return c.req.query("session") ?? "default";
 }
+var DEFAULT_RUN_ONCE_TIMEOUT = 12e4;
+async function runOnce(sessionManager2, opts) {
+  const sessionId = `run-once-${crypto.randomUUID().slice(0, 8)}`;
+  const timeout = opts.timeout ?? DEFAULT_RUN_ONCE_TIMEOUT;
+  const session = sessionManager2.createSession({
+    id: sessionId,
+    label: "run-once",
+    cwd: opts.cwd ?? process.cwd()
+  });
+  const provider2 = getProvider(opts.provider ?? "claude-code");
+  const extraArgs = opts.extraArgs ? [...opts.extraArgs] : [];
+  if (opts.systemPrompt) extraArgs.push("--system-prompt", opts.systemPrompt);
+  if (opts.appendSystemPrompt) extraArgs.push("--append-system-prompt", opts.appendSystemPrompt);
+  const proc = provider2.spawn({
+    cwd: session.cwd,
+    prompt: opts.message,
+    model: opts.model ?? "claude-sonnet-4-6",
+    permissionMode: opts.permissionMode ?? "bypassPermissions",
+    env: { SNA_SESSION_ID: sessionId },
+    extraArgs: extraArgs.length > 0 ? extraArgs : void 0
+  });
+  sessionManager2.setProcess(sessionId, proc);
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const texts = [];
+      let usage = null;
+      const timer = setTimeout(() => {
+        reject(new Error(`run-once timed out after ${timeout}ms`));
+      }, timeout);
+      const unsub = sessionManager2.onSessionEvent(sessionId, (_cursor, e) => {
+        if (e.type === "assistant" && e.message) {
+          texts.push(e.message);
+        }
+        if (e.type === "complete") {
+          clearTimeout(timer);
+          unsub();
+          usage = e.data ?? null;
+          resolve({ result: texts.join("\n"), usage });
+        }
+        if (e.type === "error") {
+          clearTimeout(timer);
+          unsub();
+          reject(new Error(e.message ?? "Agent error"));
+        }
+      });
+    });
+    return result;
+  } finally {
+    sessionManager2.killSession(sessionId);
+    sessionManager2.removeSession(sessionId);
+  }
+}
 function createAgentRoutes(sessionManager2) {
   const app = new Hono();
   app.post("/sessions", async (c) => {
@@ -618,6 +670,19 @@ function createAgentRoutes(sessionManager2) {
     }
     logger.log("route", `DELETE /sessions/${id} \u2192 removed`);
     return c.json({ status: "removed" });
+  });
+  app.post("/run-once", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.message) {
+      return c.json({ status: "error", message: "message is required" }, 400);
+    }
+    try {
+      const result = await runOnce(sessionManager2, body);
+      return c.json(result);
+    } catch (e) {
+      logger.err("err", `POST /run-once \u2192 ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 500);
+    }
   });
   app.post("/start", async (c) => {
     const sessionId = getSessionId(c);
@@ -1147,6 +1212,9 @@ function handleMessage(ws, msg, sm, state) {
       return handleAgentKill(ws, msg, sm);
     case "agent.status":
       return handleAgentStatus(ws, msg, sm);
+    case "agent.run-once":
+      handleAgentRunOnce(ws, msg, sm);
+      return;
     // ── Agent event subscription ──────────────────────
     case "agent.subscribe":
       return handleAgentSubscribe(ws, msg, sm, state);
@@ -1277,6 +1345,15 @@ function handleAgentStatus(ws, msg, sm) {
     sessionId: session?.process?.sessionId ?? null,
     eventCount: session?.eventCounter ?? 0
   });
+}
+async function handleAgentRunOnce(ws, msg, sm) {
+  if (!msg.message) return replyError(ws, msg, "message is required");
+  try {
+    const { result, usage } = await runOnce(sm, msg);
+    reply(ws, msg, { result, usage });
+  } catch (e) {
+    replyError(ws, msg, e.message);
+  }
 }
 function handleAgentSubscribe(ws, msg, sm, state) {
   const sessionId = msg.session ?? "default";

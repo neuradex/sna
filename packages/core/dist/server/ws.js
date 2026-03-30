@@ -2,6 +2,7 @@ import { WebSocketServer } from "ws";
 import { getProvider } from "../core/providers/index.js";
 import { getDb } from "../db/schema.js";
 import { logger } from "../lib/logger.js";
+import { runOnce } from "./routes/agent.js";
 function send(ws, data) {
   if (ws.readyState === ws.OPEN) {
     ws.send(JSON.stringify(data));
@@ -72,6 +73,9 @@ function handleMessage(ws, msg, sm, state) {
       return handleAgentKill(ws, msg, sm);
     case "agent.status":
       return handleAgentStatus(ws, msg, sm);
+    case "agent.run-once":
+      handleAgentRunOnce(ws, msg, sm);
+      return;
     // ── Agent event subscription ──────────────────────
     case "agent.subscribe":
       return handleAgentSubscribe(ws, msg, sm, state);
@@ -202,6 +206,15 @@ function handleAgentStatus(ws, msg, sm) {
     sessionId: session?.process?.sessionId ?? null,
     eventCount: session?.eventCounter ?? 0
   });
+}
+async function handleAgentRunOnce(ws, msg, sm) {
+  if (!msg.message) return replyError(ws, msg, "message is required");
+  try {
+    const { result, usage } = await runOnce(sm, msg);
+    reply(ws, msg, { result, usage });
+  } catch (e) {
+    replyError(ws, msg, e.message);
+  }
 }
 function handleAgentSubscribe(ws, msg, sm, state) {
   const sessionId = msg.session ?? "default";

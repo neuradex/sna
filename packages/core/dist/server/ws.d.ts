@@ -26,6 +26,7 @@ import '../core/providers/types.js';
  *   agent.status      { session? }
  *   agent.subscribe   { session?, since? }
  *   agent.unsubscribe { session? }
+ *   agent.run-once    { message, model?, systemPrompt?, permissionMode?, timeout? }
  *
  *   events.subscribe  { since? }
  *   events.unsubscribe {}
