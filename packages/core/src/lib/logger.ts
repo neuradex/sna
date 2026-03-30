@@ -22,12 +22,13 @@ const tags = {
   stdin:  chalk.bold.green(" IN  "),
   stdout: chalk.bold.yellow(" OUT "),
   route:  chalk.bold.blue(" API "),
+  ws:     chalk.bold.green(" WS  "),
   err:    chalk.bold.red(" ERR "),
 } as const;
 
 const tagPlain: Record<string, string> = {
   sna: " SNA ", req: " REQ ", agent: " AGT ", stdin: " IN  ",
-  stdout: " OUT ", route: " API ", err: " ERR ",
+  stdout: " OUT ", route: " API ", ws: " WS  ", err: " ERR ",
 };
 
 type Tag = keyof typeof tags;

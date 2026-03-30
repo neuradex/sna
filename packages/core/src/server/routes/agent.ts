@@ -260,13 +260,6 @@ export function createAgentRoutes(sessionManager: SessionManager) {
 
   // ── Permission approval flow ────────────────────────────────────
 
-  // In-memory pending permission requests: sessionId → { resolve, request }
-  const pendingPermissions = new Map<string, {
-    resolve: (approved: boolean) => void;
-    request: Record<string, unknown>;
-    createdAt: number;
-  }>();
-
   // POST /permission-request — called by hook.ts (sync) to submit a request and wait
   app.post("/permission-request", async (c) => {
     const sessionId = getSessionId(c);
@@ -277,27 +270,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
 
     logger.log("route", `POST /permission-request?session=${sessionId} → ${body.tool_name}`);
 
-    // Set session state to permission
-    const session = sessionManager.getSession(sessionId);
-    if (session) session.state = "permission";
-
-    // Create a promise that will be resolved when the UI responds
-    const result = await new Promise<boolean>((resolve) => {
-      pendingPermissions.set(sessionId, {
-        resolve,
-        request: body,
-        createdAt: Date.now(),
-      });
-
-      // Timeout: auto-deny after 5 minutes
-      setTimeout(() => {
-        if (pendingPermissions.has(sessionId)) {
-          pendingPermissions.delete(sessionId);
-          resolve(false);
-        }
-      }, 300_000);
-    });
-
+    const result = await sessionManager.createPendingPermission(sessionId, body);
     return c.json({ approved: result });
   });
 
@@ -307,16 +280,11 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     const body = (await c.req.json().catch(() => ({}))) as { approved?: boolean };
     const approved = body.approved ?? false;
 
-    const pending = pendingPermissions.get(sessionId);
-    if (!pending) {
+    const resolved = sessionManager.resolvePendingPermission(sessionId, approved);
+    if (!resolved) {
       return c.json({ status: "error", message: "No pending permission request" }, 404);
     }
 
-    pending.resolve(approved);
-    pendingPermissions.delete(sessionId);
-    // Restore to processing (tool will execute or agent will continue)
-    const session = sessionManager.getSession(sessionId);
-    if (session) session.state = "processing";
     logger.log("route", `POST /permission-respond?session=${sessionId} → ${approved ? "approved" : "denied"}`);
     return c.json({ status: approved ? "approved" : "denied" });
   });
@@ -326,24 +294,15 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     const sessionId = c.req.query("session");
 
     if (sessionId) {
-      const pending = pendingPermissions.get(sessionId);
+      const pending = sessionManager.getPendingPermission(sessionId);
       if (!pending) return c.json({ pending: null });
       return c.json({
-        pending: {
-          sessionId,
-          request: pending.request,
-          createdAt: pending.createdAt,
-        },
+        pending: { sessionId, ...pending },
       });
     }
 
     // No session specified — return all pending
-    const all = Array.from(pendingPermissions.entries()).map(([id, p]) => ({
-      sessionId: id,
-      request: p.request,
-      createdAt: p.createdAt,
-    }));
-    return c.json({ pending: all });
+    return c.json({ pending: sessionManager.getAllPendingPermissions() });
   });
 
   return app;

@@ -14,6 +14,7 @@ import { cors } from "hono/cors";
 import chalk from "chalk";
 import { createSnaApp } from "./index.js";
 import { SessionManager } from "./session-manager.js";
+import { attachWebSocket } from "./ws.js";
 import { getProvider } from "../core/providers/index.js";
 import { logger } from "../lib/logger.js";
 
@@ -108,8 +109,12 @@ process.on("uncaughtException", (err) => {
 server = serve({ fetch: root.fetch, port }, () => {
   console.log("");
   logger.log("sna", chalk.green.bold(`API server ready → http://localhost:${port}`));
+  logger.log("sna", chalk.dim(`WebSocket endpoint → ws://localhost:${port}/ws`));
   console.log("");
 });
+
+// 4. Attach WebSocket on the same HTTP server
+attachWebSocket(server, sessionManager);
 
 agentProcess.on("event", (e) => {
   if (e.type === "init") {

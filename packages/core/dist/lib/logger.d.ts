@@ -5,6 +5,7 @@ declare const tags: {
     readonly stdin: string;
     readonly stdout: string;
     readonly route: string;
+    readonly ws: string;
     readonly err: string;
 };
 type Tag = keyof typeof tags;

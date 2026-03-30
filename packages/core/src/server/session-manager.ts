@@ -39,12 +39,21 @@ export interface SessionManagerOptions {
   maxSessions?: number;
 }
 
+interface PendingPermission {
+  resolve: (approved: boolean) => void;
+  request: Record<string, unknown>;
+  createdAt: number;
+}
+
 const DEFAULT_MAX_SESSIONS = 5;
 const MAX_EVENT_BUFFER = 500;
+const PERMISSION_TIMEOUT_MS = 300_000; // 5 minutes
 
 export class SessionManager {
   private sessions = new Map<string, Session>();
   private maxSessions: number;
+  private eventListeners = new Map<string, Set<(cursor: number, event: AgentEvent) => void>>();
+  private pendingPermissions = new Map<string, PendingPermission>();
 
   constructor(options: SessionManagerOptions = {}) {
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
@@ -119,8 +128,76 @@ export class SessionManager {
       }
       // Persist assistant messages to chat_messages
       this.persistEvent(sessionId, e);
+      // Notify real-time listeners (WebSocket subscribers)
+      const listeners = this.eventListeners.get(sessionId);
+      if (listeners) {
+        for (const cb of listeners) cb(session.eventCounter, e);
+      }
     });
   }
+
+  // ── Event pub/sub (for WebSocket) ─────────────────────────────
+
+  /** Subscribe to real-time events for a session. Returns unsubscribe function. */
+  onSessionEvent(sessionId: string, cb: (cursor: number, event: AgentEvent) => void): () => void {
+    let set = this.eventListeners.get(sessionId);
+    if (!set) {
+      set = new Set();
+      this.eventListeners.set(sessionId, set);
+    }
+    set.add(cb);
+    return () => {
+      set!.delete(cb);
+      if (set!.size === 0) this.eventListeners.delete(sessionId);
+    };
+  }
+
+  // ── Permission management ─────────────────────────────────────
+
+  /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
+  createPendingPermission(sessionId: string, request: Record<string, unknown>): Promise<boolean> {
+    const session = this.sessions.get(sessionId);
+    if (session) session.state = "permission";
+
+    return new Promise<boolean>((resolve) => {
+      this.pendingPermissions.set(sessionId, { resolve, request, createdAt: Date.now() });
+      // Auto-deny after timeout
+      setTimeout(() => {
+        if (this.pendingPermissions.has(sessionId)) {
+          this.pendingPermissions.delete(sessionId);
+          resolve(false);
+        }
+      }, PERMISSION_TIMEOUT_MS);
+    });
+  }
+
+  /** Resolve a pending permission request. Returns false if no pending request. */
+  resolvePendingPermission(sessionId: string, approved: boolean): boolean {
+    const pending = this.pendingPermissions.get(sessionId);
+    if (!pending) return false;
+    pending.resolve(approved);
+    this.pendingPermissions.delete(sessionId);
+    const session = this.sessions.get(sessionId);
+    if (session) session.state = "processing";
+    return true;
+  }
+
+  /** Get a pending permission for a specific session. */
+  getPendingPermission(sessionId: string): { request: Record<string, unknown>; createdAt: number } | null {
+    const p = this.pendingPermissions.get(sessionId);
+    return p ? { request: p.request, createdAt: p.createdAt } : null;
+  }
+
+  /** Get all pending permissions across sessions. */
+  getAllPendingPermissions(): Array<{ sessionId: string; request: Record<string, unknown>; createdAt: number }> {
+    return Array.from(this.pendingPermissions.entries()).map(([id, p]) => ({
+      sessionId: id,
+      request: p.request,
+      createdAt: p.createdAt,
+    }));
+  }
+
+  // ── Session lifecycle ─────────────────────────────────────────
 
   /** Kill the agent process in a session (session stays, can be restarted). */
   killSession(id: string): boolean {
@@ -136,6 +213,9 @@ export class SessionManager {
     const session = this.sessions.get(id);
     if (!session) return false;
     if (session.process?.alive) session.process.kill();
+    // Cleanup listeners
+    this.eventListeners.delete(id);
+    this.pendingPermissions.delete(id);
     this.sessions.delete(id);
     return true;
   }

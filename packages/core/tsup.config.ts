@@ -16,6 +16,7 @@ export default defineConfig([
       "better-sqlite3",
       "chalk",
       "js-yaml",
+      "ws",
     ],
   },
   // Standalone server — bundled single file

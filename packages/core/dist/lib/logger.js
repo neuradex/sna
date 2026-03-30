@@ -19,6 +19,7 @@ const tags = {
   stdin: chalk.bold.green(" IN  "),
   stdout: chalk.bold.yellow(" OUT "),
   route: chalk.bold.blue(" API "),
+  ws: chalk.bold.green(" WS  "),
   err: chalk.bold.red(" ERR ")
 };
 const tagPlain = {
@@ -28,6 +29,7 @@ const tagPlain = {
   stdin: " IN  ",
   stdout: " OUT ",
   route: " API ",
+  ws: " WS  ",
   err: " ERR "
 };
 function appendFile(tag, args) {

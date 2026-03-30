@@ -37,6 +37,8 @@ interface SessionManagerOptions {
 declare class SessionManager {
     private sessions;
     private maxSessions;
+    private eventListeners;
+    private pendingPermissions;
     constructor(options?: SessionManagerOptions);
     /** Create a new session. Throws if max sessions reached. */
     createSession(opts?: {
@@ -54,6 +56,23 @@ declare class SessionManager {
     }): Session;
     /** Set the agent process for a session. Subscribes to events. */
     setProcess(sessionId: string, proc: AgentProcess): void;
+    /** Subscribe to real-time events for a session. Returns unsubscribe function. */
+    onSessionEvent(sessionId: string, cb: (cursor: number, event: AgentEvent) => void): () => void;
+    /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
+    createPendingPermission(sessionId: string, request: Record<string, unknown>): Promise<boolean>;
+    /** Resolve a pending permission request. Returns false if no pending request. */
+    resolvePendingPermission(sessionId: string, approved: boolean): boolean;
+    /** Get a pending permission for a specific session. */
+    getPendingPermission(sessionId: string): {
+        request: Record<string, unknown>;
+        createdAt: number;
+    } | null;
+    /** Get all pending permissions across sessions. */
+    getAllPendingPermissions(): Array<{
+        sessionId: string;
+        request: Record<string, unknown>;
+        createdAt: number;
+    }>;
     /** Kill the agent process in a session (session stays, can be restarted). */
     killSession(id: string): boolean;
     /** Remove a session entirely. Cannot remove "default". */

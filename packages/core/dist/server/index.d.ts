@@ -7,8 +7,11 @@ export { emitRoute } from './routes/emit.js';
 export { createRunRoute } from './routes/run.js';
 export { createAgentRoutes } from './routes/agent.js';
 export { createChatRoutes } from './routes/chat.js';
+export { attachWebSocket } from './ws.js';
 import '../core/providers/types.js';
 import 'hono/utils/http-status';
+import 'ws';
+import 'http';
 
 interface SnaAppOptions {
     /** Commands available via GET /run?skill=<name> */
