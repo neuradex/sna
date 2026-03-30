@@ -89,19 +89,16 @@ User clicks → /agent/start → SDK writes "invoked" → UI updates immediately
 - `start` = skill logic has begun (from emit.js inside the skill)
 - These are separate phases, not duplicates
 
-### Chat history persistence (planned)
+### Chat history persistence
 
-Chat messages currently live in frontend `localStorage` (via Zustand persist). This will move to `sna.db`.
+Chat messages are persisted server-side in `sna.db`. The `SessionManager` automatically saves agent events (assistant messages, tool use, tool results, completions, errors) to the `chat_messages` table. User messages are persisted when sent via `POST /agent/send` or `POST /agent/start`.
 
 **Schema:**
 ```sql
-chat_sessions (id, label, type, created_at)
+chat_sessions (id, label, type, meta, created_at)
 chat_messages (id, session_id FK, role, content, skill_name, meta, created_at)
 ```
 
-**Benefits:**
-- Survives browser cache clears
-- Backend sessions and frontend messages in sync
-- Background session history preserved across page reloads
+The `meta` column on `chat_sessions` stores arbitrary JSON metadata for multi-app identification (e.g., `{ "app": "loom" }` allows apps sharing a single SNA server to identify and manage only their own sessions).
 
-**Frontend `useChatStore`** remains as a cache layer. On load, hydrate from DB instead of localStorage.
+**Frontend `useChatStore`** remains as a cache layer. On load, hydrate from DB via `GET /chat/sessions/:id/messages`.

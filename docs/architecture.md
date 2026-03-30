@@ -28,7 +28,7 @@ SNA uses **two separate SQLite databases**:
 **Schema:**
 
 ```sql
-chat_sessions (id TEXT PK, label, type, created_at)
+chat_sessions (id TEXT PK, label, type, meta, created_at)
 chat_messages (id INTEGER PK, session_id FK, role, content, skill_name, meta, created_at)
 skill_events  (id INTEGER PK, session_id FK nullable, skill, type, message, data, created_at)
 ```
@@ -107,14 +107,17 @@ CLI commands:
 - `sna gen client` — Generate typed client + `.sna/skills.json`
 
 This server provides:
+
+**HTTP Routes:**
 - `GET /health` — Health check
 - `GET /events` — SSE stream of skill_events
 - `POST /emit` — Write a skill event
 - `POST /agent/start` — Start an agent session (records `invoked` event)
 - `POST /agent/send` — Send message to agent (auto-persists to chat_messages)
 - `GET /agent/events` — Agent SSE stream
-- `POST /agent/sessions` — Create session
-- `GET /agent/sessions` — List sessions (includes `state` field)
+- `POST /agent/run-once` — One-shot execution (spawn → run → return result → cleanup)
+- `POST /agent/sessions` — Create session (supports `meta` for multi-app identification)
+- `GET /agent/sessions` — List sessions (includes `state` and `meta` fields)
 - `DELETE /agent/sessions/:id` — Remove session
 - `POST /agent/kill` — Kill agent in a session
 - `GET /agent/status` — Check session status
@@ -128,27 +131,22 @@ This server provides:
 - `POST /chat/sessions/:id/messages` — Add message
 - `DELETE /chat/sessions/:id/messages` — Clear messages
 
+**WebSocket API:**
+- `ws://host:port/ws` — Full bidirectional API wrapping all HTTP routes above
+- All session, agent, chat, permission, and skill event operations over a single connection
+- Agent events pushed instantly via pub/sub (no polling delay unlike SSE's 300ms)
+- Message protocol: `{ type: "sessions.list", rid?: "1" }` → `{ type: "sessions.list", rid: "1", sessions: [...] }`
+- Push events: `{ type: "agent.event", session, cursor, event }` and `{ type: "skill.event", data }`
+
 Applications discover the server URL via `/api/sna-port` or the default port (3099).
 
 ### Hook Script
 
-The PreToolUse hook enables the permission approval flow. It fires before every tool execution, submits a request to the SNA API, and waits for user approval from the UI:
+The PreToolUse hook enables the permission approval flow. It fires before every tool execution, submits a request to the SNA API, and waits for user approval from the UI.
 
-```json
-{
-  "hooks": {
-    "PreToolUse": [{
-      "matcher": ".*",
-      "hooks": [{
-        "type": "command",
-        "command": "node \"$CLAUDE_PROJECT_DIR\"/node_modules/@sna-sdk/core/dist/scripts/hook.js"
-      }]
-    }]
-  }
-}
-```
+The SDK auto-injects the hook via `--settings` when spawning agents (unless `bypassPermissions` is set). The hook script path is resolved via `import.meta.url` relative to the SDK's own location, so it works correctly with pnpm link, monorepo setups, and any `cwd`. Session ID is passed as a `--session=<id>` CLI arg (with `SNA_SESSION_ID` env var as fallback).
 
-The SDK auto-injects this via `--settings` when spawning agents (unless `bypassPermissions` is set). Safe tools (Read, Glob, Grep, etc.) are auto-allowed without prompting.
+Safe tools (Read, Glob, Grep, Agent, TodoRead, TodoWrite) are auto-allowed without prompting.
 
 ### Typed Client Generation
 

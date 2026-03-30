@@ -6,10 +6,13 @@ Server runtime for [Skills-Native Applications](https://github.com/neuradex/sna)
 
 - **Skill event pipeline** — emit, SSE streaming, and hook scripts
 - **Dispatch** — unified event dispatcher with validation, session lifecycle, and cleanup (`sna dispatch` CLI + programmatic API)
-- **SQLite database** — schema and `getDb()` for `skill_events`
-- **Hono server factory** — `createSnaApp()` with events, emit, agent, and run routes
+- **SQLite database** — schema and `getDb()` for `skill_events`, `chat_sessions`, `chat_messages`
+- **Hono server factory** — `createSnaApp()` with events, emit, agent, chat, and run routes
+- **WebSocket API** — `attachWebSocket()` wrapping all HTTP routes over a single WS connection
+- **One-shot execution** — `POST /agent/run-once` for single-request LLM calls
 - **Lifecycle CLI** — `sna api:up`, `sna api:down`, `sna dispatch`, `sna validate`
 - **Agent providers** — Claude Code and Codex process management
+- **Multi-session** — `SessionManager` with event pub/sub, permission management, and session metadata
 
 ## Install
 
@@ -53,10 +56,14 @@ Event types: `start` | `progress` | `milestone` | `complete` | `error`
 ### Mount server routes
 
 ```ts
-import { createSnaApp } from "@sna-sdk/core/server";
+import { createSnaApp, attachWebSocket } from "@sna-sdk/core/server";
+import { serve } from "@hono/node-server";
 
 const sna = createSnaApp();
-// Provides: GET /events (SSE), POST /emit, GET /health, POST /agent/start
+// HTTP: GET /health, GET /events (SSE), POST /emit, /agent/*, /chat/*
+const server = serve({ fetch: sna.fetch, port: 3099 });
+// WS: ws://localhost:3099/ws — all routes available over WebSocket
+attachWebSocket(server, sessionManager);
 ```
 
 ### Access the database
@@ -71,9 +78,10 @@ const db = getDb(); // SQLite instance (data/sna.db)
 
 | Import path | Contents |
 |-------------|----------|
-| `@sna-sdk/core` | `DEFAULT_SNA_PORT`, `DEFAULT_SNA_URL`, `dispatchOpen`, `dispatchSend`, `dispatchClose`, `createDispatchHandle`, `SEND_TYPES`, `loadSkillsManifest`, types |
-| `@sna-sdk/core/server` | `createSnaApp()`, route handlers, `SessionManager` |
-| `@sna-sdk/core/db/schema` | `getDb()`, `SkillEvent` type |
+| `@sna-sdk/core` | `DEFAULT_SNA_PORT`, `DEFAULT_SNA_URL`, `dispatchOpen`, `dispatchSend`, `dispatchClose`, `createDispatchHandle`, types (`AgentEvent`, `Session`, `SessionInfo`, `ChatSession`, `ChatMessage`, `SkillEvent`, etc.) |
+| `@sna-sdk/core/server` | `createSnaApp()`, `attachWebSocket()`, route handlers, `SessionManager` |
+| `@sna-sdk/core/server/routes/agent` | `createAgentRoutes()`, `runOnce()` |
+| `@sna-sdk/core/db/schema` | `getDb()`, `ChatSession`, `ChatMessage`, `SkillEvent` types |
 | `@sna-sdk/core/providers` | Agent provider factory, `ClaudeCodeProvider` |
 | `@sna-sdk/core/lib/sna-run` | `snaRun()` helper for spawning Claude Code |
 

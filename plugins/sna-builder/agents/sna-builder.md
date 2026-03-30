@@ -102,7 +102,8 @@ import { SnaSession } from "@sna-sdk/react/components/sna-session";
 - Agent responses (`assistant`, `thinking`, `tool_use`, `tool_result`, `error`) are saved automatically by `SessionManager.persistEvent()`
 
 ### Hook Script
-- Use SDK's hook.js: `node_modules/@sna-sdk/core/dist/scripts/hook.js`
+- The SDK auto-injects the PreToolUse hook via `--settings` when spawning agents
+- Hook path resolved via `import.meta.url` (works with pnpm link / monorepo setups)
 - NEVER create local `scripts/hook.ts`
 
 ### Import Paths

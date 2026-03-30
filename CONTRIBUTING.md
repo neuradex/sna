@@ -66,7 +66,7 @@ Legacy `emit.js` is a thin wrapper around dispatch for backward compatibility.
 
 ### Tech Stack
 
-- TypeScript (strict) + Hono + better-sqlite3 + React 19
+- TypeScript (strict) + Hono + better-sqlite3 + ws + React 19
 - tsup (library bundler) + pnpm 10
 - Tailwind CSS v4 + Zustand + Radix UI (tooltip)
 
@@ -82,6 +82,9 @@ Legacy `emit.js` is a thin wrapper around dispatch for backward compatibility.
 | `packages/core/src/scripts/gen-client.ts` | Typed client + `.sna/skills.json` generator |
 | `packages/core/src/lib/skill-parser.ts` | SKILL.md frontmatter parser |
 | `packages/core/src/server/index.ts` | createSnaApp() Hono factory |
+| `packages/core/src/server/session-manager.ts` | Multi-session management, event pub/sub, permission flow |
+| `packages/core/src/server/ws.ts` | WebSocket API wrapping all HTTP routes |
+| `packages/core/src/server/routes/agent.ts` | Agent lifecycle, sessions, run-once, permission routes |
 | `packages/core/src/server/routes/chat.ts` | Chat persistence CRUD routes |
 | `packages/react/src/hooks/use-skill-events.ts` | SSE subscription hook |
 | `packages/react/src/hooks/use-sna.ts` | Main hook (runSkill, runSkillInBackground) |

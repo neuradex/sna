@@ -101,6 +101,7 @@ const { createSession } = useSessionManager();
 const sessionId = await createSession({
   label: "my-project",
   cwd: "/path/to/project",
+  meta: { app: "my-app" },  // optional: identify sessions by app
 });
 ```
 
@@ -203,21 +204,9 @@ function initSchema(db: Database.Database) {
 
 ### Claude Code Settings
 
-#### .claude/settings.json
+The PreToolUse hook is auto-injected by the SDK when spawning agents via `--settings`. The hook script path is resolved via `import.meta.url` (works with pnpm link / monorepo setups). You do NOT need to manually configure `.claude/settings.json` for the hook — the SDK handles it.
 
-```json
-{
-  "hooks": {
-    "PreToolUse": [{
-      "matcher": ".*",
-      "hooks": [{
-        "type": "command",
-        "command": "node \"$CLAUDE_PROJECT_DIR\"/node_modules/@sna-sdk/core/dist/scripts/hook.js"
-      }]
-    }]
-  }
-}
-```
+If you need to add custom hooks, pass them via `extraArgs` in the agent start options. The SDK merges your hooks with its own.
 
 ### Vite Config (for source-level dev)
 
