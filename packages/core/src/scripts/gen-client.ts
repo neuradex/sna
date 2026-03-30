@@ -11,17 +11,9 @@
 import fs from "fs";
 import path from "path";
 import { scanSkills, type SkillSchema, type SkillArgDef } from "../lib/skill-parser.js";
+import { parseFlags } from "../lib/parse-flags.js";
 
 const ROOT = process.cwd();
-
-function parseFlags(args: string[]): Record<string, string> {
-  const flags: Record<string, string> = {};
-  for (let i = 0; i < args.length; i += 2) {
-    const key = args[i]?.replace(/^--/, "");
-    if (key) flags[key] = args[i + 1] ?? "";
-  }
-  return flags;
-}
 
 function tsType(argDef: SkillArgDef): string {
   switch (argDef.type) {
@@ -134,7 +126,18 @@ const outDir = path.dirname(outPath);
 if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 fs.writeFileSync(outPath, code);
 
+// Generate .sna/skills.json — single source of truth for dispatch validation
+const snaDir = path.join(ROOT, ".sna");
+if (!fs.existsSync(snaDir)) fs.mkdirSync(snaDir, { recursive: true });
+const skillsManifest: Record<string, { description: string; args: Record<string, SkillArgDef> }> = {};
+for (const s of schemas) {
+  skillsManifest[s.name] = { description: s.description, args: s.args };
+}
+const manifestPath = path.join(snaDir, "skills.json");
+fs.writeFileSync(manifestPath, JSON.stringify(skillsManifest, null, 2) + "\n");
+
 console.log(`✓ Generated ${outPath}`);
+console.log(`✓ Generated ${manifestPath}`);
 console.log(`  ${schemas.length} skills:`);
 for (const s of schemas) {
   const argCount = Object.keys(s.args).length;

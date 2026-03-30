@@ -1,13 +1,7 @@
 import type Database from "better-sqlite3";
 import { createRequire } from "node:module";
+import fs from "fs";
 import path from "path";
-
-// sna-core is symlinked in dev (node_modules/sna → ../../sna/sna-core).
-// Node resolves native modules from the script's physical location (sna-core/),
-// but better-sqlite3's native binary is only built in the consumer app's node_modules.
-// Fix: always resolve better-sqlite3 from cwd (= consumer app root).
-const require = createRequire(path.join(process.cwd(), "node_modules", "_"));
-const BetterSqlite3: typeof Database = require("better-sqlite3");
 
 const DB_PATH = path.join(process.cwd(), "data/sna.db");
 
@@ -15,6 +9,13 @@ let _db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
   if (!_db) {
+    // Resolve better-sqlite3 from SDK's own node_modules (not consumer's).
+    // This avoids NODE_MODULE_VERSION conflicts when the consumer uses
+    // a different Node.js (e.g., Electron).
+    const req = createRequire(import.meta.url);
+    const BetterSqlite3: typeof Database = req("better-sqlite3");
+    const dir = path.dirname(DB_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     _db = new BetterSqlite3(DB_PATH);
     _db.pragma("journal_mode = WAL");
     initSchema(_db);

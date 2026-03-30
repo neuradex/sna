@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { SessionInfo } from "@sna-sdk/core";
 import { useSnaContext } from "../context.js";
 
@@ -14,19 +14,27 @@ export type { SessionInfo };
  * - killSession: POST /agent/kill?session=<id>
  * - deleteSession: DELETE /agent/sessions/<id>
  * - refresh: GET /agent/sessions
+ *
+ * @param pollInterval - Auto-refresh interval in ms. 0 = no polling. Default 3000.
  */
-export function useSessionManager() {
+export function useSessionManager(pollInterval = 3000) {
   const { apiUrl } = useSnaContext();
   const baseUrl = `${apiUrl}/agent`;
 
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(false);
+  const prevJsonRef = useRef("");
 
   const refresh = useCallback(async () => {
     try {
       const res = await fetch(`${baseUrl}/sessions`);
       const data = await res.json();
-      setSessions(data.sessions ?? []);
+      const next = data.sessions ?? [];
+      const json = JSON.stringify(next);
+      if (json !== prevJsonRef.current) {
+        prevJsonRef.current = json;
+        setSessions(next);
+      }
     } catch {
       // Server not ready
     }
@@ -73,10 +81,13 @@ export function useSessionManager() {
     }
   }, [baseUrl, refresh]);
 
-  // Initial fetch
+  // Initial fetch + polling
   useEffect(() => {
     refresh();
-  }, [refresh]);
+    if (!pollInterval) return;
+    const id = setInterval(refresh, pollInterval);
+    return () => clearInterval(id);
+  }, [refresh, pollInterval]);
 
   return { sessions, loading, createSession, killSession, deleteSession, refresh };
 }

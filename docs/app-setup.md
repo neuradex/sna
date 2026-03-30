@@ -18,14 +18,14 @@ For published versions, use npm versions instead of `link:`.
 
 #### SnaProvider
 
-Wrap your app with `SnaProvider`:
+`SnaProvider` is a pure context provider with no UI and no peer dependencies beyond React. Wrap your app with it to enable SDK context:
 
 ```tsx
 import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
 
 function App() {
   return (
-    <SnaProvider dangerouslySkipPermissions>
+    <SnaProvider>
       {children}
     </SnaProvider>
   );
@@ -33,10 +33,78 @@ function App() {
 ```
 
 Props:
-- `snaUrl` — Override SDK server URL (auto-discovered by default)
-- `defaultOpen` — Open chat panel on first visit
-- `dangerouslySkipPermissions` — Skip Claude permission prompts
-- `headless` — Context only, no built-in UI
+- `children` — React children
+- `snaUrl?` — Override SDK server URL (auto-discovered by default)
+- `sessionId?` — Session ID for this provider scope (default: `"default"`)
+
+#### SnaChatUI
+
+For the built-in chat panel with agent auto-start, use `SnaChatUI` inside `SnaProvider`. This is a separate component with its own peer dependency (`@radix-ui/react-tooltip`):
+
+```tsx
+import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
+import { SnaChatUI } from "@sna-sdk/react/components/sna-chat-ui";
+
+function App() {
+  return (
+    <SnaProvider>
+      <SnaChatUI dangerouslySkipPermissions>
+        {children}
+      </SnaChatUI>
+    </SnaProvider>
+  );
+}
+```
+
+Props:
+- `children` — React children
+- `defaultOpen?` — Open chat panel on first visit (default: `false`)
+- `dangerouslySkipPermissions?` — Skip Claude permission prompts (default: `false`)
+
+#### Multi-Session with SnaSession
+
+For apps managing multiple projects or agent sessions (e.g., Electron multi-project IDEs), use `SnaSession` to scope which session child hooks use:
+
+```tsx
+import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
+import { SnaSession } from "@sna-sdk/react/components/sna-session";
+
+function App() {
+  return (
+    <SnaProvider snaUrl={apiUrl}>
+      {/* Helper agent — always available */}
+      <SnaSession id="default">
+        <HelperAgent />
+      </SnaSession>
+
+      {/* Active project — switches with user selection */}
+      <SnaSession id={activeProjectSessionId}>
+        <ChatArea />
+      </SnaSession>
+    </SnaProvider>
+  );
+}
+```
+
+- `SnaSession` overrides the `sessionId` in context — all descendant `useAgent()` / `useSna()` calls automatically use it
+- Without `SnaSession`, hooks default to `"default"`
+- Existing single-session apps need no changes
+
+Create sessions with different `cwd` values for multi-project support:
+
+```typescript
+import { useSessionManager } from "@sna-sdk/react/hooks";
+
+const { createSession } = useSessionManager();
+
+// Each project gets its own session with a specific working directory
+const sessionId = await createSession({
+  label: "my-project",
+  cwd: "/path/to/project",
+});
+```
+
+Set `SNA_MAX_SESSIONS` environment variable when starting the SNA API server to allow more concurrent sessions (default: 5).
 
 #### Typed Client (Recommended)
 
@@ -140,12 +208,11 @@ function initSchema(db: Database.Database) {
 ```json
 {
   "hooks": {
-    "PermissionRequest": [{
+    "PreToolUse": [{
       "matcher": ".*",
       "hooks": [{
         "type": "command",
-        "command": "node \"$CLAUDE_PROJECT_DIR\"/node_modules/@sna-sdk/core/dist/scripts/hook.js",
-        "async": true
+        "command": "node \"$CLAUDE_PROJECT_DIR\"/node_modules/@sna-sdk/core/dist/scripts/hook.js"
       }]
     }]
   }

@@ -5,8 +5,9 @@ import { useAgent } from "./use-agent.js";
 import { useChatStore } from "../stores/chat-store.js";
 import { useSnaContext } from "../context.js";
 function useSna(options = {}) {
+  const ctx = useSnaContext();
   const {
-    sessionId = "default",
+    sessionId = ctx.sessionId,
     skills,
     maxEvents,
     onEvent,
@@ -21,7 +22,7 @@ function useSna(options = {}) {
     onTextDelta,
     onComplete
   } = options;
-  const { apiUrl } = useSnaContext();
+  const { apiUrl } = ctx;
   const bgSessionsRef = useRef(/* @__PURE__ */ new Map());
   const {
     events,

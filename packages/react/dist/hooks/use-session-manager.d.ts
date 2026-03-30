@@ -9,8 +9,10 @@ export { SessionInfo } from '@sna-sdk/core';
  * - killSession: POST /agent/kill?session=<id>
  * - deleteSession: DELETE /agent/sessions/<id>
  * - refresh: GET /agent/sessions
+ *
+ * @param pollInterval - Auto-refresh interval in ms. 0 = no polling. Default 3000.
  */
-declare function useSessionManager(): {
+declare function useSessionManager(pollInterval?: number): {
     sessions: SessionInfo[];
     loading: boolean;
     createSession: (opts?: {

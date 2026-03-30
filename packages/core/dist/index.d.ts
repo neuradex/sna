@@ -1,6 +1,7 @@
 export { ChatMessage, ChatSession, SkillEvent } from './db/schema.js';
 export { AgentEvent, AgentProcess, AgentProvider, SpawnOptions } from './core/providers/types.js';
-export { Session, SessionInfo, SessionManagerOptions } from './server/session-manager.js';
+export { Session, SessionInfo, SessionManagerOptions, SessionState } from './server/session-manager.js';
+export { DispatchCloseOptions, DispatchEventType, DispatchOpenOptions, DispatchOpenResult, DispatchSendOptions, createHandle as createDispatchHandle, close as dispatchClose, open as dispatchOpen, send as dispatchSend } from './lib/dispatch.js';
 import 'better-sqlite3';
 
 /**

@@ -1,24 +1,31 @@
 /**
- * hook.ts — Claude Code PermissionRequest hook handler
+ * hook.ts — Claude Code PreToolUse hook handler
  *
- * Configured in .claude/settings.json:
- *   "PermissionRequest": [{ "matcher": ".*", "hooks": [{ "type": "command", "async": true,
- *     "command": "\"$CLAUDE_PROJECT_DIR\"/node_modules/.bin/tsx \"$CLAUDE_PROJECT_DIR\"/node_modules/@sna-sdk/core/src/scripts/hook.ts" }] }]
+ * Configured via --settings or .claude/settings.json:
+ *   "hooks": { "PreToolUse": [{ "matcher": ".*", "type": "command",
+ *     "command": "node \"$CLAUDE_PROJECT_DIR\"/node_modules/@sna-sdk/core/dist/scripts/hook.js" }] }
  *
- * Fires exactly when a permission dialog is about to appear to the user.
- * Emits "permission_needed" to SQLite for the currently running skill.
- * Always exits 0 — never blocks the permission dialog.
+ * Fires BEFORE every tool execution. Submits a permission request to the
+ * SNA API and waits for user approval/denial from the UI.
+ *
+ * Output (stdout JSON):
+ *   { "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "allow"|"deny" } }
+ *
+ * Exit codes:
+ *   0 — decision made (allow/deny via JSON output)
+ *   2 — block the tool (stderr fed back to Claude as error)
  */
 
-import { getDb } from "../db/schema.js";
+import fs from "fs";
+import path from "path";
 
 const chunks: Buffer<ArrayBufferLike>[] = [];
 process.stdin.on("data", (chunk: Buffer<ArrayBufferLike>) => chunks.push(chunk));
 
-process.stdin.on("end", () => {
+process.stdin.on("end", async () => {
   try {
     const raw = Buffer.concat(chunks).toString().trim();
-    if (!raw) process.exit(0);
+    if (!raw) { allow(); return; }
 
     const input = JSON.parse(raw) as {
       hook_event_name?: string;
@@ -27,40 +34,57 @@ process.stdin.on("end", () => {
     };
 
     const toolName = input.tool_name ?? "unknown";
-    const toolInput = input.tool_input ?? {};
 
-    const db = getDb();
+    // Auto-allow safe tools without asking
+    const safeTools = ["Read", "Glob", "Grep", "Agent", "TodoRead", "TodoWrite"];
+    if (safeTools.includes(toolName)) { allow(); return; }
 
-    // Find currently running skill:
-    // latest 'called' event that has no subsequent 'success' or 'failed'
-    const latestCalled = db.prepare(`
-      SELECT skill FROM skill_events
-      WHERE type = 'called'
-        AND id > COALESCE(
-          (SELECT MAX(id) FROM skill_events WHERE type IN ('success', 'failed')),
-          0
-        )
-      ORDER BY id DESC LIMIT 1
-    `).get() as { skill: string } | null;
+    // Resolve SNA API port
+    const portFile = path.join(process.cwd(), ".sna/sna-api.port");
+    let port: string;
+    try {
+      port = fs.readFileSync(portFile, "utf8").trim();
+    } catch {
+      allow(); return; // No SNA API — allow by default
+    }
 
-    const skillName = latestCalled?.skill ?? "system";
+    const sessionId = process.env.SNA_SESSION_ID ?? "default";
+    const apiUrl = `http://localhost:${port}`;
 
-    const summary =
-      toolName === "Bash"                                ? String(toolInput.command ?? "").slice(0, 120) :
-      toolName === "Write"                               ? String(toolInput.file_path ?? "") :
-      toolName === "Edit" || toolName === "MultiEdit"    ? String(toolInput.file_path ?? "") :
-      JSON.stringify(toolInput).slice(0, 120);
+    // Submit permission request and wait for UI response
+    const res = await fetch(`${apiUrl}/agent/permission-request?session=${encodeURIComponent(sessionId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tool_name: input.tool_name,
+        tool_input: input.tool_input,
+      }),
+      signal: AbortSignal.timeout(300_000), // 5 min timeout
+    });
 
-    db.prepare(
-      `INSERT INTO skill_events (skill, type, message, data) VALUES (?, ?, ?, ?)`
-    ).run(
-      skillName,
-      "permission_needed",
-      `${toolName}: ${summary}`,
-      JSON.stringify({ tool_name: toolName, tool_input: toolInput })
-    );
+    const data = await res.json() as { approved: boolean };
+
+    if (data.approved) {
+      allow();
+    } else {
+      deny("User denied this tool execution");
+    }
   } catch {
-    // Never block on hook error
+    allow(); // On error, allow by default to avoid blocking
   }
-  process.exit(0);
 });
+
+function allow() {
+  console.log(JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+    },
+  }));
+  process.exit(0);
+}
+
+function deny(reason: string) {
+  process.stderr.write(reason);
+  process.exit(2);
+}

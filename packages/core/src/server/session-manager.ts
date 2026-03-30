@@ -6,6 +6,9 @@
  */
 
 import type { AgentProcess, AgentEvent } from "../core/providers/types.js";
+import { getDb } from "../db/schema.js";
+
+export type SessionState = "idle" | "processing" | "waiting" | "permission";
 
 export interface Session {
   id: string;
@@ -14,6 +17,7 @@ export interface Session {
   eventCounter: number;
   label: string;
   cwd: string;
+  state: SessionState;
   createdAt: number;
   lastActivityAt: number;
 }
@@ -22,6 +26,7 @@ export interface SessionInfo {
   id: string;
   label: string;
   alive: boolean;
+  state: SessionState;
   cwd: string;
   eventCount: number;
   createdAt: number;
@@ -55,8 +60,10 @@ export class SessionManager {
       return this.sessions.get(id)!;
     }
 
-    if (this.sessions.size >= this.maxSessions) {
-      throw new Error(`Max sessions (${this.maxSessions}) reached`);
+    const aliveCount = Array.from(this.sessions.values())
+      .filter((s) => s.process?.alive).length;
+    if (aliveCount >= this.maxSessions) {
+      throw new Error(`Max active sessions (${this.maxSessions}) reached — ${aliveCount} alive`);
     }
 
     const session: Session = {
@@ -66,6 +73,7 @@ export class SessionManager {
       eventCounter: 0,
       label: opts.label ?? id,
       cwd: opts.cwd ?? process.cwd(),
+      state: "idle",
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
     };
@@ -92,6 +100,7 @@ export class SessionManager {
     if (!session) throw new Error(`Session "${sessionId}" not found`);
 
     session.process = proc;
+    session.state = "processing";
     session.lastActivityAt = Date.now();
 
     proc.on("event", (e: AgentEvent) => {
@@ -100,6 +109,12 @@ export class SessionManager {
       if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
         session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
       }
+      // Update session state based on event type
+      if (e.type === "complete" || e.type === "error") {
+        session.state = "waiting";
+      }
+      // Persist assistant messages to chat_messages
+      this.persistEvent(sessionId, e);
     });
   }
 
@@ -127,6 +142,7 @@ export class SessionManager {
       id: s.id,
       label: s.label,
       alive: s.process?.alive ?? false,
+      state: s.state,
       cwd: s.cwd,
       eventCount: s.eventCounter,
       createdAt: s.createdAt,
@@ -138,6 +154,46 @@ export class SessionManager {
   touch(id: string): void {
     const session = this.sessions.get(id);
     if (session) session.lastActivityAt = Date.now();
+  }
+
+  /** Persist an agent event to chat_messages. */
+  private persistEvent(sessionId: string, e: AgentEvent): void {
+    try {
+      const db = getDb();
+      switch (e.type) {
+        case "assistant":
+          if (e.message) {
+            db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`)
+              .run(sessionId, e.message);
+          }
+          break;
+        case "thinking":
+          if (e.message) {
+            db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'thinking', ?)`)
+              .run(sessionId, e.message);
+          }
+          break;
+        case "tool_use": {
+          const toolName = (e.data?.toolName as string) ?? e.message ?? "tool";
+          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool', ?, ?)`)
+            .run(sessionId, toolName, JSON.stringify(e.data ?? {}));
+          break;
+        }
+        case "tool_result":
+          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool_result', ?, ?)`)
+            .run(sessionId, e.message ?? "", JSON.stringify(e.data ?? {}));
+          break;
+        case "complete":
+          // Turn-end metadata only — the text was already saved by the "assistant" event
+          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'status', '', ?)`)
+            .run(sessionId, JSON.stringify({ status: "complete", ...e.data }));
+          break;
+        case "error":
+          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'error', ?, ?)`)
+            .run(sessionId, e.message ?? "Error", JSON.stringify({ status: "error" }));
+          break;
+      }
+    } catch { /* DB failure is non-fatal */ }
   }
 
   /** Kill all sessions. Used during shutdown. */

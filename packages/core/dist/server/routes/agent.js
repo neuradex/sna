@@ -56,15 +56,19 @@ function createAgentRoutes(sessionManager) {
     }
     session.eventBuffer.length = 0;
     const provider = getProvider(body.provider ?? "claude-code");
-    const skillMatch = body.prompt?.match(/^Execute the skill:\s*(\S+)/);
-    if (skillMatch) {
-      try {
-        const db = getDb();
+    try {
+      const db = getDb();
+      db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
+      if (body.prompt) {
+        db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, body.prompt, body.meta ? JSON.stringify(body.meta) : null);
+      }
+      const skillMatch = body.prompt?.match(/^Execute the skill:\s*(\S+)/);
+      if (skillMatch) {
         db.prepare(
           `INSERT INTO skill_events (session_id, skill, type, message) VALUES (?, ?, 'invoked', ?)`
         ).run(sessionId, skillMatch[1], `Skill ${skillMatch[1]} invoked`);
-      } catch {
       }
+    } catch {
     }
     try {
       const proc = provider.spawn({
@@ -72,7 +76,8 @@ function createAgentRoutes(sessionManager) {
         prompt: body.prompt,
         model: body.model ?? "claude-sonnet-4-6",
         permissionMode: body.permissionMode ?? "acceptEdits",
-        env: { SNA_SESSION_ID: sessionId }
+        env: { SNA_SESSION_ID: sessionId },
+        extraArgs: body.extraArgs
       });
       sessionManager.setProcess(sessionId, proc);
       logger.log("route", `POST /start?session=${sessionId} \u2192 started`);
@@ -101,6 +106,13 @@ function createAgentRoutes(sessionManager) {
       logger.err("err", `POST /send?session=${sessionId} \u2192 empty message`);
       return c.json({ status: "error", message: "message is required" }, 400);
     }
+    try {
+      const db = getDb();
+      db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
+      db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, body.message, body.meta ? JSON.stringify(body.meta) : null);
+    } catch {
+    }
+    session.state = "processing";
     sessionManager.touch(sessionId);
     logger.log("route", `POST /send?session=${sessionId} \u2192 "${body.message.slice(0, 80)}"`);
     session.process.send(body.message);
@@ -152,6 +164,63 @@ function createAgentRoutes(sessionManager) {
       sessionId: session?.process?.sessionId ?? null,
       eventCount: session?.eventCounter ?? 0
     });
+  });
+  const pendingPermissions = /* @__PURE__ */ new Map();
+  app.post("/permission-request", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = await c.req.json().catch(() => ({}));
+    logger.log("route", `POST /permission-request?session=${sessionId} \u2192 ${body.tool_name}`);
+    const session = sessionManager.getSession(sessionId);
+    if (session) session.state = "permission";
+    const result = await new Promise((resolve) => {
+      pendingPermissions.set(sessionId, {
+        resolve,
+        request: body,
+        createdAt: Date.now()
+      });
+      setTimeout(() => {
+        if (pendingPermissions.has(sessionId)) {
+          pendingPermissions.delete(sessionId);
+          resolve(false);
+        }
+      }, 3e5);
+    });
+    return c.json({ approved: result });
+  });
+  app.post("/permission-respond", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = await c.req.json().catch(() => ({}));
+    const approved = body.approved ?? false;
+    const pending = pendingPermissions.get(sessionId);
+    if (!pending) {
+      return c.json({ status: "error", message: "No pending permission request" }, 404);
+    }
+    pending.resolve(approved);
+    pendingPermissions.delete(sessionId);
+    const session = sessionManager.getSession(sessionId);
+    if (session) session.state = "processing";
+    logger.log("route", `POST /permission-respond?session=${sessionId} \u2192 ${approved ? "approved" : "denied"}`);
+    return c.json({ status: approved ? "approved" : "denied" });
+  });
+  app.get("/permission-pending", (c) => {
+    const sessionId = c.req.query("session");
+    if (sessionId) {
+      const pending = pendingPermissions.get(sessionId);
+      if (!pending) return c.json({ pending: null });
+      return c.json({
+        pending: {
+          sessionId,
+          request: pending.request,
+          createdAt: pending.createdAt
+        }
+      });
+    }
+    const all = Array.from(pendingPermissions.entries()).map(([id, p]) => ({
+      sessionId: id,
+      request: p.request,
+      createdAt: p.createdAt
+    }));
+    return c.json({ pending: all });
   });
   return app;
 }

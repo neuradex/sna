@@ -264,10 +264,51 @@ export class ClaudeCodeProvider implements AgentProvider {
   spawn(options: SpawnOptions): AgentProcess {
     const claudePath = resolveClaudePath(options.cwd);
 
+    // Build merged settings: SDK's PreToolUse hook + app's settings from extraArgs.
+    // Skip hook injection when bypassPermissions is set — all tools are auto-allowed.
+    const hookScript = path.join(options.cwd, "node_modules/@sna-sdk/core/dist/scripts/hook.js");
+    const sdkSettings: Record<string, unknown> = {};
+
+    if (options.permissionMode !== "bypassPermissions") {
+      sdkSettings.hooks = {
+        PreToolUse: [{
+          matcher: ".*",
+          hooks: [{ type: "command", command: `node "${hookScript}"` }],
+        }],
+      };
+    }
+
+    // Extract --settings from extraArgs (if any) and merge
+    let extraArgsClean = options.extraArgs ? [...options.extraArgs] : [];
+    const settingsIdx = extraArgsClean.indexOf("--settings");
+    if (settingsIdx !== -1 && settingsIdx + 1 < extraArgsClean.length) {
+      try {
+        const appSettings = JSON.parse(extraArgsClean[settingsIdx + 1]);
+        // Merge hooks: SDK hooks + app hooks
+        if (appSettings.hooks) {
+          for (const [event, hooks] of Object.entries(appSettings.hooks)) {
+            if (sdkSettings.hooks && (sdkSettings.hooks as Record<string, unknown[]>)[event]) {
+              (sdkSettings.hooks as Record<string, unknown[]>)[event] = [
+                ...(sdkSettings.hooks as Record<string, unknown[]>)[event],
+                ...(hooks as unknown[]),
+              ];
+            } else {
+              (sdkSettings.hooks as Record<string, unknown>)[event] = hooks;
+            }
+          }
+          delete appSettings.hooks;
+        }
+        // Merge remaining top-level settings
+        Object.assign(sdkSettings, appSettings);
+      } catch { /* invalid JSON — ignore app settings */ }
+      extraArgsClean.splice(settingsIdx, 2);
+    }
+
     const args = [
       "--output-format", "stream-json",
       "--input-format", "stream-json",
       "--verbose",
+      "--settings", JSON.stringify(sdkSettings),
     ];
 
     if (options.model) {
@@ -276,6 +317,10 @@ export class ClaudeCodeProvider implements AgentProvider {
 
     if (options.permissionMode) {
       args.push("--permission-mode", options.permissionMode);
+    }
+
+    if (extraArgsClean.length > 0) {
+      args.push(...extraArgsClean);
     }
 
     const cleanEnv = { ...process.env, ...options.env } as Record<string, string>;
@@ -289,7 +334,7 @@ export class ClaudeCodeProvider implements AgentProvider {
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    logger.log("agent", `spawned claude-code (pid=${proc.pid})`);
+    logger.log("agent", `spawned claude-code (pid=${proc.pid}) → ${claudePath} ${args.join(" ")}`);
 
     return new ClaudeCodeProcess(proc, options);
   }

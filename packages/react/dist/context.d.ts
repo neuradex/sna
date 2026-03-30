@@ -1,6 +1,6 @@
 import * as react from 'react';
-export { DEFAULT_SNA_URL } from '@sna-sdk/core';
 
+declare const DEFAULT_SNA_URL = "http://localhost:3099";
 interface SnaConfig {
     /**
      * Base URL of the SNA internal API server.
@@ -10,8 +10,13 @@ interface SnaConfig {
      * Override via <SnaProvider snaUrl="..."> for custom deployments.
      */
     apiUrl: string;
+    /**
+     * Active session ID for this scope.
+     * Set by <SnaSession id="...">. Defaults to "default".
+     */
+    sessionId: string;
 }
 declare const SnaContext: react.Context<SnaConfig>;
 declare function useSnaContext(): SnaConfig;
 
-export { type SnaConfig, SnaContext, useSnaContext };
+export { DEFAULT_SNA_URL, type SnaConfig, SnaContext, useSnaContext };

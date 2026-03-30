@@ -1,11 +1,14 @@
 import { createRequire } from "node:module";
+import fs from "fs";
 import path from "path";
-const require2 = createRequire(path.join(process.cwd(), "node_modules", "_"));
-const BetterSqlite3 = require2("better-sqlite3");
 const DB_PATH = path.join(process.cwd(), "data/sna.db");
 let _db = null;
 function getDb() {
   if (!_db) {
+    const req = createRequire(import.meta.url);
+    const BetterSqlite3 = req("better-sqlite3");
+    const dir = path.dirname(DB_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     _db = new BetterSqlite3(DB_PATH);
     _db.pragma("journal_mode = WAL");
     initSchema(_db);

@@ -1,15 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { scanSkills } from "../lib/skill-parser.js";
+import { parseFlags } from "../lib/parse-flags.js";
 const ROOT = process.cwd();
-function parseFlags(args) {
-  const flags2 = {};
-  for (let i = 0; i < args.length; i += 2) {
-    const key = args[i]?.replace(/^--/, "");
-    if (key) flags2[key] = args[i + 1] ?? "";
-  }
-  return flags2;
-}
 function tsType(argDef) {
   switch (argDef.type) {
     case "number":
@@ -106,7 +99,16 @@ const code = generateClient(schemas);
 const outDir = path.dirname(outPath);
 if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 fs.writeFileSync(outPath, code);
+const snaDir = path.join(ROOT, ".sna");
+if (!fs.existsSync(snaDir)) fs.mkdirSync(snaDir, { recursive: true });
+const skillsManifest = {};
+for (const s of schemas) {
+  skillsManifest[s.name] = { description: s.description, args: s.args };
+}
+const manifestPath = path.join(snaDir, "skills.json");
+fs.writeFileSync(manifestPath, JSON.stringify(skillsManifest, null, 2) + "\n");
 console.log(`\u2713 Generated ${outPath}`);
+console.log(`\u2713 Generated ${manifestPath}`);
 console.log(`  ${schemas.length} skills:`);
 for (const s of schemas) {
   const argCount = Object.keys(s.args).length;

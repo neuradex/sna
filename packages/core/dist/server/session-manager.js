@@ -1,3 +1,4 @@
+import { getDb } from "../db/schema.js";
 const DEFAULT_MAX_SESSIONS = 5;
 const MAX_EVENT_BUFFER = 500;
 class SessionManager {
@@ -11,8 +12,9 @@ class SessionManager {
     if (this.sessions.has(id)) {
       return this.sessions.get(id);
     }
-    if (this.sessions.size >= this.maxSessions) {
-      throw new Error(`Max sessions (${this.maxSessions}) reached`);
+    const aliveCount = Array.from(this.sessions.values()).filter((s) => s.process?.alive).length;
+    if (aliveCount >= this.maxSessions) {
+      throw new Error(`Max active sessions (${this.maxSessions}) reached \u2014 ${aliveCount} alive`);
     }
     const session = {
       id,
@@ -21,6 +23,7 @@ class SessionManager {
       eventCounter: 0,
       label: opts.label ?? id,
       cwd: opts.cwd ?? process.cwd(),
+      state: "idle",
       createdAt: Date.now(),
       lastActivityAt: Date.now()
     };
@@ -42,6 +45,7 @@ class SessionManager {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Session "${sessionId}" not found`);
     session.process = proc;
+    session.state = "processing";
     session.lastActivityAt = Date.now();
     proc.on("event", (e) => {
       session.eventBuffer.push(e);
@@ -49,6 +53,10 @@ class SessionManager {
       if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
         session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
       }
+      if (e.type === "complete" || e.type === "error") {
+        session.state = "waiting";
+      }
+      this.persistEvent(sessionId, e);
     });
   }
   /** Kill the agent process in a session (session stays, can be restarted). */
@@ -73,6 +81,7 @@ class SessionManager {
       id: s.id,
       label: s.label,
       alive: s.process?.alive ?? false,
+      state: s.state,
       cwd: s.cwd,
       eventCount: s.eventCounter,
       createdAt: s.createdAt,
@@ -83,6 +92,39 @@ class SessionManager {
   touch(id) {
     const session = this.sessions.get(id);
     if (session) session.lastActivityAt = Date.now();
+  }
+  /** Persist an agent event to chat_messages. */
+  persistEvent(sessionId, e) {
+    try {
+      const db = getDb();
+      switch (e.type) {
+        case "assistant":
+          if (e.message) {
+            db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`).run(sessionId, e.message);
+          }
+          break;
+        case "thinking":
+          if (e.message) {
+            db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'thinking', ?)`).run(sessionId, e.message);
+          }
+          break;
+        case "tool_use": {
+          const toolName = e.data?.toolName ?? e.message ?? "tool";
+          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool', ?, ?)`).run(sessionId, toolName, JSON.stringify(e.data ?? {}));
+          break;
+        }
+        case "tool_result":
+          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool_result', ?, ?)`).run(sessionId, e.message ?? "", JSON.stringify(e.data ?? {}));
+          break;
+        case "complete":
+          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'status', '', ?)`).run(sessionId, JSON.stringify({ status: "complete", ...e.data }));
+          break;
+        case "error":
+          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'error', ?, ?)`).run(sessionId, e.message ?? "Error", JSON.stringify({ status: "error" }));
+          break;
+      }
+    } catch {
+    }
   }
   /** Kill all sessions. Used during shutdown. */
   killAll() {

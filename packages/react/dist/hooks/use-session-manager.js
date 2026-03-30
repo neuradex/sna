@@ -1,16 +1,22 @@
 "use client";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useSnaContext } from "../context.js";
-function useSessionManager() {
+function useSessionManager(pollInterval = 3e3) {
   const { apiUrl } = useSnaContext();
   const baseUrl = `${apiUrl}/agent`;
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(false);
+  const prevJsonRef = useRef("");
   const refresh = useCallback(async () => {
     try {
       const res = await fetch(`${baseUrl}/sessions`);
       const data = await res.json();
-      setSessions(data.sessions ?? []);
+      const next = data.sessions ?? [];
+      const json = JSON.stringify(next);
+      if (json !== prevJsonRef.current) {
+        prevJsonRef.current = json;
+        setSessions(next);
+      }
     } catch {
     }
   }, [baseUrl]);
@@ -54,7 +60,10 @@ function useSessionManager() {
   }, [baseUrl, refresh]);
   useEffect(() => {
     refresh();
-  }, [refresh]);
+    if (!pollInterval) return;
+    const id = setInterval(refresh, pollInterval);
+    return () => clearInterval(id);
+  }, [refresh, pollInterval]);
   return { sessions, loading, createSession, killSession, deleteSession, refresh };
 }
 export {

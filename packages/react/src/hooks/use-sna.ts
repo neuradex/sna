@@ -54,8 +54,9 @@ export interface SkillResult {
 }
 
 export function useSna(options: UseSnaOptions = {}) {
+  const ctx = useSnaContext();
   const {
-    sessionId = "default",
+    sessionId = ctx.sessionId,
     skills, maxEvents, onEvent,
     onCalled, onSuccess, onFailed, onPermissionNeeded, onProgress, onMilestone,
     provider = "claude-code",
@@ -63,7 +64,7 @@ export function useSna(options: UseSnaOptions = {}) {
     onTextDelta, onComplete,
   } = options;
 
-  const { apiUrl } = useSnaContext();
+  const { apiUrl } = ctx;
   const bgSessionsRef = useRef<Map<string, EventSource>>(new Map());
 
   // 1. Skill events from SQLite → SSE

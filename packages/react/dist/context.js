@@ -1,7 +1,8 @@
 "use client";
 import { createContext, useContext } from "react";
-import { DEFAULT_SNA_URL } from "@sna-sdk/core";
-const SnaContext = createContext({ apiUrl: DEFAULT_SNA_URL });
+const DEFAULT_SNA_PORT = 3099;
+const DEFAULT_SNA_URL = `http://localhost:${DEFAULT_SNA_PORT}`;
+const SnaContext = createContext({ apiUrl: DEFAULT_SNA_URL, sessionId: "default" });
 function useSnaContext() {
   return useContext(SnaContext);
 }

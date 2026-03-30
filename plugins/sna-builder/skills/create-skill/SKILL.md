@@ -30,14 +30,25 @@ Create a new skill following SNA conventions.
 
    Supported types: `string`, `number`, `boolean`, `string[]`, `number[]`
 
-4. The SKILL.md body MUST include event emission using the SDK script:
+4. The SKILL.md body MUST include event emission using `sna dispatch` (primary) or the SDK script (legacy):
+
+   **Primary — `sna dispatch` CLI:**
+   ```bash
+   ID=$(sna dispatch open --skill <name>)
+   sna dispatch $ID start --message "Starting..."
+   sna dispatch $ID milestone --message "Step done"
+   sna dispatch $ID close --message "Done."
+   # On error: sna dispatch $ID close --error "Failed: reason"
+   ```
+
+   **Legacy (deprecated) — `emit.js`:**
    ```bash
    node node_modules/@sna-sdk/core/dist/scripts/emit.js --skill <name> --type start --message "Starting..."
    node node_modules/@sna-sdk/core/dist/scripts/emit.js --skill <name> --type milestone --message "Step done"
    node node_modules/@sna-sdk/core/dist/scripts/emit.js --skill <name> --type complete --message "Done."
    ```
 
-5. NEVER use `tsx scripts/emit.ts` — always use the SDK path above
+5. NEVER use `tsx scripts/emit.ts` — always use `sna dispatch` or the SDK emit.js path above
 
 6. If the skill needs TypeScript scripts, create them in the app's `scripts/` directory
 

@@ -3,6 +3,8 @@ import fs from "fs";
 import net from "net";
 import path from "path";
 import { cmdNew, cmdWorkflow, cmdCancel, cmdTasks } from "./workflow.js";
+import { parseFlags } from "../lib/parse-flags.js";
+import { loadSkillsManifest, SEND_TYPES } from "../lib/dispatch.js";
 const ROOT = process.cwd();
 const STATE_DIR = path.join(ROOT, ".sna");
 const PID_FILE = path.join(STATE_DIR, "server.pid");
@@ -370,7 +372,7 @@ function cmdInit(force2 = false) {
   const hookCommand = `node "$CLAUDE_PROJECT_DIR"/node_modules/@sna-sdk/core/dist/scripts/hook.js`;
   const permissionHook = {
     matcher: ".*",
-    hooks: [{ type: "command", async: true, command: hookCommand }]
+    hooks: [{ type: "command", command: hookCommand }]
   };
   let settings = {};
   if (fs.existsSync(settingsPath)) {
@@ -380,15 +382,15 @@ function cmdInit(force2 = false) {
     }
   }
   const hooks = settings.hooks ?? {};
-  const existing = hooks.PermissionRequest ?? [];
+  const existing = hooks.PreToolUse ?? [];
   const alreadySet = existing.some(
     (entry) => entry.hooks?.some((h) => h.command === hookCommand)
   );
   if (!alreadySet) {
-    hooks.PermissionRequest = [...existing, permissionHook];
+    hooks.PreToolUse = [...existing, permissionHook];
     settings.hooks = hooks;
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
-    step(".claude/settings.json \u2014 PermissionRequest hook registered");
+    step(".claude/settings.json \u2014 PreToolUse hook registered");
   } else {
     step(".claude/settings.json \u2014 hook already set, skipped");
   }
@@ -422,6 +424,125 @@ function cmdInit(force2 = false) {
   }
   console.log("\n\u2713  SNA init complete");
 }
+function cmdValidate() {
+  console.log("\u25B6  SNA \u2014 validate\n");
+  let ok = true;
+  const manifest = loadSkillsManifest(ROOT);
+  if (!manifest) {
+    console.log("  \u2717  .sna/skills.json not found or malformed \u2014 run 'sna gen client' first");
+    ok = false;
+  } else {
+    const skillNames = Object.keys(manifest);
+    console.log(`  \u2713  .sna/skills.json \u2014 ${skillNames.length} skills registered`);
+    for (const name of skillNames) {
+      const skillMd = path.join(ROOT, ".claude/skills", name, "SKILL.md");
+      if (!fs.existsSync(skillMd)) {
+        console.log(`  \u2717  skill "${name}" registered but .claude/skills/${name}/SKILL.md missing`);
+        ok = false;
+      }
+    }
+    const skillsDir = path.join(ROOT, ".claude/skills");
+    if (fs.existsSync(skillsDir)) {
+      for (const entry of fs.readdirSync(skillsDir)) {
+        const skillMd = path.join(skillsDir, entry, "SKILL.md");
+        if (fs.existsSync(skillMd) && !(entry in manifest)) {
+          console.log(`  \u25B3  skill "${entry}" has SKILL.md but not in skills.json \u2014 run 'sna gen client'`);
+        }
+      }
+    }
+  }
+  const settingsPath = path.join(ROOT, ".claude/settings.json");
+  if (!fs.existsSync(settingsPath)) {
+    console.log("  \u2717  .claude/settings.json not found \u2014 run 'sna init'");
+    ok = false;
+  } else {
+    try {
+      const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+      const hooks = settings.hooks?.PreToolUse;
+      const hookCommand = `node "$CLAUDE_PROJECT_DIR"/node_modules/@sna-sdk/core/dist/scripts/hook.js`;
+      const hasHook = Array.isArray(hooks) && hooks.some(
+        (entry) => entry.hooks?.some((h) => h.command === hookCommand)
+      );
+      if (hasHook) {
+        console.log("  \u2713  .claude/settings.json \u2014 PreToolUse hook OK");
+      } else {
+        console.log("  \u2717  .claude/settings.json \u2014 PreToolUse hook missing \u2014 run 'sna init'");
+        ok = false;
+      }
+    } catch {
+      console.log("  \u2717  .claude/settings.json is malformed");
+      ok = false;
+    }
+  }
+  const nmPath = path.join(ROOT, "node_modules");
+  if (!fs.existsSync(nmPath)) {
+    console.log("  \u2717  node_modules not found \u2014 run 'pnpm install'");
+    ok = false;
+  } else {
+    console.log("  \u2713  node_modules \u2014 installed");
+  }
+  console.log(ok ? "\n\u2713  Validation passed" : "\n\u2717  Validation failed \u2014 fix issues above");
+  if (!ok) process.exit(1);
+}
+async function cmdDispatch(args2) {
+  const { open, send, close } = await import("../lib/dispatch.js");
+  const sub = args2[0];
+  if (!sub || sub === "--help" || sub === "-h") {
+    console.log(`sna dispatch \u2014 unified event dispatcher
+
+Usage:
+  sna dispatch open --skill <name>              Open a dispatch session \u2192 prints ID
+  sna dispatch <id> called --message "..."      Emit called event
+  sna dispatch <id> start --message "..."       Emit start event
+  sna dispatch <id> milestone --message "..."   Emit milestone event
+  sna dispatch <id> progress --message "..."    Emit progress event
+  sna dispatch <id> close [--message "..."]     Close as success (complete + kill)
+  sna dispatch <id> close --error "..."         Close as error (error + kill)`);
+    return;
+  }
+  if (sub === "open") {
+    const flags2 = parseFlags(args2.slice(1));
+    if (!flags2.skill) {
+      console.error("Usage: sna dispatch open --skill <name>");
+      process.exit(1);
+    }
+    try {
+      const result = open({ skill: flags2.skill, cwd: ROOT });
+      console.log(result.id);
+    } catch (err) {
+      console.error(`\u2717 ${err.message}`);
+      process.exit(1);
+    }
+    return;
+  }
+  const id = sub;
+  const action = args2[1];
+  if (!action) {
+    console.error("Usage: sna dispatch <id> <called|start|milestone|progress|close>");
+    process.exit(1);
+  }
+  const flags = parseFlags(args2.slice(2));
+  try {
+    if (action === "close") {
+      await close(id, {
+        error: flags.error,
+        message: flags.message
+      });
+    } else if (SEND_TYPES.includes(action)) {
+      if (!flags.message) {
+        console.error(`Usage: sna dispatch <id> ${action} --message "..."`);
+        process.exit(1);
+      }
+      send(id, { type: action, message: flags.message, data: flags.data });
+    } else {
+      console.error(`Unknown dispatch action: "${action}". Use ${SEND_TYPES.join(", ")}, or close.`);
+      process.exit(1);
+    }
+  } catch (err) {
+    console.error(`\u2717 ${err.message}`);
+    process.exit(1);
+  }
+}
 function printHelp() {
   console.log(`sna \u2014 Skills-Native Application CLI
 
@@ -434,6 +555,8 @@ Lifecycle:
   sna status          Show running services
   sna restart         Stop + start
   sna init [--force]  Initialize .claude/settings.json and skills
+  sna validate        Check project setup (skills.json, hooks, deps)
+  sna dispatch        Unified event dispatcher (open/send/close)
 
 Workflow:
   sna new <skill> [--param val ...]    Create a task from a workflow.yml
@@ -627,11 +750,21 @@ Run "sna help submit" for data submission patterns.`);
     case "status":
       cmdStatus();
       break;
+    case "validate":
+      cmdValidate();
+      break;
+    case "dispatch":
+      cmdDispatch(args);
+      break;
     case "api:up":
       cmdApiUp();
       break;
     case "api:down":
       cmdApiDown();
+      break;
+    case "api:restart":
+      cmdApiDown();
+      cmdApiUp();
       break;
     case "restart":
       cmdDown();

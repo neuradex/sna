@@ -49,6 +49,11 @@ export interface SpawnOptions {
   model?: string;
   permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan";
   env?: Record<string, string>;
+  /**
+   * Additional CLI flags passed directly to the agent binary.
+   * e.g. ["--system-prompt", "You are...", "--append-system-prompt", "Also...", "--mcp-config", "path"]
+   */
+  extraArgs?: string[];
 }
 
 /**

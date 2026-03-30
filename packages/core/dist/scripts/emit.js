@@ -1,51 +1,29 @@
-import { getDb } from "../db/schema.js";
-function parseArgs(args2) {
-  const result = {};
-  for (let i = 0; i < args2.length; i += 2) {
-    const key = args2[i]?.replace(/^--/, "");
-    if (key) result[key] = args2[i + 1] ?? "";
-  }
-  return result;
-}
+import { open, send, close, SEND_TYPES } from "../lib/dispatch.js";
+import { parseFlags } from "../lib/parse-flags.js";
 const [, , ...args] = process.argv;
-const flags = parseArgs(args);
-const VALID_TYPES = [
-  "called",
-  "success",
-  "failed",
-  "permission_needed",
-  "start",
-  "progress",
-  "milestone",
-  "complete",
-  "error"
-];
+const flags = parseFlags(args);
+const CLOSE_SUCCESS_TYPES = ["complete", "success"];
+const CLOSE_ERROR_TYPES = ["error", "failed"];
 if (!flags.skill || !flags.type || !flags.message) {
-  console.error("Usage: tsx node_modules/@sna-sdk/core/src/scripts/emit.ts --skill <name> --type <type> --message <text> [--data <json>]");
+  console.error("DEPRECATED: Use 'sna dispatch' instead.");
+  console.error("Usage: node emit.js --skill <name> --type <type> --message <text>");
   process.exit(1);
 }
-if (!VALID_TYPES.includes(flags.type)) {
-  console.error(`Invalid type: ${flags.type}. Must be one of: ${VALID_TYPES.join(", ")}`);
-  process.exit(1);
-}
-const sessionId = process.env.SNA_SESSION_ID;
-if (sessionId) {
-  const db = getDb();
-  db.prepare(`
-    INSERT INTO skill_events (session_id, skill, type, message, data)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(sessionId, flags.skill, flags.type, flags.message, flags.data ?? null);
-}
-const prefix = {
-  called: "\u2192",
-  success: "\u2713",
-  failed: "\u2717",
-  permission_needed: "\u26A0",
-  start: "\u25B6",
-  progress: "\xB7",
-  milestone: "\u25C6",
-  complete: "\u2713",
-  error: "\u2717"
-};
-const p = prefix[flags.type] ?? "\xB7";
-console.log(`${p} [${flags.skill}] ${flags.message}`);
+(async () => {
+  try {
+    const d = open({ skill: flags.skill });
+    if (SEND_TYPES.includes(flags.type)) {
+      send(d.id, { type: flags.type, message: flags.message, data: flags.data });
+    } else if (CLOSE_SUCCESS_TYPES.includes(flags.type)) {
+      await close(d.id, { message: flags.message });
+    } else if (CLOSE_ERROR_TYPES.includes(flags.type)) {
+      await close(d.id, { error: flags.message });
+    } else {
+      console.error(`Unknown type: ${flags.type}`);
+      process.exit(1);
+    }
+  } catch (err) {
+    console.error(`\u2717 ${err.message}`);
+    process.exit(1);
+  }
+})();

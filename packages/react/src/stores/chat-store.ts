@@ -56,21 +56,6 @@ function emptySession(): SessionChatState {
   return { messages: [], processedEventIds: new Set() };
 }
 
-/** Fire-and-forget POST to chat persistence API */
-function syncMessage(apiUrl: string, sessionId: string, msg: Omit<ChatMessage, "id" | "timestamp">) {
-  if (!apiUrl) return;
-  fetch(`${apiUrl}/chat/sessions/${encodeURIComponent(sessionId)}/messages`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      role: msg.role,
-      content: msg.content,
-      skill_name: msg.skillName,
-      meta: msg.meta,
-    }),
-  }).catch(() => { /* non-fatal */ });
-}
-
 function syncCreateSession(apiUrl: string, id: string, label?: string, type?: string) {
   if (!apiUrl) return;
   fetch(`${apiUrl}/chat/sessions`, {
@@ -146,7 +131,8 @@ export const useChatStore = create<ChatState>()(
           },
         };
       });
-      syncMessage(get()._apiUrl, id, msg);
+      // Server persists messages automatically (agent routes).
+      // No client-side sync needed.
     },
 
     clearMessages: (sessionId?) => {

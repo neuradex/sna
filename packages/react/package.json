@@ -13,6 +13,16 @@
       "types": "./dist/components/sna-provider.d.ts",
       "default": "./dist/components/sna-provider.js"
     },
+    "./components/sna-session": {
+      "source": "./src/components/sna-session.tsx",
+      "types": "./dist/components/sna-session.d.ts",
+      "default": "./dist/components/sna-session.js"
+    },
+    "./components/sna-chat-ui": {
+      "source": "./src/components/sna-chat-ui.tsx",
+      "types": "./dist/components/sna-chat-ui.d.ts",
+      "default": "./dist/components/sna-chat-ui.js"
+    },
     "./components/chat": {
       "source": "./src/components/chat/index.ts",
       "types": "./dist/components/chat/index.d.ts",

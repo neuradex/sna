@@ -4,48 +4,48 @@ description: Sync all documentation files with the current codebase state. Run t
 
 ## Sync Docs
 
-Update all documentation to reflect the current state of the codebase. Read the actual code first, then update docs to match.
-
-### Sources of Truth
-
-The **code** is always the source of truth. Docs describe the code, not the other way around.
+Update all documentation to reflect the current state of the codebase. Code is always the source of truth.
 
 ### Steps
 
-1. **Scan the codebase** — Read the following to understand current state:
-   - `pnpm-workspace.yaml` — workspace packages
-   - `packages/core/package.json` — core exports, scripts, dependencies
-   - `packages/react/package.json` — react exports, scripts, dependencies
-   - `packages/core/src/db/schema.ts` — DB schema and path
-   - `packages/core/src/server/index.ts` — server routes and factory
-   - `packages/core/src/scripts/emit.ts` — emit script interface
-   - `packages/core/src/scripts/hook.ts` — hook script interface
-   - `packages/core/src/scripts/sna.ts` — CLI commands
-   - `packages/react/src/hooks/use-skill-events.ts` — SSE hook
-   - `packages/react/src/components/sna-provider.tsx` — provider props
-   - `plugins/sna-builder/.claude-plugin/plugin.json` — plugin version
-   - `.claude-plugin/marketplace.json` — marketplace definition
+1. **Discover source files** — Scan the codebase dynamically (DO NOT use a hardcoded list):
+   - `packages/core/src/**/*.ts` — all core source files
+   - `packages/react/src/**/*.tsx` and `packages/react/src/**/*.ts` — all react source files
+   - `packages/core/package.json` and `packages/react/package.json` — exports, scripts, dependencies
+   - `pnpm-workspace.yaml` — workspace structure
+   - `plugins/**/*.md` and `plugins/**/*.json` — plugin definitions
 
-2. **Update each doc file** — Compare current code with each doc and fix any drift:
+   From these, extract current facts:
+   - DB schema (table names, columns, paths)
+   - CLI commands (sna.ts command router)
+   - API routes (all Hono route definitions)
+   - Exported functions, hooks, components (index.ts, package.json exports)
+   - Event types (dispatch.ts SEND_TYPES, close types)
+   - File paths that are referenced in configs (hook script, emit script)
+   - Component/hook props and signatures
 
-   - **`README.md`** — Overview, design philosophy, packages table, quick start, plugin install commands. Keep it concise with links to details.
-   - **`CONTRIBUTING.md`** — Repository structure, commands, architecture (DB separation, event pipeline, import paths), tech stack, key files table.
-   - **`docs/architecture.md`** — Package structure table, DB separation rules, event pipeline flow, emit command syntax, event types, SDK server endpoints, hook config, app responsibilities.
-   - **`docs/skill-authoring.md`** — Emit command path, event types, skill template.
-   - **`docs/app-setup.md`** — Dependencies, SnaProvider props, hook usage, server setup, DB setup rules, Vite config.
-   - **`CLAUDE.md`** — Keep minimal. Only project description + links to README and CONTRIBUTING.
-   - **`plugins/sna-builder/agents/sna-builder.md`** — Agent instructions must match current conventions (DB path, emit path, import paths, rules).
-   - **`plugins/sna-builder/skills/create-skill/SKILL.md`** — Emit command path must be current.
-   - **`.claude-plugin/marketplace.json`** — Plugin description and version must match plugin.json.
+2. **Discover documentation files** — Find all `.md` files that may reference code (DO NOT use a hardcoded list):
+   ```
+   **/*.md excluding node_modules/, dist/, .sna/, samples/
+   ```
+   This includes: README.md, CONTRIBUTING.md, docs/*.md, CLAUDE.md, plugins/**/*.md, packages/*/README.md
 
-3. **Verify consistency** — Check that these values are identical across all files:
-   - SDK DB path (e.g. `data/sna.db`)
-   - Emit script path (e.g. `node node_modules/@sna-sdk/core/dist/scripts/emit.js`)
-   - Hook script path
-   - Package names (`@sna-sdk/core`, `@sna-sdk/react`)
+3. **Compare and update** — For each discovered .md file:
+   - Read the file
+   - Identify all code references (paths, function names, CLI commands, API routes, event types, props, etc.)
+   - Compare each reference against the actual code state from step 1
+   - If a reference is stale, update it to match reality
+   - If a referenced file/function/route no longer exists, remove or replace the reference
+
+4. **Verify cross-file consistency** — After individual updates, check that these values are identical across ALL .md files:
+   - DB paths and table names
+   - Package names and import paths
    - Event types list
+   - CLI command names and syntax
+   - Script paths (emit, hook, dispatch)
    - SDK server endpoints
+   - Component/hook names and signatures
 
-4. **Language rule** — All documentation MUST be written in English.
+5. **Language rule** — All documentation MUST be written in English.
 
-5. **Report changes** — List which files were updated and what changed.
+6. **Report** — List which files were updated, what changed, and any references that couldn't be resolved (possible dead docs).

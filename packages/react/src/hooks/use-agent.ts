@@ -32,10 +32,10 @@ interface UseAgentOptions {
  * Use `send()` to send messages (spawns `claude -p --resume` per message).
  */
 export function useAgent(options: UseAgentOptions = {}) {
-  const { apiUrl } = useSnaContext();
+  const ctx = useSnaContext();
   const {
-    sessionId = "default",
-    baseUrl = `${apiUrl}/agent`,
+    sessionId = ctx.sessionId,
+    baseUrl = `${ctx.apiUrl}/agent`,
     provider = "claude-code",
     permissionMode = "acceptEdits",
   } = options;

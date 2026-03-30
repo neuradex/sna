@@ -7,6 +7,7 @@ import { AgentProcess, AgentEvent } from '../core/providers/types.js';
  * The default "default" session provides backward compatibility.
  */
 
+type SessionState = "idle" | "processing" | "waiting" | "permission";
 interface Session {
     id: string;
     process: AgentProcess | null;
@@ -14,6 +15,7 @@ interface Session {
     eventCounter: number;
     label: string;
     cwd: string;
+    state: SessionState;
     createdAt: number;
     lastActivityAt: number;
 }
@@ -21,6 +23,7 @@ interface SessionInfo {
     id: string;
     label: string;
     alive: boolean;
+    state: SessionState;
     cwd: string;
     eventCount: number;
     createdAt: number;
@@ -56,9 +59,11 @@ declare class SessionManager {
     listSessions(): SessionInfo[];
     /** Touch a session's lastActivityAt timestamp. */
     touch(id: string): void;
+    /** Persist an agent event to chat_messages. */
+    private persistEvent;
     /** Kill all sessions. Used during shutdown. */
     killAll(): void;
     get size(): number;
 }
 
-export { type Session, type SessionInfo, SessionManager, type SessionManagerOptions };
+export { type Session, type SessionInfo, SessionManager, type SessionManagerOptions, type SessionState };

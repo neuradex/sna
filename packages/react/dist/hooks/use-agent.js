@@ -2,10 +2,10 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSnaContext } from "../context.js";
 function useAgent(options = {}) {
-  const { apiUrl } = useSnaContext();
+  const ctx = useSnaContext();
   const {
-    sessionId = "default",
-    baseUrl = `${apiUrl}/agent`,
+    sessionId = ctx.sessionId,
+    baseUrl = `${ctx.apiUrl}/agent`,
     provider = "claude-code",
     permissionMode = "acceptEdits"
   } = options;

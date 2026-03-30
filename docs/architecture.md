@@ -38,55 +38,89 @@ skill_events  (id INTEGER PK, session_id FK nullable, skill, type, message, data
 - Applications MUST NOT write to `data/sna.db` directly
 - All skill event operations go through SDK scripts or SDK server routes
 
-### Skill Event Pipeline
+### Skill Event Pipeline (Dispatch)
 
-The entire pipeline is owned by `@sna-sdk/core`:
+All skill events flow through the unified dispatcher (`@sna-sdk/core/lib/dispatch`):
 
 ```
 Skill execution
-  → emit.js writes to data/sna.db (if SNA_SESSION_ID is set)
+  → dispatch.open({ skill }) — validate against .sna/skills.json
+  → dispatch.send(id, { type, message }) — write to data/sna.db
+  → dispatch.close(id) — write terminal events + kill bg agent process
   → SDK standalone server reads data/sna.db
   → GET /events (SSE) streams to frontend
   → useSkillEvents hook (SDK react) updates UI
 ```
 
-#### Context-Aware emit.js
+#### CLI Usage
 
-`emit.js` checks for `SNA_SESSION_ID` environment variable:
-- **Present** (running inside SDK-managed session): writes to `sna.db` with session FK
-- **Absent** (running outside SDK, e.g., terminal): console output only, skips DB write
+```bash
+ID=$(sna dispatch open --skill form-analyze)
+sna dispatch $ID start --message "Starting..."
+sna dispatch $ID milestone --message "5 items found"
+sna dispatch $ID close --message "Done"        # success → kills bg session
+sna dispatch $ID close --error "Failed"         # error → kills bg session
+```
 
-The SDK sets `SNA_SESSION_ID` when spawning agent processes.
+#### SDK (Programmatic) Usage
 
-#### Event Types
+```typescript
+import { createDispatchHandle } from "@sna-sdk/core";
 
-| Type | When |
-|------|------|
-| `invoked` | SDK records immediately on `/agent/start` (before Claude boots) |
-| `start` | First thing a skill does (from emit.js) |
-| `progress` | Incremental updates inside loops |
-| `milestone` | Significant checkpoint |
-| `complete` | Skill finished — frontend auto-refreshes |
-| `error` | Something failed |
+const d = createDispatchHandle({ skill: "form-analyze" });
+d.start("Starting...");
+d.milestone("5 items found");
+await d.close();  // or d.close({ error: "reason" })
+```
+
+Workflow engine, hook script, and legacy `emit.js` all route through dispatch internally.
+
+#### Dispatch Lifecycle
+
+| Phase | What happens |
+|-------|-------------|
+| `open` | Validate skill against `.sna/skills.json` (fallback: SKILL.md), create in-memory session |
+| `send` | Write event to `skill_events` table. Valid types: `called`, `start`, `progress`, `milestone`, `permission_needed` |
+| `close` | Write terminal events (`complete`+`success` or `error`+`failed`), notify SNA API server to kill background agent process |
+
+#### Validation
+
+`sna gen client` generates `.sna/skills.json` — the skill registry. Dispatch validates skill names against this file on `open()`. If the file is missing, falls back to checking `.claude/skills/<name>/SKILL.md` existence.
+
+Run `sna validate` to check project health:
+- `.sna/skills.json` exists and skills match SKILL.md files
+- `.claude/settings.json` has the PreToolUse hook
+- `node_modules` installed
 
 ### SDK Server
 
 `@sna-sdk/core` provides a standalone Hono server started via CLI:
 
 ```bash
-node node_modules/@sna-sdk/core/dist/scripts/sna.js api:up
+sna api:up    # or: node node_modules/@sna-sdk/core/dist/scripts/sna.js api:up
 ```
+
+CLI commands:
+- `sna up` / `sna down` — Full lifecycle (install, DB, API server, dev server)
+- `sna validate` — Check project health (skills.json, hooks, deps)
+- `sna dispatch` — Unified event dispatcher (open/send/close)
+- `sna gen client` — Generate typed client + `.sna/skills.json`
 
 This server provides:
 - `GET /health` — Health check
 - `GET /events` — SSE stream of skill_events
 - `POST /emit` — Write a skill event
 - `POST /agent/start` — Start an agent session (records `invoked` event)
-- `POST /agent/send` — Send message to agent
+- `POST /agent/send` — Send message to agent (auto-persists to chat_messages)
 - `GET /agent/events` — Agent SSE stream
 - `POST /agent/sessions` — Create session
-- `GET /agent/sessions` — List sessions
+- `GET /agent/sessions` — List sessions (includes `state` field)
 - `DELETE /agent/sessions/:id` — Remove session
+- `POST /agent/kill` — Kill agent in a session
+- `GET /agent/status` — Check session status
+- `POST /agent/permission-request` — Hook submits permission request (blocks until UI responds)
+- `POST /agent/permission-respond` — UI approves/denies a pending permission
+- `GET /agent/permission-pending` — UI polls for pending permission requests
 - `GET /chat/sessions` — List chat sessions
 - `POST /chat/sessions` — Create chat session
 - `DELETE /chat/sessions/:id` — Delete chat session
@@ -98,22 +132,23 @@ Applications discover the server URL via `/api/sna-port` or the default port (30
 
 ### Hook Script
 
-The permission hook notifies the UI when Claude requests permissions:
+The PreToolUse hook enables the permission approval flow. It fires before every tool execution, submits a request to the SNA API, and waits for user approval from the UI:
 
 ```json
 {
   "hooks": {
-    "PermissionRequest": [{
+    "PreToolUse": [{
       "matcher": ".*",
       "hooks": [{
         "type": "command",
-        "command": "node \"$CLAUDE_PROJECT_DIR\"/node_modules/@sna-sdk/core/dist/scripts/hook.js",
-        "async": true
+        "command": "node \"$CLAUDE_PROJECT_DIR\"/node_modules/@sna-sdk/core/dist/scripts/hook.js"
       }]
     }]
   }
 }
 ```
+
+The SDK auto-injects this via `--settings` when spawning agents (unless `bypassPermissions` is set). Safe tools (Read, Glob, Grep, etc.) are auto-allowed without prompting.
 
 ### Typed Client Generation
 

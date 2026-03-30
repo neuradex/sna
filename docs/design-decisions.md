@@ -19,18 +19,24 @@ skill_events:
 
 **Key rule:** Application DB is entirely separate. The SDK does not dictate what DB technology or ORM the application uses. Applications can use PostgreSQL, Supabase, SQLite, Prisma, Drizzle, or raw SQL — the SDK does not care.
 
-### `emit.js` behavior depends on context
+### Event dispatch: `sna dispatch` (primary) and `emit.js` (legacy)
 
-`emit.js` checks for `SNA_SESSION_ID` environment variable:
+`sna dispatch` is the primary path for emitting skill events. It provides:
+- Skill name validation against `.sna/skills.json` (fallback: SKILL.md existence)
+- Session-based lifecycle: `open` → `send` (called/start/milestone/progress) → `close`
+- Automatic emission of both canonical and legacy event types on close
+- Background session cleanup via API notification
+
+`emit.js` is the legacy path, still available for backward compatibility. Both check for `SNA_SESSION_ID`:
 
 - **Present** (running inside SDK-managed session): writes to `sna.db` with session FK, participates in the event pipeline
 - **Absent** (running outside SDK, e.g., terminal): console output only, skips DB write and lifecycle processing
 
-This ensures `emit.js` never breaks when called outside the SDK, while fully participating when running inside it.
+This ensures event emission never breaks when called outside the SDK, while fully participating when running inside it.
 
 The SDK sets `SNA_SESSION_ID` when spawning agent processes:
 ```
-SessionManager.spawn(sessionId) → env: SNA_SESSION_ID=<id> → Claude Code → emit.js reads env
+SessionManager.spawn(sessionId) → env: SNA_SESSION_ID=<id> → Claude Code → sna dispatch / emit.js reads env
 ```
 
 ### Skill execution locking is application responsibility
@@ -90,7 +96,7 @@ Chat messages currently live in frontend `localStorage` (via Zustand persist). T
 **Schema:**
 ```sql
 chat_sessions (id, label, type, created_at)
-chat_messages (id, session_id FK, role, content, meta, created_at)
+chat_messages (id, session_id FK, role, content, skill_name, meta, created_at)
 ```
 
 **Benefits:**

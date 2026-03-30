@@ -17,6 +17,20 @@ import { SessionManager } from "./session-manager.js";
 import { getProvider } from "../core/providers/index.js";
 import { logger } from "../lib/logger.js";
 
+// Pre-flight: verify native modules are compatible before starting
+import { getDb } from "../db/schema.js";
+try {
+  getDb();
+} catch (err: any) {
+  if (err.message?.includes("NODE_MODULE_VERSION")) {
+    console.error(`\n✗  better-sqlite3 was compiled for a different Node.js version.`);
+    console.error(`   Run: pnpm rebuild better-sqlite3\n`);
+  } else {
+    console.error(`\n✗  Database initialization failed: ${err.message}\n`);
+  }
+  process.exit(1);
+}
+
 const port = parseInt(process.env.SNA_PORT ?? "3099", 10);
 const permissionMode = (process.env.SNA_PERMISSION_MODE ?? "acceptEdits") as "acceptEdits" | "bypassPermissions";
 const defaultModel = process.env.SNA_MODEL ?? "claude-sonnet-4-6";
@@ -24,6 +38,12 @@ const maxSessions = parseInt(process.env.SNA_MAX_SESSIONS ?? "5", 10);
 
 const root = new Hono();
 root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "DELETE", "OPTIONS"] }));
+
+// Global error handler — always return JSON with error details
+root.onError((err, c) => {
+  logger.err("err", `${c.req.method} ${new URL(c.req.url).pathname} → ${err.message}`);
+  return c.json({ status: "error", message: err.message, stack: err.stack }, 500);
+});
 
 // Request logger with method coloring
 const methodColor: Record<string, (s: string) => string> = {

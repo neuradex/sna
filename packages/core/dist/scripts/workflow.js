@@ -2,7 +2,7 @@ import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import yaml from "js-yaml";
-import { getDb } from "../db/schema.js";
+import { createHandle } from "../lib/dispatch.js";
 const ROOT = process.cwd();
 const TASKS_DIR = path.join(ROOT, ".sna", "tasks");
 function ensureTasksDir() {
@@ -52,22 +52,6 @@ function interpolate(template, context) {
     if (typeof val === "object") return JSON.stringify(val);
     return String(val);
   });
-}
-function emitEvent(skill, type, message) {
-  const db = getDb();
-  db.prepare(`
-    INSERT INTO skill_events (skill, type, message)
-    VALUES (?, ?, ?)
-  `).run(skill, type, message);
-  const prefix = {
-    start: "\u25B6",
-    progress: "\xB7",
-    milestone: "\u25C6",
-    complete: "\u2713",
-    error: "\u2717"
-  };
-  const p = prefix[type] ?? "\xB7";
-  console.log(`${p} [${skill}] ${message}`);
 }
 function kebabToSnake(s) {
   return s.replace(/-/g, "_");
@@ -353,7 +337,7 @@ function displayStep(step, stepIndex, totalSteps, context, taskId) {
     printRequiredSubmission(afterFields, taskId);
   }
 }
-function autoAdvance(task, workflow) {
+function autoAdvance(task, workflow, d) {
   while (task.current_step < workflow.steps.length) {
     const step = workflow.steps[task.current_step];
     if (!step.exec) break;
@@ -365,8 +349,7 @@ function autoAdvance(task, workflow) {
       Object.assign(task.context, extracted);
       task.steps[step.id] = { status: "completed" };
       if (step.event) {
-        const msg = interpolate(step.event, task.context);
-        emitEvent(workflow.skill, "milestone", msg);
+        d.milestone(interpolate(step.event, task.context));
       }
       console.log(" done");
     } catch (err) {
@@ -375,7 +358,7 @@ function autoAdvance(task, workflow) {
       task.steps[step.id] = { status: "error" };
       task.status = "error";
       saveTask(task);
-      emitEvent(workflow.skill, "error", interpolate(workflow.error, { ...task.context, error: msg }));
+      d.close({ error: interpolate(workflow.error, { ...task.context, error: msg }) });
       process.exit(1);
     }
     task.current_step++;
@@ -404,12 +387,14 @@ function cmdNew(args) {
   };
   saveTask(task);
   console.log(`\u25B6 Task ${taskId} created (${workflow.skill})`);
-  emitEvent(workflow.skill, "start", `Task ${taskId} started`);
+  const d = createHandle({ skill: workflow.skill });
+  d.called(`Task ${taskId} created`);
+  d.start(`Task ${taskId} started`);
   const firstStep = workflow.steps[0];
   if (firstStep) {
     task.steps[firstStep.id] = { status: "in_progress" };
   }
-  const advanced = autoAdvance(task, workflow);
+  const advanced = autoAdvance(task, workflow, d);
   if (advanced.current_step < workflow.steps.length) {
     const currentStep = workflow.steps[advanced.current_step];
     advanced.steps[currentStep.id] = { status: "in_progress" };
@@ -419,7 +404,7 @@ function cmdNew(args) {
     advanced.status = "completed";
     saveTask(advanced);
     const msg = interpolate(workflow.complete, advanced.context);
-    emitEvent(workflow.skill, "complete", msg);
+    d.close({ message: msg });
     console.log(`
 ${msg}`);
   }
@@ -428,6 +413,7 @@ function cmdWorkflow(taskId, args) {
   const subcommand = args[0];
   const task = loadTask(taskId);
   const workflow = loadWorkflow(task.skill);
+  const d = createHandle({ skill: workflow.skill });
   if (subcommand === "start") {
     if (task.status === "completed") {
       console.error(`Task ${taskId} is already completed.`);
@@ -444,7 +430,8 @@ function cmdWorkflow(taskId, args) {
       saveTask(task);
       console.log(`\u21BB Retrying from step ${task.current_step + 1}/${workflow.steps.length}: ${currentStep.name}`);
     }
-    const advanced = autoAdvance(task, workflow);
+    d.start(`Task ${taskId} resumed`);
+    const advanced = autoAdvance(task, workflow, d);
     if (advanced.current_step < workflow.steps.length) {
       const currentStep = workflow.steps[advanced.current_step];
       advanced.steps[currentStep.id] = { status: "in_progress" };
@@ -454,7 +441,7 @@ function cmdWorkflow(taskId, args) {
       advanced.status = "completed";
       saveTask(advanced);
       const msg = interpolate(workflow.complete, advanced.context);
-      emitEvent(workflow.skill, "complete", msg);
+      d.close({ message: msg });
       console.log(`
 ${msg}`);
     }
@@ -485,7 +472,7 @@ ${msg}`);
           task.steps[currentStep.id] = { status: "error" };
           task.status = "error";
           saveTask(task);
-          emitEvent(workflow.skill, "error", interpolate(workflow.error, { ...task.context, error: msg }));
+          d.close({ error: interpolate(workflow.error, { ...task.context, error: msg }) });
           process.exit(1);
         }
       } else {
@@ -493,11 +480,10 @@ ${msg}`);
       }
       task.steps[currentStep.id] = { status: "completed" };
       if (currentStep.event) {
-        const msg = interpolate(currentStep.event, task.context);
-        emitEvent(workflow.skill, "milestone", msg);
+        d.milestone(interpolate(currentStep.event, task.context));
       }
       task.current_step++;
-      const advanced2 = autoAdvance(task, workflow);
+      const advanced2 = autoAdvance(task, workflow, d);
       if (advanced2.current_step < workflow.steps.length) {
         const nextStep = workflow.steps[advanced2.current_step];
         advanced2.steps[nextStep.id] = { status: "in_progress" };
@@ -507,7 +493,7 @@ ${msg}`);
         advanced2.status = "completed";
         saveTask(advanced2);
         const msg = interpolate(workflow.complete, advanced2.context);
-        emitEvent(workflow.skill, "complete", msg);
+        d.close({ message: msg });
         console.log(`
 ${msg}`);
       }
@@ -518,11 +504,10 @@ ${msg}`);
     Object.assign(task.context, validated);
     task.steps[currentStep.id] = { status: "completed" };
     if (currentStep.event) {
-      const msg = interpolate(currentStep.event, task.context);
-      emitEvent(workflow.skill, "milestone", msg);
+      d.milestone(interpolate(currentStep.event, task.context));
     }
     task.current_step++;
-    const advanced = autoAdvance(task, workflow);
+    const advanced = autoAdvance(task, workflow, d);
     if (advanced.current_step < workflow.steps.length) {
       const nextStep = workflow.steps[advanced.current_step];
       advanced.steps[nextStep.id] = { status: "in_progress" };
@@ -532,7 +517,7 @@ ${msg}`);
       advanced.status = "completed";
       saveTask(advanced);
       const msg = interpolate(workflow.complete, advanced.context);
-      emitEvent(workflow.skill, "complete", msg);
+      d.close({ message: msg });
       console.log(`
 ${msg}`);
     }
@@ -558,7 +543,8 @@ function cmdCancel(taskId) {
   }
   task.status = "cancelled";
   saveTask(task);
-  emitEvent(workflow.skill, "error", `Task ${taskId} cancelled`);
+  const d = createHandle({ skill: workflow.skill });
+  d.close({ error: `Task ${taskId} cancelled` });
   console.log(`\u2717 Task ${taskId} cancelled`);
 }
 function cmdTasks() {

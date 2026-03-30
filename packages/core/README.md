@@ -5,9 +5,10 @@ Server runtime for [Skills-Native Applications](https://github.com/neuradex/sna)
 ## What's included
 
 - **Skill event pipeline** — emit, SSE streaming, and hook scripts
+- **Dispatch** — unified event dispatcher with validation, session lifecycle, and cleanup (`sna dispatch` CLI + programmatic API)
 - **SQLite database** — schema and `getDb()` for `skill_events`
 - **Hono server factory** — `createSnaApp()` with events, emit, agent, and run routes
-- **Lifecycle CLI** — `sna api:up`, `sna api:down`
+- **Lifecycle CLI** — `sna api:up`, `sna api:down`, `sna dispatch`, `sna validate`
 - **Agent providers** — Claude Code and Codex process management
 
 ## Install
@@ -18,7 +19,29 @@ npm install @sna-sdk/core
 
 ## Usage
 
-### Emit skill events
+### Dispatch skill events (recommended)
+
+```bash
+# CLI
+ID=$(sna dispatch open --skill my-skill)
+sna dispatch $ID start --message "Starting..."
+sna dispatch $ID milestone --message "Step done"
+sna dispatch $ID close --message "Done."
+```
+
+```typescript
+// Programmatic
+import { createDispatchHandle } from "@sna-sdk/core";
+
+const h = createDispatchHandle({ skill: "my-skill" });
+h.start("Starting...");
+h.milestone("Step done");
+await h.close();
+```
+
+### Emit skill events (legacy, deprecated)
+
+> Use `sna dispatch` instead. `emit.js` remains for backward compatibility.
 
 ```bash
 node node_modules/@sna-sdk/core/dist/scripts/emit.js \
@@ -48,7 +71,7 @@ const db = getDb(); // SQLite instance (data/sna.db)
 
 | Import path | Contents |
 |-------------|----------|
-| `@sna-sdk/core` | `DEFAULT_SNA_PORT`, `DEFAULT_SNA_URL`, types |
+| `@sna-sdk/core` | `DEFAULT_SNA_PORT`, `DEFAULT_SNA_URL`, `dispatchOpen`, `dispatchSend`, `dispatchClose`, `createDispatchHandle`, `SEND_TYPES`, `loadSkillsManifest`, types |
 | `@sna-sdk/core/server` | `createSnaApp()`, route handlers, `SessionManager` |
 | `@sna-sdk/core/db/schema` | `getDb()`, `SkillEvent` type |
 | `@sna-sdk/core/providers` | Agent provider factory, `ClaudeCodeProvider` |

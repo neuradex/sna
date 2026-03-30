@@ -12,13 +12,16 @@ import { streamSSE } from "hono/streaming";
 
 // src/db/schema.ts
 import { createRequire } from "module";
+import fs from "fs";
 import path from "path";
-var require2 = createRequire(path.join(process.cwd(), "node_modules", "_"));
-var BetterSqlite3 = require2("better-sqlite3");
 var DB_PATH = path.join(process.cwd(), "data/sna.db");
 var _db = null;
 function getDb() {
   if (!_db) {
+    const req = createRequire(import.meta.url);
+    const BetterSqlite3 = req("better-sqlite3");
+    const dir = path.dirname(DB_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     _db = new BetterSqlite3(DB_PATH);
     _db.pragma("journal_mode = WAL");
     initSchema(_db);
@@ -195,16 +198,16 @@ import { streamSSE as streamSSE3 } from "hono/streaming";
 // src/core/providers/claude-code.ts
 import { spawn as spawn2, execSync } from "child_process";
 import { EventEmitter } from "events";
-import fs2 from "fs";
+import fs3 from "fs";
 import path3 from "path";
 
 // src/lib/logger.ts
 import chalk from "chalk";
-import fs from "fs";
+import fs2 from "fs";
 import path2 from "path";
 var LOG_PATH = path2.join(process.cwd(), ".dev.log");
 try {
-  fs.writeFileSync(LOG_PATH, "");
+  fs2.writeFileSync(LOG_PATH, "");
 } catch {
 }
 function tsPlain() {
@@ -234,7 +237,7 @@ var tagPlain = {
 function appendFile(tag, args) {
   const line = `${tsPlain()} ${tag} ${args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}
 `;
-  fs.appendFile(LOG_PATH, line, () => {
+  fs2.appendFile(LOG_PATH, line, () => {
   });
 }
 function log(tag, ...args) {
@@ -251,8 +254,8 @@ var logger = { log, err };
 var SHELL = process.env.SHELL || "/bin/zsh";
 function resolveClaudePath(cwd) {
   const cached = path3.join(cwd, ".sna/claude-path");
-  if (fs2.existsSync(cached)) {
-    const p = fs2.readFileSync(cached, "utf8").trim();
+  if (fs3.existsSync(cached)) {
+    const p = fs3.readFileSync(cached, "utf8").trim();
     if (p) {
       try {
         execSync(`test -x "${p}"`, { stdio: "pipe" });
@@ -473,18 +476,56 @@ var ClaudeCodeProvider = class {
   }
   spawn(options) {
     const claudePath = resolveClaudePath(options.cwd);
+    const hookScript = path3.join(options.cwd, "node_modules/@sna-sdk/core/dist/scripts/hook.js");
+    const sdkSettings = {};
+    if (options.permissionMode !== "bypassPermissions") {
+      sdkSettings.hooks = {
+        PreToolUse: [{
+          matcher: ".*",
+          hooks: [{ type: "command", command: `node "${hookScript}"` }]
+        }]
+      };
+    }
+    let extraArgsClean = options.extraArgs ? [...options.extraArgs] : [];
+    const settingsIdx = extraArgsClean.indexOf("--settings");
+    if (settingsIdx !== -1 && settingsIdx + 1 < extraArgsClean.length) {
+      try {
+        const appSettings = JSON.parse(extraArgsClean[settingsIdx + 1]);
+        if (appSettings.hooks) {
+          for (const [event, hooks] of Object.entries(appSettings.hooks)) {
+            if (sdkSettings.hooks && sdkSettings.hooks[event]) {
+              sdkSettings.hooks[event] = [
+                ...sdkSettings.hooks[event],
+                ...hooks
+              ];
+            } else {
+              sdkSettings.hooks[event] = hooks;
+            }
+          }
+          delete appSettings.hooks;
+        }
+        Object.assign(sdkSettings, appSettings);
+      } catch {
+      }
+      extraArgsClean.splice(settingsIdx, 2);
+    }
     const args = [
       "--output-format",
       "stream-json",
       "--input-format",
       "stream-json",
-      "--verbose"
+      "--verbose",
+      "--settings",
+      JSON.stringify(sdkSettings)
     ];
     if (options.model) {
       args.push("--model", options.model);
     }
     if (options.permissionMode) {
       args.push("--permission-mode", options.permissionMode);
+    }
+    if (extraArgsClean.length > 0) {
+      args.push(...extraArgsClean);
     }
     const cleanEnv = { ...process.env, ...options.env };
     delete cleanEnv.CLAUDECODE;
@@ -495,7 +536,7 @@ var ClaudeCodeProvider = class {
       env: cleanEnv,
       stdio: ["pipe", "pipe", "pipe"]
     });
-    logger.log("agent", `spawned claude-code (pid=${proc.pid})`);
+    logger.log("agent", `spawned claude-code (pid=${proc.pid}) \u2192 ${claudePath} ${args.join(" ")}`);
     return new ClaudeCodeProcess(proc, options);
   }
 };
@@ -576,15 +617,19 @@ function createAgentRoutes(sessionManager2) {
     }
     session.eventBuffer.length = 0;
     const provider2 = getProvider(body.provider ?? "claude-code");
-    const skillMatch = body.prompt?.match(/^Execute the skill:\s*(\S+)/);
-    if (skillMatch) {
-      try {
-        const db = getDb();
+    try {
+      const db = getDb();
+      db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
+      if (body.prompt) {
+        db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, body.prompt, body.meta ? JSON.stringify(body.meta) : null);
+      }
+      const skillMatch = body.prompt?.match(/^Execute the skill:\s*(\S+)/);
+      if (skillMatch) {
         db.prepare(
           `INSERT INTO skill_events (session_id, skill, type, message) VALUES (?, ?, 'invoked', ?)`
         ).run(sessionId, skillMatch[1], `Skill ${skillMatch[1]} invoked`);
-      } catch {
       }
+    } catch {
     }
     try {
       const proc = provider2.spawn({
@@ -592,7 +637,8 @@ function createAgentRoutes(sessionManager2) {
         prompt: body.prompt,
         model: body.model ?? "claude-sonnet-4-6",
         permissionMode: body.permissionMode ?? "acceptEdits",
-        env: { SNA_SESSION_ID: sessionId }
+        env: { SNA_SESSION_ID: sessionId },
+        extraArgs: body.extraArgs
       });
       sessionManager2.setProcess(sessionId, proc);
       logger.log("route", `POST /start?session=${sessionId} \u2192 started`);
@@ -621,6 +667,13 @@ function createAgentRoutes(sessionManager2) {
       logger.err("err", `POST /send?session=${sessionId} \u2192 empty message`);
       return c.json({ status: "error", message: "message is required" }, 400);
     }
+    try {
+      const db = getDb();
+      db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
+      db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, body.message, body.meta ? JSON.stringify(body.meta) : null);
+    } catch {
+    }
+    session.state = "processing";
     sessionManager2.touch(sessionId);
     logger.log("route", `POST /send?session=${sessionId} \u2192 "${body.message.slice(0, 80)}"`);
     session.process.send(body.message);
@@ -673,6 +726,63 @@ function createAgentRoutes(sessionManager2) {
       eventCount: session?.eventCounter ?? 0
     });
   });
+  const pendingPermissions = /* @__PURE__ */ new Map();
+  app.post("/permission-request", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = await c.req.json().catch(() => ({}));
+    logger.log("route", `POST /permission-request?session=${sessionId} \u2192 ${body.tool_name}`);
+    const session = sessionManager2.getSession(sessionId);
+    if (session) session.state = "permission";
+    const result = await new Promise((resolve) => {
+      pendingPermissions.set(sessionId, {
+        resolve,
+        request: body,
+        createdAt: Date.now()
+      });
+      setTimeout(() => {
+        if (pendingPermissions.has(sessionId)) {
+          pendingPermissions.delete(sessionId);
+          resolve(false);
+        }
+      }, 3e5);
+    });
+    return c.json({ approved: result });
+  });
+  app.post("/permission-respond", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = await c.req.json().catch(() => ({}));
+    const approved = body.approved ?? false;
+    const pending = pendingPermissions.get(sessionId);
+    if (!pending) {
+      return c.json({ status: "error", message: "No pending permission request" }, 404);
+    }
+    pending.resolve(approved);
+    pendingPermissions.delete(sessionId);
+    const session = sessionManager2.getSession(sessionId);
+    if (session) session.state = "processing";
+    logger.log("route", `POST /permission-respond?session=${sessionId} \u2192 ${approved ? "approved" : "denied"}`);
+    return c.json({ status: approved ? "approved" : "denied" });
+  });
+  app.get("/permission-pending", (c) => {
+    const sessionId = c.req.query("session");
+    if (sessionId) {
+      const pending = pendingPermissions.get(sessionId);
+      if (!pending) return c.json({ pending: null });
+      return c.json({
+        pending: {
+          sessionId,
+          request: pending.request,
+          createdAt: pending.createdAt
+        }
+      });
+    }
+    const all = Array.from(pendingPermissions.entries()).map(([id, p]) => ({
+      sessionId: id,
+      request: p.request,
+      createdAt: p.createdAt
+    }));
+    return c.json({ pending: all });
+  });
   return app;
 }
 
@@ -681,37 +791,53 @@ import { Hono as Hono2 } from "hono";
 function createChatRoutes() {
   const app = new Hono2();
   app.get("/sessions", (c) => {
-    const db = getDb();
-    const sessions = db.prepare(
-      `SELECT id, label, type, created_at FROM chat_sessions ORDER BY created_at DESC`
-    ).all();
-    return c.json({ sessions });
+    try {
+      const db = getDb();
+      const sessions = db.prepare(
+        `SELECT id, label, type, created_at FROM chat_sessions ORDER BY created_at DESC`
+      ).all();
+      return c.json({ sessions });
+    } catch (e) {
+      return c.json({ status: "error", message: e.message, stack: e.stack }, 500);
+    }
   });
   app.post("/sessions", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const id = body.id ?? crypto.randomUUID().slice(0, 8);
-    const db = getDb();
-    db.prepare(
-      `INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, ?)`
-    ).run(id, body.label ?? id, body.type ?? "background");
-    return c.json({ status: "created", id });
+    try {
+      const db = getDb();
+      db.prepare(
+        `INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, ?)`
+      ).run(id, body.label ?? id, body.type ?? "background");
+      return c.json({ status: "created", id });
+    } catch (e) {
+      return c.json({ status: "error", message: e.message }, 500);
+    }
   });
   app.delete("/sessions/:id", (c) => {
     const id = c.req.param("id");
     if (id === "default") {
       return c.json({ status: "error", message: "Cannot delete default session" }, 400);
     }
-    const db = getDb();
-    db.prepare(`DELETE FROM chat_sessions WHERE id = ?`).run(id);
-    return c.json({ status: "deleted" });
+    try {
+      const db = getDb();
+      db.prepare(`DELETE FROM chat_sessions WHERE id = ?`).run(id);
+      return c.json({ status: "deleted" });
+    } catch (e) {
+      return c.json({ status: "error", message: e.message }, 500);
+    }
   });
   app.get("/sessions/:id/messages", (c) => {
     const id = c.req.param("id");
     const sinceParam = c.req.query("since");
-    const db = getDb();
-    const query = sinceParam ? db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY id ASC`) : db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id ASC`);
-    const messages = sinceParam ? query.all(id, parseInt(sinceParam, 10)) : query.all(id);
-    return c.json({ messages });
+    try {
+      const db = getDb();
+      const query = sinceParam ? db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY id ASC`) : db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id ASC`);
+      const messages = sinceParam ? query.all(id, parseInt(sinceParam, 10)) : query.all(id);
+      return c.json({ messages });
+    } catch (e) {
+      return c.json({ status: "error", message: e.message, stack: e.stack }, 500);
+    }
   });
   app.post("/sessions/:id/messages", async (c) => {
     const sessionId = c.req.param("id");
@@ -719,24 +845,32 @@ function createChatRoutes() {
     if (!body.role) {
       return c.json({ status: "error", message: "role is required" }, 400);
     }
-    const db = getDb();
-    db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, sessionId);
-    const result = db.prepare(
-      `INSERT INTO chat_messages (session_id, role, content, skill_name, meta) VALUES (?, ?, ?, ?, ?)`
-    ).run(
-      sessionId,
-      body.role,
-      body.content ?? "",
-      body.skill_name ?? null,
-      body.meta ? JSON.stringify(body.meta) : null
-    );
-    return c.json({ status: "created", id: result.lastInsertRowid });
+    try {
+      const db = getDb();
+      db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, sessionId);
+      const result = db.prepare(
+        `INSERT INTO chat_messages (session_id, role, content, skill_name, meta) VALUES (?, ?, ?, ?, ?)`
+      ).run(
+        sessionId,
+        body.role,
+        body.content ?? "",
+        body.skill_name ?? null,
+        body.meta ? JSON.stringify(body.meta) : null
+      );
+      return c.json({ status: "created", id: result.lastInsertRowid });
+    } catch (e) {
+      return c.json({ status: "error", message: e.message }, 500);
+    }
   });
   app.delete("/sessions/:id/messages", (c) => {
     const id = c.req.param("id");
-    const db = getDb();
-    db.prepare(`DELETE FROM chat_messages WHERE session_id = ?`).run(id);
-    return c.json({ status: "cleared" });
+    try {
+      const db = getDb();
+      db.prepare(`DELETE FROM chat_messages WHERE session_id = ?`).run(id);
+      return c.json({ status: "cleared" });
+    } catch (e) {
+      return c.json({ status: "error", message: e.message }, 500);
+    }
   });
   return app;
 }
@@ -755,8 +889,9 @@ var SessionManager = class {
     if (this.sessions.has(id)) {
       return this.sessions.get(id);
     }
-    if (this.sessions.size >= this.maxSessions) {
-      throw new Error(`Max sessions (${this.maxSessions}) reached`);
+    const aliveCount = Array.from(this.sessions.values()).filter((s) => s.process?.alive).length;
+    if (aliveCount >= this.maxSessions) {
+      throw new Error(`Max active sessions (${this.maxSessions}) reached \u2014 ${aliveCount} alive`);
     }
     const session = {
       id,
@@ -765,6 +900,7 @@ var SessionManager = class {
       eventCounter: 0,
       label: opts.label ?? id,
       cwd: opts.cwd ?? process.cwd(),
+      state: "idle",
       createdAt: Date.now(),
       lastActivityAt: Date.now()
     };
@@ -786,6 +922,7 @@ var SessionManager = class {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Session "${sessionId}" not found`);
     session.process = proc;
+    session.state = "processing";
     session.lastActivityAt = Date.now();
     proc.on("event", (e) => {
       session.eventBuffer.push(e);
@@ -793,6 +930,10 @@ var SessionManager = class {
       if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
         session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
       }
+      if (e.type === "complete" || e.type === "error") {
+        session.state = "waiting";
+      }
+      this.persistEvent(sessionId, e);
     });
   }
   /** Kill the agent process in a session (session stays, can be restarted). */
@@ -817,6 +958,7 @@ var SessionManager = class {
       id: s.id,
       label: s.label,
       alive: s.process?.alive ?? false,
+      state: s.state,
       cwd: s.cwd,
       eventCount: s.eventCounter,
       createdAt: s.createdAt,
@@ -827,6 +969,39 @@ var SessionManager = class {
   touch(id) {
     const session = this.sessions.get(id);
     if (session) session.lastActivityAt = Date.now();
+  }
+  /** Persist an agent event to chat_messages. */
+  persistEvent(sessionId, e) {
+    try {
+      const db = getDb();
+      switch (e.type) {
+        case "assistant":
+          if (e.message) {
+            db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`).run(sessionId, e.message);
+          }
+          break;
+        case "thinking":
+          if (e.message) {
+            db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'thinking', ?)`).run(sessionId, e.message);
+          }
+          break;
+        case "tool_use": {
+          const toolName = e.data?.toolName ?? e.message ?? "tool";
+          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool', ?, ?)`).run(sessionId, toolName, JSON.stringify(e.data ?? {}));
+          break;
+        }
+        case "tool_result":
+          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool_result', ?, ?)`).run(sessionId, e.message ?? "", JSON.stringify(e.data ?? {}));
+          break;
+        case "complete":
+          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'status', '', ?)`).run(sessionId, JSON.stringify({ status: "complete", ...e.data }));
+          break;
+        case "error":
+          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'error', ?, ?)`).run(sessionId, e.message ?? "Error", JSON.stringify({ status: "error" }));
+          break;
+      }
+    } catch {
+    }
   }
   /** Kill all sessions. Used during shutdown. */
   killAll() {
@@ -857,12 +1032,31 @@ function createSnaApp(options = {}) {
 }
 
 // src/server/standalone.ts
+try {
+  getDb();
+} catch (err2) {
+  if (err2.message?.includes("NODE_MODULE_VERSION")) {
+    console.error(`
+\u2717  better-sqlite3 was compiled for a different Node.js version.`);
+    console.error(`   Run: pnpm rebuild better-sqlite3
+`);
+  } else {
+    console.error(`
+\u2717  Database initialization failed: ${err2.message}
+`);
+  }
+  process.exit(1);
+}
 var port = parseInt(process.env.SNA_PORT ?? "3099", 10);
 var permissionMode = process.env.SNA_PERMISSION_MODE ?? "acceptEdits";
 var defaultModel = process.env.SNA_MODEL ?? "claude-sonnet-4-6";
 var maxSessions = parseInt(process.env.SNA_MAX_SESSIONS ?? "5", 10);
 var root = new Hono4();
 root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "DELETE", "OPTIONS"] }));
+root.onError((err2, c) => {
+  logger.err("err", `${c.req.method} ${new URL(c.req.url).pathname} \u2192 ${err2.message}`);
+  return c.json({ status: "error", message: err2.message, stack: err2.stack }, 500);
+});
 var methodColor = {
   GET: chalk2.green,
   POST: chalk2.yellow,

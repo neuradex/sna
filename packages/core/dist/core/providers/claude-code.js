@@ -228,18 +228,56 @@ class ClaudeCodeProvider {
   }
   spawn(options) {
     const claudePath = resolveClaudePath(options.cwd);
+    const hookScript = path.join(options.cwd, "node_modules/@sna-sdk/core/dist/scripts/hook.js");
+    const sdkSettings = {};
+    if (options.permissionMode !== "bypassPermissions") {
+      sdkSettings.hooks = {
+        PreToolUse: [{
+          matcher: ".*",
+          hooks: [{ type: "command", command: `node "${hookScript}"` }]
+        }]
+      };
+    }
+    let extraArgsClean = options.extraArgs ? [...options.extraArgs] : [];
+    const settingsIdx = extraArgsClean.indexOf("--settings");
+    if (settingsIdx !== -1 && settingsIdx + 1 < extraArgsClean.length) {
+      try {
+        const appSettings = JSON.parse(extraArgsClean[settingsIdx + 1]);
+        if (appSettings.hooks) {
+          for (const [event, hooks] of Object.entries(appSettings.hooks)) {
+            if (sdkSettings.hooks && sdkSettings.hooks[event]) {
+              sdkSettings.hooks[event] = [
+                ...sdkSettings.hooks[event],
+                ...hooks
+              ];
+            } else {
+              sdkSettings.hooks[event] = hooks;
+            }
+          }
+          delete appSettings.hooks;
+        }
+        Object.assign(sdkSettings, appSettings);
+      } catch {
+      }
+      extraArgsClean.splice(settingsIdx, 2);
+    }
     const args = [
       "--output-format",
       "stream-json",
       "--input-format",
       "stream-json",
-      "--verbose"
+      "--verbose",
+      "--settings",
+      JSON.stringify(sdkSettings)
     ];
     if (options.model) {
       args.push("--model", options.model);
     }
     if (options.permissionMode) {
       args.push("--permission-mode", options.permissionMode);
+    }
+    if (extraArgsClean.length > 0) {
+      args.push(...extraArgsClean);
     }
     const cleanEnv = { ...process.env, ...options.env };
     delete cleanEnv.CLAUDECODE;
@@ -250,7 +288,7 @@ class ClaudeCodeProvider {
       env: cleanEnv,
       stdio: ["pipe", "pipe", "pipe"]
     });
-    logger.log("agent", `spawned claude-code (pid=${proc.pid})`);
+    logger.log("agent", `spawned claude-code (pid=${proc.pid}) \u2192 ${claudePath} ${args.join(" ")}`);
     return new ClaudeCodeProcess(proc, options);
   }
 }

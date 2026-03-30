@@ -83,6 +83,8 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       model?: string;
       permissionMode?: string;
       force?: boolean;
+      meta?: Record<string, unknown>;
+      extraArgs?: string[];
     };
 
     // Auto-create session if it doesn't exist (backward compat for "default")
@@ -107,16 +109,22 @@ export function createAgentRoutes(sessionManager: SessionManager) {
 
     const provider = getProvider(body.provider ?? "claude-code");
 
-    // Record invoked event immediately — UI can show "starting" status right away
-    const skillMatch = body.prompt?.match(/^Execute the skill:\s*(\S+)/);
-    if (skillMatch) {
-      try {
-        const db = getDb();
+    // Persist initial prompt as user message + record invoked event
+    try {
+      const db = getDb();
+      db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`)
+        .run(sessionId, session.label ?? sessionId);
+      if (body.prompt) {
+        db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`)
+          .run(sessionId, body.prompt, body.meta ? JSON.stringify(body.meta) : null);
+      }
+      const skillMatch = body.prompt?.match(/^Execute the skill:\s*(\S+)/);
+      if (skillMatch) {
         db.prepare(
           `INSERT INTO skill_events (session_id, skill, type, message) VALUES (?, ?, 'invoked', ?)`
         ).run(sessionId, skillMatch[1], `Skill ${skillMatch[1]} invoked`);
-      } catch { /* DB not ready — non-fatal */ }
-    }
+      }
+    } catch { /* DB not ready — non-fatal */ }
 
     try {
       const proc = provider.spawn({
@@ -125,6 +133,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
         model: body.model ?? "claude-sonnet-4-6",
         permissionMode: (body.permissionMode as any) ?? "acceptEdits",
         env: { SNA_SESSION_ID: sessionId },
+        extraArgs: body.extraArgs,
       });
 
       sessionManager.setProcess(sessionId, proc);
@@ -154,12 +163,25 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       );
     }
 
-    const body = (await c.req.json().catch(() => ({}))) as { message?: string };
+    const body = (await c.req.json().catch(() => ({}))) as {
+      message?: string;
+      meta?: Record<string, unknown>;
+    };
     if (!body.message) {
       logger.err("err", `POST /send?session=${sessionId} → empty message`);
       return c.json({ status: "error", message: "message is required" }, 400);
     }
 
+    // Persist user message with optional metadata
+    try {
+      const db = getDb();
+      db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`)
+        .run(sessionId, session.label ?? sessionId);
+      db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`)
+        .run(sessionId, body.message, body.meta ? JSON.stringify(body.meta) : null);
+    } catch { /* DB write failure is non-fatal */ }
+
+    session.state = "processing";
     sessionManager.touch(sessionId);
     logger.log("route", `POST /send?session=${sessionId} → "${body.message.slice(0, 80)}"`);
     session.process.send(body.message);
@@ -223,6 +245,94 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       sessionId: session?.process?.sessionId ?? null,
       eventCount: session?.eventCounter ?? 0,
     });
+  });
+
+  // ── Permission approval flow ────────────────────────────────────
+
+  // In-memory pending permission requests: sessionId → { resolve, request }
+  const pendingPermissions = new Map<string, {
+    resolve: (approved: boolean) => void;
+    request: Record<string, unknown>;
+    createdAt: number;
+  }>();
+
+  // POST /permission-request — called by hook.ts (sync) to submit a request and wait
+  app.post("/permission-request", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      tool_name?: string;
+      tool_input?: Record<string, unknown>;
+    };
+
+    logger.log("route", `POST /permission-request?session=${sessionId} → ${body.tool_name}`);
+
+    // Set session state to permission
+    const session = sessionManager.getSession(sessionId);
+    if (session) session.state = "permission";
+
+    // Create a promise that will be resolved when the UI responds
+    const result = await new Promise<boolean>((resolve) => {
+      pendingPermissions.set(sessionId, {
+        resolve,
+        request: body,
+        createdAt: Date.now(),
+      });
+
+      // Timeout: auto-deny after 5 minutes
+      setTimeout(() => {
+        if (pendingPermissions.has(sessionId)) {
+          pendingPermissions.delete(sessionId);
+          resolve(false);
+        }
+      }, 300_000);
+    });
+
+    return c.json({ approved: result });
+  });
+
+  // POST /permission-respond — called by UI to approve/deny
+  app.post("/permission-respond", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = (await c.req.json().catch(() => ({}))) as { approved?: boolean };
+    const approved = body.approved ?? false;
+
+    const pending = pendingPermissions.get(sessionId);
+    if (!pending) {
+      return c.json({ status: "error", message: "No pending permission request" }, 404);
+    }
+
+    pending.resolve(approved);
+    pendingPermissions.delete(sessionId);
+    // Restore to processing (tool will execute or agent will continue)
+    const session = sessionManager.getSession(sessionId);
+    if (session) session.state = "processing";
+    logger.log("route", `POST /permission-respond?session=${sessionId} → ${approved ? "approved" : "denied"}`);
+    return c.json({ status: approved ? "approved" : "denied" });
+  });
+
+  // GET /permission-pending — UI polls this to check for pending requests
+  app.get("/permission-pending", (c) => {
+    const sessionId = c.req.query("session");
+
+    if (sessionId) {
+      const pending = pendingPermissions.get(sessionId);
+      if (!pending) return c.json({ pending: null });
+      return c.json({
+        pending: {
+          sessionId,
+          request: pending.request,
+          createdAt: pending.createdAt,
+        },
+      });
+    }
+
+    // No session specified — return all pending
+    const all = Array.from(pendingPermissions.entries()).map(([id, p]) => ({
+      sessionId: id,
+      request: p.request,
+      createdAt: p.createdAt,
+    }));
+    return c.json({ pending: all });
   });
 
   return app;

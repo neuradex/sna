@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
+import { SnaChatUI } from "@sna-sdk/react/components/sna-chat-ui";
 import { useSnaClient } from "@sna-sdk/react/hooks";
 import { bindSkills } from "./sna-client.js";
 import type { SkillEvent } from "@sna-sdk/react/hooks";
@@ -361,8 +362,10 @@ function HelloApp() {
 
 export default function App() {
   return (
-    <SnaProvider dangerouslySkipPermissions>
-      <HelloApp />
+    <SnaProvider>
+      <SnaChatUI dangerouslySkipPermissions>
+        <HelloApp />
+      </SnaChatUI>
     </SnaProvider>
   );
 }

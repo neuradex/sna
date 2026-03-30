@@ -4,20 +4,6 @@ let messageCounter = 0;
 function emptySession() {
   return { messages: [], processedEventIds: /* @__PURE__ */ new Set() };
 }
-function syncMessage(apiUrl, sessionId, msg) {
-  if (!apiUrl) return;
-  fetch(`${apiUrl}/chat/sessions/${encodeURIComponent(sessionId)}/messages`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      role: msg.role,
-      content: msg.content,
-      skill_name: msg.skillName,
-      meta: msg.meta
-    })
-  }).catch(() => {
-  });
-}
 function syncCreateSession(apiUrl, id, label, type) {
   if (!apiUrl) return;
   fetch(`${apiUrl}/chat/sessions`, {
@@ -86,7 +72,6 @@ const useChatStore = create()(
           }
         };
       });
-      syncMessage(get()._apiUrl, id, msg);
     },
     clearMessages: (sessionId) => {
       const id = sessionId ?? get().activeSessionId;
