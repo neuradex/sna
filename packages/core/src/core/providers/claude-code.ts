@@ -266,14 +266,16 @@ export class ClaudeCodeProvider implements AgentProvider {
 
     // Build merged settings: SDK's PreToolUse hook + app's settings from extraArgs.
     // Skip hook injection when bypassPermissions is set — all tools are auto-allowed.
-    const hookScript = path.join(options.cwd, "node_modules/@sna-sdk/core/dist/scripts/hook.js");
+    // Resolve hook script relative to this file (works with pnpm link / monorepo setups).
+    const hookScript = new URL("../../scripts/hook.js", import.meta.url).pathname;
+    const sessionId = options.env?.SNA_SESSION_ID ?? "default";
     const sdkSettings: Record<string, unknown> = {};
 
     if (options.permissionMode !== "bypassPermissions") {
       sdkSettings.hooks = {
         PreToolUse: [{
           matcher: ".*",
-          hooks: [{ type: "command", command: `node "${hookScript}"` }],
+          hooks: [{ type: "command", command: `node "${hookScript}" --session=${sessionId}` }],
         }],
       };
     }

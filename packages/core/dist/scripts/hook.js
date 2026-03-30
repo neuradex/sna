@@ -24,7 +24,7 @@ process.stdin.on("end", async () => {
       allow();
       return;
     }
-    const sessionId = process.env.SNA_SESSION_ID ?? "default";
+    const sessionId = process.argv.find((a) => a.startsWith("--session="))?.slice(10) ?? process.env.SNA_SESSION_ID ?? "default";
     const apiUrl = `http://localhost:${port}`;
     const res = await fetch(`${apiUrl}/agent/permission-request?session=${encodeURIComponent(sessionId)}`, {
       method: "POST",

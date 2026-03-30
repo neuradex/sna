@@ -486,13 +486,14 @@ var ClaudeCodeProvider = class {
   }
   spawn(options) {
     const claudePath = resolveClaudePath(options.cwd);
-    const hookScript = path3.join(options.cwd, "node_modules/@sna-sdk/core/dist/scripts/hook.js");
+    const hookScript = new URL("../../scripts/hook.js", import.meta.url).pathname;
+    const sessionId = options.env?.SNA_SESSION_ID ?? "default";
     const sdkSettings = {};
     if (options.permissionMode !== "bypassPermissions") {
       sdkSettings.hooks = {
         PreToolUse: [{
           matcher: ".*",
-          hooks: [{ type: "command", command: `node "${hookScript}"` }]
+          hooks: [{ type: "command", command: `node "${hookScript}" --session=${sessionId}` }]
         }]
       };
     }

@@ -1,9 +1,9 @@
 /**
  * hook.ts — Claude Code PreToolUse hook handler
  *
- * Configured via --settings or .claude/settings.json:
- *   "hooks": { "PreToolUse": [{ "matcher": ".*", "type": "command",
- *     "command": "node \"$CLAUDE_PROJECT_DIR\"/node_modules/@sna-sdk/core/dist/scripts/hook.js" }] }
+ * Injected automatically by ClaudeCodeProvider via --settings.
+ * Hook path resolved via import.meta.url (works with pnpm link / monorepo).
+ * Session ID passed as --session=<id> arg (env SNA_SESSION_ID as fallback).
  *
  * Fires BEFORE every tool execution. Submits a permission request to the
  * SNA API and waits for user approval/denial from the UI.
@@ -48,7 +48,8 @@ process.stdin.on("end", async () => {
       allow(); return; // No SNA API — allow by default
     }
 
-    const sessionId = process.env.SNA_SESSION_ID ?? "default";
+    const sessionId = process.argv.find(a => a.startsWith("--session="))?.slice(10)
+      ?? process.env.SNA_SESSION_ID ?? "default";
     const apiUrl = `http://localhost:${port}`;
 
     // Submit permission request and wait for UI response
