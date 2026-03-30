@@ -36,13 +36,21 @@ function migrateSkillEvents(db) {
     db.exec("DROP TABLE IF EXISTS skill_events");
   }
 }
+function migrateChatSessionsMeta(db) {
+  const cols = db.prepare("PRAGMA table_info(chat_sessions)").all();
+  if (cols.length > 0 && !cols.some((c) => c.name === "meta")) {
+    db.exec("ALTER TABLE chat_sessions ADD COLUMN meta TEXT");
+  }
+}
 function initSchema(db) {
   migrateSkillEvents(db);
+  migrateChatSessionsMeta(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS chat_sessions (
       id         TEXT PRIMARY KEY,
       label      TEXT NOT NULL DEFAULT '',
       type       TEXT NOT NULL DEFAULT 'main',
+      meta       TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -576,10 +584,18 @@ function createAgentRoutes(sessionManager2) {
     try {
       const session = sessionManager2.createSession({
         label: body.label,
-        cwd: body.cwd
+        cwd: body.cwd,
+        meta: body.meta
       });
+      try {
+        const db = getDb();
+        db.prepare(
+          `INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, 'main', ?)`
+        ).run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null);
+      } catch {
+      }
       logger.log("route", `POST /sessions \u2192 created "${session.id}"`);
-      return c.json({ status: "created", sessionId: session.id, label: session.label });
+      return c.json({ status: "created", sessionId: session.id, label: session.label, meta: session.meta });
     } catch (e) {
       logger.err("err", `POST /sessions \u2192 ${e.message}`);
       return c.json({ status: "error", message: e.message }, 409);
@@ -793,9 +809,13 @@ function createChatRoutes() {
   app.get("/sessions", (c) => {
     try {
       const db = getDb();
-      const sessions = db.prepare(
-        `SELECT id, label, type, created_at FROM chat_sessions ORDER BY created_at DESC`
+      const rows = db.prepare(
+        `SELECT id, label, type, meta, created_at FROM chat_sessions ORDER BY created_at DESC`
       ).all();
+      const sessions = rows.map((r) => ({
+        ...r,
+        meta: r.meta ? JSON.parse(r.meta) : null
+      }));
       return c.json({ sessions });
     } catch (e) {
       return c.json({ status: "error", message: e.message, stack: e.stack }, 500);
@@ -807,9 +827,9 @@ function createChatRoutes() {
     try {
       const db = getDb();
       db.prepare(
-        `INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, ?)`
-      ).run(id, body.label ?? id, body.type ?? "background");
-      return c.json({ status: "created", id });
+        `INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, ?, ?)`
+      ).run(id, body.label ?? id, body.type ?? "background", body.meta ? JSON.stringify(body.meta) : null);
+      return c.json({ status: "created", id, meta: body.meta ?? null });
     } catch (e) {
       return c.json({ status: "error", message: e.message }, 500);
     }
@@ -900,6 +920,7 @@ var SessionManager = class {
       eventCounter: 0,
       label: opts.label ?? id,
       cwd: opts.cwd ?? process.cwd(),
+      meta: opts.meta ?? null,
       state: "idle",
       createdAt: Date.now(),
       lastActivityAt: Date.now()
@@ -960,6 +981,7 @@ var SessionManager = class {
       alive: s.process?.alive ?? false,
       state: s.state,
       cwd: s.cwd,
+      meta: s.meta,
       eventCount: s.eventCounter,
       createdAt: s.createdAt,
       lastActivityAt: s.lastActivityAt

@@ -5,9 +5,13 @@ function createChatRoutes() {
   app.get("/sessions", (c) => {
     try {
       const db = getDb();
-      const sessions = db.prepare(
-        `SELECT id, label, type, created_at FROM chat_sessions ORDER BY created_at DESC`
+      const rows = db.prepare(
+        `SELECT id, label, type, meta, created_at FROM chat_sessions ORDER BY created_at DESC`
       ).all();
+      const sessions = rows.map((r) => ({
+        ...r,
+        meta: r.meta ? JSON.parse(r.meta) : null
+      }));
       return c.json({ sessions });
     } catch (e) {
       return c.json({ status: "error", message: e.message, stack: e.stack }, 500);
@@ -19,9 +23,9 @@ function createChatRoutes() {
     try {
       const db = getDb();
       db.prepare(
-        `INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, ?)`
-      ).run(id, body.label ?? id, body.type ?? "background");
-      return c.json({ status: "created", id });
+        `INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, ?, ?)`
+      ).run(id, body.label ?? id, body.type ?? "background", body.meta ? JSON.stringify(body.meta) : null);
+      return c.json({ status: "created", id, meta: body.meta ?? null });
     } catch (e) {
       return c.json({ status: "error", message: e.message }, 500);
     }

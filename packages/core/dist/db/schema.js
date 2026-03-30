@@ -23,13 +23,21 @@ function migrateSkillEvents(db) {
     db.exec("DROP TABLE IF EXISTS skill_events");
   }
 }
+function migrateChatSessionsMeta(db) {
+  const cols = db.prepare("PRAGMA table_info(chat_sessions)").all();
+  if (cols.length > 0 && !cols.some((c) => c.name === "meta")) {
+    db.exec("ALTER TABLE chat_sessions ADD COLUMN meta TEXT");
+  }
+}
 function initSchema(db) {
   migrateSkillEvents(db);
+  migrateChatSessionsMeta(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS chat_sessions (
       id         TEXT PRIMARY KEY,
       label      TEXT NOT NULL DEFAULT '',
       type       TEXT NOT NULL DEFAULT 'main',
+      meta       TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 

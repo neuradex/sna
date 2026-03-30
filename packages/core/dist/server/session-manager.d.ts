@@ -15,6 +15,7 @@ interface Session {
     eventCounter: number;
     label: string;
     cwd: string;
+    meta: Record<string, unknown> | null;
     state: SessionState;
     createdAt: number;
     lastActivityAt: number;
@@ -25,6 +26,7 @@ interface SessionInfo {
     alive: boolean;
     state: SessionState;
     cwd: string;
+    meta: Record<string, unknown> | null;
     eventCount: number;
     createdAt: number;
     lastActivityAt: number;
@@ -41,6 +43,7 @@ declare class SessionManager {
         id?: string;
         label?: string;
         cwd?: string;
+        meta?: Record<string, unknown> | null;
     }): Session;
     /** Get a session by ID. */
     getSession(id: string): Session | undefined;

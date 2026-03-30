@@ -23,6 +23,7 @@ class SessionManager {
       eventCounter: 0,
       label: opts.label ?? id,
       cwd: opts.cwd ?? process.cwd(),
+      meta: opts.meta ?? null,
       state: "idle",
       createdAt: Date.now(),
       lastActivityAt: Date.now()
@@ -83,6 +84,7 @@ class SessionManager {
       alive: s.process?.alive ?? false,
       state: s.state,
       cwd: s.cwd,
+      meta: s.meta,
       eventCount: s.eventCounter,
       createdAt: s.createdAt,
       lastActivityAt: s.lastActivityAt

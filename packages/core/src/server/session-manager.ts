@@ -17,6 +17,7 @@ export interface Session {
   eventCounter: number;
   label: string;
   cwd: string;
+  meta: Record<string, unknown> | null;
   state: SessionState;
   createdAt: number;
   lastActivityAt: number;
@@ -28,6 +29,7 @@ export interface SessionInfo {
   alive: boolean;
   state: SessionState;
   cwd: string;
+  meta: Record<string, unknown> | null;
   eventCount: number;
   createdAt: number;
   lastActivityAt: number;
@@ -53,6 +55,7 @@ export class SessionManager {
     id?: string;
     label?: string;
     cwd?: string;
+    meta?: Record<string, unknown> | null;
   } = {}): Session {
     const id = opts.id ?? crypto.randomUUID().slice(0, 8);
 
@@ -73,6 +76,7 @@ export class SessionManager {
       eventCounter: 0,
       label: opts.label ?? id,
       cwd: opts.cwd ?? process.cwd(),
+      meta: opts.meta ?? null,
       state: "idle",
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
@@ -144,6 +148,7 @@ export class SessionManager {
       alive: s.process?.alive ?? false,
       state: s.state,
       cwd: s.cwd,
+      meta: s.meta,
       eventCount: s.eventCounter,
       createdAt: s.createdAt,
       lastActivityAt: s.lastActivityAt,

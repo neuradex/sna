@@ -15,10 +15,18 @@ function createAgentRoutes(sessionManager) {
     try {
       const session = sessionManager.createSession({
         label: body.label,
-        cwd: body.cwd
+        cwd: body.cwd,
+        meta: body.meta
       });
+      try {
+        const db = getDb();
+        db.prepare(
+          `INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, 'main', ?)`
+        ).run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null);
+      } catch {
+      }
       logger.log("route", `POST /sessions \u2192 created "${session.id}"`);
-      return c.json({ status: "created", sessionId: session.id, label: session.label });
+      return c.json({ status: "created", sessionId: session.id, label: session.label, meta: session.meta });
     } catch (e) {
       logger.err("err", `POST /sessions \u2192 ${e.message}`);
       return c.json({ status: "error", message: e.message }, 409);
