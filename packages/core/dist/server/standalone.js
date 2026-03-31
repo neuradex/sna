@@ -399,9 +399,12 @@ var ClaudeCodeProcess = class {
     this.proc.stdin.write(msg + "\n");
   }
   interrupt() {
-    if (this._alive) {
-      this.proc.kill("SIGINT");
-    }
+    if (!this._alive || !this.proc.stdin.writable) return;
+    const msg = JSON.stringify({
+      type: "control_request",
+      request: { subtype: "interrupt" }
+    });
+    this.proc.stdin.write(msg + "\n");
   }
   kill() {
     if (this._alive) {

@@ -117,9 +117,13 @@ class ClaudeCodeProcess implements AgentProcess {
   }
 
   interrupt(): void {
-    if (this._alive) {
-      this.proc.kill("SIGINT");
-    }
+    if (!this._alive || !this.proc.stdin!.writable) return;
+    // Use stream-json control message instead of SIGINT for cross-platform safety
+    const msg = JSON.stringify({
+      type: "control_request",
+      request: { subtype: "interrupt" },
+    });
+    this.proc.stdin!.write(msg + "\n");
   }
 
   kill(): void {
