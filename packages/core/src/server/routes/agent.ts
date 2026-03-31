@@ -72,6 +72,10 @@ export async function runOnce(
   const provider = getProvider(opts.provider ?? "claude-code");
 
   const extraArgs: string[] = opts.extraArgs ? [...opts.extraArgs] : [];
+  // --max-turns 1: auto-exit after one response turn
+  // --bare: skip hooks, LSP, plugins, CLAUDE.md for faster startup
+  // --no-session-persistence: don't save this throwaway session
+  extraArgs.push("--max-turns", "1", "--bare", "--no-session-persistence");
   if (opts.systemPrompt) extraArgs.push("--system-prompt", opts.systemPrompt);
   if (opts.appendSystemPrompt) extraArgs.push("--append-system-prompt", opts.appendSystemPrompt);
 
@@ -81,7 +85,7 @@ export async function runOnce(
     model: opts.model ?? "claude-sonnet-4-6",
     permissionMode: (opts.permissionMode as any) ?? "bypassPermissions",
     env: { SNA_SESSION_ID: sessionId },
-    extraArgs: extraArgs.length > 0 ? extraArgs : undefined,
+    extraArgs,
   });
 
   sessionManager.setProcess(sessionId, proc);

@@ -637,6 +637,7 @@ async function runOnce(sessionManager2, opts) {
   });
   const provider2 = getProvider(opts.provider ?? "claude-code");
   const extraArgs = opts.extraArgs ? [...opts.extraArgs] : [];
+  extraArgs.push("--max-turns", "1", "--bare", "--no-session-persistence");
   if (opts.systemPrompt) extraArgs.push("--system-prompt", opts.systemPrompt);
   if (opts.appendSystemPrompt) extraArgs.push("--append-system-prompt", opts.appendSystemPrompt);
   const proc = provider2.spawn({
@@ -645,7 +646,7 @@ async function runOnce(sessionManager2, opts) {
     model: opts.model ?? "claude-sonnet-4-6",
     permissionMode: opts.permissionMode ?? "bypassPermissions",
     env: { SNA_SESSION_ID: sessionId },
-    extraArgs: extraArgs.length > 0 ? extraArgs : void 0
+    extraArgs
   });
   sessionManager2.setProcess(sessionId, proc);
   try {
