@@ -29,7 +29,7 @@ See [docs/architecture.md](docs/architecture.md) for full details.
 #### DB Separation (CRITICAL)
 
 SDK DB (`data/sna.db`):
-- `chat_sessions` — session management (main + background)
+- `chat_sessions` — session management (id, label, type, meta, cwd, last_start_config, created_at)
 - `chat_messages` — chat history persistence
 - `skill_events` — skill execution state tracking (FK → chat_sessions)
 

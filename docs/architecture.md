@@ -28,7 +28,7 @@ SNA uses **two separate SQLite databases**:
 **Schema:**
 
 ```sql
-chat_sessions (id TEXT PK, label, type, meta, created_at)
+chat_sessions (id TEXT PK, label, type, meta, cwd, last_start_config, created_at)
 chat_messages (id INTEGER PK, session_id FK, role, content, skill_name, meta, created_at)
 skill_events  (id INTEGER PK, session_id FK nullable, skill, type, message, data, created_at)
 ```
@@ -111,11 +111,15 @@ This server provides:
 **HTTP Routes:**
 - `GET /health` — Health check
 - `GET /events` — SSE stream of skill_events
-- `POST /emit` — Write a skill event
+- `POST /emit` — Write a skill event (broadcasts to WS subscribers)
 - `POST /agent/start` — Start an agent session (records `invoked` event)
 - `POST /agent/send` — Send message to agent (auto-persists to chat_messages)
 - `GET /agent/events` — Agent SSE stream
 - `POST /agent/run-once` — One-shot execution (spawn → run → return result → cleanup)
+- `POST /agent/restart` — Kill + re-spawn with merged config + `--resume`
+- `POST /agent/interrupt` — Interrupt current turn (process stays alive)
+- `POST /agent/set-model` — Change model at runtime (no restart)
+- `POST /agent/set-permission-mode` — Change permission mode at runtime (no restart)
 - `POST /agent/sessions` — Create session (supports `meta` for multi-app identification)
 - `GET /agent/sessions` — List sessions (includes `state` and `meta` fields)
 - `DELETE /agent/sessions/:id` — Remove session
@@ -123,7 +127,7 @@ This server provides:
 - `GET /agent/status` — Check session status
 - `POST /agent/permission-request` — Hook submits permission request (blocks until UI responds)
 - `POST /agent/permission-respond` — UI approves/denies a pending permission
-- `GET /agent/permission-pending` — UI polls for pending permission requests
+- `GET /agent/permission-pending` — Poll for pending permission requests (always returns array)
 - `GET /chat/sessions` — List chat sessions
 - `POST /chat/sessions` — Create chat session
 - `DELETE /chat/sessions/:id` — Delete chat session
@@ -131,12 +135,13 @@ This server provides:
 - `POST /chat/sessions/:id/messages` — Add message
 - `DELETE /chat/sessions/:id/messages` — Clear messages
 
-**WebSocket API:**
-- `ws://host:port/ws` — Full bidirectional API wrapping all HTTP routes above
-- All session, agent, chat, permission, and skill event operations over a single connection
-- Agent events pushed instantly via pub/sub (no polling delay unlike SSE's 300ms)
-- Message protocol: `{ type: "sessions.list", rid?: "1" }` → `{ type: "sessions.list", rid: "1", sessions: [...] }`
-- Push events: `{ type: "agent.event", session, cursor, event }` and `{ type: "skill.event", data }`
+**WebSocket API (`ws://host:port/ws`):**
+- Full bidirectional API wrapping all HTTP routes over a single connection
+- Agent events pushed instantly via pub/sub (no polling delay)
+- `ApiResponses` type contract enforces HTTP/WS response shape parity at compile time
+- Push events (no subscribe needed): `session.lifecycle` (started/killed/exited/crashed/restarted)
+- Push events (subscribe needed): `agent.event`, `skill.event`, `permission.request`
+- Runtime config: `agent.set-model` and `agent.set-permission-mode` change settings without restart
 
 Applications discover the server URL via `/api/sna-port` or the default port (3099).
 
