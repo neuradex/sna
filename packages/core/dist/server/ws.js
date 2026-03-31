@@ -132,11 +132,6 @@ function handleSessionsCreate(ws, msg, sm) {
       cwd: msg.cwd,
       meta: msg.meta
     });
-    try {
-      const db = getDb();
-      db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, 'main', ?)`).run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null);
-    } catch {
-    }
     wsReply(ws, msg, { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
   } catch (e) {
     replyError(ws, msg, e.message);
@@ -152,7 +147,9 @@ function handleSessionsRemove(ws, msg, sm) {
 }
 function handleAgentStart(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
-  const session = sm.getOrCreateSession(sessionId);
+  const session = sm.getOrCreateSession(sessionId, {
+    cwd: msg.cwd
+  });
   if (session.process?.alive && !msg.force) {
     wsReply(ws, msg, { status: "already_running", provider: "claude-code", sessionId: session.id });
     return;
@@ -368,7 +365,7 @@ function handleChatSessionsList(ws, msg) {
   try {
     const db = getDb();
     const rows = db.prepare(
-      `SELECT id, label, type, meta, created_at FROM chat_sessions ORDER BY created_at DESC`
+      `SELECT id, label, type, meta, cwd, created_at FROM chat_sessions ORDER BY created_at DESC`
     ).all();
     const sessions = rows.map((r) => ({ ...r, meta: r.meta ? JSON.parse(r.meta) : null }));
     wsReply(ws, msg, { sessions });

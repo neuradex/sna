@@ -11,6 +11,42 @@ class SessionManager {
     this.permissionRequestListeners = /* @__PURE__ */ new Set();
     this.lifecycleListeners = /* @__PURE__ */ new Set();
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
+    this.restoreFromDb();
+  }
+  /** Restore session metadata from DB (cwd, label, meta). Process state is not restored. */
+  restoreFromDb() {
+    try {
+      const db = getDb();
+      const rows = db.prepare(
+        `SELECT id, label, meta, cwd, created_at FROM chat_sessions`
+      ).all();
+      for (const row of rows) {
+        if (this.sessions.has(row.id)) continue;
+        this.sessions.set(row.id, {
+          id: row.id,
+          process: null,
+          eventBuffer: [],
+          eventCounter: 0,
+          label: row.label,
+          cwd: row.cwd ?? process.cwd(),
+          meta: row.meta ? JSON.parse(row.meta) : null,
+          state: "idle",
+          createdAt: new Date(row.created_at).getTime() || Date.now(),
+          lastActivityAt: Date.now()
+        });
+      }
+    } catch {
+    }
+  }
+  /** Persist session metadata to DB. */
+  persistSession(session) {
+    try {
+      const db = getDb();
+      db.prepare(
+        `INSERT OR REPLACE INTO chat_sessions (id, label, type, meta, cwd) VALUES (?, ?, 'main', ?, ?)`
+      ).run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null, session.cwd);
+    } catch {
+    }
   }
   /** Create a new session. Throws if max sessions reached. */
   createSession(opts = {}) {
@@ -35,6 +71,7 @@ class SessionManager {
       lastActivityAt: Date.now()
     };
     this.sessions.set(id, session);
+    this.persistSession(session);
     return session;
   }
   /** Get a session by ID. */
@@ -44,7 +81,13 @@ class SessionManager {
   /** Get or create a session (used for "default" backward compat). */
   getOrCreateSession(id, opts) {
     const existing = this.sessions.get(id);
-    if (existing) return existing;
+    if (existing) {
+      if (opts?.cwd && opts.cwd !== existing.cwd) {
+        existing.cwd = opts.cwd;
+        this.persistSession(existing);
+      }
+      return existing;
+    }
     return this.createSession({ id, ...opts });
   }
   /** Set the agent process for a session. Subscribes to events. */

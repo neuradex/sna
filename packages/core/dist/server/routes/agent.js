@@ -71,13 +71,6 @@ function createAgentRoutes(sessionManager) {
         cwd: body.cwd,
         meta: body.meta
       });
-      try {
-        const db = getDb();
-        db.prepare(
-          `INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, 'main', ?)`
-        ).run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null);
-      } catch {
-      }
       logger.log("route", `POST /sessions \u2192 created "${session.id}"`);
       return httpJson(c, "sessions.create", { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
     } catch (e) {
@@ -116,7 +109,9 @@ function createAgentRoutes(sessionManager) {
   app.post("/start", async (c) => {
     const sessionId = getSessionId(c);
     const body = await c.req.json().catch(() => ({}));
-    const session = sessionManager.getOrCreateSession(sessionId);
+    const session = sessionManager.getOrCreateSession(sessionId, {
+      cwd: body.cwd
+    });
     if (session.process?.alive && !body.force) {
       logger.log("route", `POST /start?session=${sessionId} \u2192 already_running`);
       return httpJson(c, "agent.start", {

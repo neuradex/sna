@@ -7,7 +7,7 @@ function createChatRoutes() {
     try {
       const db = getDb();
       const rows = db.prepare(
-        `SELECT id, label, type, meta, created_at FROM chat_sessions ORDER BY created_at DESC`
+        `SELECT id, label, type, meta, cwd, created_at FROM chat_sessions ORDER BY created_at DESC`
       ).all();
       const sessions = rows.map((r) => ({
         ...r,

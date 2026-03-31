@@ -140,14 +140,6 @@ export function createAgentRoutes(sessionManager: SessionManager) {
         meta: body.meta,
       });
 
-      // Persist session to DB with meta
-      try {
-        const db = getDb();
-        db.prepare(
-          `INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, 'main', ?)`
-        ).run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null);
-      } catch { /* DB not ready — non-fatal */ }
-
       logger.log("route", `POST /sessions → created "${session.id}"`);
       return httpJson(c, "sessions.create", { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
     } catch (e: any) {
@@ -205,10 +197,13 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       force?: boolean;
       meta?: Record<string, unknown>;
       extraArgs?: string[];
+      cwd?: string;
     };
 
     // Auto-create session if it doesn't exist (backward compat for "default")
-    const session = sessionManager.getOrCreateSession(sessionId);
+    const session = sessionManager.getOrCreateSession(sessionId, {
+      cwd: body.cwd,
+    });
 
     // If agent is already alive and not forced, return existing session
     if (session.process?.alive && !body.force) {

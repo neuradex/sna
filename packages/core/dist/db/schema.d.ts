@@ -6,6 +6,7 @@ interface ChatSession {
     label: string;
     type: "main" | "background";
     meta: string | null;
+    cwd: string | null;
     created_at: string;
 }
 interface ChatMessage {

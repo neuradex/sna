@@ -50,6 +50,9 @@ function migrateChatSessionsMeta(db) {
   if (cols.length > 0 && !cols.some((c) => c.name === "meta")) {
     db.exec("ALTER TABLE chat_sessions ADD COLUMN meta TEXT");
   }
+  if (cols.length > 0 && !cols.some((c) => c.name === "cwd")) {
+    db.exec("ALTER TABLE chat_sessions ADD COLUMN cwd TEXT");
+  }
 }
 function initSchema(db) {
   migrateSkillEvents(db);
@@ -60,6 +63,7 @@ function initSchema(db) {
       label      TEXT NOT NULL DEFAULT '',
       type       TEXT NOT NULL DEFAULT 'main',
       meta       TEXT,
+      cwd        TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -675,13 +679,6 @@ function createAgentRoutes(sessionManager2) {
         cwd: body.cwd,
         meta: body.meta
       });
-      try {
-        const db = getDb();
-        db.prepare(
-          `INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, 'main', ?)`
-        ).run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null);
-      } catch {
-      }
       logger.log("route", `POST /sessions \u2192 created "${session.id}"`);
       return httpJson(c, "sessions.create", { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
     } catch (e) {
@@ -720,7 +717,9 @@ function createAgentRoutes(sessionManager2) {
   app.post("/start", async (c) => {
     const sessionId = getSessionId(c);
     const body = await c.req.json().catch(() => ({}));
-    const session = sessionManager2.getOrCreateSession(sessionId);
+    const session = sessionManager2.getOrCreateSession(sessionId, {
+      cwd: body.cwd
+    });
     if (session.process?.alive && !body.force) {
       logger.log("route", `POST /start?session=${sessionId} \u2192 already_running`);
       return httpJson(c, "agent.start", {
@@ -880,7 +879,7 @@ function createChatRoutes() {
     try {
       const db = getDb();
       const rows = db.prepare(
-        `SELECT id, label, type, meta, created_at FROM chat_sessions ORDER BY created_at DESC`
+        `SELECT id, label, type, meta, cwd, created_at FROM chat_sessions ORDER BY created_at DESC`
       ).all();
       const sessions = rows.map((r) => ({
         ...r,
@@ -978,6 +977,42 @@ var SessionManager = class {
     this.permissionRequestListeners = /* @__PURE__ */ new Set();
     this.lifecycleListeners = /* @__PURE__ */ new Set();
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
+    this.restoreFromDb();
+  }
+  /** Restore session metadata from DB (cwd, label, meta). Process state is not restored. */
+  restoreFromDb() {
+    try {
+      const db = getDb();
+      const rows = db.prepare(
+        `SELECT id, label, meta, cwd, created_at FROM chat_sessions`
+      ).all();
+      for (const row of rows) {
+        if (this.sessions.has(row.id)) continue;
+        this.sessions.set(row.id, {
+          id: row.id,
+          process: null,
+          eventBuffer: [],
+          eventCounter: 0,
+          label: row.label,
+          cwd: row.cwd ?? process.cwd(),
+          meta: row.meta ? JSON.parse(row.meta) : null,
+          state: "idle",
+          createdAt: new Date(row.created_at).getTime() || Date.now(),
+          lastActivityAt: Date.now()
+        });
+      }
+    } catch {
+    }
+  }
+  /** Persist session metadata to DB. */
+  persistSession(session) {
+    try {
+      const db = getDb();
+      db.prepare(
+        `INSERT OR REPLACE INTO chat_sessions (id, label, type, meta, cwd) VALUES (?, ?, 'main', ?, ?)`
+      ).run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null, session.cwd);
+    } catch {
+    }
   }
   /** Create a new session. Throws if max sessions reached. */
   createSession(opts = {}) {
@@ -1002,6 +1037,7 @@ var SessionManager = class {
       lastActivityAt: Date.now()
     };
     this.sessions.set(id, session);
+    this.persistSession(session);
     return session;
   }
   /** Get a session by ID. */
@@ -1011,7 +1047,13 @@ var SessionManager = class {
   /** Get or create a session (used for "default" backward compat). */
   getOrCreateSession(id, opts) {
     const existing = this.sessions.get(id);
-    if (existing) return existing;
+    if (existing) {
+      if (opts?.cwd && opts.cwd !== existing.cwd) {
+        existing.cwd = opts.cwd;
+        this.persistSession(existing);
+      }
+      return existing;
+    }
     return this.createSession({ id, ...opts });
   }
   /** Set the agent process for a session. Subscribes to events. */
@@ -1338,11 +1380,6 @@ function handleSessionsCreate(ws, msg, sm) {
       cwd: msg.cwd,
       meta: msg.meta
     });
-    try {
-      const db = getDb();
-      db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, 'main', ?)`).run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null);
-    } catch {
-    }
     wsReply(ws, msg, { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
   } catch (e) {
     replyError(ws, msg, e.message);
@@ -1358,7 +1395,9 @@ function handleSessionsRemove(ws, msg, sm) {
 }
 function handleAgentStart(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
-  const session = sm.getOrCreateSession(sessionId);
+  const session = sm.getOrCreateSession(sessionId, {
+    cwd: msg.cwd
+  });
   if (session.process?.alive && !msg.force) {
     wsReply(ws, msg, { status: "already_running", provider: "claude-code", sessionId: session.id });
     return;
@@ -1574,7 +1613,7 @@ function handleChatSessionsList(ws, msg) {
   try {
     const db = getDb();
     const rows = db.prepare(
-      `SELECT id, label, type, meta, created_at FROM chat_sessions ORDER BY created_at DESC`
+      `SELECT id, label, type, meta, cwd, created_at FROM chat_sessions ORDER BY created_at DESC`
     ).all();
     const sessions = rows.map((r) => ({ ...r, meta: r.meta ? JSON.parse(r.meta) : null }));
     wsReply(ws, msg, { sessions });

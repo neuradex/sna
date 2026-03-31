@@ -68,6 +68,42 @@ export class SessionManager {
 
   constructor(options: SessionManagerOptions = {}) {
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
+    this.restoreFromDb();
+  }
+
+  /** Restore session metadata from DB (cwd, label, meta). Process state is not restored. */
+  private restoreFromDb(): void {
+    try {
+      const db = getDb();
+      const rows = db.prepare(
+        `SELECT id, label, meta, cwd, created_at FROM chat_sessions`
+      ).all() as { id: string; label: string; meta: string | null; cwd: string | null; created_at: string }[];
+      for (const row of rows) {
+        if (this.sessions.has(row.id)) continue;
+        this.sessions.set(row.id, {
+          id: row.id,
+          process: null,
+          eventBuffer: [],
+          eventCounter: 0,
+          label: row.label,
+          cwd: row.cwd ?? process.cwd(),
+          meta: row.meta ? JSON.parse(row.meta) : null,
+          state: "idle",
+          createdAt: new Date(row.created_at).getTime() || Date.now(),
+          lastActivityAt: Date.now(),
+        });
+      }
+    } catch { /* DB not ready — skip restore */ }
+  }
+
+  /** Persist session metadata to DB. */
+  private persistSession(session: Session): void {
+    try {
+      const db = getDb();
+      db.prepare(
+        `INSERT OR REPLACE INTO chat_sessions (id, label, type, meta, cwd) VALUES (?, ?, 'main', ?, ?)`
+      ).run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null, session.cwd);
+    } catch { /* non-fatal */ }
   }
 
   /** Create a new session. Throws if max sessions reached. */
@@ -103,6 +139,7 @@ export class SessionManager {
     };
 
     this.sessions.set(id, session);
+    this.persistSession(session);
     return session;
   }
 
@@ -114,7 +151,14 @@ export class SessionManager {
   /** Get or create a session (used for "default" backward compat). */
   getOrCreateSession(id: string, opts?: { label?: string; cwd?: string }): Session {
     const existing = this.sessions.get(id);
-    if (existing) return existing;
+    if (existing) {
+      // Update cwd if provided (handles server restart where session was recreated with wrong cwd)
+      if (opts?.cwd && opts.cwd !== existing.cwd) {
+        existing.cwd = opts.cwd;
+        this.persistSession(existing);
+      }
+      return existing;
+    }
     return this.createSession({ id, ...opts });
   }
 

@@ -75,6 +75,7 @@ export interface ApiResponses {
       label: string;
       type: string;
       meta: Record<string, unknown> | null;
+      cwd: string | null;
       created_at: string;
     }>;
   };

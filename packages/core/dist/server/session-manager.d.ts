@@ -49,6 +49,10 @@ declare class SessionManager {
     private permissionRequestListeners;
     private lifecycleListeners;
     constructor(options?: SessionManagerOptions);
+    /** Restore session metadata from DB (cwd, label, meta). Process state is not restored. */
+    private restoreFromDb;
+    /** Persist session metadata to DB. */
+    private persistSession;
     /** Create a new session. Throws if max sessions reached. */
     createSession(opts?: {
         id?: string;

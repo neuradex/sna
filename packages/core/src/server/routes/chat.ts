@@ -22,8 +22,8 @@ export function createChatRoutes() {
     try {
       const db = getDb();
       const rows = db.prepare(
-        `SELECT id, label, type, meta, created_at FROM chat_sessions ORDER BY created_at DESC`
-      ).all() as { id: string; label: string; type: string; meta: string | null; created_at: string }[];
+        `SELECT id, label, type, meta, cwd, created_at FROM chat_sessions ORDER BY created_at DESC`
+      ).all() as { id: string; label: string; type: string; meta: string | null; cwd: string | null; created_at: string }[];
       const sessions = rows.map((r) => ({
         ...r,
         meta: r.meta ? JSON.parse(r.meta) : null,

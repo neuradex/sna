@@ -234,11 +234,6 @@ function handleSessionsCreate(ws: WebSocket, msg: WsRequest, sm: SessionManager)
       cwd: msg.cwd as string | undefined,
       meta: msg.meta as Record<string, unknown> | undefined,
     });
-    try {
-      const db = getDb();
-      db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, 'main', ?)`)
-        .run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null);
-    } catch { /* non-fatal */ }
     wsReply(ws, msg, { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
   } catch (e: any) {
     replyError(ws, msg, e.message);
@@ -258,7 +253,9 @@ function handleSessionsRemove(ws: WebSocket, msg: WsRequest, sm: SessionManager)
 
 function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
   const sessionId = (msg.session as string) ?? "default";
-  const session = sm.getOrCreateSession(sessionId);
+  const session = sm.getOrCreateSession(sessionId, {
+    cwd: msg.cwd as string | undefined,
+  });
 
   if (session.process?.alive && !msg.force) {
     wsReply(ws, msg, { status: "already_running", provider: "claude-code", sessionId: session.id });
@@ -533,8 +530,8 @@ function handleChatSessionsList(ws: WebSocket, msg: WsRequest): void {
   try {
     const db = getDb();
     const rows = db.prepare(
-      `SELECT id, label, type, meta, created_at FROM chat_sessions ORDER BY created_at DESC`,
-    ).all() as { id: string; label: string; type: string; meta: string | null; created_at: string }[];
+      `SELECT id, label, type, meta, cwd, created_at FROM chat_sessions ORDER BY created_at DESC`,
+    ).all() as { id: string; label: string; type: string; meta: string | null; cwd: string | null; created_at: string }[];
     const sessions = rows.map((r) => ({ ...r, meta: r.meta ? JSON.parse(r.meta) : null }));
     wsReply(ws, msg, { sessions });
   } catch (e: any) {

@@ -58,6 +58,9 @@ function migrateChatSessionsMeta(db: Database.Database) {
   if (cols.length > 0 && !cols.some((c) => c.name === "meta")) {
     db.exec("ALTER TABLE chat_sessions ADD COLUMN meta TEXT");
   }
+  if (cols.length > 0 && !cols.some((c) => c.name === "cwd")) {
+    db.exec("ALTER TABLE chat_sessions ADD COLUMN cwd TEXT");
+  }
 }
 
 function initSchema(db: Database.Database) {
@@ -69,6 +72,7 @@ function initSchema(db: Database.Database) {
       label      TEXT NOT NULL DEFAULT '',
       type       TEXT NOT NULL DEFAULT 'main',
       meta       TEXT,
+      cwd        TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -108,6 +112,7 @@ export interface ChatSession {
   label: string;
   type: "main" | "background";
   meta: string | null;
+  cwd: string | null;
   created_at: string;
 }
 
