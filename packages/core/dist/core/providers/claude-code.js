@@ -99,6 +99,11 @@ class ClaudeCodeProcess {
     logger.log("stdin", msg.slice(0, 200));
     this.proc.stdin.write(msg + "\n");
   }
+  interrupt() {
+    if (this._alive) {
+      this.proc.kill("SIGINT");
+    }
+  }
   kill() {
     if (this._alive) {
       this._alive = false;

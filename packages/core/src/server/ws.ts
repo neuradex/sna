@@ -172,6 +172,8 @@ function handleMessage(
       return handleAgentStart(ws, msg, sm);
     case "agent.send":
       return handleAgentSend(ws, msg, sm);
+    case "agent.interrupt":
+      return handleAgentInterrupt(ws, msg, sm);
     case "agent.kill":
       return handleAgentKill(ws, msg, sm);
     case "agent.status":
@@ -322,6 +324,12 @@ function handleAgentSend(ws: WebSocket, msg: WsRequest, sm: SessionManager): voi
   sm.touch(sessionId);
   session.process.send(msg.message as string);
   wsReply(ws, msg, { status: "sent" });
+}
+
+function handleAgentInterrupt(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
+  const sessionId = (msg.session as string) ?? "default";
+  const interrupted = sm.interruptSession(sessionId);
+  wsReply(ws, msg, { status: interrupted ? "interrupted" : "no_session" });
 }
 
 function handleAgentKill(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {

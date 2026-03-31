@@ -25,6 +25,9 @@ interface ApiResponses {
     "agent.send": {
         status: "sent";
     };
+    "agent.interrupt": {
+        status: "interrupted" | "no_session";
+    };
     "agent.kill": {
         status: "killed" | "no_session";
     };

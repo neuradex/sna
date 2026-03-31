@@ -309,6 +309,16 @@ export class SessionManager {
   // ── Session lifecycle ─────────────────────────────────────────
 
   /** Kill the agent process in a session (session stays, can be restarted). */
+  /** Interrupt the current turn (SIGINT). Process stays alive, returns to waiting. */
+  interruptSession(id: string): boolean {
+    const session = this.sessions.get(id);
+    if (!session?.process?.alive) return false;
+    session.process.interrupt();
+    session.state = "waiting";
+    return true;
+  }
+
+  /** Kill the agent process in a session (session stays, can be restarted). */
   killSession(id: string): boolean {
     const session = this.sessions.get(id);
     if (!session?.process?.alive) return false;

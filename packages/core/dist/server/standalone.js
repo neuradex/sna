@@ -394,6 +394,11 @@ var ClaudeCodeProcess = class {
     logger.log("stdin", msg.slice(0, 200));
     this.proc.stdin.write(msg + "\n");
   }
+  interrupt() {
+    if (this._alive) {
+      this.proc.kill("SIGINT");
+    }
+  }
   kill() {
     if (this._alive) {
       this._alive = false;
@@ -828,6 +833,11 @@ function createAgentRoutes(sessionManager2) {
       }
     });
   });
+  app.post("/interrupt", async (c) => {
+    const sessionId = getSessionId(c);
+    const interrupted = sessionManager2.interruptSession(sessionId);
+    return httpJson(c, "agent.interrupt", { status: interrupted ? "interrupted" : "no_session" });
+  });
   app.post("/kill", async (c) => {
     const sessionId = getSessionId(c);
     const killed = sessionManager2.killSession(sessionId);
@@ -1184,6 +1194,15 @@ var SessionManager = class {
   }
   // ── Session lifecycle ─────────────────────────────────────────
   /** Kill the agent process in a session (session stays, can be restarted). */
+  /** Interrupt the current turn (SIGINT). Process stays alive, returns to waiting. */
+  interruptSession(id) {
+    const session = this.sessions.get(id);
+    if (!session?.process?.alive) return false;
+    session.process.interrupt();
+    session.state = "waiting";
+    return true;
+  }
+  /** Kill the agent process in a session (session stays, can be restarted). */
   killSession(id) {
     const session = this.sessions.get(id);
     if (!session?.process?.alive) return false;
@@ -1344,6 +1363,8 @@ function handleMessage(ws, msg, sm, state) {
       return handleAgentStart(ws, msg, sm);
     case "agent.send":
       return handleAgentSend(ws, msg, sm);
+    case "agent.interrupt":
+      return handleAgentInterrupt(ws, msg, sm);
     case "agent.kill":
       return handleAgentKill(ws, msg, sm);
     case "agent.status":
@@ -1468,6 +1489,11 @@ function handleAgentSend(ws, msg, sm) {
   sm.touch(sessionId);
   session.process.send(msg.message);
   wsReply(ws, msg, { status: "sent" });
+}
+function handleAgentInterrupt(ws, msg, sm) {
+  const sessionId = msg.session ?? "default";
+  const interrupted = sm.interruptSession(sessionId);
+  wsReply(ws, msg, { status: interrupted ? "interrupted" : "no_session" });
 }
 function handleAgentKill(ws, msg, sm) {
   const sessionId = msg.session ?? "default";

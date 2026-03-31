@@ -16,6 +16,8 @@ interface AgentEvent {
 interface AgentProcess {
     /** Send a user message to the agent's stdin. */
     send(input: string): void;
+    /** Interrupt the current turn (SIGINT). Process stays alive. */
+    interrupt(): void;
     /** Kill the agent process. */
     kill(): void;
     /** Whether the process is still running. */

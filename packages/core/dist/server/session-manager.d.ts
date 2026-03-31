@@ -96,6 +96,9 @@ declare class SessionManager {
         createdAt: number;
     }>;
     /** Kill the agent process in a session (session stays, can be restarted). */
+    /** Interrupt the current turn (SIGINT). Process stays alive, returns to waiting. */
+    interruptSession(id: string): boolean;
+    /** Kill the agent process in a session (session stays, can be restarted). */
     killSession(id: string): boolean;
     /** Remove a session entirely. Cannot remove "default". */
     removeSession(id: string): boolean;

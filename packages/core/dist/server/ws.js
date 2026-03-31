@@ -79,6 +79,8 @@ function handleMessage(ws, msg, sm, state) {
       return handleAgentStart(ws, msg, sm);
     case "agent.send":
       return handleAgentSend(ws, msg, sm);
+    case "agent.interrupt":
+      return handleAgentInterrupt(ws, msg, sm);
     case "agent.kill":
       return handleAgentKill(ws, msg, sm);
     case "agent.status":
@@ -203,6 +205,11 @@ function handleAgentSend(ws, msg, sm) {
   sm.touch(sessionId);
   session.process.send(msg.message);
   wsReply(ws, msg, { status: "sent" });
+}
+function handleAgentInterrupt(ws, msg, sm) {
+  const sessionId = msg.session ?? "default";
+  const interrupted = sm.interruptSession(sessionId);
+  wsReply(ws, msg, { status: interrupted ? "interrupted" : "no_session" });
 }
 function handleAgentKill(ws, msg, sm) {
   const sessionId = msg.session ?? "default";

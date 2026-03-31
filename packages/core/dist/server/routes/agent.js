@@ -220,6 +220,11 @@ function createAgentRoutes(sessionManager) {
       }
     });
   });
+  app.post("/interrupt", async (c) => {
+    const sessionId = getSessionId(c);
+    const interrupted = sessionManager.interruptSession(sessionId);
+    return httpJson(c, "agent.interrupt", { status: interrupted ? "interrupted" : "no_session" });
+  });
   app.post("/kill", async (c) => {
     const sessionId = getSessionId(c);
     const killed = sessionManager.killSession(sessionId);

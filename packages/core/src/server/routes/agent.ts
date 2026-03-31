@@ -345,6 +345,14 @@ export function createAgentRoutes(sessionManager: SessionManager) {
   });
 
   // POST /kill
+  // POST /interrupt — interrupt current turn (SIGINT), process stays alive
+  app.post("/interrupt", async (c) => {
+    const sessionId = getSessionId(c);
+    const interrupted = sessionManager.interruptSession(sessionId);
+    return httpJson(c, "agent.interrupt", { status: interrupted ? "interrupted" : "no_session" });
+  });
+
+  // POST /kill
   app.post("/kill", async (c) => {
     const sessionId = getSessionId(c);
     const killed = sessionManager.killSession(sessionId);

@@ -116,6 +116,12 @@ class ClaudeCodeProcess implements AgentProcess {
     this.proc.stdin!.write(msg + "\n");
   }
 
+  interrupt(): void {
+    if (this._alive) {
+      this.proc.kill("SIGINT");
+    }
+  }
+
   kill(): void {
     if (this._alive) {
       this._alive = false;
