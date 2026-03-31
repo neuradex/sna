@@ -53,6 +53,11 @@ function isHigher(next: string, current: string): boolean {
 const corePkg = JSON.parse(fs.readFileSync(path.join(ROOT, "packages/core/package.json"), "utf-8"));
 const currentVersion = corePkg.version;
 
+if (currentVersion === version) {
+  console.log(`Version already set to ${version} — skipping`);
+  process.exit(0);
+}
+
 if (currentVersion !== "0.0.0" && !isHigher(version, currentVersion)) {
   console.error(`✗ Version ${version} is not higher than current ${currentVersion}`);
   process.exit(1);
