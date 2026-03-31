@@ -100,11 +100,21 @@ Run `sna validate` to check project health:
 sna api:up    # or: node node_modules/@sna-sdk/core/dist/scripts/sna.js api:up
 ```
 
-CLI commands:
-- `sna up` / `sna down` — Full lifecycle (install, DB, API server, dev server)
+CLI commands (`sna help` for full list):
+
+Lifecycle:
+- `sna up` / `sna down` / `sna status` / `sna restart` — Service management
+- `sna init` — Initialize `.claude/settings.json` and skills
 - `sna validate` — Check project health (skills.json, hooks, deps)
+
+Tools:
 - `sna dispatch` — Unified event dispatcher (open/send/close)
 - `sna gen client` — Generate typed client + `.sna/skills.json`
+- `sna api:up` / `sna api:down` — Standalone API server
+
+Testing:
+- `sna tu api:up` / `api:down` / `api:log` — Mock Anthropic API server
+- `sna tu claude` — Run claude with mock API (isolated env)
 
 This server provides:
 

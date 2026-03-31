@@ -10,7 +10,7 @@ Server runtime for [Skills-Native Applications](https://github.com/neuradex/sna)
 - **Hono server factory** — `createSnaApp()` with events, emit, agent, chat, and run routes
 - **WebSocket API** — `attachWebSocket()` wrapping all HTTP routes over a single WS connection
 - **One-shot execution** — `POST /agent/run-once` for single-request LLM calls
-- **Lifecycle CLI** — `sna api:up`, `sna api:down`, `sna dispatch`, `sna validate`
+- **CLI** — `sna up/down/status`, `sna dispatch`, `sna gen client`, `sna tu` (mock API testing)
 - **Agent providers** — Claude Code and Codex process management
 - **Multi-session** — `SessionManager` with event pub/sub, permission management, and session metadata
 
