@@ -282,6 +282,7 @@ function createAgentRoutes(sessionManager) {
     return httpJson(c, "agent.status", {
       alive: session?.process?.alive ?? false,
       sessionId: session?.process?.sessionId ?? null,
+      ccSessionId: session?.ccSessionId ?? null,
       eventCount: session?.eventCounter ?? 0,
       config: session?.lastStartConfig ?? null
     });

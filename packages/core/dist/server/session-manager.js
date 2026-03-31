@@ -336,6 +336,7 @@ class SessionManager {
       cwd: s.cwd,
       meta: s.meta,
       config: s.lastStartConfig,
+      ccSessionId: s.ccSessionId,
       eventCount: s.eventCounter,
       createdAt: s.createdAt,
       lastActivityAt: s.lastActivityAt

@@ -41,6 +41,7 @@ export interface SessionInfo {
   cwd: string;
   meta: Record<string, unknown> | null;
   config: StartConfig | null;
+  ccSessionId: string | null;
   eventCount: number;
   createdAt: number;
   lastActivityAt: number;
@@ -467,6 +468,7 @@ export class SessionManager {
       cwd: s.cwd,
       meta: s.meta,
       config: s.lastStartConfig,
+      ccSessionId: s.ccSessionId,
       eventCount: s.eventCounter,
       createdAt: s.createdAt,
       lastActivityAt: s.lastActivityAt,

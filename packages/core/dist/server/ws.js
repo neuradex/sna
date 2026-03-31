@@ -281,6 +281,7 @@ function handleAgentStatus(ws, msg, sm) {
   wsReply(ws, msg, {
     alive: session?.process?.alive ?? false,
     sessionId: session?.process?.sessionId ?? null,
+    ccSessionId: session?.ccSessionId ?? null,
     eventCount: session?.eventCounter ?? 0,
     config: session?.lastStartConfig ?? null
   });

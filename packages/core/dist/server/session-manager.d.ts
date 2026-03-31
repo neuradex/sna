@@ -37,6 +37,7 @@ interface SessionInfo {
     cwd: string;
     meta: Record<string, unknown> | null;
     config: StartConfig | null;
+    ccSessionId: string | null;
     eventCount: number;
     createdAt: number;
     lastActivityAt: number;

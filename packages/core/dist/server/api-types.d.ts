@@ -47,6 +47,7 @@ interface ApiResponses {
     "agent.status": {
         alive: boolean;
         sessionId: string | null;
+        ccSessionId: string | null;
         eventCount: number;
         config: {
             provider: string;

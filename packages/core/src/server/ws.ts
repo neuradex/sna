@@ -410,6 +410,7 @@ function handleAgentStatus(ws: WebSocket, msg: WsRequest, sm: SessionManager): v
   wsReply(ws, msg, {
     alive: session?.process?.alive ?? false,
     sessionId: session?.process?.sessionId ?? null,
+    ccSessionId: session?.ccSessionId ?? null,
     eventCount: session?.eventCounter ?? 0,
     config: session?.lastStartConfig ?? null,
   });

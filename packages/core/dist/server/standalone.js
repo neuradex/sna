@@ -927,6 +927,7 @@ function createAgentRoutes(sessionManager2) {
     return httpJson(c, "agent.status", {
       alive: session?.process?.alive ?? false,
       sessionId: session?.process?.sessionId ?? null,
+      ccSessionId: session?.ccSessionId ?? null,
       eventCount: session?.eventCounter ?? 0,
       config: session?.lastStartConfig ?? null
     });
@@ -1391,6 +1392,7 @@ var SessionManager = class {
       cwd: s.cwd,
       meta: s.meta,
       config: s.lastStartConfig,
+      ccSessionId: s.ccSessionId,
       eventCount: s.eventCounter,
       createdAt: s.createdAt,
       lastActivityAt: s.lastActivityAt
@@ -1726,6 +1728,7 @@ function handleAgentStatus(ws, msg, sm) {
   wsReply(ws, msg, {
     alive: session?.process?.alive ?? false,
     sessionId: session?.process?.sessionId ?? null,
+    ccSessionId: session?.ccSessionId ?? null,
     eventCount: session?.eventCounter ?? 0,
     config: session?.lastStartConfig ?? null
   });
