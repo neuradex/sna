@@ -114,12 +114,14 @@ class ClaudeCodeProcess {
   }
   /**
    * Send a user message to the persistent Claude process via stdin.
+   * Accepts plain string or content block array (text + images).
    */
   send(input) {
     if (!this._alive || !this.proc.stdin.writable) return;
+    const content = typeof input === "string" ? input : input;
     const msg = JSON.stringify({
       type: "user",
-      message: { role: "user", content: input }
+      message: { role: "user", content }
     });
     logger.log("stdin", msg.slice(0, 200));
     this.proc.stdin.write(msg + "\n");

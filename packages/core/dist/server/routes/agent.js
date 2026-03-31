@@ -177,20 +177,33 @@ function createAgentRoutes(sessionManager) {
       );
     }
     const body = await c.req.json().catch(() => ({}));
-    if (!body.message) {
+    if (!body.message && !body.images?.length) {
       logger.err("err", `POST /send?session=${sessionId} \u2192 empty message`);
-      return c.json({ status: "error", message: "message is required" }, 400);
+      return c.json({ status: "error", message: "message or images required" }, 400);
     }
+    const textContent = body.message ?? "(image)";
     try {
       const db = getDb();
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
-      db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, body.message, body.meta ? JSON.stringify(body.meta) : null);
+      db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, body.meta ? JSON.stringify(body.meta) : null);
     } catch {
     }
     session.state = "processing";
     sessionManager.touch(sessionId);
-    logger.log("route", `POST /send?session=${sessionId} \u2192 "${body.message.slice(0, 80)}"`);
-    session.process.send(body.message);
+    if (body.images?.length) {
+      const content = [
+        ...body.images.map((img) => ({
+          type: "image",
+          source: { type: "base64", media_type: img.mimeType, data: img.base64 }
+        })),
+        ...body.message ? [{ type: "text", text: body.message }] : []
+      ];
+      logger.log("route", `POST /send?session=${sessionId} \u2192 ${body.images.length} image(s) + "${(body.message ?? "").slice(0, 40)}"`);
+      session.process.send(content);
+    } else {
+      logger.log("route", `POST /send?session=${sessionId} \u2192 "${body.message.slice(0, 80)}"`);
+      session.process.send(body.message);
+    }
     return httpJson(c, "agent.send", { status: "sent" });
   });
   app.get("/events", (c) => {

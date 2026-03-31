@@ -209,18 +209,31 @@ function handleAgentSend(ws, msg, sm) {
   if (!session?.process?.alive) {
     return replyError(ws, msg, `No active agent session "${sessionId}". Start first.`);
   }
-  if (!msg.message) {
-    return replyError(ws, msg, "message is required");
+  const images = msg.images;
+  if (!msg.message && !images?.length) {
+    return replyError(ws, msg, "message or images required");
   }
+  const textContent = msg.message ?? "(image)";
   try {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
-    db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, msg.message, msg.meta ? JSON.stringify(msg.meta) : null);
+    db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, msg.meta ? JSON.stringify(msg.meta) : null);
   } catch {
   }
   session.state = "processing";
   sm.touch(sessionId);
-  session.process.send(msg.message);
+  if (images?.length) {
+    const content = [
+      ...images.map((img) => ({
+        type: "image",
+        source: { type: "base64", media_type: img.mimeType, data: img.base64 }
+      })),
+      ...msg.message ? [{ type: "text", text: msg.message }] : []
+    ];
+    session.process.send(content);
+  } else {
+    session.process.send(msg.message);
+  }
   wsReply(ws, msg, { status: "sent" });
 }
 function handleAgentRestart(ws, msg, sm) {

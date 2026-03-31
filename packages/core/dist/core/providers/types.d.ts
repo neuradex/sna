@@ -14,8 +14,8 @@ interface AgentEvent {
  * A running agent process. Wraps a child_process with typed event handlers.
  */
 interface AgentProcess {
-    /** Send a user message to the agent's stdin. */
-    send(input: string): void;
+    /** Send a user message to the agent's stdin. Accepts string or content blocks (text + images). */
+    send(input: string | ContentBlock[]): void;
     /** Interrupt the current turn. Process stays alive. */
     interrupt(): void;
     /** Change model at runtime via control message. No restart needed. */
@@ -36,6 +36,17 @@ interface AgentProcess {
 /**
  * Options for spawning an agent session.
  */
+type ContentBlock = {
+    type: "text";
+    text: string;
+} | {
+    type: "image";
+    source: {
+        type: "base64";
+        media_type: string;
+        data: string;
+    };
+};
 interface HistoryMessage {
     role: "user" | "assistant";
     content: string;
@@ -70,4 +81,4 @@ interface AgentProvider {
     spawn(options: SpawnOptions): AgentProcess;
 }
 
-export type { AgentEvent, AgentProcess, AgentProvider, HistoryMessage, SpawnOptions };
+export type { AgentEvent, AgentProcess, AgentProvider, ContentBlock, HistoryMessage, SpawnOptions };

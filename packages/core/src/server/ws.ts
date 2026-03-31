@@ -329,21 +329,35 @@ function handleAgentSend(ws: WebSocket, msg: WsRequest, sm: SessionManager): voi
   if (!session?.process?.alive) {
     return replyError(ws, msg, `No active agent session "${sessionId}". Start first.`);
   }
-  if (!msg.message) {
-    return replyError(ws, msg, "message is required");
+  const images = msg.images as Array<{ base64: string; mimeType: string }> | undefined;
+  if (!msg.message && !images?.length) {
+    return replyError(ws, msg, "message or images required");
   }
 
+  const textContent = (msg.message as string) ?? "(image)";
   try {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`)
       .run(sessionId, session.label ?? sessionId);
     db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`)
-      .run(sessionId, msg.message as string, msg.meta ? JSON.stringify(msg.meta) : null);
+      .run(sessionId, textContent, msg.meta ? JSON.stringify(msg.meta) : null);
   } catch { /* non-fatal */ }
 
   session.state = "processing";
   sm.touch(sessionId);
-  session.process.send(msg.message as string);
+
+  if (images?.length) {
+    const content: import("../core/providers/types.js").ContentBlock[] = [
+      ...images.map((img) => ({
+        type: "image" as const,
+        source: { type: "base64" as const, media_type: img.mimeType, data: img.base64 },
+      })),
+      ...(msg.message ? [{ type: "text" as const, text: msg.message as string }] : []),
+    ];
+    session.process.send(content);
+  } else {
+    session.process.send(msg.message as string);
+  }
   wsReply(ws, msg, { status: "sent" });
 }
 

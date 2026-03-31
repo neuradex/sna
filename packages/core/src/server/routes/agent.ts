@@ -288,26 +288,42 @@ export function createAgentRoutes(sessionManager: SessionManager) {
 
     const body = (await c.req.json().catch(() => ({}))) as {
       message?: string;
+      images?: Array<{ base64: string; mimeType: string }>;
       meta?: Record<string, unknown>;
     };
-    if (!body.message) {
+    if (!body.message && !body.images?.length) {
       logger.err("err", `POST /send?session=${sessionId} → empty message`);
-      return c.json({ status: "error", message: "message is required" }, 400);
+      return c.json({ status: "error", message: "message or images required" }, 400);
     }
 
     // Persist user message with optional metadata
+    const textContent = body.message ?? "(image)";
     try {
       const db = getDb();
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`)
         .run(sessionId, session.label ?? sessionId);
       db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`)
-        .run(sessionId, body.message, body.meta ? JSON.stringify(body.meta) : null);
+        .run(sessionId, textContent, body.meta ? JSON.stringify(body.meta) : null);
     } catch { /* DB write failure is non-fatal */ }
 
     session.state = "processing";
     sessionManager.touch(sessionId);
-    logger.log("route", `POST /send?session=${sessionId} → "${body.message.slice(0, 80)}"`);
-    session.process.send(body.message);
+
+    // Build content: plain string or content block array with images
+    if (body.images?.length) {
+      const content: import("../../core/providers/types.js").ContentBlock[] = [
+        ...body.images.map((img) => ({
+          type: "image" as const,
+          source: { type: "base64" as const, media_type: img.mimeType, data: img.base64 },
+        })),
+        ...(body.message ? [{ type: "text" as const, text: body.message }] : []),
+      ];
+      logger.log("route", `POST /send?session=${sessionId} → ${body.images.length} image(s) + "${(body.message ?? "").slice(0, 40)}"`);
+      session.process.send(content);
+    } else {
+      logger.log("route", `POST /send?session=${sessionId} → "${body.message!.slice(0, 80)}"`);
+      session.process.send(body.message!);
+    }
     return httpJson(c, "agent.send", { status: "sent" });
   });
 
