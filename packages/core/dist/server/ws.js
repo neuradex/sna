@@ -216,6 +216,7 @@ function handleAgentSend(ws, msg, sm) {
 function handleAgentRestart(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
   try {
+    const ccSessionId = sm.getSession(sessionId)?.ccSessionId;
     const { config } = sm.restartSession(
       sessionId,
       {
@@ -226,12 +227,13 @@ function handleAgentRestart(ws, msg, sm) {
       },
       (cfg) => {
         const prov = getProvider(cfg.provider);
+        const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
         return prov.spawn({
           cwd: sm.getSession(sessionId).cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode,
           env: { SNA_SESSION_ID: sessionId },
-          extraArgs: [...cfg.extraArgs ?? [], "--resume"]
+          extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
         });
       }
     );

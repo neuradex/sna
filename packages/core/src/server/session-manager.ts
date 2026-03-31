@@ -27,6 +27,8 @@ export interface Session {
   meta: Record<string, unknown> | null;
   state: SessionState;
   lastStartConfig: StartConfig | null;
+  /** Claude Code's own session ID (from system.init event). Used for --resume. */
+  ccSessionId: string | null;
   createdAt: number;
   lastActivityAt: number;
 }
@@ -98,6 +100,7 @@ export class SessionManager {
           meta: row.meta ? JSON.parse(row.meta) : null,
           state: "idle",
           lastStartConfig: row.last_start_config ? JSON.parse(row.last_start_config) : null,
+          ccSessionId: null,
           createdAt: new Date(row.created_at).getTime() || Date.now(),
           lastActivityAt: Date.now(),
         });
@@ -156,6 +159,7 @@ export class SessionManager {
       meta: opts.meta ?? null,
       state: "idle",
       lastStartConfig: null,
+      ccSessionId: null,
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
     };
@@ -194,6 +198,11 @@ export class SessionManager {
     session.lastActivityAt = Date.now();
 
     proc.on("event", (e: AgentEvent) => {
+      // Capture Claude Code's session ID from init event
+      if (e.type === "init" && e.data?.sessionId && !session.ccSessionId) {
+        session.ccSessionId = e.data.sessionId as string;
+        this.persistSession(session);
+      }
       session.eventBuffer.push(e);
       session.eventCounter++;
       if (session.eventBuffer.length > MAX_EVENT_BUFFER) {

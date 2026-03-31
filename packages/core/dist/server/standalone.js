@@ -846,14 +846,16 @@ function createAgentRoutes(sessionManager2) {
     const sessionId = getSessionId(c);
     const body = await c.req.json().catch(() => ({}));
     try {
+      const ccSessionId = sessionManager2.getSession(sessionId)?.ccSessionId;
       const { config } = sessionManager2.restartSession(sessionId, body, (cfg) => {
         const prov = getProvider(cfg.provider);
+        const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
         return prov.spawn({
           cwd: sessionManager2.getSession(sessionId).cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode,
           env: { SNA_SESSION_ID: sessionId },
-          extraArgs: [...cfg.extraArgs ?? [], "--resume"]
+          extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
         });
       });
       logger.log("route", `POST /restart?session=${sessionId} \u2192 restarted`);
@@ -1042,6 +1044,7 @@ var SessionManager = class {
           meta: row.meta ? JSON.parse(row.meta) : null,
           state: "idle",
           lastStartConfig: row.last_start_config ? JSON.parse(row.last_start_config) : null,
+          ccSessionId: null,
           createdAt: new Date(row.created_at).getTime() || Date.now(),
           lastActivityAt: Date.now()
         });
@@ -1100,6 +1103,7 @@ var SessionManager = class {
       meta: opts.meta ?? null,
       state: "idle",
       lastStartConfig: null,
+      ccSessionId: null,
       createdAt: Date.now(),
       lastActivityAt: Date.now()
     };
@@ -1131,6 +1135,10 @@ var SessionManager = class {
     session.state = "processing";
     session.lastActivityAt = Date.now();
     proc.on("event", (e) => {
+      if (e.type === "init" && e.data?.sessionId && !session.ccSessionId) {
+        session.ccSessionId = e.data.sessionId;
+        this.persistSession(session);
+      }
       session.eventBuffer.push(e);
       session.eventCounter++;
       if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
@@ -1570,6 +1578,7 @@ function handleAgentSend(ws, msg, sm) {
 function handleAgentRestart(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
   try {
+    const ccSessionId = sm.getSession(sessionId)?.ccSessionId;
     const { config } = sm.restartSession(
       sessionId,
       {
@@ -1580,12 +1589,13 @@ function handleAgentRestart(ws, msg, sm) {
       },
       (cfg) => {
         const prov = getProvider(cfg.provider);
+        const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
         return prov.spawn({
           cwd: sm.getSession(sessionId).cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode,
           env: { SNA_SESSION_ID: sessionId },
-          extraArgs: [...cfg.extraArgs ?? [], "--resume"]
+          extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
         });
       }
     );

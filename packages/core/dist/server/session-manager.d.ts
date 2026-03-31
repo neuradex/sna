@@ -24,6 +24,8 @@ interface Session {
     meta: Record<string, unknown> | null;
     state: SessionState;
     lastStartConfig: StartConfig | null;
+    /** Claude Code's own session ID (from system.init event). Used for --resume. */
+    ccSessionId: string | null;
     createdAt: number;
     lastActivityAt: number;
 }

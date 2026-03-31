@@ -361,14 +361,16 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     };
 
     try {
+      const ccSessionId = sessionManager.getSession(sessionId)?.ccSessionId;
       const { config } = sessionManager.restartSession(sessionId, body, (cfg) => {
         const prov = getProvider(cfg.provider);
+        const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
         return prov.spawn({
           cwd: sessionManager.getSession(sessionId)!.cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode as any,
           env: { SNA_SESSION_ID: sessionId },
-          extraArgs: [...(cfg.extraArgs ?? []), "--resume"],
+          extraArgs: [...(cfg.extraArgs ?? []), ...resumeArgs],
         });
       });
       logger.log("route", `POST /restart?session=${sessionId} → restarted`);

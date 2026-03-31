@@ -32,6 +32,7 @@ class SessionManager {
           meta: row.meta ? JSON.parse(row.meta) : null,
           state: "idle",
           lastStartConfig: row.last_start_config ? JSON.parse(row.last_start_config) : null,
+          ccSessionId: null,
           createdAt: new Date(row.created_at).getTime() || Date.now(),
           lastActivityAt: Date.now()
         });
@@ -90,6 +91,7 @@ class SessionManager {
       meta: opts.meta ?? null,
       state: "idle",
       lastStartConfig: null,
+      ccSessionId: null,
       createdAt: Date.now(),
       lastActivityAt: Date.now()
     };
@@ -121,6 +123,10 @@ class SessionManager {
     session.state = "processing";
     session.lastActivityAt = Date.now();
     proc.on("event", (e) => {
+      if (e.type === "init" && e.data?.sessionId && !session.ccSessionId) {
+        session.ccSessionId = e.data.sessionId;
+        this.persistSession(session);
+      }
       session.eventBuffer.push(e);
       session.eventCounter++;
       if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
