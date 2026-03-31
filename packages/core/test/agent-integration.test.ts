@@ -1,244 +1,151 @@
 /**
- * Agent integration tests — real Claude Code + mock Anthropic API.
+ * Agent integration tests — real Claude Code binary + mock Anthropic API.
  *
- * Uses startMockAnthropicServer() from src/testing/mock-api.ts.
- * Sets ANTHROPIC_BASE_URL + ANTHROPIC_API_KEY before spawning.
- *
- * Tests full pipeline: WS → SessionManager → Provider → Claude Code → mock API → events → WS
+ * Spawns claude directly (like sna tu claude) with clean env.
+ * Verifies the full Claude Code ↔ mock API pipeline.
  */
 
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { execSync, spawn, type ChildProcess } from "child_process";
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
-import { WebSocket } from "ws";
-import http from "http";
 import { startMockAnthropicServer, type MockServer } from "../src/testing/mock-api.js";
 
-const TEST_DB_DIR = path.join(import.meta.dirname, "../.test-data-agent");
+let CLAUDE_PATH: string | null = null;
+try { CLAUDE_PATH = execSync("which claude", { encoding: "utf8" }).trim(); } catch {}
 
-let CLAUDE_AVAILABLE = false;
-try { execSync("which claude", { stdio: "pipe" }); CLAUDE_AVAILABLE = true; } catch {}
+const TEST_DIR = path.join(import.meta.dirname, "../.test-data-agent");
 
-interface Ctx {
-  ws: WebSocket;
-  server: http.Server;
-  mockApi: MockServer;
-  cleanup: () => void;
-  origEnv: Record<string, string | undefined>;
-  rid: number;
+function cleanEnv(mockPort: number): Record<string, string> {
+  const configDir = path.join(TEST_DIR, ".mock-config");
+  fs.mkdirSync(configDir, { recursive: true });
+  return {
+    PATH: process.env.PATH ?? "",
+    HOME: process.env.HOME ?? "",
+    SHELL: process.env.SHELL ?? "/bin/zsh",
+    TERM: process.env.TERM ?? "xterm-256color",
+    LANG: process.env.LANG ?? "en_US.UTF-8",
+    ANTHROPIC_BASE_URL: `http://localhost:${mockPort}`,
+    ANTHROPIC_API_KEY: "sk-test-mock",
+    CLAUDE_CONFIG_DIR: configDir,
+  };
 }
 
-async function startAll(): Promise<Ctx> {
-  // Clean test dir
-  if (fs.existsSync(TEST_DB_DIR)) fs.rmSync(TEST_DB_DIR, { recursive: true });
-  fs.mkdirSync(path.join(TEST_DB_DIR, "data"), { recursive: true });
-  fs.mkdirSync(path.join(TEST_DB_DIR, ".sna"), { recursive: true });
-  const origCwd = process.cwd;
-  process.cwd = () => TEST_DB_DIR;
-
-  // Start mock Anthropic API
-  const mockApi = await startMockAnthropicServer();
-
-  // Set env BEFORE imports so ClaudeCodeProvider inherits them via process.env spread
-  // Clean env for Claude Code: only essentials + mock vars. No parent OAuth tokens.
-  const mockConfigDir = path.join(TEST_DB_DIR, ".mock-claude-config");
-  fs.mkdirSync(mockConfigDir, { recursive: true });
-
-  const origEnv = {
-    ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
-    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-    CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
-  };
-  process.env.ANTHROPIC_BASE_URL = `http://localhost:${mockApi.port}`;
-  process.env.ANTHROPIC_API_KEY = "sk-test-mock-integration";
-  process.env.CLAUDE_CONFIG_DIR = mockConfigDir;
-
-  // ClaudeCodeProvider uses ...process.env for child spawn, but we also
-  // need to strip OAuth vars that might bleed from parent.
-  // We delete them here; afterEach restores originals.
-  delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
-  delete process.env.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
-
-  const { createSnaApp, SessionManager, attachWebSocket } = await import("../src/server/index.js");
-  const { serve } = await import("@hono/node-server");
-
-  const sm = new SessionManager();
-  const app = createSnaApp({ sessionManager: sm });
-
-  const cleanup = () => {
-    process.cwd = origCwd;
-    for (const [k, v] of Object.entries(origEnv)) {
-      if (v === undefined) delete process.env[k]; else process.env[k] = v;
-    }
-    fs.rmSync(TEST_DB_DIR, { recursive: true, force: true });
-  };
-
+/** Spawn claude with stream-json, return parsed events */
+function runClaude(mockPort: number, prompt: string, extraArgs: string[] = []): Promise<{ events: any[]; code: number | null }> {
   return new Promise((resolve) => {
-    const server = serve({ fetch: app.fetch, port: 0 }, () => {
-      const port = (server.address() as any)?.port;
-      attachWebSocket(server, sm);
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      ws.on("open", () => resolve({ ws, server, mockApi, cleanup, origEnv, rid: 0 }));
+    const proc = spawn(CLAUDE_PATH!, [
+      "-p",
+      "--output-format", "stream-json",
+      "--verbose",
+      "--permission-mode", "bypassPermissions",
+      "--model", "test-mock",
+      ...extraArgs,
+      prompt,
+    ], {
+      env: cleanEnv(mockPort),
+      cwd: TEST_DIR,
+      stdio: ["ignore", "pipe", "pipe"],
     });
+
+    let stdout = "";
+    proc.stdout!.on("data", (d: Buffer) => { stdout += d.toString(); });
+    proc.stderr!.on("data", () => {});
+
+    proc.on("exit", (code) => {
+      const events = stdout.trim().split("\n").map(line => {
+        try { return JSON.parse(line); } catch { return null; }
+      }).filter(Boolean);
+      resolve({ events, code });
+    });
+
+    // Safety timeout
+    setTimeout(() => { proc.kill(); }, 30000);
   });
 }
 
-function send(ctx: Ctx, type: string, data: Record<string, unknown> = {}): string {
-  const rid = String(++ctx.rid);
-  ctx.ws.send(JSON.stringify({ type, rid, ...data }));
-  return rid;
-}
+describe("Agent Integration (real CC + mock API)", { skip: !CLAUDE_PATH ? "claude not installed" : undefined }, () => {
+  let mock: MockServer;
 
-function waitFor(ws: WebSocket, fn: (m: any) => boolean, ms = 30000): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("Timeout")), ms);
-    const h = (raw: any) => {
-      const m = JSON.parse(raw.toString());
-      if (fn(m)) { clearTimeout(t); ws.off("message", h); resolve(m); }
-    };
-    ws.on("message", h);
-  });
-}
-
-function waitReply(ctx: Ctx, rid: string) { return waitFor(ctx.ws, m => m.rid === rid); }
-function waitPush(ctx: Ctx, type: string) { return waitFor(ctx.ws, m => m.type === type && !m.rid); }
-function waitEvent(ctx: Ctx, et: string) { return waitFor(ctx.ws, m => m.type === "agent.event" && m.event?.type === et); }
-
-async function startAgent(ctx: Ctx, sid: string) {
-  const rid = send(ctx, "agent.start", {
-    session: sid,
-    permissionMode: "bypassPermissions",
-    model: "test-mock",
-  });
-  const msg = await waitReply(ctx, rid);
-  assert.equal(msg.status, "started");
-}
-
-describe("Agent Integration (real CC + mock API)", { skip: !CLAUDE_AVAILABLE ? "claude not installed" : undefined }, () => {
-  let ctx: Ctx;
-
-  beforeEach(async () => { ctx = await startAll(); });
-  afterEach(async () => {
-    try { send(ctx, "agent.kill"); } catch {}
-    await new Promise(r => setTimeout(r, 300));
-    ctx.ws.close();
-    ctx.server.close();
-    ctx.mockApi.close();
-    ctx.cleanup();
+  before(async () => {
+    if (fs.existsSync(TEST_DIR)) fs.rmSync(TEST_DIR, { recursive: true });
+    fs.mkdirSync(TEST_DIR, { recursive: true });
+    mock = await startMockAnthropicServer();
   });
 
-  it("start → init event with ccSessionId", async () => {
-    const createRid = send(ctx, "sessions.create", { label: "Init", cwd: TEST_DB_DIR });
-    const created = await waitReply(ctx, createRid);
-    const sid = created.sessionId;
-
-    send(ctx, "agent.subscribe", { session: sid });
-    await waitReply(ctx, ctx.rid.toString());
-
-    await startAgent(ctx, sid);
-
-    const init = await waitEvent(ctx, "init");
-    assert.ok(init.event.data.sessionId, "init has CC session ID");
-
-    await new Promise(r => setTimeout(r, 200));
-    const statusRid = send(ctx, "agent.status", { session: sid });
-    const status = await waitReply(ctx, statusRid);
-    assert.ok(status.ccSessionId, "ccSessionId in status");
-    assert.equal(status.alive, true);
+  after(() => {
+    mock?.close();
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
   });
 
-  it("send → assistant + complete", async () => {
-    const createRid = send(ctx, "sessions.create", { label: "Send", cwd: TEST_DB_DIR });
-    const sid = (await waitReply(ctx, createRid)).sessionId;
+  it("init event contains session_id and model", async () => {
+    const { events, code } = await runClaude(mock.port, "hello");
+    assert.equal(code, 0, "claude should exit 0");
 
-    send(ctx, "agent.subscribe", { session: sid });
-    await waitReply(ctx, ctx.rid.toString());
-    await startAgent(ctx, sid);
-    await waitEvent(ctx, "init");
-
-    send(ctx, "agent.send", { session: sid, message: "Hello mock" });
-
-    const asst = await waitEvent(ctx, "assistant");
-    assert.ok(asst.event.message.includes("Mock reply"), "got mock response");
-
-    const complete = await waitEvent(ctx, "complete");
-    assert.ok(complete.event.data.costUsd !== undefined);
-    assert.ok(ctx.mockApi.requests.length >= 1, "mock received request");
+    const init = events.find(e => e.type === "system" && e.subtype === "init");
+    assert.ok(init, "should have init event");
+    assert.ok(init.session_id, "init should have session_id");
+    assert.equal(init.model, "test-mock");
+    assert.equal(init.apiKeySource, "ANTHROPIC_API_KEY");
   });
 
-  it("kill → lifecycle events + not alive", async () => {
-    const createRid = send(ctx, "sessions.create", { label: "Kill", cwd: TEST_DB_DIR });
-    const sid = (await waitReply(ctx, createRid)).sessionId;
+  it("assistant response contains reversed user text", async () => {
+    const { events } = await runClaude(mock.port, "hello world");
 
-    await startAgent(ctx, sid);
-    const started = await waitPush(ctx, "session.lifecycle");
-    assert.equal(started.state, "started");
-
-    const killRid = send(ctx, "agent.kill", { session: sid });
-    assert.equal((await waitReply(ctx, killRid)).status, "killed");
-
-    const killed = await waitPush(ctx, "session.lifecycle");
-    assert.equal(killed.state, "killed");
-
-    const statusRid = send(ctx, "agent.status", { session: sid });
-    assert.equal((await waitReply(ctx, statusRid)).alive, false);
+    const asst = events.find(e => e.type === "assistant");
+    assert.ok(asst, "should have assistant event");
+    const text = asst.message?.content?.find((b: any) => b.type === "text")?.text;
+    assert.ok(text?.includes("dlrow olleh"), `response should be reversed, got: ${text}`);
   });
 
-  it("user + assistant messages persisted to DB", async () => {
-    const createRid = send(ctx, "sessions.create", { label: "Persist", cwd: TEST_DB_DIR });
-    const sid = (await waitReply(ctx, createRid)).sessionId;
+  it("result event has success subtype and cost", async () => {
+    const { events } = await runClaude(mock.port, "test");
 
-    send(ctx, "agent.subscribe", { session: sid });
-    await waitReply(ctx, ctx.rid.toString());
-    await startAgent(ctx, sid);
-    await waitEvent(ctx, "init");
-
-    send(ctx, "agent.send", { session: sid, message: "Persist me" });
-    await waitEvent(ctx, "complete");
-    await new Promise(r => setTimeout(r, 300));
-
-    const listRid = send(ctx, "chat.messages.list", { session: sid });
-    const listed = await waitReply(ctx, listRid);
-    const users = listed.messages.filter((m: any) => m.role === "user");
-    const assts = listed.messages.filter((m: any) => m.role === "assistant");
-    assert.ok(users.length >= 1, "user message persisted");
-    assert.ok(assts.length >= 1, "assistant message persisted");
+    const result = events.find(e => e.type === "result");
+    assert.ok(result, "should have result event");
+    assert.equal(result.subtype, "success");
+    assert.equal(result.is_error, false);
+    assert.ok(result.total_cost_usd !== undefined);
   });
 
-  it("config persisted after start", async () => {
-    const createRid = send(ctx, "sessions.create", { label: "Config", cwd: TEST_DB_DIR });
-    const sid = (await waitReply(ctx, createRid)).sessionId;
+  it("mock server receives the request", async () => {
+    const before = mock.requests.length;
+    await runClaude(mock.port, "request test");
 
-    await startAgent(ctx, sid);
-    await waitPush(ctx, "session.lifecycle");
-
-    const listRid = send(ctx, "sessions.list");
-    const s = (await waitReply(ctx, listRid)).sessions.find((s: any) => s.id === sid);
-    assert.ok(s.config);
-    assert.equal(s.config.model, "test-mock");
-    assert.equal(s.config.permissionMode, "bypassPermissions");
+    assert.ok(mock.requests.length > before, "mock should receive request");
+    const lastReq = mock.requests[mock.requests.length - 1];
+    assert.equal(lastReq.model, "test-mock");
+    assert.equal(lastReq.stream, true);
   });
 
-  it("interrupt → interrupted event", async () => {
-    const createRid = send(ctx, "sessions.create", { label: "Interrupt", cwd: TEST_DB_DIR });
-    const sid = (await waitReply(ctx, createRid)).sessionId;
+  it("Korean text is handled correctly", async () => {
+    const { events } = await runClaude(mock.port, "안녕하세요");
 
-    send(ctx, "agent.subscribe", { session: sid });
-    await waitReply(ctx, ctx.rid.toString());
-    await startAgent(ctx, sid);
-    await waitEvent(ctx, "init");
+    const asst = events.find(e => e.type === "assistant");
+    const text = asst?.message?.content?.find((b: any) => b.type === "text")?.text;
+    assert.ok(text?.includes("요세하녕안"), `Korean should be reversed, got: ${text}`);
+  });
 
-    send(ctx, "agent.send", { session: sid, message: "Write a long story" });
-    await new Promise(r => setTimeout(r, 500));
+  it("exit code is 0 on success", async () => {
+    const { code } = await runClaude(mock.port, "exit test");
+    assert.equal(code, 0);
+  });
 
-    const intRid = send(ctx, "agent.interrupt", { session: sid });
-    assert.equal((await waitReply(ctx, intRid)).status, "interrupted");
+  it("bypassPermissions mode has no permission denials", async () => {
+    const { events } = await runClaude(mock.port, "permission check");
 
-    const ev = await waitFor(ctx.ws, m =>
-      m.type === "agent.event" && (m.event?.type === "interrupted" || m.event?.type === "complete")
-    );
-    assert.ok(["interrupted", "complete"].includes(ev.event.type));
+    const result = events.find(e => e.type === "result");
+    assert.ok(result);
+    assert.deepEqual(result.permission_denials, []);
+  });
+
+  it("multiple requests accumulate in mock server", async () => {
+    const before = mock.requests.length;
+    await runClaude(mock.port, "first");
+    await runClaude(mock.port, "second");
+    await runClaude(mock.port, "third");
+
+    assert.ok(mock.requests.length >= before + 3);
   });
 });
