@@ -318,6 +318,7 @@ class SessionManager {
       state: s.state,
       cwd: s.cwd,
       meta: s.meta,
+      config: s.lastStartConfig,
       eventCount: s.eventCounter,
       createdAt: s.createdAt,
       lastActivityAt: s.lastActivityAt

@@ -36,6 +36,7 @@ interface SessionInfo {
     state: SessionState;
     cwd: string;
     meta: Record<string, unknown> | null;
+    config: StartConfig | null;
     eventCount: number;
     createdAt: number;
     lastActivityAt: number;

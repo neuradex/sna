@@ -425,6 +425,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       alive: session?.process?.alive ?? false,
       sessionId: session?.process?.sessionId ?? null,
       eventCount: session?.eventCounter ?? 0,
+      config: session?.lastStartConfig ?? null,
     });
   });
 

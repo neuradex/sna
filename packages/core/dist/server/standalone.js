@@ -927,7 +927,8 @@ function createAgentRoutes(sessionManager2) {
     return httpJson(c, "agent.status", {
       alive: session?.process?.alive ?? false,
       sessionId: session?.process?.sessionId ?? null,
-      eventCount: session?.eventCounter ?? 0
+      eventCount: session?.eventCounter ?? 0,
+      config: session?.lastStartConfig ?? null
     });
   });
   app.post("/permission-request", async (c) => {
@@ -1372,6 +1373,7 @@ var SessionManager = class {
       state: s.state,
       cwd: s.cwd,
       meta: s.meta,
+      config: s.lastStartConfig,
       eventCount: s.eventCounter,
       createdAt: s.createdAt,
       lastActivityAt: s.lastActivityAt
@@ -1702,7 +1704,8 @@ function handleAgentStatus(ws, msg, sm) {
   wsReply(ws, msg, {
     alive: session?.process?.alive ?? false,
     sessionId: session?.process?.sessionId ?? null,
-    eventCount: session?.eventCounter ?? 0
+    eventCount: session?.eventCounter ?? 0,
+    config: session?.lastStartConfig ?? null
   });
 }
 async function handleAgentRunOnce(ws, msg, sm) {

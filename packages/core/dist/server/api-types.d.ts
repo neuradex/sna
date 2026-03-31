@@ -48,6 +48,12 @@ interface ApiResponses {
         alive: boolean;
         sessionId: string | null;
         eventCount: number;
+        config: {
+            provider: string;
+            model: string;
+            permissionMode: string;
+            extraArgs?: string[];
+        } | null;
     };
     "agent.run-once": {
         result: string;

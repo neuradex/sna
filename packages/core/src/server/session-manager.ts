@@ -40,6 +40,7 @@ export interface SessionInfo {
   state: SessionState;
   cwd: string;
   meta: Record<string, unknown> | null;
+  config: StartConfig | null;
   eventCount: number;
   createdAt: number;
   lastActivityAt: number;
@@ -440,6 +441,7 @@ export class SessionManager {
       state: s.state,
       cwd: s.cwd,
       meta: s.meta,
+      config: s.lastStartConfig,
       eventCount: s.eventCounter,
       createdAt: s.createdAt,
       lastActivityAt: s.lastActivityAt,

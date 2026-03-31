@@ -403,6 +403,7 @@ function handleAgentStatus(ws: WebSocket, msg: WsRequest, sm: SessionManager): v
     alive: session?.process?.alive ?? false,
     sessionId: session?.process?.sessionId ?? null,
     eventCount: session?.eventCounter ?? 0,
+    config: session?.lastStartConfig ?? null,
   });
 }
 
