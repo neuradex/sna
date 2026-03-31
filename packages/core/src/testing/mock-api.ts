@@ -62,14 +62,22 @@ export async function startMockAnthropicServer(): Promise<MockServer> {
       const entry = { model: body.model, messages: body.messages, stream: body.stream, timestamp: new Date().toISOString() };
       requests.push(entry);
 
-      // Log request details
+      // Log request details — extract actual user text (skip system-reminder blocks)
       const lastUser = body.messages?.filter((m: any) => m.role === "user").pop();
-      const userText = typeof lastUser?.content === "string"
-        ? lastUser.content
-        : lastUser?.content?.find((b: any) => b.type === "text")?.text ?? "(no text)";
+      let userText = "(no text)";
+      if (typeof lastUser?.content === "string") {
+        userText = lastUser.content;
+      } else if (Array.isArray(lastUser?.content)) {
+        // Find the last text block that isn't a system-reminder
+        const textBlocks = lastUser.content
+          .filter((b: any) => b.type === "text")
+          .map((b: any) => b.text as string);
+        const realText = textBlocks.find((t: string) => !t.startsWith("<system-reminder>"));
+        userText = realText ?? textBlocks[textBlocks.length - 1] ?? "(no text)";
+      }
       console.log(`[${ts()}] REQ model=${body.model} stream=${body.stream} messages=${body.messages?.length} user="${userText.slice(0, 120)}"`);
 
-      const replyText = `Mock reply to: ${userText.slice(0, 100)}`;
+      const replyText = [...userText].reverse().join("");
       const messageId = `msg_mock_${Date.now()}`;
 
       if (body.stream) {
