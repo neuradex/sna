@@ -101,8 +101,14 @@ class ClaudeCodeProcess implements AgentProcess {
       this.emitter.emit("error", err);
     });
 
-    // Inject conversation history before first prompt
+    // Inject conversation history before first prompt.
+    // Rule: the final stdin message must be a user message (the prompt).
+    // History should alternate user↔assistant and end with assistant,
+    // so the prompt naturally becomes the next user turn.
     if (options.history?.length) {
+      if (!options.prompt) {
+        throw new Error("history requires a prompt — the last stdin message must be a user message");
+      }
       for (const msg of options.history) {
         if (msg.role === "user") {
           const line = JSON.stringify({

@@ -379,6 +379,9 @@ var ClaudeCodeProcess = class {
       this.emitter.emit("error", err2);
     });
     if (options.history?.length) {
+      if (!options.prompt) {
+        throw new Error("history requires a prompt \u2014 the last stdin message must be a user message");
+      }
       for (const msg of options.history) {
         if (msg.role === "user") {
           const line = JSON.stringify({
