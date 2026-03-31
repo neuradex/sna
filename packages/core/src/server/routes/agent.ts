@@ -72,8 +72,6 @@ export async function runOnce(
   const provider = getProvider(opts.provider ?? "claude-code");
 
   const extraArgs: string[] = opts.extraArgs ? [...opts.extraArgs] : [];
-  // --bare: skip hooks, LSP, plugins, CLAUDE.md for faster startup
-  extraArgs.push("--bare");
   if (opts.systemPrompt) extraArgs.push("--system-prompt", opts.systemPrompt);
   if (opts.appendSystemPrompt) extraArgs.push("--append-system-prompt", opts.appendSystemPrompt);
 

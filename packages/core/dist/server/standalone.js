@@ -640,7 +640,6 @@ async function runOnce(sessionManager2, opts) {
   });
   const provider2 = getProvider(opts.provider ?? "claude-code");
   const extraArgs = opts.extraArgs ? [...opts.extraArgs] : [];
-  extraArgs.push("--bare");
   if (opts.systemPrompt) extraArgs.push("--system-prompt", opts.systemPrompt);
   if (opts.appendSystemPrompt) extraArgs.push("--append-system-prompt", opts.appendSystemPrompt);
   const proc = provider2.spawn({
