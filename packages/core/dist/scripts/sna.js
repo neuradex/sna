@@ -316,10 +316,17 @@ function cmdTuClaude(args2) {
     process.exit(1);
   }
   const claudePath = resolveAndCacheClaudePath();
+  const mockConfigDir = path.join(STATE_DIR, "mock-claude-config");
+  fs.mkdirSync(mockConfigDir, { recursive: true });
   const env = {
-    ...process.env,
+    PATH: process.env.PATH ?? "",
+    HOME: process.env.HOME ?? "",
+    SHELL: process.env.SHELL ?? "/bin/zsh",
+    TERM: process.env.TERM ?? "xterm-256color",
+    LANG: process.env.LANG ?? "en_US.UTF-8",
     ANTHROPIC_BASE_URL: `http://localhost:${port}`,
-    ANTHROPIC_API_KEY: "sk-test-mock-sna"
+    ANTHROPIC_API_KEY: "sk-test-mock-sna",
+    CLAUDE_CONFIG_DIR: mockConfigDir
   };
   try {
     execSync(`"${claudePath}" ${args2.map((a) => `"${a}"`).join(" ")}`, {

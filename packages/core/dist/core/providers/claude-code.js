@@ -319,6 +319,7 @@ class ClaudeCodeProvider {
     delete cleanEnv.CLAUDECODE;
     delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
     delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
+    delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
     const proc = spawn(claudePath, args, {
       cwd: options.cwd,
       env: cleanEnv,
