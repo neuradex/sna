@@ -337,6 +337,7 @@ var ClaudeCodeProcess = class {
     this.emitter = new EventEmitter();
     this._alive = true;
     this._sessionId = null;
+    this._initEmitted = false;
     this.buffer = "";
     this.proc = proc;
     proc.stdout.on("data", (chunk) => {
@@ -438,7 +439,8 @@ var ClaudeCodeProcess = class {
     switch (msg.type) {
       case "system": {
         if (msg.subtype === "init") {
-          if (this._sessionId && msg.session_id === this._sessionId) return null;
+          if (this._initEmitted) return null;
+          this._initEmitted = true;
           return {
             type: "init",
             message: `Agent ready (${msg.model ?? "unknown"})`,

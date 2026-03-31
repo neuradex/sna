@@ -47,6 +47,7 @@ class ClaudeCodeProcess implements AgentProcess {
   private proc: ChildProcess;
   private _alive = true;
   private _sessionId: string | null = null;
+  private _initEmitted = false;
   private buffer = "";
 
   get alive() { return this._alive; }
@@ -162,8 +163,9 @@ class ClaudeCodeProcess implements AgentProcess {
     switch (msg.type) {
       case "system": {
         if (msg.subtype === "init") {
-          // Skip duplicate init after interrupt (same session re-initializes)
-          if (this._sessionId && msg.session_id === this._sessionId) return null;
+          // Emit first init, suppress duplicates after interrupt (same session re-initializes)
+          if (this._initEmitted) return null;
+          this._initEmitted = true;
           return {
             type: "init",
             message: `Agent ready (${msg.model ?? "unknown"})`,
