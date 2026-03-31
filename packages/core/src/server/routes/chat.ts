@@ -12,6 +12,7 @@
 
 import { Hono } from "hono";
 import { getDb } from "../../db/schema.js";
+import { httpJson } from "../api-types.js";
 
 export function createChatRoutes() {
   const app = new Hono();
@@ -27,7 +28,7 @@ export function createChatRoutes() {
         ...r,
         meta: r.meta ? JSON.parse(r.meta) : null,
       }));
-      return c.json({ sessions });
+      return httpJson(c, "chat.sessions.list", { sessions });
     } catch (e: any) {
       return c.json({ status: "error", message: e.message, stack: e.stack }, 500);
     }
@@ -47,7 +48,7 @@ export function createChatRoutes() {
       db.prepare(
         `INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, ?, ?)`
       ).run(id, body.label ?? id, body.type ?? "background", body.meta ? JSON.stringify(body.meta) : null);
-      return c.json({ status: "created", id, meta: body.meta ?? null });
+      return httpJson(c, "chat.sessions.create", { status: "created", id, meta: body.meta ?? null });
     } catch (e: any) {
       return c.json({ status: "error", message: e.message }, 500);
     }
@@ -62,7 +63,7 @@ export function createChatRoutes() {
     try {
       const db = getDb();
       db.prepare(`DELETE FROM chat_sessions WHERE id = ?`).run(id);
-      return c.json({ status: "deleted" });
+      return httpJson(c, "chat.sessions.remove", { status: "deleted" });
     } catch (e: any) {
       return c.json({ status: "error", message: e.message }, 500);
     }
@@ -78,7 +79,7 @@ export function createChatRoutes() {
         ? db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY id ASC`)
         : db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id ASC`);
       const messages = sinceParam ? query.all(id, parseInt(sinceParam, 10)) : query.all(id);
-      return c.json({ messages });
+      return httpJson(c, "chat.messages.list", { messages });
     } catch (e: any) {
       return c.json({ status: "error", message: e.message, stack: e.stack }, 500);
     }
@@ -111,7 +112,7 @@ export function createChatRoutes() {
         body.skill_name ?? null,
         body.meta ? JSON.stringify(body.meta) : null,
       );
-      return c.json({ status: "created", id: result.lastInsertRowid });
+      return httpJson(c, "chat.messages.create", { status: "created", id: Number(result.lastInsertRowid) });
     } catch (e: any) {
       return c.json({ status: "error", message: e.message }, 500);
     }
@@ -123,7 +124,7 @@ export function createChatRoutes() {
     try {
       const db = getDb();
       db.prepare(`DELETE FROM chat_messages WHERE session_id = ?`).run(id);
-      return c.json({ status: "cleared" });
+      return httpJson(c, "chat.messages.clear", { status: "cleared" });
     } catch (e: any) {
       return c.json({ status: "error", message: e.message }, 500);
     }

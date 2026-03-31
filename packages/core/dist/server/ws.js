@@ -3,6 +3,7 @@ import { getProvider } from "../core/providers/index.js";
 import { getDb } from "../db/schema.js";
 import { logger } from "../lib/logger.js";
 import { runOnce } from "./routes/agent.js";
+import { wsReply } from "./api-types.js";
 function send(ws, data) {
   if (ws.readyState === ws.OPEN) {
     ws.send(JSON.stringify(data));
@@ -65,7 +66,7 @@ function handleMessage(ws, msg, sm, state) {
     case "sessions.create":
       return handleSessionsCreate(ws, msg, sm);
     case "sessions.list":
-      return reply(ws, msg, { sessions: sm.listSessions() });
+      return wsReply(ws, msg, { sessions: sm.listSessions() });
     case "sessions.remove":
       return handleSessionsRemove(ws, msg, sm);
     // ── Agent lifecycle ───────────────────────────────
@@ -131,7 +132,7 @@ function handleSessionsCreate(ws, msg, sm) {
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, 'main', ?)`).run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null);
     } catch {
     }
-    reply(ws, msg, { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
+    wsReply(ws, msg, { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -142,13 +143,13 @@ function handleSessionsRemove(ws, msg, sm) {
   if (id === "default") return replyError(ws, msg, "Cannot remove default session");
   const removed = sm.removeSession(id);
   if (!removed) return replyError(ws, msg, "Session not found");
-  reply(ws, msg, { status: "removed" });
+  wsReply(ws, msg, { status: "removed" });
 }
 function handleAgentStart(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
   const session = sm.getOrCreateSession(sessionId);
   if (session.process?.alive && !msg.force) {
-    reply(ws, msg, { status: "already_running", provider: "claude-code", sessionId: session.id });
+    wsReply(ws, msg, { status: "already_running", provider: "claude-code", sessionId: session.id });
     return;
   }
   if (session.process?.alive) session.process.kill();
@@ -176,7 +177,7 @@ function handleAgentStart(ws, msg, sm) {
       extraArgs: msg.extraArgs
     });
     sm.setProcess(sessionId, proc);
-    reply(ws, msg, { status: "started", provider: provider.name, sessionId: session.id });
+    wsReply(ws, msg, { status: "started", provider: provider.name, sessionId: session.id });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -199,17 +200,17 @@ function handleAgentSend(ws, msg, sm) {
   session.state = "processing";
   sm.touch(sessionId);
   session.process.send(msg.message);
-  reply(ws, msg, { status: "sent" });
+  wsReply(ws, msg, { status: "sent" });
 }
 function handleAgentKill(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
   const killed = sm.killSession(sessionId);
-  reply(ws, msg, { status: killed ? "killed" : "no_session" });
+  wsReply(ws, msg, { status: killed ? "killed" : "no_session" });
 }
 function handleAgentStatus(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
   const session = sm.getSession(sessionId);
-  reply(ws, msg, {
+  wsReply(ws, msg, {
     alive: session?.process?.alive ?? false,
     sessionId: session?.process?.sessionId ?? null,
     eventCount: session?.eventCounter ?? 0
@@ -219,7 +220,7 @@ async function handleAgentRunOnce(ws, msg, sm) {
   if (!msg.message) return replyError(ws, msg, "message is required");
   try {
     const { result, usage } = await runOnce(sm, msg);
-    reply(ws, msg, { result, usage });
+    wsReply(ws, msg, { result, usage });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -325,7 +326,7 @@ function handleEmit(ws, msg, sm) {
       data: data ?? null,
       created_at: (/* @__PURE__ */ new Date()).toISOString()
     });
-    reply(ws, msg, { id });
+    wsReply(ws, msg, { id });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -335,15 +336,15 @@ function handlePermissionRespond(ws, msg, sm) {
   const approved = msg.approved === true;
   const resolved = sm.resolvePendingPermission(sessionId, approved);
   if (!resolved) return replyError(ws, msg, "No pending permission request");
-  reply(ws, msg, { status: approved ? "approved" : "denied" });
+  wsReply(ws, msg, { status: approved ? "approved" : "denied" });
 }
 function handlePermissionPending(ws, msg, sm) {
   const sessionId = msg.session;
   if (sessionId) {
     const pending = sm.getPendingPermission(sessionId);
-    reply(ws, msg, { pending: pending ? [{ sessionId, ...pending }] : [] });
+    wsReply(ws, msg, { pending: pending ? [{ sessionId, ...pending }] : [] });
   } else {
-    reply(ws, msg, { pending: sm.getAllPendingPermissions() });
+    wsReply(ws, msg, { pending: sm.getAllPendingPermissions() });
   }
 }
 function handlePermissionSubscribe(ws, msg, sm, state) {
@@ -365,7 +366,7 @@ function handleChatSessionsList(ws, msg) {
       `SELECT id, label, type, meta, created_at FROM chat_sessions ORDER BY created_at DESC`
     ).all();
     const sessions = rows.map((r) => ({ ...r, meta: r.meta ? JSON.parse(r.meta) : null }));
-    reply(ws, msg, { sessions });
+    wsReply(ws, msg, { sessions });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -375,7 +376,7 @@ function handleChatSessionsCreate(ws, msg) {
   try {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, ?, ?)`).run(id, msg.label ?? id, msg.chatType ?? "background", msg.meta ? JSON.stringify(msg.meta) : null);
-    reply(ws, msg, { status: "created", id, meta: msg.meta ?? null });
+    wsReply(ws, msg, { status: "created", id, meta: msg.meta ?? null });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -387,7 +388,7 @@ function handleChatSessionsRemove(ws, msg) {
   try {
     const db = getDb();
     db.prepare(`DELETE FROM chat_sessions WHERE id = ?`).run(id);
-    reply(ws, msg, { status: "deleted" });
+    wsReply(ws, msg, { status: "deleted" });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -399,7 +400,7 @@ function handleChatMessagesList(ws, msg) {
     const db = getDb();
     const query = msg.since != null ? db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY id ASC`) : db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id ASC`);
     const messages = msg.since != null ? query.all(id, msg.since) : query.all(id);
-    reply(ws, msg, { messages });
+    wsReply(ws, msg, { messages });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -420,7 +421,7 @@ function handleChatMessagesCreate(ws, msg) {
       msg.skill_name ?? null,
       msg.meta ? JSON.stringify(msg.meta) : null
     );
-    reply(ws, msg, { status: "created", id: Number(result.lastInsertRowid) });
+    wsReply(ws, msg, { status: "created", id: Number(result.lastInsertRowid) });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -431,7 +432,7 @@ function handleChatMessagesClear(ws, msg) {
   try {
     const db = getDb();
     db.prepare(`DELETE FROM chat_messages WHERE session_id = ?`).run(id);
-    reply(ws, msg, { status: "cleared" });
+    wsReply(ws, msg, { status: "cleared" });
   } catch (e) {
     replyError(ws, msg, e.message);
   }

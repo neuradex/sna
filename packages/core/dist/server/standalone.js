@@ -145,6 +145,17 @@ function eventsRoute(c) {
   });
 }
 
+// src/server/api-types.ts
+function httpJson(c, _op, data, status) {
+  return c.json(data, status);
+}
+function wsReply(ws, msg, data) {
+  if (ws.readyState !== ws.OPEN) return;
+  const out = { ...data, type: msg.type };
+  if (msg.rid != null) out.rid = msg.rid;
+  ws.send(JSON.stringify(out));
+}
+
 // src/server/routes/emit.ts
 function createEmitRoute(sessionManager2) {
   return async (c) => {
@@ -167,7 +178,7 @@ function createEmitRoute(sessionManager2) {
       data: data ?? null,
       created_at: (/* @__PURE__ */ new Date()).toISOString()
     });
-    return c.json({ id });
+    return httpJson(c, "emit", { id });
   };
 }
 
@@ -672,14 +683,14 @@ function createAgentRoutes(sessionManager2) {
       } catch {
       }
       logger.log("route", `POST /sessions \u2192 created "${session.id}"`);
-      return c.json({ status: "created", sessionId: session.id, label: session.label, meta: session.meta });
+      return httpJson(c, "sessions.create", { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
     } catch (e) {
       logger.err("err", `POST /sessions \u2192 ${e.message}`);
       return c.json({ status: "error", message: e.message }, 409);
     }
   });
   app.get("/sessions", (c) => {
-    return c.json({ sessions: sessionManager2.listSessions() });
+    return httpJson(c, "sessions.list", { sessions: sessionManager2.listSessions() });
   });
   app.delete("/sessions/:id", (c) => {
     const id = c.req.param("id");
@@ -691,7 +702,7 @@ function createAgentRoutes(sessionManager2) {
       return c.json({ status: "error", message: "Session not found" }, 404);
     }
     logger.log("route", `DELETE /sessions/${id} \u2192 removed`);
-    return c.json({ status: "removed" });
+    return httpJson(c, "sessions.remove", { status: "removed" });
   });
   app.post("/run-once", async (c) => {
     const body = await c.req.json().catch(() => ({}));
@@ -700,7 +711,7 @@ function createAgentRoutes(sessionManager2) {
     }
     try {
       const result = await runOnce(sessionManager2, body);
-      return c.json(result);
+      return httpJson(c, "agent.run-once", result);
     } catch (e) {
       logger.err("err", `POST /run-once \u2192 ${e.message}`);
       return c.json({ status: "error", message: e.message }, 500);
@@ -712,10 +723,10 @@ function createAgentRoutes(sessionManager2) {
     const session = sessionManager2.getOrCreateSession(sessionId);
     if (session.process?.alive && !body.force) {
       logger.log("route", `POST /start?session=${sessionId} \u2192 already_running`);
-      return c.json({
+      return httpJson(c, "agent.start", {
         status: "already_running",
         provider: "claude-code",
-        sessionId: session.process.sessionId
+        sessionId: session.process.sessionId ?? session.id
       });
     }
     if (session.process?.alive) {
@@ -748,7 +759,7 @@ function createAgentRoutes(sessionManager2) {
       });
       sessionManager2.setProcess(sessionId, proc);
       logger.log("route", `POST /start?session=${sessionId} \u2192 started`);
-      return c.json({
+      return httpJson(c, "agent.start", {
         status: "started",
         provider: provider2.name,
         sessionId: session.id
@@ -783,7 +794,7 @@ function createAgentRoutes(sessionManager2) {
     sessionManager2.touch(sessionId);
     logger.log("route", `POST /send?session=${sessionId} \u2192 "${body.message.slice(0, 80)}"`);
     session.process.send(body.message);
-    return c.json({ status: "sent" });
+    return httpJson(c, "agent.send", { status: "sent" });
   });
   app.get("/events", (c) => {
     const sessionId = getSessionId(c);
@@ -821,12 +832,12 @@ function createAgentRoutes(sessionManager2) {
   app.post("/kill", async (c) => {
     const sessionId = getSessionId(c);
     const killed = sessionManager2.killSession(sessionId);
-    return c.json({ status: killed ? "killed" : "no_session" });
+    return httpJson(c, "agent.kill", { status: killed ? "killed" : "no_session" });
   });
   app.get("/status", (c) => {
     const sessionId = getSessionId(c);
     const session = sessionManager2.getSession(sessionId);
-    return c.json({
+    return httpJson(c, "agent.status", {
       alive: session?.process?.alive ?? false,
       sessionId: session?.process?.sessionId ?? null,
       eventCount: session?.eventCounter ?? 0
@@ -848,15 +859,15 @@ function createAgentRoutes(sessionManager2) {
       return c.json({ status: "error", message: "No pending permission request" }, 404);
     }
     logger.log("route", `POST /permission-respond?session=${sessionId} \u2192 ${approved ? "approved" : "denied"}`);
-    return c.json({ status: approved ? "approved" : "denied" });
+    return httpJson(c, "permission.respond", { status: approved ? "approved" : "denied" });
   });
   app.get("/permission-pending", (c) => {
     const sessionId = c.req.query("session");
     if (sessionId) {
       const pending = sessionManager2.getPendingPermission(sessionId);
-      return c.json({ pending: pending ? [{ sessionId, ...pending }] : [] });
+      return httpJson(c, "permission.pending", { pending: pending ? [{ sessionId, ...pending }] : [] });
     }
-    return c.json({ pending: sessionManager2.getAllPendingPermissions() });
+    return httpJson(c, "permission.pending", { pending: sessionManager2.getAllPendingPermissions() });
   });
   return app;
 }
@@ -875,7 +886,7 @@ function createChatRoutes() {
         ...r,
         meta: r.meta ? JSON.parse(r.meta) : null
       }));
-      return c.json({ sessions });
+      return httpJson(c, "chat.sessions.list", { sessions });
     } catch (e) {
       return c.json({ status: "error", message: e.message, stack: e.stack }, 500);
     }
@@ -888,7 +899,7 @@ function createChatRoutes() {
       db.prepare(
         `INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, ?, ?)`
       ).run(id, body.label ?? id, body.type ?? "background", body.meta ? JSON.stringify(body.meta) : null);
-      return c.json({ status: "created", id, meta: body.meta ?? null });
+      return httpJson(c, "chat.sessions.create", { status: "created", id, meta: body.meta ?? null });
     } catch (e) {
       return c.json({ status: "error", message: e.message }, 500);
     }
@@ -901,7 +912,7 @@ function createChatRoutes() {
     try {
       const db = getDb();
       db.prepare(`DELETE FROM chat_sessions WHERE id = ?`).run(id);
-      return c.json({ status: "deleted" });
+      return httpJson(c, "chat.sessions.remove", { status: "deleted" });
     } catch (e) {
       return c.json({ status: "error", message: e.message }, 500);
     }
@@ -913,7 +924,7 @@ function createChatRoutes() {
       const db = getDb();
       const query = sinceParam ? db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY id ASC`) : db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id ASC`);
       const messages = sinceParam ? query.all(id, parseInt(sinceParam, 10)) : query.all(id);
-      return c.json({ messages });
+      return httpJson(c, "chat.messages.list", { messages });
     } catch (e) {
       return c.json({ status: "error", message: e.message, stack: e.stack }, 500);
     }
@@ -936,7 +947,7 @@ function createChatRoutes() {
         body.skill_name ?? null,
         body.meta ? JSON.stringify(body.meta) : null
       );
-      return c.json({ status: "created", id: result.lastInsertRowid });
+      return httpJson(c, "chat.messages.create", { status: "created", id: Number(result.lastInsertRowid) });
     } catch (e) {
       return c.json({ status: "error", message: e.message }, 500);
     }
@@ -946,7 +957,7 @@ function createChatRoutes() {
     try {
       const db = getDb();
       db.prepare(`DELETE FROM chat_messages WHERE session_id = ?`).run(id);
-      return c.json({ status: "cleared" });
+      return httpJson(c, "chat.messages.clear", { status: "cleared" });
     } catch (e) {
       return c.json({ status: "error", message: e.message }, 500);
     }
@@ -1243,7 +1254,7 @@ function handleMessage(ws, msg, sm, state) {
     case "sessions.create":
       return handleSessionsCreate(ws, msg, sm);
     case "sessions.list":
-      return reply(ws, msg, { sessions: sm.listSessions() });
+      return wsReply(ws, msg, { sessions: sm.listSessions() });
     case "sessions.remove":
       return handleSessionsRemove(ws, msg, sm);
     // ── Agent lifecycle ───────────────────────────────
@@ -1309,7 +1320,7 @@ function handleSessionsCreate(ws, msg, sm) {
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, 'main', ?)`).run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null);
     } catch {
     }
-    reply(ws, msg, { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
+    wsReply(ws, msg, { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -1320,13 +1331,13 @@ function handleSessionsRemove(ws, msg, sm) {
   if (id === "default") return replyError(ws, msg, "Cannot remove default session");
   const removed = sm.removeSession(id);
   if (!removed) return replyError(ws, msg, "Session not found");
-  reply(ws, msg, { status: "removed" });
+  wsReply(ws, msg, { status: "removed" });
 }
 function handleAgentStart(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
   const session = sm.getOrCreateSession(sessionId);
   if (session.process?.alive && !msg.force) {
-    reply(ws, msg, { status: "already_running", provider: "claude-code", sessionId: session.id });
+    wsReply(ws, msg, { status: "already_running", provider: "claude-code", sessionId: session.id });
     return;
   }
   if (session.process?.alive) session.process.kill();
@@ -1354,7 +1365,7 @@ function handleAgentStart(ws, msg, sm) {
       extraArgs: msg.extraArgs
     });
     sm.setProcess(sessionId, proc);
-    reply(ws, msg, { status: "started", provider: provider2.name, sessionId: session.id });
+    wsReply(ws, msg, { status: "started", provider: provider2.name, sessionId: session.id });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -1377,17 +1388,17 @@ function handleAgentSend(ws, msg, sm) {
   session.state = "processing";
   sm.touch(sessionId);
   session.process.send(msg.message);
-  reply(ws, msg, { status: "sent" });
+  wsReply(ws, msg, { status: "sent" });
 }
 function handleAgentKill(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
   const killed = sm.killSession(sessionId);
-  reply(ws, msg, { status: killed ? "killed" : "no_session" });
+  wsReply(ws, msg, { status: killed ? "killed" : "no_session" });
 }
 function handleAgentStatus(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
   const session = sm.getSession(sessionId);
-  reply(ws, msg, {
+  wsReply(ws, msg, {
     alive: session?.process?.alive ?? false,
     sessionId: session?.process?.sessionId ?? null,
     eventCount: session?.eventCounter ?? 0
@@ -1397,7 +1408,7 @@ async function handleAgentRunOnce(ws, msg, sm) {
   if (!msg.message) return replyError(ws, msg, "message is required");
   try {
     const { result, usage } = await runOnce(sm, msg);
-    reply(ws, msg, { result, usage });
+    wsReply(ws, msg, { result, usage });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -1503,7 +1514,7 @@ function handleEmit(ws, msg, sm) {
       data: data ?? null,
       created_at: (/* @__PURE__ */ new Date()).toISOString()
     });
-    reply(ws, msg, { id });
+    wsReply(ws, msg, { id });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -1513,15 +1524,15 @@ function handlePermissionRespond(ws, msg, sm) {
   const approved = msg.approved === true;
   const resolved = sm.resolvePendingPermission(sessionId, approved);
   if (!resolved) return replyError(ws, msg, "No pending permission request");
-  reply(ws, msg, { status: approved ? "approved" : "denied" });
+  wsReply(ws, msg, { status: approved ? "approved" : "denied" });
 }
 function handlePermissionPending(ws, msg, sm) {
   const sessionId = msg.session;
   if (sessionId) {
     const pending = sm.getPendingPermission(sessionId);
-    reply(ws, msg, { pending: pending ? [{ sessionId, ...pending }] : [] });
+    wsReply(ws, msg, { pending: pending ? [{ sessionId, ...pending }] : [] });
   } else {
-    reply(ws, msg, { pending: sm.getAllPendingPermissions() });
+    wsReply(ws, msg, { pending: sm.getAllPendingPermissions() });
   }
 }
 function handlePermissionSubscribe(ws, msg, sm, state) {
@@ -1543,7 +1554,7 @@ function handleChatSessionsList(ws, msg) {
       `SELECT id, label, type, meta, created_at FROM chat_sessions ORDER BY created_at DESC`
     ).all();
     const sessions = rows.map((r) => ({ ...r, meta: r.meta ? JSON.parse(r.meta) : null }));
-    reply(ws, msg, { sessions });
+    wsReply(ws, msg, { sessions });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -1553,7 +1564,7 @@ function handleChatSessionsCreate(ws, msg) {
   try {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, ?, ?)`).run(id, msg.label ?? id, msg.chatType ?? "background", msg.meta ? JSON.stringify(msg.meta) : null);
-    reply(ws, msg, { status: "created", id, meta: msg.meta ?? null });
+    wsReply(ws, msg, { status: "created", id, meta: msg.meta ?? null });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -1565,7 +1576,7 @@ function handleChatSessionsRemove(ws, msg) {
   try {
     const db = getDb();
     db.prepare(`DELETE FROM chat_sessions WHERE id = ?`).run(id);
-    reply(ws, msg, { status: "deleted" });
+    wsReply(ws, msg, { status: "deleted" });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -1577,7 +1588,7 @@ function handleChatMessagesList(ws, msg) {
     const db = getDb();
     const query = msg.since != null ? db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY id ASC`) : db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id ASC`);
     const messages = msg.since != null ? query.all(id, msg.since) : query.all(id);
-    reply(ws, msg, { messages });
+    wsReply(ws, msg, { messages });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -1598,7 +1609,7 @@ function handleChatMessagesCreate(ws, msg) {
       msg.skill_name ?? null,
       msg.meta ? JSON.stringify(msg.meta) : null
     );
-    reply(ws, msg, { status: "created", id: Number(result.lastInsertRowid) });
+    wsReply(ws, msg, { status: "created", id: Number(result.lastInsertRowid) });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -1609,7 +1620,7 @@ function handleChatMessagesClear(ws, msg) {
   try {
     const db = getDb();
     db.prepare(`DELETE FROM chat_messages WHERE session_id = ?`).run(id);
-    reply(ws, msg, { status: "cleared" });
+    wsReply(ws, msg, { status: "cleared" });
   } catch (e) {
     replyError(ws, msg, e.message);
   }

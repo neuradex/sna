@@ -5,6 +5,7 @@ import {
 } from "../../core/providers/index.js";
 import { logger } from "../../lib/logger.js";
 import { getDb } from "../../db/schema.js";
+import { httpJson } from "../api-types.js";
 function getSessionId(c) {
   return c.req.query("session") ?? "default";
 }
@@ -78,14 +79,14 @@ function createAgentRoutes(sessionManager) {
       } catch {
       }
       logger.log("route", `POST /sessions \u2192 created "${session.id}"`);
-      return c.json({ status: "created", sessionId: session.id, label: session.label, meta: session.meta });
+      return httpJson(c, "sessions.create", { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
     } catch (e) {
       logger.err("err", `POST /sessions \u2192 ${e.message}`);
       return c.json({ status: "error", message: e.message }, 409);
     }
   });
   app.get("/sessions", (c) => {
-    return c.json({ sessions: sessionManager.listSessions() });
+    return httpJson(c, "sessions.list", { sessions: sessionManager.listSessions() });
   });
   app.delete("/sessions/:id", (c) => {
     const id = c.req.param("id");
@@ -97,7 +98,7 @@ function createAgentRoutes(sessionManager) {
       return c.json({ status: "error", message: "Session not found" }, 404);
     }
     logger.log("route", `DELETE /sessions/${id} \u2192 removed`);
-    return c.json({ status: "removed" });
+    return httpJson(c, "sessions.remove", { status: "removed" });
   });
   app.post("/run-once", async (c) => {
     const body = await c.req.json().catch(() => ({}));
@@ -106,7 +107,7 @@ function createAgentRoutes(sessionManager) {
     }
     try {
       const result = await runOnce(sessionManager, body);
-      return c.json(result);
+      return httpJson(c, "agent.run-once", result);
     } catch (e) {
       logger.err("err", `POST /run-once \u2192 ${e.message}`);
       return c.json({ status: "error", message: e.message }, 500);
@@ -118,10 +119,10 @@ function createAgentRoutes(sessionManager) {
     const session = sessionManager.getOrCreateSession(sessionId);
     if (session.process?.alive && !body.force) {
       logger.log("route", `POST /start?session=${sessionId} \u2192 already_running`);
-      return c.json({
+      return httpJson(c, "agent.start", {
         status: "already_running",
         provider: "claude-code",
-        sessionId: session.process.sessionId
+        sessionId: session.process.sessionId ?? session.id
       });
     }
     if (session.process?.alive) {
@@ -154,7 +155,7 @@ function createAgentRoutes(sessionManager) {
       });
       sessionManager.setProcess(sessionId, proc);
       logger.log("route", `POST /start?session=${sessionId} \u2192 started`);
-      return c.json({
+      return httpJson(c, "agent.start", {
         status: "started",
         provider: provider.name,
         sessionId: session.id
@@ -189,7 +190,7 @@ function createAgentRoutes(sessionManager) {
     sessionManager.touch(sessionId);
     logger.log("route", `POST /send?session=${sessionId} \u2192 "${body.message.slice(0, 80)}"`);
     session.process.send(body.message);
-    return c.json({ status: "sent" });
+    return httpJson(c, "agent.send", { status: "sent" });
   });
   app.get("/events", (c) => {
     const sessionId = getSessionId(c);
@@ -227,12 +228,12 @@ function createAgentRoutes(sessionManager) {
   app.post("/kill", async (c) => {
     const sessionId = getSessionId(c);
     const killed = sessionManager.killSession(sessionId);
-    return c.json({ status: killed ? "killed" : "no_session" });
+    return httpJson(c, "agent.kill", { status: killed ? "killed" : "no_session" });
   });
   app.get("/status", (c) => {
     const sessionId = getSessionId(c);
     const session = sessionManager.getSession(sessionId);
-    return c.json({
+    return httpJson(c, "agent.status", {
       alive: session?.process?.alive ?? false,
       sessionId: session?.process?.sessionId ?? null,
       eventCount: session?.eventCounter ?? 0
@@ -254,15 +255,15 @@ function createAgentRoutes(sessionManager) {
       return c.json({ status: "error", message: "No pending permission request" }, 404);
     }
     logger.log("route", `POST /permission-respond?session=${sessionId} \u2192 ${approved ? "approved" : "denied"}`);
-    return c.json({ status: approved ? "approved" : "denied" });
+    return httpJson(c, "permission.respond", { status: approved ? "approved" : "denied" });
   });
   app.get("/permission-pending", (c) => {
     const sessionId = c.req.query("session");
     if (sessionId) {
       const pending = sessionManager.getPendingPermission(sessionId);
-      return c.json({ pending: pending ? [{ sessionId, ...pending }] : [] });
+      return httpJson(c, "permission.pending", { pending: pending ? [{ sessionId, ...pending }] : [] });
     }
-    return c.json({ pending: sessionManager.getAllPendingPermissions() });
+    return httpJson(c, "permission.pending", { pending: sessionManager.getAllPendingPermissions() });
   });
   return app;
 }

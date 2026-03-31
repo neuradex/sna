@@ -8,6 +8,7 @@
 import type { Context } from "hono";
 import { getDb } from "../../db/schema.js";
 import type { SessionManager } from "../session-manager.js";
+import { httpJson } from "../api-types.js";
 
 /**
  * Create an emit route handler that broadcasts to WS subscribers.
@@ -39,7 +40,7 @@ export function createEmitRoute(sessionManager: SessionManager) {
       created_at: new Date().toISOString(),
     });
 
-    return c.json({ id });
+    return httpJson(c, "emit", { id });
   };
 }
 

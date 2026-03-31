@@ -47,6 +47,7 @@ import { getProvider } from "../core/providers/index.js";
 import { getDb } from "../db/schema.js";
 import { logger } from "../lib/logger.js";
 import { runOnce, type RunOnceOptions } from "./routes/agent.js";
+import { wsReply } from "./api-types.js";
 import type { SessionManager } from "./session-manager.js";
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -153,7 +154,7 @@ function handleMessage(
     case "sessions.create":
       return handleSessionsCreate(ws, msg, sm);
     case "sessions.list":
-      return reply(ws, msg, { sessions: sm.listSessions() });
+      return wsReply(ws, msg, { sessions: sm.listSessions() });
     case "sessions.remove":
       return handleSessionsRemove(ws, msg, sm);
 
@@ -229,7 +230,7 @@ function handleSessionsCreate(ws: WebSocket, msg: WsRequest, sm: SessionManager)
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, 'main', ?)`)
         .run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null);
     } catch { /* non-fatal */ }
-    reply(ws, msg, { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
+    wsReply(ws, msg, { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }
@@ -241,7 +242,7 @@ function handleSessionsRemove(ws: WebSocket, msg: WsRequest, sm: SessionManager)
   if (id === "default") return replyError(ws, msg, "Cannot remove default session");
   const removed = sm.removeSession(id);
   if (!removed) return replyError(ws, msg, "Session not found");
-  reply(ws, msg, { status: "removed" });
+  wsReply(ws, msg, { status: "removed" });
 }
 
 // ── Agent handlers ────────────────────────────────────────────────
@@ -251,7 +252,7 @@ function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): vo
   const session = sm.getOrCreateSession(sessionId);
 
   if (session.process?.alive && !msg.force) {
-    reply(ws, msg, { status: "already_running", provider: "claude-code", sessionId: session.id });
+    wsReply(ws, msg, { status: "already_running", provider: "claude-code", sessionId: session.id });
     return;
   }
 
@@ -286,7 +287,7 @@ function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): vo
       extraArgs: msg.extraArgs as string[] | undefined,
     });
     sm.setProcess(sessionId, proc);
-    reply(ws, msg, { status: "started", provider: provider.name, sessionId: session.id });
+    wsReply(ws, msg, { status: "started", provider: provider.name, sessionId: session.id });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }
@@ -314,19 +315,19 @@ function handleAgentSend(ws: WebSocket, msg: WsRequest, sm: SessionManager): voi
   session.state = "processing";
   sm.touch(sessionId);
   session.process.send(msg.message as string);
-  reply(ws, msg, { status: "sent" });
+  wsReply(ws, msg, { status: "sent" });
 }
 
 function handleAgentKill(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
   const sessionId = (msg.session as string) ?? "default";
   const killed = sm.killSession(sessionId);
-  reply(ws, msg, { status: killed ? "killed" : "no_session" });
+  wsReply(ws, msg, { status: killed ? "killed" : "no_session" });
 }
 
 function handleAgentStatus(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
   const sessionId = (msg.session as string) ?? "default";
   const session = sm.getSession(sessionId);
-  reply(ws, msg, {
+  wsReply(ws, msg, {
     alive: session?.process?.alive ?? false,
     sessionId: session?.process?.sessionId ?? null,
     eventCount: session?.eventCounter ?? 0,
@@ -337,7 +338,7 @@ async function handleAgentRunOnce(ws: WebSocket, msg: WsRequest, sm: SessionMana
   if (!msg.message) return replyError(ws, msg, "message is required");
   try {
     const { result, usage } = await runOnce(sm, msg as unknown as RunOnceOptions);
-    reply(ws, msg, { result, usage });
+    wsReply(ws, msg, { result, usage });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }
@@ -477,7 +478,7 @@ function handleEmit(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
       created_at: new Date().toISOString(),
     });
 
-    reply(ws, msg, { id });
+    wsReply(ws, msg, { id });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }
@@ -490,16 +491,16 @@ function handlePermissionRespond(ws: WebSocket, msg: WsRequest, sm: SessionManag
   const approved = msg.approved === true;
   const resolved = sm.resolvePendingPermission(sessionId, approved);
   if (!resolved) return replyError(ws, msg, "No pending permission request");
-  reply(ws, msg, { status: approved ? "approved" : "denied" });
+  wsReply(ws, msg, { status: approved ? "approved" : "denied" });
 }
 
 function handlePermissionPending(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
   const sessionId = msg.session as string | undefined;
   if (sessionId) {
     const pending = sm.getPendingPermission(sessionId);
-    reply(ws, msg, { pending: pending ? [{ sessionId, ...pending }] : [] });
+    wsReply(ws, msg, { pending: pending ? [{ sessionId, ...pending }] : [] });
   } else {
-    reply(ws, msg, { pending: sm.getAllPendingPermissions() });
+    wsReply(ws, msg, { pending: sm.getAllPendingPermissions() });
   }
 }
 
@@ -526,7 +527,7 @@ function handleChatSessionsList(ws: WebSocket, msg: WsRequest): void {
       `SELECT id, label, type, meta, created_at FROM chat_sessions ORDER BY created_at DESC`,
     ).all() as { id: string; label: string; type: string; meta: string | null; created_at: string }[];
     const sessions = rows.map((r) => ({ ...r, meta: r.meta ? JSON.parse(r.meta) : null }));
-    reply(ws, msg, { sessions });
+    wsReply(ws, msg, { sessions });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }
@@ -538,7 +539,7 @@ function handleChatSessionsCreate(ws: WebSocket, msg: WsRequest): void {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, ?, ?)`)
       .run(id, (msg.label as string) ?? id, (msg.chatType as string) ?? "background", msg.meta ? JSON.stringify(msg.meta) : null);
-    reply(ws, msg, { status: "created", id, meta: (msg.meta as Record<string, unknown>) ?? null });
+    wsReply(ws, msg, { status: "created", id, meta: (msg.meta as Record<string, unknown>) ?? null });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }
@@ -551,7 +552,7 @@ function handleChatSessionsRemove(ws: WebSocket, msg: WsRequest): void {
   try {
     const db = getDb();
     db.prepare(`DELETE FROM chat_sessions WHERE id = ?`).run(id);
-    reply(ws, msg, { status: "deleted" });
+    wsReply(ws, msg, { status: "deleted" });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }
@@ -568,7 +569,7 @@ function handleChatMessagesList(ws: WebSocket, msg: WsRequest): void {
       ? db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY id ASC`)
       : db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id ASC`);
     const messages = msg.since != null ? query.all(id, msg.since as number) : query.all(id);
-    reply(ws, msg, { messages });
+    wsReply(ws, msg, { messages });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }
@@ -591,7 +592,7 @@ function handleChatMessagesCreate(ws: WebSocket, msg: WsRequest): void {
       (msg.skill_name as string) ?? null,
       msg.meta ? JSON.stringify(msg.meta) : null,
     );
-    reply(ws, msg, { status: "created", id: Number(result.lastInsertRowid) });
+    wsReply(ws, msg, { status: "created", id: Number(result.lastInsertRowid) });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }
@@ -603,7 +604,7 @@ function handleChatMessagesClear(ws: WebSocket, msg: WsRequest): void {
   try {
     const db = getDb();
     db.prepare(`DELETE FROM chat_messages WHERE session_id = ?`).run(id);
-    reply(ws, msg, { status: "cleared" });
+    wsReply(ws, msg, { status: "cleared" });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }

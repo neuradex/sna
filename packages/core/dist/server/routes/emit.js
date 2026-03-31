@@ -1,4 +1,5 @@
 import { getDb } from "../../db/schema.js";
+import { httpJson } from "../api-types.js";
 function createEmitRoute(sessionManager) {
   return async (c) => {
     const body = await c.req.json();
@@ -20,7 +21,7 @@ function createEmitRoute(sessionManager) {
       data: data ?? null,
       created_at: (/* @__PURE__ */ new Date()).toISOString()
     });
-    return c.json({ id });
+    return httpJson(c, "emit", { id });
   };
 }
 async function emitRoute(c) {
