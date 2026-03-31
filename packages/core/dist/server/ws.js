@@ -28,7 +28,7 @@ function attachWebSocket(server, sessionManager) {
   });
   wss.on("connection", (ws) => {
     logger.log("ws", "client connected");
-    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillPollTimer: null };
+    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null };
     ws.on("message", (raw) => {
       let msg;
       try {
@@ -47,10 +47,14 @@ function attachWebSocket(server, sessionManager) {
       logger.log("ws", "client disconnected");
       for (const unsub of state.agentUnsubs.values()) unsub();
       state.agentUnsubs.clear();
+      state.skillEventUnsub?.();
+      state.skillEventUnsub = null;
       if (state.skillPollTimer) {
         clearInterval(state.skillPollTimer);
         state.skillPollTimer = null;
       }
+      state.permissionUnsub?.();
+      state.permissionUnsub = null;
     });
   });
   return wss;
@@ -83,16 +87,20 @@ function handleMessage(ws, msg, sm, state) {
       return handleAgentUnsubscribe(ws, msg, state);
     // ── Skill events ──────────────────────────────────
     case "events.subscribe":
-      return handleEventsSubscribe(ws, msg, state);
+      return handleEventsSubscribe(ws, msg, sm, state);
     case "events.unsubscribe":
       return handleEventsUnsubscribe(ws, msg, state);
     case "emit":
-      return handleEmit(ws, msg);
+      return handleEmit(ws, msg, sm);
     // ── Permission ────────────────────────────────────
     case "permission.respond":
       return handlePermissionRespond(ws, msg, sm);
     case "permission.pending":
       return handlePermissionPending(ws, msg, sm);
+    case "permission.subscribe":
+      return handlePermissionSubscribe(ws, msg, sm, state);
+    case "permission.unsubscribe":
+      return handlePermissionUnsubscribe(ws, msg, state);
     // ── Chat sessions ─────────────────────────────────
     case "chat.sessions.list":
       return handleChatSessionsList(ws, msg);
@@ -241,8 +249,10 @@ function handleAgentUnsubscribe(ws, msg, state) {
   state.agentUnsubs.delete(sessionId);
   reply(ws, msg, {});
 }
-const SKILL_POLL_MS = 500;
-function handleEventsSubscribe(ws, msg, state) {
+const SKILL_POLL_MS = 2e3;
+function handleEventsSubscribe(ws, msg, sm, state) {
+  state.skillEventUnsub?.();
+  state.skillEventUnsub = null;
   if (state.skillPollTimer) {
     clearInterval(state.skillPollTimer);
     state.skillPollTimer = null;
@@ -257,6 +267,13 @@ function handleEventsSubscribe(ws, msg, state) {
       lastId = 0;
     }
   }
+  state.skillEventUnsub = sm.onSkillEvent((event) => {
+    const eventId = event.id;
+    if (eventId > lastId) {
+      lastId = eventId;
+      send(ws, { type: "skill.event", data: event });
+    }
+  });
   state.skillPollTimer = setInterval(() => {
     try {
       const db = getDb();
@@ -265,8 +282,10 @@ function handleEventsSubscribe(ws, msg, state) {
          FROM skill_events WHERE id > ? ORDER BY id ASC LIMIT 50`
       ).all(lastId);
       for (const row of rows) {
-        send(ws, { type: "skill.event", data: row });
-        lastId = row.id;
+        if (row.id > lastId) {
+          lastId = row.id;
+          send(ws, { type: "skill.event", data: row });
+        }
       }
     } catch {
     }
@@ -274,13 +293,15 @@ function handleEventsSubscribe(ws, msg, state) {
   reply(ws, msg, { lastId });
 }
 function handleEventsUnsubscribe(ws, msg, state) {
+  state.skillEventUnsub?.();
+  state.skillEventUnsub = null;
   if (state.skillPollTimer) {
     clearInterval(state.skillPollTimer);
     state.skillPollTimer = null;
   }
   reply(ws, msg, {});
 }
-function handleEmit(ws, msg) {
+function handleEmit(ws, msg, sm) {
   const skill = msg.skill;
   const eventType = msg.eventType;
   const emitMessage = msg.message;
@@ -294,7 +315,17 @@ function handleEmit(ws, msg) {
     const result = db.prepare(
       `INSERT INTO skill_events (session_id, skill, type, message, data) VALUES (?, ?, ?, ?, ?)`
     ).run(sessionId ?? null, skill, eventType, emitMessage, data ?? null);
-    reply(ws, msg, { id: Number(result.lastInsertRowid) });
+    const id = Number(result.lastInsertRowid);
+    sm.broadcastSkillEvent({
+      id,
+      session_id: sessionId ?? null,
+      skill,
+      type: eventType,
+      message: emitMessage,
+      data: data ?? null,
+      created_at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    reply(ws, msg, { id });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -310,10 +341,22 @@ function handlePermissionPending(ws, msg, sm) {
   const sessionId = msg.session;
   if (sessionId) {
     const pending = sm.getPendingPermission(sessionId);
-    reply(ws, msg, { pending: pending ? { sessionId, ...pending } : null });
+    reply(ws, msg, { pending: pending ? [{ sessionId, ...pending }] : [] });
   } else {
     reply(ws, msg, { pending: sm.getAllPendingPermissions() });
   }
+}
+function handlePermissionSubscribe(ws, msg, sm, state) {
+  state.permissionUnsub?.();
+  state.permissionUnsub = sm.onPermissionRequest((sessionId, request, createdAt) => {
+    send(ws, { type: "permission.request", session: sessionId, request, createdAt });
+  });
+  reply(ws, msg, {});
+}
+function handlePermissionUnsubscribe(ws, msg, state) {
+  state.permissionUnsub?.();
+  state.permissionUnsub = null;
+  reply(ws, msg, {});
 }
 function handleChatSessionsList(ws, msg) {
   try {

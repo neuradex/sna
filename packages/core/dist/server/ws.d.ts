@@ -32,8 +32,10 @@ import '../core/providers/types.js';
  *   events.unsubscribe {}
  *   emit              { skill, eventType, message, data?, session? }
  *
- *   permission.respond { session?, approved }
- *   permission.pending { session? }
+ *   permission.respond   { session?, approved }
+ *   permission.pending   { session? }
+ *   permission.subscribe {}              → pushes { type: "permission.request", session, request, createdAt }
+ *   permission.unsubscribe {}
  *
  *   chat.sessions.list    {}
  *   chat.sessions.create  { id?, label?, chatType?, meta? }

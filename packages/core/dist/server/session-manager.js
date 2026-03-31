@@ -7,6 +7,8 @@ class SessionManager {
     this.sessions = /* @__PURE__ */ new Map();
     this.eventListeners = /* @__PURE__ */ new Map();
     this.pendingPermissions = /* @__PURE__ */ new Map();
+    this.skillEventListeners = /* @__PURE__ */ new Set();
+    this.permissionRequestListeners = /* @__PURE__ */ new Set();
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
   }
   /** Create a new session. Throws if max sessions reached. */
@@ -81,13 +83,31 @@ class SessionManager {
       if (set.size === 0) this.eventListeners.delete(sessionId);
     };
   }
+  // ── Skill event pub/sub ────────────────────────────────────────
+  /** Subscribe to skill events broadcast. Returns unsubscribe function. */
+  onSkillEvent(cb) {
+    this.skillEventListeners.add(cb);
+    return () => this.skillEventListeners.delete(cb);
+  }
+  /** Broadcast a skill event to all subscribers (called after DB insert). */
+  broadcastSkillEvent(event) {
+    for (const cb of this.skillEventListeners) cb(event);
+  }
+  // ── Permission pub/sub ────────────────────────────────────────
+  /** Subscribe to permission request notifications. Returns unsubscribe function. */
+  onPermissionRequest(cb) {
+    this.permissionRequestListeners.add(cb);
+    return () => this.permissionRequestListeners.delete(cb);
+  }
   // ── Permission management ─────────────────────────────────────
   /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
   createPendingPermission(sessionId, request) {
     const session = this.sessions.get(sessionId);
     if (session) session.state = "permission";
     return new Promise((resolve) => {
-      this.pendingPermissions.set(sessionId, { resolve, request, createdAt: Date.now() });
+      const createdAt = Date.now();
+      this.pendingPermissions.set(sessionId, { resolve, request, createdAt });
+      for (const cb of this.permissionRequestListeners) cb(sessionId, request, createdAt);
       setTimeout(() => {
         if (this.pendingPermissions.has(sessionId)) {
           this.pendingPermissions.delete(sessionId);

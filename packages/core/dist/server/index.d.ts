@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { SessionManager } from './session-manager.js';
 export { Session, SessionInfo, SessionManagerOptions } from './session-manager.js';
 export { eventsRoute } from './routes/events.js';
-export { emitRoute } from './routes/emit.js';
+export { createEmitRoute, emitRoute } from './routes/emit.js';
 export { createRunRoute } from './routes/run.js';
 export { createAgentRoutes } from './routes/agent.js';
 export { createChatRoutes } from './routes/chat.js';

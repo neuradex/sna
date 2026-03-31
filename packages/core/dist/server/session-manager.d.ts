@@ -39,6 +39,8 @@ declare class SessionManager {
     private maxSessions;
     private eventListeners;
     private pendingPermissions;
+    private skillEventListeners;
+    private permissionRequestListeners;
     constructor(options?: SessionManagerOptions);
     /** Create a new session. Throws if max sessions reached. */
     createSession(opts?: {
@@ -58,6 +60,12 @@ declare class SessionManager {
     setProcess(sessionId: string, proc: AgentProcess): void;
     /** Subscribe to real-time events for a session. Returns unsubscribe function. */
     onSessionEvent(sessionId: string, cb: (cursor: number, event: AgentEvent) => void): () => void;
+    /** Subscribe to skill events broadcast. Returns unsubscribe function. */
+    onSkillEvent(cb: (event: Record<string, unknown>) => void): () => void;
+    /** Broadcast a skill event to all subscribers (called after DB insert). */
+    broadcastSkillEvent(event: Record<string, unknown>): void;
+    /** Subscribe to permission request notifications. Returns unsubscribe function. */
+    onPermissionRequest(cb: (sessionId: string, request: Record<string, unknown>, createdAt: number) => void): () => void;
     /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
     createPendingPermission(sessionId: string, request: Record<string, unknown>): Promise<boolean>;
     /** Resolve a pending permission request. Returns false if no pending request. */

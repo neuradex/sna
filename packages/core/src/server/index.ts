@@ -24,7 +24,7 @@ import _fs from "fs";
 import _path from "path";
 import { Hono } from "hono";
 import { eventsRoute } from "./routes/events.js";
-import { emitRoute } from "./routes/emit.js";
+import { createEmitRoute } from "./routes/emit.js";
 import { createRunRoute } from "./routes/run.js";
 import { createAgentRoutes } from "./routes/agent.js";
 import { createChatRoutes } from "./routes/chat.js";
@@ -46,7 +46,7 @@ export function createSnaApp(options: SnaAppOptions = {}) {
 
   // Skill event routes (SQLite → SSE)
   app.get("/events", eventsRoute);
-  app.post("/emit", emitRoute);
+  app.post("/emit", createEmitRoute(sessionManager));
 
   // Agent routes (stdio spawn → SSE)
   app.route("/agent", createAgentRoutes(sessionManager));
@@ -62,7 +62,7 @@ export function createSnaApp(options: SnaAppOptions = {}) {
 }
 
 export { eventsRoute } from "./routes/events.js";
-export { emitRoute } from "./routes/emit.js";
+export { emitRoute, createEmitRoute } from "./routes/emit.js";
 export { createRunRoute } from "./routes/run.js";
 export { createAgentRoutes } from "./routes/agent.js";
 export { createChatRoutes } from "./routes/chat.js";

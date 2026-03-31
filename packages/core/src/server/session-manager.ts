@@ -54,6 +54,8 @@ export class SessionManager {
   private maxSessions: number;
   private eventListeners = new Map<string, Set<(cursor: number, event: AgentEvent) => void>>();
   private pendingPermissions = new Map<string, PendingPermission>();
+  private skillEventListeners = new Set<(event: Record<string, unknown>) => void>();
+  private permissionRequestListeners = new Set<(sessionId: string, request: Record<string, unknown>, createdAt: number) => void>();
 
   constructor(options: SessionManagerOptions = {}) {
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
@@ -152,6 +154,27 @@ export class SessionManager {
     };
   }
 
+  // ── Skill event pub/sub ────────────────────────────────────────
+
+  /** Subscribe to skill events broadcast. Returns unsubscribe function. */
+  onSkillEvent(cb: (event: Record<string, unknown>) => void): () => void {
+    this.skillEventListeners.add(cb);
+    return () => this.skillEventListeners.delete(cb);
+  }
+
+  /** Broadcast a skill event to all subscribers (called after DB insert). */
+  broadcastSkillEvent(event: Record<string, unknown>): void {
+    for (const cb of this.skillEventListeners) cb(event);
+  }
+
+  // ── Permission pub/sub ────────────────────────────────────────
+
+  /** Subscribe to permission request notifications. Returns unsubscribe function. */
+  onPermissionRequest(cb: (sessionId: string, request: Record<string, unknown>, createdAt: number) => void): () => void {
+    this.permissionRequestListeners.add(cb);
+    return () => this.permissionRequestListeners.delete(cb);
+  }
+
   // ── Permission management ─────────────────────────────────────
 
   /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
@@ -160,7 +183,10 @@ export class SessionManager {
     if (session) session.state = "permission";
 
     return new Promise<boolean>((resolve) => {
-      this.pendingPermissions.set(sessionId, { resolve, request, createdAt: Date.now() });
+      const createdAt = Date.now();
+      this.pendingPermissions.set(sessionId, { resolve, request, createdAt });
+      // Notify permission subscribers (WS push)
+      for (const cb of this.permissionRequestListeners) cb(sessionId, request, createdAt);
       // Auto-deny after timeout
       setTimeout(() => {
         if (this.pendingPermissions.has(sessionId)) {

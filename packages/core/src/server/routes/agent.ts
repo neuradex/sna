@@ -398,15 +398,13 @@ export function createAgentRoutes(sessionManager: SessionManager) {
   });
 
   // GET /permission-pending — UI polls this to check for pending requests
+  // Always returns { pending: Array } for consistent typing
   app.get("/permission-pending", (c) => {
     const sessionId = c.req.query("session");
 
     if (sessionId) {
       const pending = sessionManager.getPendingPermission(sessionId);
-      if (!pending) return c.json({ pending: null });
-      return c.json({
-        pending: { sessionId, ...pending },
-      });
+      return c.json({ pending: pending ? [{ sessionId, ...pending }] : [] });
     }
 
     // No session specified — return all pending

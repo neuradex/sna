@@ -27,8 +27,10 @@
  *   events.unsubscribe {}
  *   emit              { skill, eventType, message, data?, session? }
  *
- *   permission.respond { session?, approved }
- *   permission.pending { session? }
+ *   permission.respond   { session?, approved }
+ *   permission.pending   { session? }
+ *   permission.subscribe {}              → pushes { type: "permission.request", session, request, createdAt }
+ *   permission.unsubscribe {}
  *
  *   chat.sessions.list    {}
  *   chat.sessions.create  { id?, label?, chatType?, meta? }
@@ -57,7 +59,9 @@ interface WsRequest {
 
 interface ConnState {
   agentUnsubs: Map<string, () => void>;
+  skillEventUnsub: (() => void) | null;
   skillPollTimer: ReturnType<typeof setInterval> | null;
+  permissionUnsub: (() => void) | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -101,7 +105,7 @@ export function attachWebSocket(
 
   wss.on("connection", (ws) => {
     logger.log("ws", "client connected");
-    const state: ConnState = { agentUnsubs: new Map(), skillPollTimer: null };
+    const state: ConnState = { agentUnsubs: new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null };
 
     ws.on("message", (raw) => {
       let msg: WsRequest;
@@ -122,10 +126,14 @@ export function attachWebSocket(
       logger.log("ws", "client disconnected");
       for (const unsub of state.agentUnsubs.values()) unsub();
       state.agentUnsubs.clear();
+      state.skillEventUnsub?.();
+      state.skillEventUnsub = null;
       if (state.skillPollTimer) {
         clearInterval(state.skillPollTimer);
         state.skillPollTimer = null;
       }
+      state.permissionUnsub?.();
+      state.permissionUnsub = null;
     });
   });
 
@@ -170,17 +178,21 @@ function handleMessage(
 
     // ── Skill events ──────────────────────────────────
     case "events.subscribe":
-      return handleEventsSubscribe(ws, msg, state);
+      return handleEventsSubscribe(ws, msg, sm, state);
     case "events.unsubscribe":
       return handleEventsUnsubscribe(ws, msg, state);
     case "emit":
-      return handleEmit(ws, msg);
+      return handleEmit(ws, msg, sm);
 
     // ── Permission ────────────────────────────────────
     case "permission.respond":
       return handlePermissionRespond(ws, msg, sm);
     case "permission.pending":
       return handlePermissionPending(ws, msg, sm);
+    case "permission.subscribe":
+      return handlePermissionSubscribe(ws, msg, sm, state);
+    case "permission.unsubscribe":
+      return handlePermissionUnsubscribe(ws, msg, state);
 
     // ── Chat sessions ─────────────────────────────────
     case "chat.sessions.list":
@@ -374,9 +386,13 @@ function handleAgentUnsubscribe(ws: WebSocket, msg: WsRequest, state: ConnState)
 
 // ── Skill event handlers ──────────────────────────────────────────
 
-const SKILL_POLL_MS = 500;
+// Slower poll interval — only catches events from external sources (CLI, HTTP from other processes)
+const SKILL_POLL_MS = 2000;
 
-function handleEventsSubscribe(ws: WebSocket, msg: WsRequest, state: ConnState): void {
+function handleEventsSubscribe(ws: WebSocket, msg: WsRequest, sm: SessionManager, state: ConnState): void {
+  // Cleanup existing subscription
+  state.skillEventUnsub?.();
+  state.skillEventUnsub = null;
   if (state.skillPollTimer) {
     clearInterval(state.skillPollTimer);
     state.skillPollTimer = null;
@@ -393,6 +409,16 @@ function handleEventsSubscribe(ws: WebSocket, msg: WsRequest, state: ConnState):
     }
   }
 
+  // Instant push for events emitted through this server (WS emit + HTTP POST /emit)
+  state.skillEventUnsub = sm.onSkillEvent((event) => {
+    const eventId = event.id as number;
+    if (eventId > lastId) {
+      lastId = eventId;
+      send(ws, { type: "skill.event", data: event });
+    }
+  });
+
+  // Slower DB poll to catch events from external sources (CLI emit.js, other processes)
   state.skillPollTimer = setInterval(() => {
     try {
       const db = getDb();
@@ -401,8 +427,10 @@ function handleEventsSubscribe(ws: WebSocket, msg: WsRequest, state: ConnState):
          FROM skill_events WHERE id > ? ORDER BY id ASC LIMIT 50`,
       ).all(lastId) as any[];
       for (const row of rows) {
-        send(ws, { type: "skill.event", data: row });
-        lastId = row.id;
+        if ((row as any).id > lastId) {
+          lastId = (row as any).id;
+          send(ws, { type: "skill.event", data: row });
+        }
       }
     } catch { /* DB not ready */ }
   }, SKILL_POLL_MS);
@@ -411,6 +439,8 @@ function handleEventsSubscribe(ws: WebSocket, msg: WsRequest, state: ConnState):
 }
 
 function handleEventsUnsubscribe(ws: WebSocket, msg: WsRequest, state: ConnState): void {
+  state.skillEventUnsub?.();
+  state.skillEventUnsub = null;
   if (state.skillPollTimer) {
     clearInterval(state.skillPollTimer);
     state.skillPollTimer = null;
@@ -418,7 +448,7 @@ function handleEventsUnsubscribe(ws: WebSocket, msg: WsRequest, state: ConnState
   reply(ws, msg, {});
 }
 
-function handleEmit(ws: WebSocket, msg: WsRequest): void {
+function handleEmit(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
   const skill = msg.skill as string;
   const eventType = msg.eventType as string;
   const emitMessage = msg.message as string;
@@ -434,7 +464,20 @@ function handleEmit(ws: WebSocket, msg: WsRequest): void {
     const result = db.prepare(
       `INSERT INTO skill_events (session_id, skill, type, message, data) VALUES (?, ?, ?, ?, ?)`,
     ).run(sessionId ?? null, skill, eventType, emitMessage, data ?? null);
-    reply(ws, msg, { id: Number(result.lastInsertRowid) });
+    const id = Number(result.lastInsertRowid);
+
+    // Broadcast to all WS skill event subscribers
+    sm.broadcastSkillEvent({
+      id,
+      session_id: sessionId ?? null,
+      skill,
+      type: eventType,
+      message: emitMessage,
+      data: data ?? null,
+      created_at: new Date().toISOString(),
+    });
+
+    reply(ws, msg, { id });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }
@@ -454,10 +497,24 @@ function handlePermissionPending(ws: WebSocket, msg: WsRequest, sm: SessionManag
   const sessionId = msg.session as string | undefined;
   if (sessionId) {
     const pending = sm.getPendingPermission(sessionId);
-    reply(ws, msg, { pending: pending ? { sessionId, ...pending } : null });
+    reply(ws, msg, { pending: pending ? [{ sessionId, ...pending }] : [] });
   } else {
     reply(ws, msg, { pending: sm.getAllPendingPermissions() });
   }
+}
+
+function handlePermissionSubscribe(ws: WebSocket, msg: WsRequest, sm: SessionManager, state: ConnState): void {
+  state.permissionUnsub?.();
+  state.permissionUnsub = sm.onPermissionRequest((sessionId, request, createdAt) => {
+    send(ws, { type: "permission.request", session: sessionId, request, createdAt });
+  });
+  reply(ws, msg, {});
+}
+
+function handlePermissionUnsubscribe(ws: WebSocket, msg: WsRequest, state: ConnState): void {
+  state.permissionUnsub?.();
+  state.permissionUnsub = null;
+  reply(ws, msg, {});
 }
 
 // ── Chat session handlers ─────────────────────────────────────────

@@ -146,16 +146,29 @@ function eventsRoute(c) {
 }
 
 // src/server/routes/emit.ts
-async function emitRoute(c) {
-  const { skill, type, message, data } = await c.req.json();
-  if (!skill || !type || !message) {
-    return c.json({ error: "missing fields" }, 400);
-  }
-  const db = getDb();
-  const result = db.prepare(
-    `INSERT INTO skill_events (skill, type, message, data) VALUES (?, ?, ?, ?)`
-  ).run(skill, type, message, data ?? null);
-  return c.json({ id: result.lastInsertRowid });
+function createEmitRoute(sessionManager2) {
+  return async (c) => {
+    const body = await c.req.json();
+    const { skill, type, message, data, session_id } = body;
+    if (!skill || !type || !message) {
+      return c.json({ error: "missing fields" }, 400);
+    }
+    const db = getDb();
+    const result = db.prepare(
+      `INSERT INTO skill_events (session_id, skill, type, message, data) VALUES (?, ?, ?, ?, ?)`
+    ).run(session_id ?? null, skill, type, message, data ?? null);
+    const id = Number(result.lastInsertRowid);
+    sessionManager2.broadcastSkillEvent({
+      id,
+      session_id: session_id ?? null,
+      skill,
+      type,
+      message,
+      data: data ?? null,
+      created_at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    return c.json({ id });
+  };
 }
 
 // src/server/routes/run.ts
@@ -841,10 +854,7 @@ function createAgentRoutes(sessionManager2) {
     const sessionId = c.req.query("session");
     if (sessionId) {
       const pending = sessionManager2.getPendingPermission(sessionId);
-      if (!pending) return c.json({ pending: null });
-      return c.json({
-        pending: { sessionId, ...pending }
-      });
+      return c.json({ pending: pending ? [{ sessionId, ...pending }] : [] });
     }
     return c.json({ pending: sessionManager2.getAllPendingPermissions() });
   });
@@ -953,6 +963,8 @@ var SessionManager = class {
     this.sessions = /* @__PURE__ */ new Map();
     this.eventListeners = /* @__PURE__ */ new Map();
     this.pendingPermissions = /* @__PURE__ */ new Map();
+    this.skillEventListeners = /* @__PURE__ */ new Set();
+    this.permissionRequestListeners = /* @__PURE__ */ new Set();
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
   }
   /** Create a new session. Throws if max sessions reached. */
@@ -1027,13 +1039,31 @@ var SessionManager = class {
       if (set.size === 0) this.eventListeners.delete(sessionId);
     };
   }
+  // ── Skill event pub/sub ────────────────────────────────────────
+  /** Subscribe to skill events broadcast. Returns unsubscribe function. */
+  onSkillEvent(cb) {
+    this.skillEventListeners.add(cb);
+    return () => this.skillEventListeners.delete(cb);
+  }
+  /** Broadcast a skill event to all subscribers (called after DB insert). */
+  broadcastSkillEvent(event) {
+    for (const cb of this.skillEventListeners) cb(event);
+  }
+  // ── Permission pub/sub ────────────────────────────────────────
+  /** Subscribe to permission request notifications. Returns unsubscribe function. */
+  onPermissionRequest(cb) {
+    this.permissionRequestListeners.add(cb);
+    return () => this.permissionRequestListeners.delete(cb);
+  }
   // ── Permission management ─────────────────────────────────────
   /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
   createPendingPermission(sessionId, request) {
     const session = this.sessions.get(sessionId);
     if (session) session.state = "permission";
     return new Promise((resolve) => {
-      this.pendingPermissions.set(sessionId, { resolve, request, createdAt: Date.now() });
+      const createdAt = Date.now();
+      this.pendingPermissions.set(sessionId, { resolve, request, createdAt });
+      for (const cb of this.permissionRequestListeners) cb(sessionId, request, createdAt);
       setTimeout(() => {
         if (this.pendingPermissions.has(sessionId)) {
           this.pendingPermissions.delete(sessionId);
@@ -1176,7 +1206,7 @@ function attachWebSocket(server2, sessionManager2) {
   });
   wss.on("connection", (ws) => {
     logger.log("ws", "client connected");
-    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillPollTimer: null };
+    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null };
     ws.on("message", (raw) => {
       let msg;
       try {
@@ -1195,10 +1225,14 @@ function attachWebSocket(server2, sessionManager2) {
       logger.log("ws", "client disconnected");
       for (const unsub of state.agentUnsubs.values()) unsub();
       state.agentUnsubs.clear();
+      state.skillEventUnsub?.();
+      state.skillEventUnsub = null;
       if (state.skillPollTimer) {
         clearInterval(state.skillPollTimer);
         state.skillPollTimer = null;
       }
+      state.permissionUnsub?.();
+      state.permissionUnsub = null;
     });
   });
   return wss;
@@ -1231,16 +1265,20 @@ function handleMessage(ws, msg, sm, state) {
       return handleAgentUnsubscribe(ws, msg, state);
     // ── Skill events ──────────────────────────────────
     case "events.subscribe":
-      return handleEventsSubscribe(ws, msg, state);
+      return handleEventsSubscribe(ws, msg, sm, state);
     case "events.unsubscribe":
       return handleEventsUnsubscribe(ws, msg, state);
     case "emit":
-      return handleEmit(ws, msg);
+      return handleEmit(ws, msg, sm);
     // ── Permission ────────────────────────────────────
     case "permission.respond":
       return handlePermissionRespond(ws, msg, sm);
     case "permission.pending":
       return handlePermissionPending(ws, msg, sm);
+    case "permission.subscribe":
+      return handlePermissionSubscribe(ws, msg, sm, state);
+    case "permission.unsubscribe":
+      return handlePermissionUnsubscribe(ws, msg, state);
     // ── Chat sessions ─────────────────────────────────
     case "chat.sessions.list":
       return handleChatSessionsList(ws, msg);
@@ -1389,8 +1427,10 @@ function handleAgentUnsubscribe(ws, msg, state) {
   state.agentUnsubs.delete(sessionId);
   reply(ws, msg, {});
 }
-var SKILL_POLL_MS = 500;
-function handleEventsSubscribe(ws, msg, state) {
+var SKILL_POLL_MS = 2e3;
+function handleEventsSubscribe(ws, msg, sm, state) {
+  state.skillEventUnsub?.();
+  state.skillEventUnsub = null;
   if (state.skillPollTimer) {
     clearInterval(state.skillPollTimer);
     state.skillPollTimer = null;
@@ -1405,6 +1445,13 @@ function handleEventsSubscribe(ws, msg, state) {
       lastId = 0;
     }
   }
+  state.skillEventUnsub = sm.onSkillEvent((event) => {
+    const eventId = event.id;
+    if (eventId > lastId) {
+      lastId = eventId;
+      send(ws, { type: "skill.event", data: event });
+    }
+  });
   state.skillPollTimer = setInterval(() => {
     try {
       const db = getDb();
@@ -1413,8 +1460,10 @@ function handleEventsSubscribe(ws, msg, state) {
          FROM skill_events WHERE id > ? ORDER BY id ASC LIMIT 50`
       ).all(lastId);
       for (const row of rows) {
-        send(ws, { type: "skill.event", data: row });
-        lastId = row.id;
+        if (row.id > lastId) {
+          lastId = row.id;
+          send(ws, { type: "skill.event", data: row });
+        }
       }
     } catch {
     }
@@ -1422,13 +1471,15 @@ function handleEventsSubscribe(ws, msg, state) {
   reply(ws, msg, { lastId });
 }
 function handleEventsUnsubscribe(ws, msg, state) {
+  state.skillEventUnsub?.();
+  state.skillEventUnsub = null;
   if (state.skillPollTimer) {
     clearInterval(state.skillPollTimer);
     state.skillPollTimer = null;
   }
   reply(ws, msg, {});
 }
-function handleEmit(ws, msg) {
+function handleEmit(ws, msg, sm) {
   const skill = msg.skill;
   const eventType = msg.eventType;
   const emitMessage = msg.message;
@@ -1442,7 +1493,17 @@ function handleEmit(ws, msg) {
     const result = db.prepare(
       `INSERT INTO skill_events (session_id, skill, type, message, data) VALUES (?, ?, ?, ?, ?)`
     ).run(sessionId ?? null, skill, eventType, emitMessage, data ?? null);
-    reply(ws, msg, { id: Number(result.lastInsertRowid) });
+    const id = Number(result.lastInsertRowid);
+    sm.broadcastSkillEvent({
+      id,
+      session_id: sessionId ?? null,
+      skill,
+      type: eventType,
+      message: emitMessage,
+      data: data ?? null,
+      created_at: (/* @__PURE__ */ new Date()).toISOString()
+    });
+    reply(ws, msg, { id });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -1458,10 +1519,22 @@ function handlePermissionPending(ws, msg, sm) {
   const sessionId = msg.session;
   if (sessionId) {
     const pending = sm.getPendingPermission(sessionId);
-    reply(ws, msg, { pending: pending ? { sessionId, ...pending } : null });
+    reply(ws, msg, { pending: pending ? [{ sessionId, ...pending }] : [] });
   } else {
     reply(ws, msg, { pending: sm.getAllPendingPermissions() });
   }
+}
+function handlePermissionSubscribe(ws, msg, sm, state) {
+  state.permissionUnsub?.();
+  state.permissionUnsub = sm.onPermissionRequest((sessionId, request, createdAt) => {
+    send(ws, { type: "permission.request", session: sessionId, request, createdAt });
+  });
+  reply(ws, msg, {});
+}
+function handlePermissionUnsubscribe(ws, msg, state) {
+  state.permissionUnsub?.();
+  state.permissionUnsub = null;
+  reply(ws, msg, {});
 }
 function handleChatSessionsList(ws, msg) {
   try {
@@ -1548,7 +1621,7 @@ function createSnaApp(options = {}) {
   const app = new Hono3();
   app.get("/health", (c) => c.json({ ok: true, name: "sna", version: "1" }));
   app.get("/events", eventsRoute);
-  app.post("/emit", emitRoute);
+  app.post("/emit", createEmitRoute(sessionManager2));
   app.route("/agent", createAgentRoutes(sessionManager2));
   app.route("/chat", createChatRoutes());
   if (options.runCommands) {

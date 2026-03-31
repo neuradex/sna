@@ -1,13 +1,52 @@
 /**
  * POST /emit
  *
- * Write a skill event to SQLite.
- * Body: { skill, type, message, data? }
+ * Write a skill event to SQLite and broadcast to WS subscribers.
+ * Body: { skill, type, message, data?, session_id? }
  */
 
 import type { Context } from "hono";
 import { getDb } from "../../db/schema.js";
+import type { SessionManager } from "../session-manager.js";
 
+/**
+ * Create an emit route handler that broadcasts to WS subscribers.
+ */
+export function createEmitRoute(sessionManager: SessionManager) {
+  return async (c: Context) => {
+    const body = await c.req.json();
+    const { skill, type, message, data, session_id } = body;
+
+    if (!skill || !type || !message) {
+      return c.json({ error: "missing fields" }, 400);
+    }
+
+    const db = getDb();
+    const result = db.prepare(
+      `INSERT INTO skill_events (session_id, skill, type, message, data) VALUES (?, ?, ?, ?, ?)`
+    ).run(session_id ?? null, skill, type, message, data ?? null);
+
+    const id = Number(result.lastInsertRowid);
+
+    // Broadcast to WS subscribers
+    sessionManager.broadcastSkillEvent({
+      id,
+      session_id: session_id ?? null,
+      skill,
+      type,
+      message,
+      data: data ?? null,
+      created_at: new Date().toISOString(),
+    });
+
+    return c.json({ id });
+  };
+}
+
+/**
+ * Legacy plain handler (no broadcast). Kept for backward compatibility
+ * when consumers import emitRoute directly without SessionManager.
+ */
 export async function emitRoute(c: Context) {
   const { skill, type, message, data } = await c.req.json();
 

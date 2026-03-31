@@ -260,10 +260,7 @@ function createAgentRoutes(sessionManager) {
     const sessionId = c.req.query("session");
     if (sessionId) {
       const pending = sessionManager.getPendingPermission(sessionId);
-      if (!pending) return c.json({ pending: null });
-      return c.json({
-        pending: { sessionId, ...pending }
-      });
+      return c.json({ pending: pending ? [{ sessionId, ...pending }] : [] });
     }
     return c.json({ pending: sessionManager.getAllPendingPermissions() });
   });
