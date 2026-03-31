@@ -99,3 +99,4 @@ Legacy `emit.js` is a thin wrapper around dispatch for backward compatibility.
 - [Skill Authoring](docs/skill-authoring.md) — How to write skills with typed args
 - [App Setup](docs/app-setup.md) — Frontend, server, Vite configuration, typed client
 - [Design Decisions](docs/design-decisions.md) — DB scope, locking, invoked status
+- [Testing](docs/testing.md) — Mock API, `sna tu` commands, `SNA_CLAUDE_COMMAND`, test modules
