@@ -5,6 +5,7 @@ import path from "path";
 import { logger } from "../../lib/logger.js";
 const SHELL = process.env.SHELL || "/bin/zsh";
 function resolveClaudePath(cwd) {
+  if (process.env.SNA_CLAUDE_COMMAND) return process.env.SNA_CLAUDE_COMMAND;
   const cached = path.join(cwd, ".sna/claude-path");
   if (fs.existsSync(cached)) {
     const p = fs.readFileSync(cached, "utf8").trim();
@@ -262,7 +263,10 @@ class ClaudeCodeProvider {
     }
   }
   spawn(options) {
-    const claudePath = resolveClaudePath(options.cwd);
+    const claudeCommand = resolveClaudePath(options.cwd);
+    const claudeParts = claudeCommand.split(/\s+/);
+    const claudePath = claudeParts[0];
+    const claudePrefix = claudeParts.slice(1);
     const hookScript = new URL("../../scripts/hook.js", import.meta.url).pathname;
     const sessionId = options.env?.SNA_SESSION_ID ?? "default";
     const sdkSettings = {};
@@ -320,12 +324,12 @@ class ClaudeCodeProvider {
     delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
     delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
     delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
-    const proc = spawn(claudePath, args, {
+    const proc = spawn(claudePath, [...claudePrefix, ...args], {
       cwd: options.cwd,
       env: cleanEnv,
       stdio: ["pipe", "pipe", "pipe"]
     });
-    logger.log("agent", `spawned claude-code (pid=${proc.pid}) \u2192 ${claudePath} ${args.join(" ")}`);
+    logger.log("agent", `spawned claude-code (pid=${proc.pid}) \u2192 ${claudeCommand} ${args.join(" ")}`);
     return new ClaudeCodeProcess(proc, options);
   }
 }

@@ -27,9 +27,16 @@ async function startMockAnthropicServer() {
       const entry = { model: body.model, messages: body.messages, stream: body.stream, timestamp: (/* @__PURE__ */ new Date()).toISOString() };
       requests.push(entry);
       const lastUser = body.messages?.filter((m) => m.role === "user").pop();
-      const userText = typeof lastUser?.content === "string" ? lastUser.content : lastUser?.content?.find((b) => b.type === "text")?.text ?? "(no text)";
+      let userText = "(no text)";
+      if (typeof lastUser?.content === "string") {
+        userText = lastUser.content;
+      } else if (Array.isArray(lastUser?.content)) {
+        const textBlocks = lastUser.content.filter((b) => b.type === "text").map((b) => b.text);
+        const realText = textBlocks.find((t) => !t.startsWith("<system-reminder>"));
+        userText = realText ?? textBlocks[textBlocks.length - 1] ?? "(no text)";
+      }
       console.log(`[${ts()}] REQ model=${body.model} stream=${body.stream} messages=${body.messages?.length} user="${userText.slice(0, 120)}"`);
-      const replyText = `Mock reply to: ${userText.slice(0, 100)}`;
+      const replyText = [...userText].reverse().join("");
       const messageId = `msg_mock_${Date.now()}`;
       if (body.stream) {
         res.writeHead(200, {

@@ -10,6 +10,9 @@ const SHELL = process.env.SHELL || "/bin/zsh";
 // ── Claude binary resolution ─────────────────────────────────────────────────
 
 function resolveClaudePath(cwd: string): string {
+  // SNA_CLAUDE_COMMAND overrides everything (e.g., "sna tu claude" for testing)
+  if (process.env.SNA_CLAUDE_COMMAND) return process.env.SNA_CLAUDE_COMMAND;
+
   const cached = path.join(cwd, ".sna/claude-path");
   if (fs.existsSync(cached)) {
     const p = fs.readFileSync(cached, "utf8").trim();
@@ -302,7 +305,11 @@ export class ClaudeCodeProvider implements AgentProvider {
   }
 
   spawn(options: SpawnOptions): AgentProcess {
-    const claudePath = resolveClaudePath(options.cwd);
+    const claudeCommand = resolveClaudePath(options.cwd);
+    // SNA_CLAUDE_COMMAND can be multi-word (e.g., "node sna.ts tu claude")
+    const claudeParts = claudeCommand.split(/\s+/);
+    const claudePath = claudeParts[0]!;
+    const claudePrefix = claudeParts.slice(1);
 
     // Build merged settings: SDK's PreToolUse hook + app's settings from extraArgs.
     // Skip hook injection when bypassPermissions is set — all tools are auto-allowed.
@@ -371,13 +378,13 @@ export class ClaudeCodeProvider implements AgentProvider {
     delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
     delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
 
-    const proc = spawn(claudePath, args, {
+    const proc = spawn(claudePath, [...claudePrefix, ...args], {
       cwd: options.cwd,
       env: cleanEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    logger.log("agent", `spawned claude-code (pid=${proc.pid}) → ${claudePath} ${args.join(" ")}`);
+    logger.log("agent", `spawned claude-code (pid=${proc.pid}) → ${claudeCommand} ${args.join(" ")}`);
 
     return new ClaudeCodeProcess(proc, options);
   }
