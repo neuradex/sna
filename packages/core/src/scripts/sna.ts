@@ -894,7 +894,12 @@ Lifecycle:
   sna restart         Stop + start
   sna init [--force]  Initialize .claude/settings.json and skills
   sna validate        Check project setup (skills.json, hooks, deps)
+
+Tools:
   sna dispatch        Unified event dispatcher (open/send/close)
+  sna gen client      Generate typed skill client + .sna/skills.json
+  sna api:up          Start standalone SNA API server
+  sna api:down        Stop SNA API server
 
 Workflow:
   sna new <skill> [--param val ...]    Create a task from a workflow.yml
@@ -904,7 +909,15 @@ Workflow:
   sna <task-id> cancel                 Cancel a running task
   sna tasks                            List all tasks with status
 
-  Task IDs are 10-digit timestamps (MMDDHHmmss), e.g. 0317143052
+Testing:
+  sna tu api:up       Start mock Anthropic API server
+  sna tu api:down     Stop mock API server
+  sna tu api:log      Show mock API request/response log
+  sna tu api:log -f   Follow log in real-time
+  sna tu claude ...   Run claude with mock API (isolated env, no account pollution)
+
+  Set SNA_CLAUDE_COMMAND to override claude binary in SDK.
+  See: docs/testing.md
 
 Run "sna help workflow" for workflow.yml specification.
 Run "sna help submit" for data submission patterns.`);
