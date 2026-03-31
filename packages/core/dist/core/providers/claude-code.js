@@ -123,6 +123,7 @@ class ClaudeCodeProcess {
     switch (msg.type) {
       case "system": {
         if (msg.subtype === "init") {
+          if (this._sessionId && msg.session_id === this._sessionId) return null;
           return {
             type: "init",
             message: `Agent ready (${msg.model ?? "unknown"})`,
@@ -201,6 +202,14 @@ class ClaudeCodeProcess {
               contextWindow: modelInfo.contextWindow ?? 0,
               model: modelKey
             },
+            timestamp: Date.now()
+          };
+        }
+        if (msg.subtype === "error_during_execution" && msg.is_error === false) {
+          return {
+            type: "interrupted",
+            message: "Turn interrupted by user",
+            data: { durationMs: msg.duration_ms, costUsd: msg.total_cost_usd },
             timestamp: Date.now()
           };
         }

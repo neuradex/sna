@@ -132,7 +132,7 @@ class SessionManager {
       if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
         session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
       }
-      if (e.type === "complete" || e.type === "error") {
+      if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
         session.state = "waiting";
       }
       this.persistEvent(sessionId, e);

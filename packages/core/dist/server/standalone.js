@@ -422,6 +422,7 @@ var ClaudeCodeProcess = class {
     switch (msg.type) {
       case "system": {
         if (msg.subtype === "init") {
+          if (this._sessionId && msg.session_id === this._sessionId) return null;
           return {
             type: "init",
             message: `Agent ready (${msg.model ?? "unknown"})`,
@@ -500,6 +501,14 @@ var ClaudeCodeProcess = class {
               contextWindow: modelInfo.contextWindow ?? 0,
               model: modelKey
             },
+            timestamp: Date.now()
+          };
+        }
+        if (msg.subtype === "error_during_execution" && msg.is_error === false) {
+          return {
+            type: "interrupted",
+            message: "Turn interrupted by user",
+            data: { durationMs: msg.duration_ms, costUsd: msg.total_cost_usd },
             timestamp: Date.now()
           };
         }
@@ -1147,7 +1156,7 @@ var SessionManager = class {
       if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
         session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
       }
-      if (e.type === "complete" || e.type === "error") {
+      if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
         session.state = "waiting";
       }
       this.persistEvent(sessionId, e);

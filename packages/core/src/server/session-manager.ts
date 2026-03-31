@@ -209,7 +209,7 @@ export class SessionManager {
         session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
       }
       // Update session state based on event type
-      if (e.type === "complete" || e.type === "error") {
+      if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
         session.state = "waiting";
       }
       // Persist assistant messages to chat_messages

@@ -14,6 +14,7 @@ export interface AgentEvent {
     | "tool_result"   // tool returned a result
     | "permission_needed" // agent needs user approval
     | "milestone"     // skill progress milestone
+    | "interrupted"   // user interrupted current turn
     | "error"         // error occurred
     | "complete";     // agent finished
   message?: string;
