@@ -229,7 +229,7 @@ function handleSessionsCreate(ws: WebSocket, msg: WsRequest, sm: SessionManager)
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, 'main', ?)`)
         .run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null);
     } catch { /* non-fatal */ }
-    reply(ws, msg, { sessionId: session.id, label: session.label, meta: session.meta });
+    reply(ws, msg, { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }
@@ -241,7 +241,7 @@ function handleSessionsRemove(ws: WebSocket, msg: WsRequest, sm: SessionManager)
   if (id === "default") return replyError(ws, msg, "Cannot remove default session");
   const removed = sm.removeSession(id);
   if (!removed) return replyError(ws, msg, "Session not found");
-  reply(ws, msg, {});
+  reply(ws, msg, { status: "removed" });
 }
 
 // ── Agent handlers ────────────────────────────────────────────────
@@ -314,7 +314,7 @@ function handleAgentSend(ws: WebSocket, msg: WsRequest, sm: SessionManager): voi
   session.state = "processing";
   sm.touch(sessionId);
   session.process.send(msg.message as string);
-  reply(ws, msg, {});
+  reply(ws, msg, { status: "sent" });
 }
 
 function handleAgentKill(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
@@ -538,7 +538,7 @@ function handleChatSessionsCreate(ws: WebSocket, msg: WsRequest): void {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, ?, ?)`)
       .run(id, (msg.label as string) ?? id, (msg.chatType as string) ?? "background", msg.meta ? JSON.stringify(msg.meta) : null);
-    reply(ws, msg, { id, meta: (msg.meta as Record<string, unknown>) ?? null });
+    reply(ws, msg, { status: "created", id, meta: (msg.meta as Record<string, unknown>) ?? null });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }
@@ -551,7 +551,7 @@ function handleChatSessionsRemove(ws: WebSocket, msg: WsRequest): void {
   try {
     const db = getDb();
     db.prepare(`DELETE FROM chat_sessions WHERE id = ?`).run(id);
-    reply(ws, msg, {});
+    reply(ws, msg, { status: "deleted" });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }
@@ -591,7 +591,7 @@ function handleChatMessagesCreate(ws: WebSocket, msg: WsRequest): void {
       (msg.skill_name as string) ?? null,
       msg.meta ? JSON.stringify(msg.meta) : null,
     );
-    reply(ws, msg, { id: Number(result.lastInsertRowid) });
+    reply(ws, msg, { status: "created", id: Number(result.lastInsertRowid) });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }
@@ -603,7 +603,7 @@ function handleChatMessagesClear(ws: WebSocket, msg: WsRequest): void {
   try {
     const db = getDb();
     db.prepare(`DELETE FROM chat_messages WHERE session_id = ?`).run(id);
-    reply(ws, msg, {});
+    reply(ws, msg, { status: "cleared" });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }

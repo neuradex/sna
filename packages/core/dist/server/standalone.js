@@ -1309,7 +1309,7 @@ function handleSessionsCreate(ws, msg, sm) {
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, 'main', ?)`).run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null);
     } catch {
     }
-    reply(ws, msg, { sessionId: session.id, label: session.label, meta: session.meta });
+    reply(ws, msg, { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -1320,7 +1320,7 @@ function handleSessionsRemove(ws, msg, sm) {
   if (id === "default") return replyError(ws, msg, "Cannot remove default session");
   const removed = sm.removeSession(id);
   if (!removed) return replyError(ws, msg, "Session not found");
-  reply(ws, msg, {});
+  reply(ws, msg, { status: "removed" });
 }
 function handleAgentStart(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
@@ -1377,7 +1377,7 @@ function handleAgentSend(ws, msg, sm) {
   session.state = "processing";
   sm.touch(sessionId);
   session.process.send(msg.message);
-  reply(ws, msg, {});
+  reply(ws, msg, { status: "sent" });
 }
 function handleAgentKill(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
@@ -1553,7 +1553,7 @@ function handleChatSessionsCreate(ws, msg) {
   try {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, ?, ?)`).run(id, msg.label ?? id, msg.chatType ?? "background", msg.meta ? JSON.stringify(msg.meta) : null);
-    reply(ws, msg, { id, meta: msg.meta ?? null });
+    reply(ws, msg, { status: "created", id, meta: msg.meta ?? null });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -1565,7 +1565,7 @@ function handleChatSessionsRemove(ws, msg) {
   try {
     const db = getDb();
     db.prepare(`DELETE FROM chat_sessions WHERE id = ?`).run(id);
-    reply(ws, msg, {});
+    reply(ws, msg, { status: "deleted" });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -1598,7 +1598,7 @@ function handleChatMessagesCreate(ws, msg) {
       msg.skill_name ?? null,
       msg.meta ? JSON.stringify(msg.meta) : null
     );
-    reply(ws, msg, { id: Number(result.lastInsertRowid) });
+    reply(ws, msg, { status: "created", id: Number(result.lastInsertRowid) });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -1609,7 +1609,7 @@ function handleChatMessagesClear(ws, msg) {
   try {
     const db = getDb();
     db.prepare(`DELETE FROM chat_messages WHERE session_id = ?`).run(id);
-    reply(ws, msg, {});
+    reply(ws, msg, { status: "cleared" });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
