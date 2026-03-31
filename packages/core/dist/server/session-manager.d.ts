@@ -122,9 +122,9 @@ declare class SessionManager {
     };
     /** Interrupt the current turn. Process stays alive, returns to waiting. */
     interruptSession(id: string): boolean;
-    /** Change model at runtime. No process restart. */
+    /** Change model. Sends control message if alive, always persists to config. */
     setSessionModel(id: string, model: string): boolean;
-    /** Change permission mode at runtime. No process restart. */
+    /** Change permission mode. Sends control message if alive, always persists to config. */
     setSessionPermissionMode(id: string, mode: string): boolean;
     /** Kill the agent process in a session (session stays, can be restarted). */
     killSession(id: string): boolean;

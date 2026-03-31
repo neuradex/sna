@@ -1334,28 +1334,32 @@ var SessionManager = class {
     session.state = "waiting";
     return true;
   }
-  /** Change model at runtime. No process restart. */
+  /** Change model. Sends control message if alive, always persists to config. */
   setSessionModel(id, model) {
     const session = this.sessions.get(id);
-    if (!session?.process?.alive) return false;
-    session.process.setModel(model);
+    if (!session) return false;
+    if (session.process?.alive) session.process.setModel(model);
     if (session.lastStartConfig) {
       session.lastStartConfig.model = model;
-      this.persistSession(session);
-      this.emitConfigChanged(id, session.lastStartConfig);
+    } else {
+      session.lastStartConfig = { provider: "claude-code", model, permissionMode: "acceptEdits" };
     }
+    this.persistSession(session);
+    this.emitConfigChanged(id, session.lastStartConfig);
     return true;
   }
-  /** Change permission mode at runtime. No process restart. */
+  /** Change permission mode. Sends control message if alive, always persists to config. */
   setSessionPermissionMode(id, mode) {
     const session = this.sessions.get(id);
-    if (!session?.process?.alive) return false;
-    session.process.setPermissionMode(mode);
+    if (!session) return false;
+    if (session.process?.alive) session.process.setPermissionMode(mode);
     if (session.lastStartConfig) {
       session.lastStartConfig.permissionMode = mode;
-      this.persistSession(session);
-      this.emitConfigChanged(id, session.lastStartConfig);
+    } else {
+      session.lastStartConfig = { provider: "claude-code", model: "claude-sonnet-4-6", permissionMode: mode };
     }
+    this.persistSession(session);
+    this.emitConfigChanged(id, session.lastStartConfig);
     return true;
   }
   /** Kill the agent process in a session (session stays, can be restarted). */
