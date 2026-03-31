@@ -260,12 +260,34 @@ class SessionManager {
     this.emitLifecycle({ session: id, state: "restarted" });
     return { config };
   }
-  /** Interrupt the current turn (SIGINT). Process stays alive, returns to waiting. */
+  /** Interrupt the current turn. Process stays alive, returns to waiting. */
   interruptSession(id) {
     const session = this.sessions.get(id);
     if (!session?.process?.alive) return false;
     session.process.interrupt();
     session.state = "waiting";
+    return true;
+  }
+  /** Change model at runtime. No process restart. */
+  setSessionModel(id, model) {
+    const session = this.sessions.get(id);
+    if (!session?.process?.alive) return false;
+    session.process.setModel(model);
+    if (session.lastStartConfig) {
+      session.lastStartConfig.model = model;
+      this.persistSession(session);
+    }
+    return true;
+  }
+  /** Change permission mode at runtime. No process restart. */
+  setSessionPermissionMode(id, mode) {
+    const session = this.sessions.get(id);
+    if (!session?.process?.alive) return false;
+    session.process.setPermissionMode(mode);
+    if (session.lastStartConfig) {
+      session.lastStartConfig.permissionMode = mode;
+      this.persistSession(session);
+    }
     return true;
   }
   /** Kill the agent process in a session (session stays, can be restarted). */

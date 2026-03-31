@@ -111,8 +111,12 @@ declare class SessionManager {
     restartSession(id: string, overrides: Partial<StartConfig>, spawnFn: (config: StartConfig) => AgentProcess): {
         config: StartConfig;
     };
-    /** Interrupt the current turn (SIGINT). Process stays alive, returns to waiting. */
+    /** Interrupt the current turn. Process stays alive, returns to waiting. */
     interruptSession(id: string): boolean;
+    /** Change model at runtime. No process restart. */
+    setSessionModel(id: string, model: string): boolean;
+    /** Change permission mode at runtime. No process restart. */
+    setSessionPermissionMode(id: string, mode: string): boolean;
     /** Kill the agent process in a session (session stays, can be restarted). */
     killSession(id: string): boolean;
     /** Remove a session entirely. Cannot remove "default". */

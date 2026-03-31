@@ -83,6 +83,10 @@ function handleMessage(ws, msg, sm, state) {
       return handleAgentRestart(ws, msg, sm);
     case "agent.interrupt":
       return handleAgentInterrupt(ws, msg, sm);
+    case "agent.set-model":
+      return handleAgentSetModel(ws, msg, sm);
+    case "agent.set-permission-mode":
+      return handleAgentSetPermissionMode(ws, msg, sm);
     case "agent.kill":
       return handleAgentKill(ws, msg, sm);
     case "agent.status":
@@ -246,6 +250,20 @@ function handleAgentInterrupt(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
   const interrupted = sm.interruptSession(sessionId);
   wsReply(ws, msg, { status: interrupted ? "interrupted" : "no_session" });
+}
+function handleAgentSetModel(ws, msg, sm) {
+  const sessionId = msg.session ?? "default";
+  const model = msg.model;
+  if (!model) return replyError(ws, msg, "model is required");
+  const updated = sm.setSessionModel(sessionId, model);
+  wsReply(ws, msg, { status: updated ? "updated" : "no_session", model });
+}
+function handleAgentSetPermissionMode(ws, msg, sm) {
+  const sessionId = msg.session ?? "default";
+  const permissionMode = msg.permissionMode;
+  if (!permissionMode) return replyError(ws, msg, "permissionMode is required");
+  const updated = sm.setSessionPermissionMode(sessionId, permissionMode);
+  wsReply(ws, msg, { status: updated ? "updated" : "no_session", permissionMode });
 }
 function handleAgentKill(ws, msg, sm) {
   const sessionId = msg.session ?? "default";

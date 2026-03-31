@@ -50,6 +50,14 @@ export interface ApiResponses {
   "agent.interrupt": {
     status: "interrupted" | "no_session";
   };
+  "agent.set-model": {
+    status: "updated" | "no_session";
+    model: string;
+  };
+  "agent.set-permission-mode": {
+    status: "updated" | "no_session";
+    permissionMode: string;
+  };
   "agent.kill": {
     status: "killed" | "no_session";
   };

@@ -118,10 +118,27 @@ class ClaudeCodeProcess implements AgentProcess {
 
   interrupt(): void {
     if (!this._alive || !this.proc.stdin!.writable) return;
-    // Use stream-json control message instead of SIGINT for cross-platform safety
     const msg = JSON.stringify({
       type: "control_request",
       request: { subtype: "interrupt" },
+    });
+    this.proc.stdin!.write(msg + "\n");
+  }
+
+  setModel(model: string): void {
+    if (!this._alive || !this.proc.stdin!.writable) return;
+    const msg = JSON.stringify({
+      type: "control_request",
+      request: { subtype: "set_model", model },
+    });
+    this.proc.stdin!.write(msg + "\n");
+  }
+
+  setPermissionMode(mode: string): void {
+    if (!this._alive || !this.proc.stdin!.writable) return;
+    const msg = JSON.stringify({
+      type: "control_request",
+      request: { subtype: "set_permission_mode", permission_mode: mode },
     });
     this.proc.stdin!.write(msg + "\n");
   }

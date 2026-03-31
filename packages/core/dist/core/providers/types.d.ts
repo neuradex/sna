@@ -16,8 +16,12 @@ interface AgentEvent {
 interface AgentProcess {
     /** Send a user message to the agent's stdin. */
     send(input: string): void;
-    /** Interrupt the current turn (SIGINT). Process stays alive. */
+    /** Interrupt the current turn. Process stays alive. */
     interrupt(): void;
+    /** Change model at runtime via control message. No restart needed. */
+    setModel(model: string): void;
+    /** Change permission mode at runtime via control message. No restart needed. */
+    setPermissionMode(mode: string): void;
     /** Kill the agent process. */
     kill(): void;
     /** Whether the process is still running. */

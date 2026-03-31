@@ -107,6 +107,22 @@ class ClaudeCodeProcess {
     });
     this.proc.stdin.write(msg + "\n");
   }
+  setModel(model) {
+    if (!this._alive || !this.proc.stdin.writable) return;
+    const msg = JSON.stringify({
+      type: "control_request",
+      request: { subtype: "set_model", model }
+    });
+    this.proc.stdin.write(msg + "\n");
+  }
+  setPermissionMode(mode) {
+    if (!this._alive || !this.proc.stdin.writable) return;
+    const msg = JSON.stringify({
+      type: "control_request",
+      request: { subtype: "set_permission_mode", permission_mode: mode }
+    });
+    this.proc.stdin.write(msg + "\n");
+  }
   kill() {
     if (this._alive) {
       this._alive = false;

@@ -406,6 +406,22 @@ var ClaudeCodeProcess = class {
     });
     this.proc.stdin.write(msg + "\n");
   }
+  setModel(model) {
+    if (!this._alive || !this.proc.stdin.writable) return;
+    const msg = JSON.stringify({
+      type: "control_request",
+      request: { subtype: "set_model", model }
+    });
+    this.proc.stdin.write(msg + "\n");
+  }
+  setPermissionMode(mode) {
+    if (!this._alive || !this.proc.stdin.writable) return;
+    const msg = JSON.stringify({
+      type: "control_request",
+      request: { subtype: "set_permission_mode", permission_mode: mode }
+    });
+    this.proc.stdin.write(msg + "\n");
+  }
   kill() {
     if (this._alive) {
       this._alive = false;
@@ -886,6 +902,20 @@ function createAgentRoutes(sessionManager2) {
     const interrupted = sessionManager2.interruptSession(sessionId);
     return httpJson(c, "agent.interrupt", { status: interrupted ? "interrupted" : "no_session" });
   });
+  app.post("/set-model", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.model) return c.json({ status: "error", message: "model is required" }, 400);
+    const updated = sessionManager2.setSessionModel(sessionId, body.model);
+    return httpJson(c, "agent.set-model", { status: updated ? "updated" : "no_session", model: body.model });
+  });
+  app.post("/set-permission-mode", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.permissionMode) return c.json({ status: "error", message: "permissionMode is required" }, 400);
+    const updated = sessionManager2.setSessionPermissionMode(sessionId, body.permissionMode);
+    return httpJson(c, "agent.set-permission-mode", { status: updated ? "updated" : "no_session", permissionMode: body.permissionMode });
+  });
   app.post("/kill", async (c) => {
     const sessionId = getSessionId(c);
     const killed = sessionManager2.killSession(sessionId);
@@ -1284,12 +1314,34 @@ var SessionManager = class {
     this.emitLifecycle({ session: id, state: "restarted" });
     return { config };
   }
-  /** Interrupt the current turn (SIGINT). Process stays alive, returns to waiting. */
+  /** Interrupt the current turn. Process stays alive, returns to waiting. */
   interruptSession(id) {
     const session = this.sessions.get(id);
     if (!session?.process?.alive) return false;
     session.process.interrupt();
     session.state = "waiting";
+    return true;
+  }
+  /** Change model at runtime. No process restart. */
+  setSessionModel(id, model) {
+    const session = this.sessions.get(id);
+    if (!session?.process?.alive) return false;
+    session.process.setModel(model);
+    if (session.lastStartConfig) {
+      session.lastStartConfig.model = model;
+      this.persistSession(session);
+    }
+    return true;
+  }
+  /** Change permission mode at runtime. No process restart. */
+  setSessionPermissionMode(id, mode) {
+    const session = this.sessions.get(id);
+    if (!session?.process?.alive) return false;
+    session.process.setPermissionMode(mode);
+    if (session.lastStartConfig) {
+      session.lastStartConfig.permissionMode = mode;
+      this.persistSession(session);
+    }
     return true;
   }
   /** Kill the agent process in a session (session stays, can be restarted). */
@@ -1457,6 +1509,10 @@ function handleMessage(ws, msg, sm, state) {
       return handleAgentRestart(ws, msg, sm);
     case "agent.interrupt":
       return handleAgentInterrupt(ws, msg, sm);
+    case "agent.set-model":
+      return handleAgentSetModel(ws, msg, sm);
+    case "agent.set-permission-mode":
+      return handleAgentSetPermissionMode(ws, msg, sm);
     case "agent.kill":
       return handleAgentKill(ws, msg, sm);
     case "agent.status":
@@ -1620,6 +1676,20 @@ function handleAgentInterrupt(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
   const interrupted = sm.interruptSession(sessionId);
   wsReply(ws, msg, { status: interrupted ? "interrupted" : "no_session" });
+}
+function handleAgentSetModel(ws, msg, sm) {
+  const sessionId = msg.session ?? "default";
+  const model = msg.model;
+  if (!model) return replyError(ws, msg, "model is required");
+  const updated = sm.setSessionModel(sessionId, model);
+  wsReply(ws, msg, { status: updated ? "updated" : "no_session", model });
+}
+function handleAgentSetPermissionMode(ws, msg, sm) {
+  const sessionId = msg.session ?? "default";
+  const permissionMode2 = msg.permissionMode;
+  if (!permissionMode2) return replyError(ws, msg, "permissionMode is required");
+  const updated = sm.setSessionPermissionMode(sessionId, permissionMode2);
+  wsReply(ws, msg, { status: updated ? "updated" : "no_session", permissionMode: permissionMode2 });
 }
 function handleAgentKill(ws, msg, sm) {
   const sessionId = msg.session ?? "default";

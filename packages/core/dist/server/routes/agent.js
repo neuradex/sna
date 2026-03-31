@@ -257,6 +257,20 @@ function createAgentRoutes(sessionManager) {
     const interrupted = sessionManager.interruptSession(sessionId);
     return httpJson(c, "agent.interrupt", { status: interrupted ? "interrupted" : "no_session" });
   });
+  app.post("/set-model", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.model) return c.json({ status: "error", message: "model is required" }, 400);
+    const updated = sessionManager.setSessionModel(sessionId, body.model);
+    return httpJson(c, "agent.set-model", { status: updated ? "updated" : "no_session", model: body.model });
+  });
+  app.post("/set-permission-mode", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.permissionMode) return c.json({ status: "error", message: "permissionMode is required" }, 400);
+    const updated = sessionManager.setSessionPermissionMode(sessionId, body.permissionMode);
+    return httpJson(c, "agent.set-permission-mode", { status: updated ? "updated" : "no_session", permissionMode: body.permissionMode });
+  });
   app.post("/kill", async (c) => {
     const sessionId = getSessionId(c);
     const killed = sessionManager.killSession(sessionId);

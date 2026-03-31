@@ -176,6 +176,10 @@ function handleMessage(
       return handleAgentRestart(ws, msg, sm);
     case "agent.interrupt":
       return handleAgentInterrupt(ws, msg, sm);
+    case "agent.set-model":
+      return handleAgentSetModel(ws, msg, sm);
+    case "agent.set-permission-mode":
+      return handleAgentSetPermissionMode(ws, msg, sm);
     case "agent.kill":
       return handleAgentKill(ws, msg, sm);
     case "agent.status":
@@ -368,6 +372,22 @@ function handleAgentInterrupt(ws: WebSocket, msg: WsRequest, sm: SessionManager)
   const sessionId = (msg.session as string) ?? "default";
   const interrupted = sm.interruptSession(sessionId);
   wsReply(ws, msg, { status: interrupted ? "interrupted" : "no_session" });
+}
+
+function handleAgentSetModel(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
+  const sessionId = (msg.session as string) ?? "default";
+  const model = msg.model as string;
+  if (!model) return replyError(ws, msg, "model is required");
+  const updated = sm.setSessionModel(sessionId, model);
+  wsReply(ws, msg, { status: updated ? "updated" : "no_session", model });
+}
+
+function handleAgentSetPermissionMode(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
+  const sessionId = (msg.session as string) ?? "default";
+  const permissionMode = msg.permissionMode as string;
+  if (!permissionMode) return replyError(ws, msg, "permissionMode is required");
+  const updated = sm.setSessionPermissionMode(sessionId, permissionMode);
+  wsReply(ws, msg, { status: updated ? "updated" : "no_session", permissionMode });
 }
 
 function handleAgentKill(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {

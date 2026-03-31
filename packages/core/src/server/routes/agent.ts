@@ -385,11 +385,29 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     }
   });
 
-  // POST /interrupt — interrupt current turn (SIGINT), process stays alive
+  // POST /interrupt — interrupt current turn, process stays alive
   app.post("/interrupt", async (c) => {
     const sessionId = getSessionId(c);
     const interrupted = sessionManager.interruptSession(sessionId);
     return httpJson(c, "agent.interrupt", { status: interrupted ? "interrupted" : "no_session" });
+  });
+
+  // POST /set-model — change model at runtime, no restart
+  app.post("/set-model", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = (await c.req.json().catch(() => ({}))) as { model?: string };
+    if (!body.model) return c.json({ status: "error", message: "model is required" }, 400);
+    const updated = sessionManager.setSessionModel(sessionId, body.model);
+    return httpJson(c, "agent.set-model", { status: updated ? "updated" : "no_session", model: body.model });
+  });
+
+  // POST /set-permission-mode — change permission mode at runtime, no restart
+  app.post("/set-permission-mode", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = (await c.req.json().catch(() => ({}))) as { permissionMode?: string };
+    if (!body.permissionMode) return c.json({ status: "error", message: "permissionMode is required" }, 400);
+    const updated = sessionManager.setSessionPermissionMode(sessionId, body.permissionMode);
+    return httpJson(c, "agent.set-permission-mode", { status: updated ? "updated" : "no_session", permissionMode: body.permissionMode });
   });
 
   // POST /kill
