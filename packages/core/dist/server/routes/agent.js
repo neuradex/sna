@@ -150,6 +150,7 @@ function createAgentRoutes(sessionManager) {
         model,
         permissionMode,
         env: { SNA_SESSION_ID: sessionId },
+        history: body.history,
         extraArgs
       });
       sessionManager.setProcess(sessionId, proc);

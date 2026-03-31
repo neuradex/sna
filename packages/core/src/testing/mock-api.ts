@@ -77,6 +77,23 @@ export async function startMockAnthropicServer(): Promise<MockServer> {
       }
       console.log(`[${ts()}] REQ model=${body.model} stream=${body.stream} messages=${body.messages?.length} user="${userText.slice(0, 120)}"`);
 
+      // Log full messages array for debugging
+      for (let mi = 0; mi < body.messages.length; mi++) {
+        const m = body.messages[mi];
+        const role = m.role;
+        let preview = "";
+        if (typeof m.content === "string") {
+          preview = m.content.slice(0, 150);
+        } else if (Array.isArray(m.content)) {
+          preview = m.content.map((b: any) => {
+            if (b.type === "text") return `text:"${(b.text as string).slice(0, 100)}"`;
+            if (b.type === "image") return `image:${b.source?.media_type}`;
+            return b.type;
+          }).join(" | ");
+        }
+        console.log(`[${ts()}]   [${mi}] ${role}: ${preview}`);
+      }
+
       const replyText = [...userText].reverse().join("");
       const messageId = `msg_mock_${Date.now()}`;
 

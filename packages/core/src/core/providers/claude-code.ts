@@ -101,6 +101,28 @@ class ClaudeCodeProcess implements AgentProcess {
       this.emitter.emit("error", err);
     });
 
+    // Inject conversation history before first prompt
+    if (options.history?.length) {
+      for (const msg of options.history) {
+        if (msg.role === "user") {
+          const line = JSON.stringify({
+            type: "user",
+            message: { role: "user", content: msg.content },
+          });
+          this.proc.stdin!.write(line + "\n");
+        } else if (msg.role === "assistant") {
+          const line = JSON.stringify({
+            type: "assistant",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: msg.content }],
+            },
+          });
+          this.proc.stdin!.write(line + "\n");
+        }
+      }
+    }
+
     // Send initial prompt if provided
     if (options.prompt) {
       this.send(options.prompt);

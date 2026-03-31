@@ -198,6 +198,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       meta?: Record<string, unknown>;
       extraArgs?: string[];
       cwd?: string;
+      history?: Array<{ role: "user" | "assistant"; content: string }>;
     };
 
     // Auto-create session if it doesn't exist (backward compat for "default")
@@ -253,6 +254,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
         model,
         permissionMode: permissionMode as any,
         env: { SNA_SESSION_ID: sessionId },
+        history: body.history,
         extraArgs,
       });
 

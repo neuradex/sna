@@ -79,6 +79,26 @@ class ClaudeCodeProcess {
       this._alive = false;
       this.emitter.emit("error", err);
     });
+    if (options.history?.length) {
+      for (const msg of options.history) {
+        if (msg.role === "user") {
+          const line = JSON.stringify({
+            type: "user",
+            message: { role: "user", content: msg.content }
+          });
+          this.proc.stdin.write(line + "\n");
+        } else if (msg.role === "assistant") {
+          const line = JSON.stringify({
+            type: "assistant",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: msg.content }]
+            }
+          });
+          this.proc.stdin.write(line + "\n");
+        }
+      }
+    }
     if (options.prompt) {
       this.send(options.prompt);
     }

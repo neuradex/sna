@@ -36,12 +36,22 @@ interface AgentProcess {
 /**
  * Options for spawning an agent session.
  */
+interface HistoryMessage {
+    role: "user" | "assistant";
+    content: string;
+}
 interface SpawnOptions {
     cwd: string;
     prompt?: string;
     model?: string;
     permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan";
     env?: Record<string, string>;
+    /**
+     * Conversation history to inject before the first prompt.
+     * Written to stdin as NDJSON — Claude Code treats these as prior conversation turns.
+     * Must alternate user→assistant. Assistant content is auto-wrapped in array format.
+     */
+    history?: HistoryMessage[];
     /**
      * Additional CLI flags passed directly to the agent binary.
      * e.g. ["--system-prompt", "You are...", "--append-system-prompt", "Also...", "--mcp-config", "path"]
@@ -60,4 +70,4 @@ interface AgentProvider {
     spawn(options: SpawnOptions): AgentProcess;
 }
 
-export type { AgentEvent, AgentProcess, AgentProvider, SpawnOptions };
+export type { AgentEvent, AgentProcess, AgentProvider, HistoryMessage, SpawnOptions };

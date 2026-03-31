@@ -378,6 +378,26 @@ var ClaudeCodeProcess = class {
       this._alive = false;
       this.emitter.emit("error", err2);
     });
+    if (options.history?.length) {
+      for (const msg of options.history) {
+        if (msg.role === "user") {
+          const line = JSON.stringify({
+            type: "user",
+            message: { role: "user", content: msg.content }
+          });
+          this.proc.stdin.write(line + "\n");
+        } else if (msg.role === "assistant") {
+          const line = JSON.stringify({
+            type: "assistant",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: msg.content }]
+            }
+          });
+          this.proc.stdin.write(line + "\n");
+        }
+      }
+    }
     if (options.prompt) {
       this.send(options.prompt);
     }
@@ -802,6 +822,7 @@ function createAgentRoutes(sessionManager2) {
         model,
         permissionMode: permissionMode2,
         env: { SNA_SESSION_ID: sessionId },
+        history: body.history,
         extraArgs
       });
       sessionManager2.setProcess(sessionId, proc);
@@ -1653,6 +1674,7 @@ function handleAgentStart(ws, msg, sm) {
       model,
       permissionMode: permissionMode2,
       env: { SNA_SESSION_ID: sessionId },
+      history: msg.history,
       extraArgs
     });
     sm.setProcess(sessionId, proc);

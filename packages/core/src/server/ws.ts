@@ -311,6 +311,7 @@ function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): vo
       model,
       permissionMode: permissionMode as any,
       env: { SNA_SESSION_ID: sessionId },
+      history: msg.history as any[] | undefined,
       extraArgs,
     });
     sm.setProcess(sessionId, proc);

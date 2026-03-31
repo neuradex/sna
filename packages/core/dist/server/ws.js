@@ -193,6 +193,7 @@ function handleAgentStart(ws, msg, sm) {
       model,
       permissionMode,
       env: { SNA_SESSION_ID: sessionId },
+      history: msg.history,
       extraArgs
     });
     sm.setProcess(sessionId, proc);
