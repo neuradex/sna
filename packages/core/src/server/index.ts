@@ -67,7 +67,7 @@ export { createRunRoute } from "./routes/run.js";
 export { createAgentRoutes } from "./routes/agent.js";
 export { createChatRoutes } from "./routes/chat.js";
 export { SessionManager } from "./session-manager.js";
-export type { Session, SessionInfo, SessionManagerOptions } from "./session-manager.js";
+export type { Session, SessionInfo, SessionManagerOptions, SessionLifecycleEvent, SessionLifecycleState } from "./session-manager.js";
 export { attachWebSocket } from "./ws.js";
 
 /**

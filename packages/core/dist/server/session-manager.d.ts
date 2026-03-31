@@ -34,6 +34,12 @@ interface SessionInfo {
 interface SessionManagerOptions {
     maxSessions?: number;
 }
+type SessionLifecycleState = "started" | "killed" | "exited" | "crashed";
+interface SessionLifecycleEvent {
+    session: string;
+    state: SessionLifecycleState;
+    code?: number | null;
+}
 declare class SessionManager {
     private sessions;
     private maxSessions;
@@ -41,6 +47,7 @@ declare class SessionManager {
     private pendingPermissions;
     private skillEventListeners;
     private permissionRequestListeners;
+    private lifecycleListeners;
     constructor(options?: SessionManagerOptions);
     /** Create a new session. Throws if max sessions reached. */
     createSession(opts?: {
@@ -66,6 +73,9 @@ declare class SessionManager {
     broadcastSkillEvent(event: Record<string, unknown>): void;
     /** Subscribe to permission request notifications. Returns unsubscribe function. */
     onPermissionRequest(cb: (sessionId: string, request: Record<string, unknown>, createdAt: number) => void): () => void;
+    /** Subscribe to session lifecycle events (started/killed/exited/crashed). Returns unsubscribe function. */
+    onSessionLifecycle(cb: (event: SessionLifecycleEvent) => void): () => void;
+    private emitLifecycle;
     /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
     createPendingPermission(sessionId: string, request: Record<string, unknown>): Promise<boolean>;
     /** Resolve a pending permission request. Returns false if no pending request. */
@@ -96,4 +106,4 @@ declare class SessionManager {
     get size(): number;
 }
 
-export { type Session, type SessionInfo, SessionManager, type SessionManagerOptions, type SessionState };
+export { type Session, type SessionInfo, type SessionLifecycleEvent, type SessionLifecycleState, SessionManager, type SessionManagerOptions, type SessionState };

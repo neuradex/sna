@@ -29,7 +29,10 @@ function attachWebSocket(server, sessionManager) {
   });
   wss.on("connection", (ws) => {
     logger.log("ws", "client connected");
-    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null };
+    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null };
+    state.lifecycleUnsub = sessionManager.onSessionLifecycle((event) => {
+      send(ws, { type: "session.lifecycle", ...event });
+    });
     ws.on("message", (raw) => {
       let msg;
       try {
@@ -56,6 +59,8 @@ function attachWebSocket(server, sessionManager) {
       }
       state.permissionUnsub?.();
       state.permissionUnsub = null;
+      state.lifecycleUnsub?.();
+      state.lifecycleUnsub = null;
     });
   });
   return wss;

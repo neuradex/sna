@@ -13,6 +13,7 @@ import '../core/providers/types.js';
  *   Server → Client:  { type: "sessions.list", rid: "1", sessions: [...] }
  *   Server → Client:  { type: "error", rid: "1", message: "..." }
  *   Server → Client:  { type: "agent.event", session: "abc", cursor: 42, event: {...} }  (push)
+ *   Server → Client:  { type: "session.lifecycle", session: "abc", state: "killed" }   (auto-push)
  *   Server → Client:  { type: "skill.event", data: {...} }  (push)
  *
  * Message types:

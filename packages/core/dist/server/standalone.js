@@ -976,6 +976,7 @@ var SessionManager = class {
     this.pendingPermissions = /* @__PURE__ */ new Map();
     this.skillEventListeners = /* @__PURE__ */ new Set();
     this.permissionRequestListeners = /* @__PURE__ */ new Set();
+    this.lifecycleListeners = /* @__PURE__ */ new Set();
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
   }
   /** Create a new session. Throws if max sessions reached. */
@@ -1035,6 +1036,13 @@ var SessionManager = class {
         for (const cb of listeners) cb(session.eventCounter, e);
       }
     });
+    proc.on("exit", (code) => {
+      this.emitLifecycle({ session: sessionId, state: code != null ? "exited" : "crashed", code });
+    });
+    proc.on("error", () => {
+      this.emitLifecycle({ session: sessionId, state: "crashed" });
+    });
+    this.emitLifecycle({ session: sessionId, state: "started" });
   }
   // ── Event pub/sub (for WebSocket) ─────────────────────────────
   /** Subscribe to real-time events for a session. Returns unsubscribe function. */
@@ -1065,6 +1073,15 @@ var SessionManager = class {
   onPermissionRequest(cb) {
     this.permissionRequestListeners.add(cb);
     return () => this.permissionRequestListeners.delete(cb);
+  }
+  // ── Session lifecycle pub/sub ──────────────────────────────────
+  /** Subscribe to session lifecycle events (started/killed/exited/crashed). Returns unsubscribe function. */
+  onSessionLifecycle(cb) {
+    this.lifecycleListeners.add(cb);
+    return () => this.lifecycleListeners.delete(cb);
+  }
+  emitLifecycle(event) {
+    for (const cb of this.lifecycleListeners) cb(event);
   }
   // ── Permission management ─────────────────────────────────────
   /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
@@ -1112,6 +1129,7 @@ var SessionManager = class {
     const session = this.sessions.get(id);
     if (!session?.process?.alive) return false;
     session.process.kill();
+    this.emitLifecycle({ session: id, state: "killed" });
     return true;
   }
   /** Remove a session entirely. Cannot remove "default". */
@@ -1217,7 +1235,10 @@ function attachWebSocket(server2, sessionManager2) {
   });
   wss.on("connection", (ws) => {
     logger.log("ws", "client connected");
-    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null };
+    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null };
+    state.lifecycleUnsub = sessionManager2.onSessionLifecycle((event) => {
+      send(ws, { type: "session.lifecycle", ...event });
+    });
     ws.on("message", (raw) => {
       let msg;
       try {
@@ -1244,6 +1265,8 @@ function attachWebSocket(server2, sessionManager2) {
       }
       state.permissionUnsub?.();
       state.permissionUnsub = null;
+      state.lifecycleUnsub?.();
+      state.lifecycleUnsub = null;
     });
   });
   return wss;

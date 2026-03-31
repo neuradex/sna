@@ -9,6 +9,7 @@ class SessionManager {
     this.pendingPermissions = /* @__PURE__ */ new Map();
     this.skillEventListeners = /* @__PURE__ */ new Set();
     this.permissionRequestListeners = /* @__PURE__ */ new Set();
+    this.lifecycleListeners = /* @__PURE__ */ new Set();
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
   }
   /** Create a new session. Throws if max sessions reached. */
@@ -68,6 +69,13 @@ class SessionManager {
         for (const cb of listeners) cb(session.eventCounter, e);
       }
     });
+    proc.on("exit", (code) => {
+      this.emitLifecycle({ session: sessionId, state: code != null ? "exited" : "crashed", code });
+    });
+    proc.on("error", () => {
+      this.emitLifecycle({ session: sessionId, state: "crashed" });
+    });
+    this.emitLifecycle({ session: sessionId, state: "started" });
   }
   // ── Event pub/sub (for WebSocket) ─────────────────────────────
   /** Subscribe to real-time events for a session. Returns unsubscribe function. */
@@ -98,6 +106,15 @@ class SessionManager {
   onPermissionRequest(cb) {
     this.permissionRequestListeners.add(cb);
     return () => this.permissionRequestListeners.delete(cb);
+  }
+  // ── Session lifecycle pub/sub ──────────────────────────────────
+  /** Subscribe to session lifecycle events (started/killed/exited/crashed). Returns unsubscribe function. */
+  onSessionLifecycle(cb) {
+    this.lifecycleListeners.add(cb);
+    return () => this.lifecycleListeners.delete(cb);
+  }
+  emitLifecycle(event) {
+    for (const cb of this.lifecycleListeners) cb(event);
   }
   // ── Permission management ─────────────────────────────────────
   /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
@@ -145,6 +162,7 @@ class SessionManager {
     const session = this.sessions.get(id);
     if (!session?.process?.alive) return false;
     session.process.kill();
+    this.emitLifecycle({ session: id, state: "killed" });
     return true;
   }
   /** Remove a session entirely. Cannot remove "default". */

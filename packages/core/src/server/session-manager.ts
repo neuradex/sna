@@ -45,6 +45,14 @@ interface PendingPermission {
   createdAt: number;
 }
 
+export type SessionLifecycleState = "started" | "killed" | "exited" | "crashed";
+
+export interface SessionLifecycleEvent {
+  session: string;
+  state: SessionLifecycleState;
+  code?: number | null;
+}
+
 const DEFAULT_MAX_SESSIONS = 5;
 const MAX_EVENT_BUFFER = 500;
 const PERMISSION_TIMEOUT_MS = 300_000; // 5 minutes
@@ -56,6 +64,7 @@ export class SessionManager {
   private pendingPermissions = new Map<string, PendingPermission>();
   private skillEventListeners = new Set<(event: Record<string, unknown>) => void>();
   private permissionRequestListeners = new Set<(sessionId: string, request: Record<string, unknown>, createdAt: number) => void>();
+  private lifecycleListeners = new Set<(event: SessionLifecycleEvent) => void>();
 
   constructor(options: SessionManagerOptions = {}) {
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
@@ -136,6 +145,16 @@ export class SessionManager {
         for (const cb of listeners) cb(session.eventCounter, e);
       }
     });
+
+    proc.on("exit", (code) => {
+      this.emitLifecycle({ session: sessionId, state: code != null ? "exited" : "crashed", code });
+    });
+
+    proc.on("error", () => {
+      this.emitLifecycle({ session: sessionId, state: "crashed" });
+    });
+
+    this.emitLifecycle({ session: sessionId, state: "started" });
   }
 
   // ── Event pub/sub (for WebSocket) ─────────────────────────────
@@ -173,6 +192,18 @@ export class SessionManager {
   onPermissionRequest(cb: (sessionId: string, request: Record<string, unknown>, createdAt: number) => void): () => void {
     this.permissionRequestListeners.add(cb);
     return () => this.permissionRequestListeners.delete(cb);
+  }
+
+  // ── Session lifecycle pub/sub ──────────────────────────────────
+
+  /** Subscribe to session lifecycle events (started/killed/exited/crashed). Returns unsubscribe function. */
+  onSessionLifecycle(cb: (event: SessionLifecycleEvent) => void): () => void {
+    this.lifecycleListeners.add(cb);
+    return () => this.lifecycleListeners.delete(cb);
+  }
+
+  private emitLifecycle(event: SessionLifecycleEvent): void {
+    for (const cb of this.lifecycleListeners) cb(event);
   }
 
   // ── Permission management ─────────────────────────────────────
@@ -230,6 +261,7 @@ export class SessionManager {
     const session = this.sessions.get(id);
     if (!session?.process?.alive) return false;
     session.process.kill();
+    this.emitLifecycle({ session: id, state: "killed" });
     return true;
   }
 

@@ -8,6 +8,7 @@
  *   Server → Client:  { type: "sessions.list", rid: "1", sessions: [...] }
  *   Server → Client:  { type: "error", rid: "1", message: "..." }
  *   Server → Client:  { type: "agent.event", session: "abc", cursor: 42, event: {...} }  (push)
+ *   Server → Client:  { type: "session.lifecycle", session: "abc", state: "killed" }   (auto-push)
  *   Server → Client:  { type: "skill.event", data: {...} }  (push)
  *
  * Message types:
@@ -63,6 +64,7 @@ interface ConnState {
   skillEventUnsub: (() => void) | null;
   skillPollTimer: ReturnType<typeof setInterval> | null;
   permissionUnsub: (() => void) | null;
+  lifecycleUnsub: (() => void) | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -106,7 +108,12 @@ export function attachWebSocket(
 
   wss.on("connection", (ws) => {
     logger.log("ws", "client connected");
-    const state: ConnState = { agentUnsubs: new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null };
+    const state: ConnState = { agentUnsubs: new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null };
+
+    // Auto-push session lifecycle events to all clients (no subscribe needed)
+    state.lifecycleUnsub = sessionManager.onSessionLifecycle((event) => {
+      send(ws, { type: "session.lifecycle", ...event });
+    });
 
     ws.on("message", (raw) => {
       let msg: WsRequest;
@@ -135,6 +142,8 @@ export function attachWebSocket(
       }
       state.permissionUnsub?.();
       state.permissionUnsub = null;
+      state.lifecycleUnsub?.();
+      state.lifecycleUnsub = null;
     });
   });
 
