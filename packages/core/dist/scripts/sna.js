@@ -17,6 +17,9 @@ const PORT = process.env.PORT ?? "3000";
 const CLAUDE_PATH_FILE = path.join(STATE_DIR, "claude-path");
 const SNA_CORE_DIR = path.join(ROOT, "node_modules/@sna-sdk/core");
 const NATIVE_DIR = path.join(STATE_DIR, "native");
+const MOCK_API_PID_FILE = path.join(STATE_DIR, "mock-api.pid");
+const MOCK_API_PORT_FILE = path.join(STATE_DIR, "mock-api.port");
+const MOCK_API_LOG_FILE = path.join(STATE_DIR, "mock-api.log");
 function ensureStateDir() {
   if (!fs.existsSync(STATE_DIR)) fs.mkdirSync(STATE_DIR, { recursive: true });
 }
@@ -193,6 +196,154 @@ function cmdApiDown() {
     }
   }
   clearSnaApiState();
+}
+function cmdTu(args2) {
+  const sub = args2[0];
+  switch (sub) {
+    case "api:up":
+      cmdTuApiUp();
+      break;
+    case "api:down":
+      cmdTuApiDown();
+      break;
+    case "api:log":
+      cmdTuApiLog(args2.slice(1));
+      break;
+    case "claude":
+      cmdTuClaude(args2.slice(1));
+      break;
+    default:
+      console.log(`
+  sna tu \u2014 Test utilities (mock Anthropic API)
+
+  Commands:
+    sna tu api:up       Start mock Anthropic API server
+    sna tu api:down     Stop mock API server
+    sna tu api:log      Show mock API request/response log
+    sna tu api:log -f   Follow log in real-time (tail -f)
+    sna tu claude ...   Run claude with mock API env vars (proxy)
+
+  Flow:
+    1. sna tu api:up            \u2192 mock server on random port
+    2. sna tu claude "say hi"   \u2192 real claude \u2192 mock API \u2192 mock response
+    3. sna tu api:log -f        \u2192 watch requests/responses in real-time
+    4. sna tu api:down          \u2192 cleanup
+
+  All requests/responses are logged to .sna/mock-api.log
+`);
+  }
+}
+function cmdTuApiUp() {
+  ensureStateDir();
+  const existingPid = readPidFile(MOCK_API_PID_FILE);
+  const existingPort = readPortFile(MOCK_API_PORT_FILE);
+  if (existingPid && isProcessRunning(existingPid)) {
+    step(`Mock API already running on :${existingPort} (pid=${existingPid})`);
+    return;
+  }
+  const scriptDir = path.dirname(new URL(import.meta.url).pathname);
+  const mockEntry = path.join(scriptDir, "../testing/mock-api.js");
+  const mockEntrySrc = path.join(scriptDir, "../testing/mock-api.ts");
+  const resolvedMockEntry = fs.existsSync(mockEntry) ? mockEntry : mockEntrySrc;
+  if (!fs.existsSync(resolvedMockEntry)) {
+    console.error("\u2717  Mock API server not found. Run pnpm build first.");
+    process.exit(1);
+  }
+  const logStream = fs.openSync(MOCK_API_LOG_FILE, "w");
+  const startScript = `
+    import { startMockAnthropicServer } from "${resolvedMockEntry.replace(/\\/g, "/")}";
+    const mock = await startMockAnthropicServer();
+    const fs = await import("fs");
+    fs.writeFileSync("${MOCK_API_PORT_FILE.replace(/\\/g, "/")}", String(mock.port));
+    console.log("Mock Anthropic API ready on :" + mock.port);
+    // Keep alive
+    process.on("SIGTERM", () => { mock.close(); process.exit(0); });
+  `;
+  const child = spawn("node", ["--import", "tsx", "-e", startScript], {
+    cwd: ROOT,
+    detached: true,
+    stdio: ["ignore", logStream, logStream]
+  });
+  child.unref();
+  fs.writeFileSync(MOCK_API_PID_FILE, String(child.pid));
+  for (let i = 0; i < 20; i++) {
+    if (fs.existsSync(MOCK_API_PORT_FILE) && fs.readFileSync(MOCK_API_PORT_FILE, "utf8").trim()) break;
+    execSync("sleep 0.3", { stdio: "pipe" });
+  }
+  const port = readPortFile(MOCK_API_PORT_FILE);
+  if (port) {
+    step(`Mock Anthropic API \u2192 http://localhost:${port} (log: .sna/mock-api.log)`);
+  } else {
+    console.error("\u2717  Mock API failed to start. Check .sna/mock-api.log");
+  }
+}
+function cmdTuApiDown() {
+  const pid = readPidFile(MOCK_API_PID_FILE);
+  if (pid && isProcessRunning(pid)) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+    }
+    console.log(`   Mock API    \u2713  stopped (pid=${pid})`);
+  } else {
+    console.log(`   Mock API    \u2014  not running`);
+  }
+  try {
+    fs.unlinkSync(MOCK_API_PID_FILE);
+  } catch {
+  }
+  try {
+    fs.unlinkSync(MOCK_API_PORT_FILE);
+  } catch {
+  }
+}
+function cmdTuApiLog(args2) {
+  if (!fs.existsSync(MOCK_API_LOG_FILE)) {
+    console.log("No log file. Start mock API with: sna tu api:up");
+    return;
+  }
+  const follow = args2.includes("-f") || args2.includes("--follow");
+  if (follow) {
+    execSync(`tail -f "${MOCK_API_LOG_FILE}"`, { stdio: "inherit" });
+  } else {
+    execSync(`cat "${MOCK_API_LOG_FILE}"`, { stdio: "inherit" });
+  }
+}
+function cmdTuClaude(args2) {
+  const port = readPortFile(MOCK_API_PORT_FILE);
+  if (!port) {
+    console.error("\u2717  Mock API not running. Start with: sna tu api:up");
+    process.exit(1);
+  }
+  const claudePath = resolveAndCacheClaudePath();
+  const env = {
+    ...process.env,
+    ANTHROPIC_BASE_URL: `http://localhost:${port}`,
+    ANTHROPIC_API_KEY: "sk-test-mock-sna"
+  };
+  try {
+    execSync(`"${claudePath}" ${args2.map((a) => `"${a}"`).join(" ")}`, {
+      stdio: "inherit",
+      env,
+      cwd: ROOT
+    });
+  } catch (e) {
+    process.exit(e.status ?? 1);
+  }
+}
+function readPidFile(filePath) {
+  try {
+    return parseInt(fs.readFileSync(filePath, "utf8").trim(), 10) || null;
+  } catch {
+    return null;
+  }
+}
+function readPortFile(filePath) {
+  try {
+    return fs.readFileSync(filePath, "utf8").trim() || null;
+  } catch {
+    return null;
+  }
 }
 function isPortInUse(port) {
   try {
@@ -815,6 +966,9 @@ Run "sna help submit" for data submission patterns.`);
     case "api:restart":
       cmdApiDown();
       cmdApiUp();
+      break;
+    case "tu":
+      cmdTu(args);
       break;
     case "restart":
       cmdDown();

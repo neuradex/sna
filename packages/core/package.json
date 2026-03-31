@@ -63,6 +63,11 @@
       "source": "./src/lib/sna-run.ts",
       "types": "./dist/lib/sna-run.d.ts",
       "default": "./dist/lib/sna-run.js"
+    },
+    "./testing": {
+      "source": "./test/mock-anthropic-server.ts",
+      "types": "./dist/testing/mock-anthropic-server.d.ts",
+      "default": "./dist/testing/mock-anthropic-server.js"
     }
   },
   "scripts": {
