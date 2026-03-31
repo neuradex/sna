@@ -46,7 +46,13 @@ class SessionManager {
     try {
       const db = getDb();
       db.prepare(
-        `INSERT OR REPLACE INTO chat_sessions (id, label, type, meta, cwd, last_start_config) VALUES (?, ?, 'main', ?, ?, ?)`
+        `INSERT INTO chat_sessions (id, label, type, meta, cwd, last_start_config)
+         VALUES (?, ?, 'main', ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           label = excluded.label,
+           meta = excluded.meta,
+           cwd = excluded.cwd,
+           last_start_config = excluded.last_start_config`
       ).run(
         session.id,
         session.label,
