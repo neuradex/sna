@@ -42,6 +42,11 @@ export interface ApiResponses {
   "agent.send": {
     status: "sent";
   };
+  "agent.restart": {
+    status: "restarted";
+    provider: string;
+    sessionId: string;
+  };
   "agent.interrupt": {
     status: "interrupted" | "no_session";
   };

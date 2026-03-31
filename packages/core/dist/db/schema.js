@@ -40,6 +40,9 @@ function migrateChatSessionsMeta(db) {
   if (cols.length > 0 && !cols.some((c) => c.name === "cwd")) {
     db.exec("ALTER TABLE chat_sessions ADD COLUMN cwd TEXT");
   }
+  if (cols.length > 0 && !cols.some((c) => c.name === "last_start_config")) {
+    db.exec("ALTER TABLE chat_sessions ADD COLUMN last_start_config TEXT");
+  }
 }
 function initSchema(db) {
   migrateSkillEvents(db);
@@ -51,6 +54,7 @@ function initSchema(db) {
       type       TEXT NOT NULL DEFAULT 'main',
       meta       TEXT,
       cwd        TEXT,
+      last_start_config TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 

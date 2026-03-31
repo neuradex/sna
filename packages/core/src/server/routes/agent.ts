@@ -241,17 +241,23 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       }
     } catch { /* DB not ready — non-fatal */ }
 
+    const providerName = body.provider ?? "claude-code";
+    const model = body.model ?? "claude-sonnet-4-6";
+    const permissionMode = body.permissionMode ?? "acceptEdits";
+    const extraArgs = body.extraArgs;
+
     try {
       const proc = provider.spawn({
         cwd: session.cwd,
         prompt: body.prompt,
-        model: body.model ?? "claude-sonnet-4-6",
-        permissionMode: (body.permissionMode as any) ?? "acceptEdits",
+        model,
+        permissionMode: permissionMode as any,
         env: { SNA_SESSION_ID: sessionId },
-        extraArgs: body.extraArgs,
+        extraArgs,
       });
 
       sessionManager.setProcess(sessionId, proc);
+      sessionManager.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
       logger.log("route", `POST /start?session=${sessionId} → started`);
 
       return httpJson(c, "agent.start", {
@@ -344,7 +350,39 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     });
   });
 
-  // POST /kill
+  // POST /restart — kill + re-spawn with merged config + --resume
+  app.post("/restart", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      provider?: string;
+      model?: string;
+      permissionMode?: string;
+      extraArgs?: string[];
+    };
+
+    try {
+      const { config } = sessionManager.restartSession(sessionId, body, (cfg) => {
+        const prov = getProvider(cfg.provider);
+        return prov.spawn({
+          cwd: sessionManager.getSession(sessionId)!.cwd,
+          model: cfg.model,
+          permissionMode: cfg.permissionMode as any,
+          env: { SNA_SESSION_ID: sessionId },
+          extraArgs: [...(cfg.extraArgs ?? []), "--resume"],
+        });
+      });
+      logger.log("route", `POST /restart?session=${sessionId} → restarted`);
+      return httpJson(c, "agent.restart", {
+        status: "restarted",
+        provider: config.provider,
+        sessionId,
+      });
+    } catch (e: any) {
+      logger.err("err", `POST /restart?session=${sessionId} → ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 500);
+    }
+  });
+
   // POST /interrupt — interrupt current turn (SIGINT), process stays alive
   app.post("/interrupt", async (c) => {
     const sessionId = getSessionId(c);

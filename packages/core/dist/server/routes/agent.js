@@ -139,16 +139,21 @@ function createAgentRoutes(sessionManager) {
       }
     } catch {
     }
+    const providerName = body.provider ?? "claude-code";
+    const model = body.model ?? "claude-sonnet-4-6";
+    const permissionMode = body.permissionMode ?? "acceptEdits";
+    const extraArgs = body.extraArgs;
     try {
       const proc = provider.spawn({
         cwd: session.cwd,
         prompt: body.prompt,
-        model: body.model ?? "claude-sonnet-4-6",
-        permissionMode: body.permissionMode ?? "acceptEdits",
+        model,
+        permissionMode,
         env: { SNA_SESSION_ID: sessionId },
-        extraArgs: body.extraArgs
+        extraArgs
       });
       sessionManager.setProcess(sessionId, proc);
+      sessionManager.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
       logger.log("route", `POST /start?session=${sessionId} \u2192 started`);
       return httpJson(c, "agent.start", {
         status: "started",
@@ -219,6 +224,31 @@ function createAgentRoutes(sessionManager) {
         await new Promise((r) => setTimeout(r, POLL_MS));
       }
     });
+  });
+  app.post("/restart", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      const { config } = sessionManager.restartSession(sessionId, body, (cfg) => {
+        const prov = getProvider(cfg.provider);
+        return prov.spawn({
+          cwd: sessionManager.getSession(sessionId).cwd,
+          model: cfg.model,
+          permissionMode: cfg.permissionMode,
+          env: { SNA_SESSION_ID: sessionId },
+          extraArgs: [...cfg.extraArgs ?? [], "--resume"]
+        });
+      });
+      logger.log("route", `POST /restart?session=${sessionId} \u2192 restarted`);
+      return httpJson(c, "agent.restart", {
+        status: "restarted",
+        provider: config.provider,
+        sessionId
+      });
+    } catch (e) {
+      logger.err("err", `POST /restart?session=${sessionId} \u2192 ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 500);
+    }
   });
   app.post("/interrupt", async (c) => {
     const sessionId = getSessionId(c);

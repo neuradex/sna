@@ -172,6 +172,8 @@ function handleMessage(
       return handleAgentStart(ws, msg, sm);
     case "agent.send":
       return handleAgentSend(ws, msg, sm);
+    case "agent.restart":
+      return handleAgentRestart(ws, msg, sm);
     case "agent.interrupt":
       return handleAgentInterrupt(ws, msg, sm);
     case "agent.kill":
@@ -285,16 +287,22 @@ function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): vo
     }
   } catch { /* non-fatal */ }
 
+  const providerName = (msg.provider as string) ?? "claude-code";
+  const model = (msg.model as string) ?? "claude-sonnet-4-6";
+  const permissionMode = (msg.permissionMode as string) ?? "acceptEdits";
+  const extraArgs = msg.extraArgs as string[] | undefined;
+
   try {
     const proc = provider.spawn({
       cwd: session.cwd,
       prompt: msg.prompt as string | undefined,
-      model: (msg.model as string) ?? "claude-sonnet-4-6",
-      permissionMode: (msg.permissionMode as any) ?? "acceptEdits",
+      model,
+      permissionMode: permissionMode as any,
       env: { SNA_SESSION_ID: sessionId },
-      extraArgs: msg.extraArgs as string[] | undefined,
+      extraArgs,
     });
     sm.setProcess(sessionId, proc);
+    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
     wsReply(ws, msg, { status: "started", provider: provider.name, sessionId: session.id });
   } catch (e: any) {
     replyError(ws, msg, e.message);
@@ -324,6 +332,34 @@ function handleAgentSend(ws: WebSocket, msg: WsRequest, sm: SessionManager): voi
   sm.touch(sessionId);
   session.process.send(msg.message as string);
   wsReply(ws, msg, { status: "sent" });
+}
+
+function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
+  const sessionId = (msg.session as string) ?? "default";
+  try {
+    const { config } = sm.restartSession(
+      sessionId,
+      {
+        provider: msg.provider as string | undefined,
+        model: msg.model as string | undefined,
+        permissionMode: msg.permissionMode as string | undefined,
+        extraArgs: msg.extraArgs as string[] | undefined,
+      },
+      (cfg) => {
+        const prov = getProvider(cfg.provider);
+        return prov.spawn({
+          cwd: sm.getSession(sessionId)!.cwd,
+          model: cfg.model,
+          permissionMode: cfg.permissionMode as any,
+          env: { SNA_SESSION_ID: sessionId },
+          extraArgs: [...(cfg.extraArgs ?? []), "--resume"],
+        });
+      },
+    );
+    wsReply(ws, msg, { status: "restarted", provider: config.provider, sessionId });
+  } catch (e: any) {
+    replyError(ws, msg, e.message);
+  }
 }
 
 function handleAgentInterrupt(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {

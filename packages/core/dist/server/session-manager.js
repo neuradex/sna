@@ -18,7 +18,7 @@ class SessionManager {
     try {
       const db = getDb();
       const rows = db.prepare(
-        `SELECT id, label, meta, cwd, created_at FROM chat_sessions`
+        `SELECT id, label, meta, cwd, last_start_config, created_at FROM chat_sessions`
       ).all();
       for (const row of rows) {
         if (this.sessions.has(row.id)) continue;
@@ -31,6 +31,7 @@ class SessionManager {
           cwd: row.cwd ?? process.cwd(),
           meta: row.meta ? JSON.parse(row.meta) : null,
           state: "idle",
+          lastStartConfig: row.last_start_config ? JSON.parse(row.last_start_config) : null,
           createdAt: new Date(row.created_at).getTime() || Date.now(),
           lastActivityAt: Date.now()
         });
@@ -43,8 +44,14 @@ class SessionManager {
     try {
       const db = getDb();
       db.prepare(
-        `INSERT OR REPLACE INTO chat_sessions (id, label, type, meta, cwd) VALUES (?, ?, 'main', ?, ?)`
-      ).run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null, session.cwd);
+        `INSERT OR REPLACE INTO chat_sessions (id, label, type, meta, cwd, last_start_config) VALUES (?, ?, 'main', ?, ?, ?)`
+      ).run(
+        session.id,
+        session.label,
+        session.meta ? JSON.stringify(session.meta) : null,
+        session.cwd,
+        session.lastStartConfig ? JSON.stringify(session.lastStartConfig) : null
+      );
     } catch {
     }
   }
@@ -82,6 +89,7 @@ class SessionManager {
       cwd: opts.cwd ?? process.cwd(),
       meta: opts.meta ?? null,
       state: "idle",
+      lastStartConfig: null,
       createdAt: Date.now(),
       lastActivityAt: Date.now()
     };
@@ -218,6 +226,34 @@ class SessionManager {
   }
   // ── Session lifecycle ─────────────────────────────────────────
   /** Kill the agent process in a session (session stays, can be restarted). */
+  /** Save the start config for a session (called by start handlers). */
+  saveStartConfig(id, config) {
+    const session = this.sessions.get(id);
+    if (!session) return;
+    session.lastStartConfig = config;
+    this.persistSession(session);
+  }
+  /** Restart session: kill → re-spawn with merged config + --resume. */
+  restartSession(id, overrides, spawnFn) {
+    const session = this.sessions.get(id);
+    if (!session) throw new Error(`Session "${id}" not found`);
+    const base = session.lastStartConfig;
+    if (!base) throw new Error(`Session "${id}" has no previous start config`);
+    const config = {
+      provider: overrides.provider ?? base.provider,
+      model: overrides.model ?? base.model,
+      permissionMode: overrides.permissionMode ?? base.permissionMode,
+      extraArgs: overrides.extraArgs ?? base.extraArgs
+    };
+    if (session.process?.alive) session.process.kill();
+    session.eventBuffer.length = 0;
+    const proc = spawnFn(config);
+    this.setProcess(id, proc);
+    session.lastStartConfig = config;
+    this.persistSession(session);
+    this.emitLifecycle({ session: id, state: "restarted" });
+    return { config };
+  }
   /** Interrupt the current turn (SIGINT). Process stays alive, returns to waiting. */
   interruptSession(id) {
     const session = this.sessions.get(id);

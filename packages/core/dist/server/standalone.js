@@ -53,6 +53,9 @@ function migrateChatSessionsMeta(db) {
   if (cols.length > 0 && !cols.some((c) => c.name === "cwd")) {
     db.exec("ALTER TABLE chat_sessions ADD COLUMN cwd TEXT");
   }
+  if (cols.length > 0 && !cols.some((c) => c.name === "last_start_config")) {
+    db.exec("ALTER TABLE chat_sessions ADD COLUMN last_start_config TEXT");
+  }
 }
 function initSchema(db) {
   migrateSkillEvents(db);
@@ -64,6 +67,7 @@ function initSchema(db) {
       type       TEXT NOT NULL DEFAULT 'main',
       meta       TEXT,
       cwd        TEXT,
+      last_start_config TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -752,16 +756,21 @@ function createAgentRoutes(sessionManager2) {
       }
     } catch {
     }
+    const providerName = body.provider ?? "claude-code";
+    const model = body.model ?? "claude-sonnet-4-6";
+    const permissionMode2 = body.permissionMode ?? "acceptEdits";
+    const extraArgs = body.extraArgs;
     try {
       const proc = provider2.spawn({
         cwd: session.cwd,
         prompt: body.prompt,
-        model: body.model ?? "claude-sonnet-4-6",
-        permissionMode: body.permissionMode ?? "acceptEdits",
+        model,
+        permissionMode: permissionMode2,
         env: { SNA_SESSION_ID: sessionId },
-        extraArgs: body.extraArgs
+        extraArgs
       });
       sessionManager2.setProcess(sessionId, proc);
+      sessionManager2.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, extraArgs });
       logger.log("route", `POST /start?session=${sessionId} \u2192 started`);
       return httpJson(c, "agent.start", {
         status: "started",
@@ -832,6 +841,31 @@ function createAgentRoutes(sessionManager2) {
         await new Promise((r) => setTimeout(r, POLL_MS));
       }
     });
+  });
+  app.post("/restart", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      const { config } = sessionManager2.restartSession(sessionId, body, (cfg) => {
+        const prov = getProvider(cfg.provider);
+        return prov.spawn({
+          cwd: sessionManager2.getSession(sessionId).cwd,
+          model: cfg.model,
+          permissionMode: cfg.permissionMode,
+          env: { SNA_SESSION_ID: sessionId },
+          extraArgs: [...cfg.extraArgs ?? [], "--resume"]
+        });
+      });
+      logger.log("route", `POST /restart?session=${sessionId} \u2192 restarted`);
+      return httpJson(c, "agent.restart", {
+        status: "restarted",
+        provider: config.provider,
+        sessionId
+      });
+    } catch (e) {
+      logger.err("err", `POST /restart?session=${sessionId} \u2192 ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 500);
+    }
   });
   app.post("/interrupt", async (c) => {
     const sessionId = getSessionId(c);
@@ -994,7 +1028,7 @@ var SessionManager = class {
     try {
       const db = getDb();
       const rows = db.prepare(
-        `SELECT id, label, meta, cwd, created_at FROM chat_sessions`
+        `SELECT id, label, meta, cwd, last_start_config, created_at FROM chat_sessions`
       ).all();
       for (const row of rows) {
         if (this.sessions.has(row.id)) continue;
@@ -1007,6 +1041,7 @@ var SessionManager = class {
           cwd: row.cwd ?? process.cwd(),
           meta: row.meta ? JSON.parse(row.meta) : null,
           state: "idle",
+          lastStartConfig: row.last_start_config ? JSON.parse(row.last_start_config) : null,
           createdAt: new Date(row.created_at).getTime() || Date.now(),
           lastActivityAt: Date.now()
         });
@@ -1019,8 +1054,14 @@ var SessionManager = class {
     try {
       const db = getDb();
       db.prepare(
-        `INSERT OR REPLACE INTO chat_sessions (id, label, type, meta, cwd) VALUES (?, ?, 'main', ?, ?)`
-      ).run(session.id, session.label, session.meta ? JSON.stringify(session.meta) : null, session.cwd);
+        `INSERT OR REPLACE INTO chat_sessions (id, label, type, meta, cwd, last_start_config) VALUES (?, ?, 'main', ?, ?, ?)`
+      ).run(
+        session.id,
+        session.label,
+        session.meta ? JSON.stringify(session.meta) : null,
+        session.cwd,
+        session.lastStartConfig ? JSON.stringify(session.lastStartConfig) : null
+      );
     } catch {
     }
   }
@@ -1058,6 +1099,7 @@ var SessionManager = class {
       cwd: opts.cwd ?? process.cwd(),
       meta: opts.meta ?? null,
       state: "idle",
+      lastStartConfig: null,
       createdAt: Date.now(),
       lastActivityAt: Date.now()
     };
@@ -1194,6 +1236,34 @@ var SessionManager = class {
   }
   // ── Session lifecycle ─────────────────────────────────────────
   /** Kill the agent process in a session (session stays, can be restarted). */
+  /** Save the start config for a session (called by start handlers). */
+  saveStartConfig(id, config) {
+    const session = this.sessions.get(id);
+    if (!session) return;
+    session.lastStartConfig = config;
+    this.persistSession(session);
+  }
+  /** Restart session: kill → re-spawn with merged config + --resume. */
+  restartSession(id, overrides, spawnFn) {
+    const session = this.sessions.get(id);
+    if (!session) throw new Error(`Session "${id}" not found`);
+    const base = session.lastStartConfig;
+    if (!base) throw new Error(`Session "${id}" has no previous start config`);
+    const config = {
+      provider: overrides.provider ?? base.provider,
+      model: overrides.model ?? base.model,
+      permissionMode: overrides.permissionMode ?? base.permissionMode,
+      extraArgs: overrides.extraArgs ?? base.extraArgs
+    };
+    if (session.process?.alive) session.process.kill();
+    session.eventBuffer.length = 0;
+    const proc = spawnFn(config);
+    this.setProcess(id, proc);
+    session.lastStartConfig = config;
+    this.persistSession(session);
+    this.emitLifecycle({ session: id, state: "restarted" });
+    return { config };
+  }
   /** Interrupt the current turn (SIGINT). Process stays alive, returns to waiting. */
   interruptSession(id) {
     const session = this.sessions.get(id);
@@ -1363,6 +1433,8 @@ function handleMessage(ws, msg, sm, state) {
       return handleAgentStart(ws, msg, sm);
     case "agent.send":
       return handleAgentSend(ws, msg, sm);
+    case "agent.restart":
+      return handleAgentRestart(ws, msg, sm);
     case "agent.interrupt":
       return handleAgentInterrupt(ws, msg, sm);
     case "agent.kill":
@@ -1455,16 +1527,21 @@ function handleAgentStart(ws, msg, sm) {
     }
   } catch {
   }
+  const providerName = msg.provider ?? "claude-code";
+  const model = msg.model ?? "claude-sonnet-4-6";
+  const permissionMode2 = msg.permissionMode ?? "acceptEdits";
+  const extraArgs = msg.extraArgs;
   try {
     const proc = provider2.spawn({
       cwd: session.cwd,
       prompt: msg.prompt,
-      model: msg.model ?? "claude-sonnet-4-6",
-      permissionMode: msg.permissionMode ?? "acceptEdits",
+      model,
+      permissionMode: permissionMode2,
       env: { SNA_SESSION_ID: sessionId },
-      extraArgs: msg.extraArgs
+      extraArgs
     });
     sm.setProcess(sessionId, proc);
+    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, extraArgs });
     wsReply(ws, msg, { status: "started", provider: provider2.name, sessionId: session.id });
   } catch (e) {
     replyError(ws, msg, e.message);
@@ -1489,6 +1566,33 @@ function handleAgentSend(ws, msg, sm) {
   sm.touch(sessionId);
   session.process.send(msg.message);
   wsReply(ws, msg, { status: "sent" });
+}
+function handleAgentRestart(ws, msg, sm) {
+  const sessionId = msg.session ?? "default";
+  try {
+    const { config } = sm.restartSession(
+      sessionId,
+      {
+        provider: msg.provider,
+        model: msg.model,
+        permissionMode: msg.permissionMode,
+        extraArgs: msg.extraArgs
+      },
+      (cfg) => {
+        const prov = getProvider(cfg.provider);
+        return prov.spawn({
+          cwd: sm.getSession(sessionId).cwd,
+          model: cfg.model,
+          permissionMode: cfg.permissionMode,
+          env: { SNA_SESSION_ID: sessionId },
+          extraArgs: [...cfg.extraArgs ?? [], "--resume"]
+        });
+      }
+    );
+    wsReply(ws, msg, { status: "restarted", provider: config.provider, sessionId });
+  } catch (e) {
+    replyError(ws, msg, e.message);
+  }
 }
 function handleAgentInterrupt(ws, msg, sm) {
   const sessionId = msg.session ?? "default";

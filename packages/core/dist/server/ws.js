@@ -79,6 +79,8 @@ function handleMessage(ws, msg, sm, state) {
       return handleAgentStart(ws, msg, sm);
     case "agent.send":
       return handleAgentSend(ws, msg, sm);
+    case "agent.restart":
+      return handleAgentRestart(ws, msg, sm);
     case "agent.interrupt":
       return handleAgentInterrupt(ws, msg, sm);
     case "agent.kill":
@@ -171,16 +173,21 @@ function handleAgentStart(ws, msg, sm) {
     }
   } catch {
   }
+  const providerName = msg.provider ?? "claude-code";
+  const model = msg.model ?? "claude-sonnet-4-6";
+  const permissionMode = msg.permissionMode ?? "acceptEdits";
+  const extraArgs = msg.extraArgs;
   try {
     const proc = provider.spawn({
       cwd: session.cwd,
       prompt: msg.prompt,
-      model: msg.model ?? "claude-sonnet-4-6",
-      permissionMode: msg.permissionMode ?? "acceptEdits",
+      model,
+      permissionMode,
       env: { SNA_SESSION_ID: sessionId },
-      extraArgs: msg.extraArgs
+      extraArgs
     });
     sm.setProcess(sessionId, proc);
+    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
     wsReply(ws, msg, { status: "started", provider: provider.name, sessionId: session.id });
   } catch (e) {
     replyError(ws, msg, e.message);
@@ -205,6 +212,33 @@ function handleAgentSend(ws, msg, sm) {
   sm.touch(sessionId);
   session.process.send(msg.message);
   wsReply(ws, msg, { status: "sent" });
+}
+function handleAgentRestart(ws, msg, sm) {
+  const sessionId = msg.session ?? "default";
+  try {
+    const { config } = sm.restartSession(
+      sessionId,
+      {
+        provider: msg.provider,
+        model: msg.model,
+        permissionMode: msg.permissionMode,
+        extraArgs: msg.extraArgs
+      },
+      (cfg) => {
+        const prov = getProvider(cfg.provider);
+        return prov.spawn({
+          cwd: sm.getSession(sessionId).cwd,
+          model: cfg.model,
+          permissionMode: cfg.permissionMode,
+          env: { SNA_SESSION_ID: sessionId },
+          extraArgs: [...cfg.extraArgs ?? [], "--resume"]
+        });
+      }
+    );
+    wsReply(ws, msg, { status: "restarted", provider: config.provider, sessionId });
+  } catch (e) {
+    replyError(ws, msg, e.message);
+  }
 }
 function handleAgentInterrupt(ws, msg, sm) {
   const sessionId = msg.session ?? "default";

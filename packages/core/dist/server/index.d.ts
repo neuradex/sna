@@ -1,7 +1,7 @@
 import * as hono_types from 'hono/types';
 import { Hono } from 'hono';
 import { SessionManager } from './session-manager.js';
-export { Session, SessionInfo, SessionLifecycleEvent, SessionLifecycleState, SessionManagerOptions } from './session-manager.js';
+export { Session, SessionInfo, SessionLifecycleEvent, SessionLifecycleState, SessionManagerOptions, StartConfig } from './session-manager.js';
 export { eventsRoute } from './routes/events.js';
 export { createEmitRoute, emitRoute } from './routes/emit.js';
 export { createRunRoute } from './routes/run.js';

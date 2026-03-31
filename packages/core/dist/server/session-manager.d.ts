@@ -8,6 +8,12 @@ import { AgentProcess, AgentEvent } from '../core/providers/types.js';
  */
 
 type SessionState = "idle" | "processing" | "waiting" | "permission";
+interface StartConfig {
+    provider: string;
+    model: string;
+    permissionMode: string;
+    extraArgs?: string[];
+}
 interface Session {
     id: string;
     process: AgentProcess | null;
@@ -17,6 +23,7 @@ interface Session {
     cwd: string;
     meta: Record<string, unknown> | null;
     state: SessionState;
+    lastStartConfig: StartConfig | null;
     createdAt: number;
     lastActivityAt: number;
 }
@@ -34,7 +41,7 @@ interface SessionInfo {
 interface SessionManagerOptions {
     maxSessions?: number;
 }
-type SessionLifecycleState = "started" | "killed" | "exited" | "crashed";
+type SessionLifecycleState = "started" | "killed" | "exited" | "crashed" | "restarted";
 interface SessionLifecycleEvent {
     session: string;
     state: SessionLifecycleState;
@@ -96,6 +103,12 @@ declare class SessionManager {
         createdAt: number;
     }>;
     /** Kill the agent process in a session (session stays, can be restarted). */
+    /** Save the start config for a session (called by start handlers). */
+    saveStartConfig(id: string, config: StartConfig): void;
+    /** Restart session: kill → re-spawn with merged config + --resume. */
+    restartSession(id: string, overrides: Partial<StartConfig>, spawnFn: (config: StartConfig) => AgentProcess): {
+        config: StartConfig;
+    };
     /** Interrupt the current turn (SIGINT). Process stays alive, returns to waiting. */
     interruptSession(id: string): boolean;
     /** Kill the agent process in a session (session stays, can be restarted). */
@@ -113,4 +126,4 @@ declare class SessionManager {
     get size(): number;
 }
 
-export { type Session, type SessionInfo, type SessionLifecycleEvent, type SessionLifecycleState, SessionManager, type SessionManagerOptions, type SessionState };
+export { type Session, type SessionInfo, type SessionLifecycleEvent, type SessionLifecycleState, SessionManager, type SessionManagerOptions, type SessionState, type StartConfig };
