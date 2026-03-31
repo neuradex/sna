@@ -50,6 +50,10 @@ interface SessionLifecycleEvent {
     state: SessionLifecycleState;
     code?: number | null;
 }
+interface SessionConfigChangedEvent {
+    session: string;
+    config: StartConfig;
+}
 declare class SessionManager {
     private sessions;
     private maxSessions;
@@ -58,6 +62,7 @@ declare class SessionManager {
     private skillEventListeners;
     private permissionRequestListeners;
     private lifecycleListeners;
+    private configChangedListeners;
     constructor(options?: SessionManagerOptions);
     /** Restore session metadata from DB (cwd, label, meta). Process state is not restored. */
     private restoreFromDb;
@@ -90,6 +95,9 @@ declare class SessionManager {
     /** Subscribe to session lifecycle events (started/killed/exited/crashed). Returns unsubscribe function. */
     onSessionLifecycle(cb: (event: SessionLifecycleEvent) => void): () => void;
     private emitLifecycle;
+    /** Subscribe to session config changes. Returns unsubscribe function. */
+    onConfigChanged(cb: (event: SessionConfigChangedEvent) => void): () => void;
+    private emitConfigChanged;
     /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
     createPendingPermission(sessionId: string, request: Record<string, unknown>): Promise<boolean>;
     /** Resolve a pending permission request. Returns false if no pending request. */
@@ -133,4 +141,4 @@ declare class SessionManager {
     get size(): number;
 }
 
-export { type Session, type SessionInfo, type SessionLifecycleEvent, type SessionLifecycleState, SessionManager, type SessionManagerOptions, type SessionState, type StartConfig };
+export { type Session, type SessionConfigChangedEvent, type SessionInfo, type SessionLifecycleEvent, type SessionLifecycleState, SessionManager, type SessionManagerOptions, type SessionState, type StartConfig };

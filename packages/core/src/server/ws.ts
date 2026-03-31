@@ -65,6 +65,7 @@ interface ConnState {
   skillPollTimer: ReturnType<typeof setInterval> | null;
   permissionUnsub: (() => void) | null;
   lifecycleUnsub: (() => void) | null;
+  configChangedUnsub: (() => void) | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -108,11 +109,16 @@ export function attachWebSocket(
 
   wss.on("connection", (ws) => {
     logger.log("ws", "client connected");
-    const state: ConnState = { agentUnsubs: new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null };
+    const state: ConnState = { agentUnsubs: new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null };
 
     // Auto-push session lifecycle events to all clients (no subscribe needed)
     state.lifecycleUnsub = sessionManager.onSessionLifecycle((event) => {
       send(ws, { type: "session.lifecycle", ...event });
+    });
+
+    // Auto-push config changes to all clients (no subscribe needed)
+    state.configChangedUnsub = sessionManager.onConfigChanged((event) => {
+      send(ws, { type: "session.config-changed", ...event });
     });
 
     ws.on("message", (raw) => {
@@ -144,6 +150,8 @@ export function attachWebSocket(
       state.permissionUnsub = null;
       state.lifecycleUnsub?.();
       state.lifecycleUnsub = null;
+      state.configChangedUnsub?.();
+      state.configChangedUnsub = null;
     });
   });
 

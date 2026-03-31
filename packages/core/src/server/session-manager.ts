@@ -64,6 +64,11 @@ export interface SessionLifecycleEvent {
   code?: number | null;
 }
 
+export interface SessionConfigChangedEvent {
+  session: string;
+  config: StartConfig;
+}
+
 const DEFAULT_MAX_SESSIONS = 5;
 const MAX_EVENT_BUFFER = 500;
 const PERMISSION_TIMEOUT_MS = 300_000; // 5 minutes
@@ -76,6 +81,7 @@ export class SessionManager {
   private skillEventListeners = new Set<(event: Record<string, unknown>) => void>();
   private permissionRequestListeners = new Set<(sessionId: string, request: Record<string, unknown>, createdAt: number) => void>();
   private lifecycleListeners = new Set<(event: SessionLifecycleEvent) => void>();
+  private configChangedListeners = new Set<(event: SessionConfigChangedEvent) => void>();
 
   constructor(options: SessionManagerOptions = {}) {
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
@@ -284,6 +290,18 @@ export class SessionManager {
     for (const cb of this.lifecycleListeners) cb(event);
   }
 
+  // ── Config changed pub/sub ────────────────────────────────────
+
+  /** Subscribe to session config changes. Returns unsubscribe function. */
+  onConfigChanged(cb: (event: SessionConfigChangedEvent) => void): () => void {
+    this.configChangedListeners.add(cb);
+    return () => this.configChangedListeners.delete(cb);
+  }
+
+  private emitConfigChanged(sessionId: string, config: StartConfig): void {
+    for (const cb of this.configChangedListeners) cb({ session: sessionId, config });
+  }
+
   // ── Permission management ─────────────────────────────────────
 
   /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
@@ -373,6 +391,7 @@ export class SessionManager {
     session.lastStartConfig = config;
     this.persistSession(session);
     this.emitLifecycle({ session: id, state: "restarted" });
+    this.emitConfigChanged(id, config);
 
     return { config };
   }
@@ -394,6 +413,7 @@ export class SessionManager {
     if (session.lastStartConfig) {
       session.lastStartConfig.model = model;
       this.persistSession(session);
+      this.emitConfigChanged(id, session.lastStartConfig);
     }
     return true;
   }
@@ -406,6 +426,7 @@ export class SessionManager {
     if (session.lastStartConfig) {
       session.lastStartConfig.permissionMode = mode;
       this.persistSession(session);
+      this.emitConfigChanged(id, session.lastStartConfig);
     }
     return true;
   }

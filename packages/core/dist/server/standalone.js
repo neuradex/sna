@@ -1065,6 +1065,7 @@ var SessionManager = class {
     this.skillEventListeners = /* @__PURE__ */ new Set();
     this.permissionRequestListeners = /* @__PURE__ */ new Set();
     this.lifecycleListeners = /* @__PURE__ */ new Set();
+    this.configChangedListeners = /* @__PURE__ */ new Set();
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
     this.restoreFromDb();
   }
@@ -1245,6 +1246,15 @@ var SessionManager = class {
   emitLifecycle(event) {
     for (const cb of this.lifecycleListeners) cb(event);
   }
+  // ── Config changed pub/sub ────────────────────────────────────
+  /** Subscribe to session config changes. Returns unsubscribe function. */
+  onConfigChanged(cb) {
+    this.configChangedListeners.add(cb);
+    return () => this.configChangedListeners.delete(cb);
+  }
+  emitConfigChanged(sessionId, config) {
+    for (const cb of this.configChangedListeners) cb({ session: sessionId, config });
+  }
   // ── Permission management ─────────────────────────────────────
   /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
   createPendingPermission(sessionId, request) {
@@ -1313,6 +1323,7 @@ var SessionManager = class {
     session.lastStartConfig = config;
     this.persistSession(session);
     this.emitLifecycle({ session: id, state: "restarted" });
+    this.emitConfigChanged(id, config);
     return { config };
   }
   /** Interrupt the current turn. Process stays alive, returns to waiting. */
@@ -1331,6 +1342,7 @@ var SessionManager = class {
     if (session.lastStartConfig) {
       session.lastStartConfig.model = model;
       this.persistSession(session);
+      this.emitConfigChanged(id, session.lastStartConfig);
     }
     return true;
   }
@@ -1342,6 +1354,7 @@ var SessionManager = class {
     if (session.lastStartConfig) {
       session.lastStartConfig.permissionMode = mode;
       this.persistSession(session);
+      this.emitConfigChanged(id, session.lastStartConfig);
     }
     return true;
   }
@@ -1457,9 +1470,12 @@ function attachWebSocket(server2, sessionManager2) {
   });
   wss.on("connection", (ws) => {
     logger.log("ws", "client connected");
-    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null };
+    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null };
     state.lifecycleUnsub = sessionManager2.onSessionLifecycle((event) => {
       send(ws, { type: "session.lifecycle", ...event });
+    });
+    state.configChangedUnsub = sessionManager2.onConfigChanged((event) => {
+      send(ws, { type: "session.config-changed", ...event });
     });
     ws.on("message", (raw) => {
       let msg;
@@ -1489,6 +1505,8 @@ function attachWebSocket(server2, sessionManager2) {
       state.permissionUnsub = null;
       state.lifecycleUnsub?.();
       state.lifecycleUnsub = null;
+      state.configChangedUnsub?.();
+      state.configChangedUnsub = null;
     });
   });
   return wss;

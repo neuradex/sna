@@ -10,6 +10,7 @@ class SessionManager {
     this.skillEventListeners = /* @__PURE__ */ new Set();
     this.permissionRequestListeners = /* @__PURE__ */ new Set();
     this.lifecycleListeners = /* @__PURE__ */ new Set();
+    this.configChangedListeners = /* @__PURE__ */ new Set();
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
     this.restoreFromDb();
   }
@@ -190,6 +191,15 @@ class SessionManager {
   emitLifecycle(event) {
     for (const cb of this.lifecycleListeners) cb(event);
   }
+  // ── Config changed pub/sub ────────────────────────────────────
+  /** Subscribe to session config changes. Returns unsubscribe function. */
+  onConfigChanged(cb) {
+    this.configChangedListeners.add(cb);
+    return () => this.configChangedListeners.delete(cb);
+  }
+  emitConfigChanged(sessionId, config) {
+    for (const cb of this.configChangedListeners) cb({ session: sessionId, config });
+  }
   // ── Permission management ─────────────────────────────────────
   /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
   createPendingPermission(sessionId, request) {
@@ -258,6 +268,7 @@ class SessionManager {
     session.lastStartConfig = config;
     this.persistSession(session);
     this.emitLifecycle({ session: id, state: "restarted" });
+    this.emitConfigChanged(id, config);
     return { config };
   }
   /** Interrupt the current turn. Process stays alive, returns to waiting. */
@@ -276,6 +287,7 @@ class SessionManager {
     if (session.lastStartConfig) {
       session.lastStartConfig.model = model;
       this.persistSession(session);
+      this.emitConfigChanged(id, session.lastStartConfig);
     }
     return true;
   }
@@ -287,6 +299,7 @@ class SessionManager {
     if (session.lastStartConfig) {
       session.lastStartConfig.permissionMode = mode;
       this.persistSession(session);
+      this.emitConfigChanged(id, session.lastStartConfig);
     }
     return true;
   }
