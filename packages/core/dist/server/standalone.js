@@ -1018,7 +1018,22 @@ var SessionManager = class {
   createSession(opts = {}) {
     const id = opts.id ?? crypto.randomUUID().slice(0, 8);
     if (this.sessions.has(id)) {
-      return this.sessions.get(id);
+      const existing = this.sessions.get(id);
+      let changed = false;
+      if (opts.cwd && opts.cwd !== existing.cwd) {
+        existing.cwd = opts.cwd;
+        changed = true;
+      }
+      if (opts.label && opts.label !== existing.label) {
+        existing.label = opts.label;
+        changed = true;
+      }
+      if (opts.meta !== void 0 && opts.meta !== existing.meta) {
+        existing.meta = opts.meta ?? null;
+        changed = true;
+      }
+      if (changed) this.persistSession(existing);
+      return existing;
     }
     const aliveCount = Array.from(this.sessions.values()).filter((s) => s.process?.alive).length;
     if (aliveCount >= this.maxSessions) {
