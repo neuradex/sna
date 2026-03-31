@@ -139,9 +139,10 @@ This server provides:
 - Full bidirectional API wrapping all HTTP routes over a single connection
 - Agent events pushed instantly via pub/sub (no polling delay)
 - `ApiResponses` type contract enforces HTTP/WS response shape parity at compile time
-- Push events (no subscribe needed): `session.lifecycle` (started/killed/exited/crashed/restarted)
-- Push events (subscribe needed): `agent.event`, `skill.event`, `permission.request`
+- Auto-push (no subscribe needed): `session.lifecycle` (started/killed/exited/crashed/restarted), `session.config-changed` (model/permissionMode changes)
+- Push (subscribe needed): `agent.event` (includes `interrupted` type for turn cancellation), `skill.event`, `permission.request`
 - Runtime config: `agent.set-model` and `agent.set-permission-mode` change settings without restart
+- Session info includes `ccSessionId` (Claude Code's own session ID) and `config` (StartConfig: model, permissionMode, provider)
 
 Applications discover the server URL via `/api/sna-port` or the default port (3099).
 
@@ -162,6 +163,10 @@ sna gen client --out src/sna-client.ts
 ```
 
 See [Skill Authoring](skill-authoring.md) for frontmatter schema and [App Setup](app-setup.md) for usage.
+
+### Test Utilities
+
+`sna tu` provides a mock Anthropic API server for testing without real API calls. Set `SNA_CLAUDE_COMMAND` to override the claude binary (e.g., `sna tu claude` for isolated testing). See [Testing Guide](testing.md) for details.
 
 ### Application Responsibilities
 

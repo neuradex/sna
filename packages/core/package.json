@@ -65,9 +65,9 @@
       "default": "./dist/lib/sna-run.js"
     },
     "./testing": {
-      "source": "./test/mock-anthropic-server.ts",
-      "types": "./dist/testing/mock-anthropic-server.d.ts",
-      "default": "./dist/testing/mock-anthropic-server.js"
+      "source": "./src/testing/mock-api.ts",
+      "types": "./dist/testing/mock-api.d.ts",
+      "default": "./dist/testing/mock-api.js"
     }
   },
   "scripts": {

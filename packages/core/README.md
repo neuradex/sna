@@ -84,6 +84,7 @@ const db = getDb(); // SQLite instance (data/sna.db)
 | `@sna-sdk/core/db/schema` | `getDb()`, `ChatSession`, `ChatMessage`, `SkillEvent` types |
 | `@sna-sdk/core/providers` | Agent provider factory, `ClaudeCodeProvider` |
 | `@sna-sdk/core/lib/sna-run` | `snaRun()` helper for spawning Claude Code |
+| `@sna-sdk/core/testing` | `startMockAnthropicServer()` for testing without real API calls |
 
 ## Documentation
 
