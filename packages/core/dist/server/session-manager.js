@@ -128,9 +128,11 @@ class SessionManager {
       }
     });
     proc.on("exit", (code) => {
+      session.state = "idle";
       this.emitLifecycle({ session: sessionId, state: code != null ? "exited" : "crashed", code });
     });
     proc.on("error", () => {
+      session.state = "idle";
       this.emitLifecycle({ session: sessionId, state: "crashed" });
     });
     this.emitLifecycle({ session: sessionId, state: "started" });

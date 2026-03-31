@@ -226,7 +226,7 @@ class ClaudeCodeProcess implements AgentProcess {
             timestamp: Date.now(),
           };
         }
-        if (msg.subtype === "error" || msg.is_error) {
+        if (msg.subtype?.startsWith("error") || msg.is_error) {
           return {
             type: "error",
             message: msg.result ?? msg.error ?? "Unknown error",

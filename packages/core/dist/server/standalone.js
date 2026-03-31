@@ -491,7 +491,7 @@ var ClaudeCodeProcess = class {
             timestamp: Date.now()
           };
         }
-        if (msg.subtype === "error" || msg.is_error) {
+        if (msg.subtype?.startsWith("error") || msg.is_error) {
           return {
             type: "error",
             message: msg.result ?? msg.error ?? "Unknown error",
@@ -1094,9 +1094,11 @@ var SessionManager = class {
       }
     });
     proc.on("exit", (code) => {
+      session.state = "idle";
       this.emitLifecycle({ session: sessionId, state: code != null ? "exited" : "crashed", code });
     });
     proc.on("error", () => {
+      session.state = "idle";
       this.emitLifecycle({ session: sessionId, state: "crashed" });
     });
     this.emitLifecycle({ session: sessionId, state: "started" });
