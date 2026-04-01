@@ -49,6 +49,7 @@ import { getDb } from "../db/schema.js";
 import { logger } from "../lib/logger.js";
 import { runOnce, type RunOnceOptions } from "./routes/agent.js";
 import { wsReply } from "./api-types.js";
+import { saveImages } from "./image-store.js";
 import type { SessionManager } from "./session-manager.js";
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -335,12 +336,17 @@ function handleAgentSend(ws: WebSocket, msg: WsRequest, sm: SessionManager): voi
   }
 
   const textContent = (msg.message as string) ?? "(image)";
+  let meta: Record<string, unknown> = msg.meta ? { ...(msg.meta as Record<string, unknown>) } : {};
+  if (images?.length) {
+    const filenames = saveImages(sessionId, images);
+    meta.images = filenames;
+  }
   try {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`)
       .run(sessionId, session.label ?? sessionId);
     db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`)
-      .run(sessionId, textContent, msg.meta ? JSON.stringify(msg.meta) : null);
+      .run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
   } catch { /* non-fatal */ }
 
   session.state = "processing";

@@ -4,6 +4,7 @@ import { getDb } from "../db/schema.js";
 import { logger } from "../lib/logger.js";
 import { runOnce } from "./routes/agent.js";
 import { wsReply } from "./api-types.js";
+import { saveImages } from "./image-store.js";
 function send(ws, data) {
   if (ws.readyState === ws.OPEN) {
     ws.send(JSON.stringify(data));
@@ -214,10 +215,15 @@ function handleAgentSend(ws, msg, sm) {
     return replyError(ws, msg, "message or images required");
   }
   const textContent = msg.message ?? "(image)";
+  let meta = msg.meta ? { ...msg.meta } : {};
+  if (images?.length) {
+    const filenames = saveImages(sessionId, images);
+    meta.images = filenames;
+  }
   try {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
-    db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, msg.meta ? JSON.stringify(msg.meta) : null);
+    db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
   } catch {
   }
   session.state = "processing";

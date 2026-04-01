@@ -6,6 +6,7 @@ import {
 import { logger } from "../../lib/logger.js";
 import { getDb } from "../../db/schema.js";
 import { httpJson } from "../api-types.js";
+import { saveImages } from "../image-store.js";
 function getSessionId(c) {
   return c.req.query("session") ?? "default";
 }
@@ -182,10 +183,15 @@ function createAgentRoutes(sessionManager) {
       return c.json({ status: "error", message: "message or images required" }, 400);
     }
     const textContent = body.message ?? "(image)";
+    let meta = body.meta ? { ...body.meta } : {};
+    if (body.images?.length) {
+      const filenames = saveImages(sessionId, body.images);
+      meta.images = filenames;
+    }
     try {
       const db = getDb();
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
-      db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, body.meta ? JSON.stringify(body.meta) : null);
+      db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
     } catch {
     }
     session.state = "processing";

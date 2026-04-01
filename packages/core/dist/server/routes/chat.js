@@ -1,6 +1,8 @@
 import { Hono } from "hono";
+import fs from "fs";
 import { getDb } from "../../db/schema.js";
 import { httpJson } from "../api-types.js";
+import { resolveImagePath } from "../image-store.js";
 function createChatRoutes() {
   const app = new Hono();
   app.get("/sessions", (c) => {
@@ -88,6 +90,26 @@ function createChatRoutes() {
     } catch (e) {
       return c.json({ status: "error", message: e.message }, 500);
     }
+  });
+  app.get("/images/:sessionId/:filename", (c) => {
+    const sessionId = c.req.param("sessionId");
+    const filename = c.req.param("filename");
+    const filePath = resolveImagePath(sessionId, filename);
+    if (!filePath) {
+      return c.json({ status: "error", message: "Image not found" }, 404);
+    }
+    const ext = filename.split(".").pop()?.toLowerCase();
+    const mimeMap = {
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      gif: "image/gif",
+      webp: "image/webp",
+      svg: "image/svg+xml"
+    };
+    const contentType = mimeMap[ext ?? ""] ?? "application/octet-stream";
+    const data = fs.readFileSync(filePath);
+    return new Response(data, { headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=31536000, immutable" } });
   });
   return app;
 }

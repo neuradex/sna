@@ -3,6 +3,7 @@
  *
  * Routes:
  *   GET    /sessions              — list all chat sessions
+ *   GET    /images/:sessionId/:filename — serve a stored image
  *   POST   /sessions              — create a chat session
  *   DELETE /sessions/:id          — delete a chat session
  *   GET    /sessions/:id/messages — get messages for a session
@@ -11,8 +12,10 @@
  */
 
 import { Hono } from "hono";
+import fs from "fs";
 import { getDb } from "../../db/schema.js";
 import { httpJson } from "../api-types.js";
+import { resolveImagePath } from "../image-store.js";
 
 export function createChatRoutes() {
   const app = new Hono();
@@ -128,6 +131,24 @@ export function createChatRoutes() {
     } catch (e: any) {
       return c.json({ status: "error", message: e.message }, 500);
     }
+  });
+
+  // GET /images/:sessionId/:filename — serve stored image
+  app.get("/images/:sessionId/:filename", (c) => {
+    const sessionId = c.req.param("sessionId");
+    const filename = c.req.param("filename");
+    const filePath = resolveImagePath(sessionId, filename);
+    if (!filePath) {
+      return c.json({ status: "error", message: "Image not found" }, 404);
+    }
+    const ext = filename.split(".").pop()?.toLowerCase();
+    const mimeMap: Record<string, string> = {
+      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+      gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
+    };
+    const contentType = mimeMap[ext ?? ""] ?? "application/octet-stream";
+    const data = fs.readFileSync(filePath);
+    return new Response(data, { headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=31536000, immutable" } });
   });
 
   return app;

@@ -682,6 +682,38 @@ function getProvider(name = "claude-code") {
   return provider2;
 }
 
+// src/server/image-store.ts
+import fs4 from "fs";
+import path4 from "path";
+import { createHash } from "crypto";
+var IMAGE_DIR = path4.join(process.cwd(), "data/images");
+var MIME_TO_EXT = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/svg+xml": "svg"
+};
+function saveImages(sessionId, images) {
+  const dir = path4.join(IMAGE_DIR, sessionId);
+  fs4.mkdirSync(dir, { recursive: true });
+  return images.map((img) => {
+    const ext = MIME_TO_EXT[img.mimeType] ?? "bin";
+    const hash = createHash("sha256").update(img.base64).digest("hex").slice(0, 12);
+    const filename = `${hash}.${ext}`;
+    const filePath = path4.join(dir, filename);
+    if (!fs4.existsSync(filePath)) {
+      fs4.writeFileSync(filePath, Buffer.from(img.base64, "base64"));
+    }
+    return filename;
+  });
+}
+function resolveImagePath(sessionId, filename) {
+  if (filename.includes("..") || filename.includes("/")) return null;
+  const filePath = path4.join(IMAGE_DIR, sessionId, filename);
+  return fs4.existsSync(filePath) ? filePath : null;
+}
+
 // src/server/routes/agent.ts
 function getSessionId(c) {
   return c.req.query("session") ?? "default";
@@ -859,10 +891,15 @@ function createAgentRoutes(sessionManager2) {
       return c.json({ status: "error", message: "message or images required" }, 400);
     }
     const textContent = body.message ?? "(image)";
+    let meta = body.meta ? { ...body.meta } : {};
+    if (body.images?.length) {
+      const filenames = saveImages(sessionId, body.images);
+      meta.images = filenames;
+    }
     try {
       const db = getDb();
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
-      db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, body.meta ? JSON.stringify(body.meta) : null);
+      db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
     } catch {
     }
     session.state = "processing";
@@ -1009,6 +1046,7 @@ function createAgentRoutes(sessionManager2) {
 
 // src/server/routes/chat.ts
 import { Hono as Hono2 } from "hono";
+import fs5 from "fs";
 function createChatRoutes() {
   const app = new Hono2();
   app.get("/sessions", (c) => {
@@ -1096,6 +1134,26 @@ function createChatRoutes() {
     } catch (e) {
       return c.json({ status: "error", message: e.message }, 500);
     }
+  });
+  app.get("/images/:sessionId/:filename", (c) => {
+    const sessionId = c.req.param("sessionId");
+    const filename = c.req.param("filename");
+    const filePath = resolveImagePath(sessionId, filename);
+    if (!filePath) {
+      return c.json({ status: "error", message: "Image not found" }, 404);
+    }
+    const ext = filename.split(".").pop()?.toLowerCase();
+    const mimeMap = {
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      gif: "image/gif",
+      webp: "image/webp",
+      svg: "image/svg+xml"
+    };
+    const contentType = mimeMap[ext ?? ""] ?? "application/octet-stream";
+    const data = fs5.readFileSync(filePath);
+    return new Response(data, { headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=31536000, immutable" } });
   });
   return app;
 }
@@ -1713,10 +1771,15 @@ function handleAgentSend(ws, msg, sm) {
     return replyError(ws, msg, "message or images required");
   }
   const textContent = msg.message ?? "(image)";
+  let meta = msg.meta ? { ...msg.meta } : {};
+  if (images?.length) {
+    const filenames = saveImages(sessionId, images);
+    meta.images = filenames;
+  }
   try {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
-    db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, msg.meta ? JSON.stringify(msg.meta) : null);
+    db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
   } catch {
   }
   session.state = "processing";
@@ -2072,8 +2135,8 @@ var methodColor = {
 root.use("*", async (c, next) => {
   const m = c.req.method;
   const colorFn = methodColor[m] ?? chalk2.white;
-  const path4 = new URL(c.req.url).pathname;
-  logger.log("req", `${colorFn(m.padEnd(6))} ${path4}`);
+  const path5 = new URL(c.req.url).pathname;
+  logger.log("req", `${colorFn(m.padEnd(6))} ${path5}`);
   await next();
 });
 var sessionManager = new SessionManager({ maxSessions });
