@@ -1503,10 +1503,10 @@ var SessionManager = class {
     if (session) this.setSessionState(sessionId, session, newState);
   }
   setSessionState(sessionId, session, newState) {
-    const oldStatus = !session.process?.alive ? "disconnected" : session.state === "processing" ? "busy" : "idle";
+    const oldState = session.state;
     session.state = newState;
     const newStatus = !session.process?.alive ? "disconnected" : newState === "processing" ? "busy" : "idle";
-    if (oldStatus !== newStatus) {
+    if (oldState !== newState) {
       for (const cb of this.stateChangedListeners) cb({ session: sessionId, agentStatus: newStatus, state: newState });
     }
   }

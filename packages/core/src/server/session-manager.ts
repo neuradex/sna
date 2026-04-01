@@ -327,10 +327,10 @@ export class SessionManager {
   }
 
   private setSessionState(sessionId: string, session: Session, newState: SessionState): void {
-    const oldStatus = !session.process?.alive ? "disconnected" : (session.state === "processing" ? "busy" : "idle");
+    const oldState = session.state;
     session.state = newState;
     const newStatus: AgentStatus = !session.process?.alive ? "disconnected" : (newState === "processing" ? "busy" : "idle");
-    if (oldStatus !== newStatus) {
+    if (oldState !== newState) {
       for (const cb of this.stateChangedListeners) cb({ session: sessionId, agentStatus: newStatus, state: newState });
     }
   }
