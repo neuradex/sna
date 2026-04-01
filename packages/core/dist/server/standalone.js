@@ -266,23 +266,24 @@ function writeSessionJsonl(history, opts) {
     let prevUuid = null;
     for (const msg of history) {
       const uuid = crypto.randomUUID();
+      const common = {
+        uuid,
+        parentUuid: prevUuid,
+        isSidechain: false,
+        sessionId,
+        timestamp: now,
+        cwd: opts.cwd
+      };
       if (msg.role === "user") {
         lines.push(JSON.stringify({
+          ...common,
           type: "user",
-          uuid,
-          parentUuid: prevUuid,
-          sessionId,
-          timestamp: now,
-          cwd: opts.cwd,
           message: { role: "user", content: msg.content }
         }));
       } else {
         lines.push(JSON.stringify({
+          ...common,
           type: "assistant",
-          uuid,
-          parentUuid: prevUuid,
-          sessionId,
-          timestamp: now,
           message: {
             role: "assistant",
             content: [{ type: "text", text: msg.content }]
