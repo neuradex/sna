@@ -9,6 +9,7 @@ Server runtime for [Skills-Native Applications](https://github.com/neuradex/sna)
 - **SQLite database** — schema and `getDb()` for `skill_events`, `chat_sessions`, `chat_messages`
 - **Hono server factory** — `createSnaApp()` with events, emit, agent, chat, and run routes
 - **WebSocket API** — `attachWebSocket()` wrapping all HTTP routes over a single WS connection
+- **History management** — `agent.resume` auto-loads DB history, `agent.subscribe({ since: 0 })` unified history+realtime channel
 - **One-shot execution** — `POST /agent/run-once` for single-request LLM calls
 - **CLI** — `sna up/down/status`, `sna dispatch`, `sna gen client`, `sna tu` (mock API testing)
 - **Agent providers** — Claude Code and Codex process management

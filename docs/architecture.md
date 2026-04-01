@@ -148,12 +148,14 @@ This server provides:
 
 **WebSocket API (`ws://host:port/ws`):**
 - Full bidirectional API wrapping all HTTP routes over a single connection
-- Agent events pushed instantly via pub/sub (no polling delay)
 - `ApiResponses` type contract enforces HTTP/WS response shape parity at compile time
-- Auto-push (no subscribe needed): `session.lifecycle` (started/killed/exited/crashed/restarted), `session.config-changed` (model/permissionMode changes)
-- Push (subscribe needed): `agent.event` (includes `interrupted` type for turn cancellation), `skill.event`, `permission.request`
-- Runtime config: `agent.set-model` and `agent.set-permission-mode` change settings without restart
-- Session info includes `ccSessionId` (Claude Code's own session ID) and `config` (StartConfig: model, permissionMode, provider)
+- Auto-push (no subscribe): `session.lifecycle`, `session.config-changed`, `session.state-changed`
+- `agent.subscribe({ since: 0 })` — unified channel: DB history replay + real-time events. No separate `chat.messages.list` needed
+- `permission.subscribe` — replays existing pending + subscribes to new. No separate `permission.pending` needed
+- `agent.event` stream includes `user_message` type for multi-client chat sync
+- `agentStatus: "idle" | "busy" | "disconnected"` in `sessions.list` and `agent.status`
+- `agent.resume` — auto-loads DB history via JSONL injection
+- Runtime config: `agent.set-model` and `agent.set-permission-mode` without restart
 
 Applications discover the server URL via `/api/sna-port` or the default port (3099).
 
