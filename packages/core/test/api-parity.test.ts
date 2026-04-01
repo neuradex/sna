@@ -18,7 +18,7 @@ describe("API Parity", () => {
 
     const expectedOps = [
       "sessions.create", "sessions.list", "sessions.remove",
-      "agent.start", "agent.send", "agent.restart", "agent.interrupt",
+      "agent.start", "agent.send", "agent.resume", "agent.restart", "agent.interrupt",
       "agent.set-model", "agent.set-permission-mode",
       "agent.kill", "agent.status", "agent.run-once",
       "emit",
@@ -75,7 +75,7 @@ describe("API Parity", () => {
 
     const wsOps = [
       "sessions.create", "sessions.list", "sessions.remove",
-      "agent.start", "agent.send", "agent.kill", "agent.status",
+      "agent.start", "agent.send", "agent.resume", "agent.kill", "agent.status",
       "agent.run-once", "agent.restart", "agent.interrupt",
       "agent.set-model", "agent.set-permission-mode",
       "permission.respond", "permission.pending",
@@ -95,11 +95,11 @@ describe("API Parity", () => {
 
     const expectedCases = [
       "sessions.create", "sessions.list", "sessions.remove",
-      "agent.start", "agent.send", "agent.restart", "agent.interrupt",
+      "agent.start", "agent.send", "agent.resume", "agent.restart", "agent.interrupt",
       "agent.set-model", "agent.set-permission-mode",
       "agent.kill", "agent.status", "agent.run-once",
       "emit",
-      "permission.respond", "permission.pending",
+      "permission.respond", "permission.pending", "permission.subscribe", "permission.unsubscribe",
       "chat.sessions.list", "chat.sessions.create", "chat.sessions.remove",
       "chat.messages.list", "chat.messages.create", "chat.messages.clear",
     ];
@@ -119,6 +119,7 @@ describe("API Parity", () => {
       "agent.event",
       "session.lifecycle",
       "session.config-changed",
+      "session.state-changed",
       "permission.request",
       "skill.event",
     ];

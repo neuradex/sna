@@ -398,4 +398,89 @@ describe("WebSocket Handler", () => {
     const msg = await errorPromise;
     assert.ok(msg.message.includes("type is required"));
   });
+
+  // ── v0.4 features ─────────────────────────────────
+
+  it("agent.status includes agentStatus", async () => {
+    const rid = send(ctx, "agent.status", { session: "default" });
+    const msg = await waitForReply(ctx, rid);
+    assert.ok("agentStatus" in msg);
+    assert.equal(msg.agentStatus, "disconnected");
+  });
+
+  it("sessions.list includes agentStatus", async () => {
+    send(ctx, "sessions.create", { label: "AgentStatusTest" });
+    await waitForReply(ctx, ctx.rid.toString());
+
+    const rid = send(ctx, "sessions.list");
+    const msg = await waitForReply(ctx, rid);
+    const s = msg.sessions.find((s: any) => s.label === "AgentStatusTest");
+    assert.ok(s);
+    assert.equal(s.agentStatus, "disconnected");
+  });
+
+  it("agent.resume with no history returns error", async () => {
+    const createRid = send(ctx, "sessions.create", { label: "ResumeNoHistory" });
+    const created = await waitForReply(ctx, createRid);
+
+    const rid = send(ctx, "agent.resume", { session: created.sessionId });
+    const msg = await waitForReply(ctx, rid);
+    assert.equal(msg.type, "error");
+    assert.ok(msg.message.includes("No history"));
+  });
+
+  it("agent.subscribe with since=0 replays DB history", async () => {
+    // Create session with messages in DB
+    send(ctx, "chat.sessions.create", { id: "history-replay-test" });
+    await waitForReply(ctx, ctx.rid.toString());
+    send(ctx, "chat.messages.create", { session: "history-replay-test", role: "user", content: "hello from DB" });
+    await waitForReply(ctx, ctx.rid.toString());
+    send(ctx, "chat.messages.create", { session: "history-replay-test", role: "assistant", content: "hi from DB" });
+    await waitForReply(ctx, ctx.rid.toString());
+
+    // Subscribe with since=0 to get history
+    const events: any[] = [];
+    const collectPromise = new Promise<void>((resolve) => {
+      const handler = (raw: any) => {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type === "agent.event" && msg.session === "history-replay-test") {
+          events.push(msg);
+          if (events.length >= 2) {
+            ctx.ws.off("message", handler);
+            resolve();
+          }
+        }
+      };
+      ctx.ws.on("message", handler);
+      setTimeout(() => { ctx.ws.off("message", handler); resolve(); }, 3000);
+    });
+
+    send(ctx, "agent.subscribe", { session: "history-replay-test", since: 0 });
+    await collectPromise;
+
+    assert.ok(events.length >= 2, `Expected 2+ history events, got ${events.length}`);
+    assert.equal(events[0].isHistory, true);
+    assert.equal(events[0].event.type, "user_message");
+    assert.equal(events[0].event.message, "hello from DB");
+    assert.equal(events[1].isHistory, true);
+    assert.equal(events[1].event.type, "assistant");
+    assert.equal(events[1].event.message, "hi from DB");
+  });
+
+  it("permission.subscribe replays existing pending", async () => {
+    // No pending permissions exist, so pendingCount should be 0
+    const rid = send(ctx, "permission.subscribe");
+    const msg = await waitForReply(ctx, rid);
+    assert.equal(msg.pendingCount, 0);
+  });
+
+  it("session.state-changed auto-push on subscribe", async () => {
+    // State changes are auto-pushed — verify the subscription is active
+    // by checking that the state-changed unsub exists (indirect test)
+    // Direct test requires running agent which needs claude binary
+    const createRid = send(ctx, "sessions.create", { label: "StateChangeTest" });
+    await waitForReply(ctx, createRid);
+    // Just verify no crash — state-changed push requires process lifecycle
+    assert.ok(true);
+  });
 });

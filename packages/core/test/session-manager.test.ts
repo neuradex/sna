@@ -254,4 +254,68 @@ describe("SessionManager", () => {
     assert.ok(Array.isArray(all));
     assert.equal(all.length, 0);
   });
+
+  // ── v0.4 features ─────────────────────────────────
+
+  it("listSessions includes agentStatus", async () => {
+    const { SessionManager } = await loadModules();
+    const sm = new SessionManager();
+    sm.createSession({ id: "status-test" });
+    const sessions = sm.listSessions();
+    const s = sessions.find(s => s.id === "status-test");
+    assert.ok(s);
+    assert.equal(s.agentStatus, "disconnected"); // no process
+  });
+
+  it("updateSessionState triggers onStateChanged", async () => {
+    const { SessionManager } = await loadModules();
+    const sm = new SessionManager();
+    sm.createSession({ id: "state-change-test" });
+
+    const events: any[] = [];
+    sm.onStateChanged((e) => events.push(e));
+
+    sm.updateSessionState("state-change-test", "processing");
+    assert.equal(events.length, 1);
+    assert.equal(events[0].agentStatus, "disconnected"); // no process alive
+    assert.equal(events[0].state, "processing");
+
+    sm.updateSessionState("state-change-test", "waiting");
+    assert.equal(events.length, 2);
+    assert.equal(events[1].state, "waiting");
+  });
+
+  it("updateSessionState does not push if state unchanged", async () => {
+    const { SessionManager } = await loadModules();
+    const sm = new SessionManager();
+    sm.createSession({ id: "no-change-test" });
+
+    const events: any[] = [];
+    sm.onStateChanged((e) => events.push(e));
+
+    sm.updateSessionState("no-change-test", "idle"); // already idle
+    assert.equal(events.length, 0, "Should not push when state unchanged");
+  });
+
+  it("pushEvent adds to buffer and notifies listeners", async () => {
+    const { SessionManager } = await loadModules();
+    const sm = new SessionManager();
+    sm.createSession({ id: "push-event-test" });
+
+    const events: any[] = [];
+    sm.onSessionEvent("push-event-test", (_cursor, e) => events.push(e));
+
+    sm.pushEvent("push-event-test", {
+      type: "user_message",
+      message: "test push",
+      timestamp: Date.now(),
+    });
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0].type, "user_message");
+    assert.equal(events[0].message, "test push");
+
+    const session = sm.getSession("push-event-test")!;
+    assert.equal(session.eventCounter, 1);
+  });
 });
