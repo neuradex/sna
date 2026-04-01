@@ -123,7 +123,7 @@ class SessionManager {
     return this.createSession({ id, ...opts });
   }
   /** Set the agent process for a session. Subscribes to events. */
-  setProcess(sessionId, proc) {
+  setProcess(sessionId, proc, lifecycleState) {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Session "${sessionId}" not found`);
     session.process = proc;
@@ -156,7 +156,7 @@ class SessionManager {
       session.state = "idle";
       this.emitLifecycle({ session: sessionId, state: "crashed" });
     });
-    this.emitLifecycle({ session: sessionId, state: "started" });
+    this.emitLifecycle({ session: sessionId, state: lifecycleState ?? "started" });
   }
   // ── Event pub/sub (for WebSocket) ─────────────────────────────
   /** Subscribe to real-time events for a session. Returns unsubscribe function. */

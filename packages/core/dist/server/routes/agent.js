@@ -299,7 +299,7 @@ function createAgentRoutes(sessionManager) {
         history: history.length > 0 ? history : void 0,
         extraArgs
       });
-      sessionManager.setProcess(sessionId, proc);
+      sessionManager.setProcess(sessionId, proc, "resumed");
       sessionManager.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
       logger.log("route", `POST /resume?session=${sessionId} \u2192 resumed (${history.length} history msgs)`);
       return httpJson(c, "agent.resume", {

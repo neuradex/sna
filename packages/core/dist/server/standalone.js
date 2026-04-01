@@ -1089,7 +1089,7 @@ function createAgentRoutes(sessionManager2) {
         history: history.length > 0 ? history : void 0,
         extraArgs
       });
-      sessionManager2.setProcess(sessionId, proc);
+      sessionManager2.setProcess(sessionId, proc, "resumed");
       sessionManager2.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, extraArgs });
       logger.log("route", `POST /resume?session=${sessionId} \u2192 resumed (${history.length} history msgs)`);
       return httpJson(c, "agent.resume", {
@@ -1406,7 +1406,7 @@ var SessionManager = class {
     return this.createSession({ id, ...opts });
   }
   /** Set the agent process for a session. Subscribes to events. */
-  setProcess(sessionId, proc) {
+  setProcess(sessionId, proc, lifecycleState) {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Session "${sessionId}" not found`);
     session.process = proc;
@@ -1439,7 +1439,7 @@ var SessionManager = class {
       session.state = "idle";
       this.emitLifecycle({ session: sessionId, state: "crashed" });
     });
-    this.emitLifecycle({ session: sessionId, state: "started" });
+    this.emitLifecycle({ session: sessionId, state: lifecycleState ?? "started" });
   }
   // ── Event pub/sub (for WebSocket) ─────────────────────────────
   /** Subscribe to real-time events for a session. Returns unsubscribe function. */
@@ -1948,7 +1948,7 @@ function handleAgentResume(ws, msg, sm) {
       history: history.length > 0 ? history : void 0,
       extraArgs
     });
-    sm.setProcess(sessionId, proc);
+    sm.setProcess(sessionId, proc, "resumed");
     sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, extraArgs });
     wsReply(ws, msg, {
       status: "resumed",

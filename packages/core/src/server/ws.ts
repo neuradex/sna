@@ -399,7 +399,7 @@ function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManager): v
       history: history.length > 0 ? history : undefined,
       extraArgs,
     });
-    sm.setProcess(sessionId, proc);
+    sm.setProcess(sessionId, proc, "resumed");
     sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
     wsReply(ws, msg, {
       status: "resumed",

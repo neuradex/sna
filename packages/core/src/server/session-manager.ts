@@ -57,7 +57,7 @@ interface PendingPermission {
   createdAt: number;
 }
 
-export type SessionLifecycleState = "started" | "killed" | "exited" | "crashed" | "restarted";
+export type SessionLifecycleState = "started" | "resumed" | "killed" | "exited" | "crashed" | "restarted";
 
 export interface SessionLifecycleEvent {
   session: string;
@@ -203,7 +203,7 @@ export class SessionManager {
   }
 
   /** Set the agent process for a session. Subscribes to events. */
-  setProcess(sessionId: string, proc: AgentProcess): void {
+  setProcess(sessionId: string, proc: AgentProcess, lifecycleState?: SessionLifecycleState): void {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Session "${sessionId}" not found`);
 
@@ -245,7 +245,7 @@ export class SessionManager {
       this.emitLifecycle({ session: sessionId, state: "crashed" });
     });
 
-    this.emitLifecycle({ session: sessionId, state: "started" });
+    this.emitLifecycle({ session: sessionId, state: lifecycleState ?? "started" });
   }
 
   // ── Event pub/sub (for WebSocket) ─────────────────────────────

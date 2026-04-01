@@ -447,7 +447,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
         history: history.length > 0 ? history : undefined,
         extraArgs,
       });
-      sessionManager.setProcess(sessionId, proc);
+      sessionManager.setProcess(sessionId, proc, "resumed");
       sessionManager.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
       logger.log("route", `POST /resume?session=${sessionId} → resumed (${history.length} history msgs)`);
       return httpJson(c, "agent.resume", {

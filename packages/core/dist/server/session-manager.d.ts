@@ -45,7 +45,7 @@ interface SessionInfo {
 interface SessionManagerOptions {
     maxSessions?: number;
 }
-type SessionLifecycleState = "started" | "killed" | "exited" | "crashed" | "restarted";
+type SessionLifecycleState = "started" | "resumed" | "killed" | "exited" | "crashed" | "restarted";
 interface SessionLifecycleEvent {
     session: string;
     state: SessionLifecycleState;
@@ -84,7 +84,7 @@ declare class SessionManager {
         cwd?: string;
     }): Session;
     /** Set the agent process for a session. Subscribes to events. */
-    setProcess(sessionId: string, proc: AgentProcess): void;
+    setProcess(sessionId: string, proc: AgentProcess, lifecycleState?: SessionLifecycleState): void;
     /** Subscribe to real-time events for a session. Returns unsubscribe function. */
     onSessionEvent(sessionId: string, cb: (cursor: number, event: AgentEvent) => void): () => void;
     /** Subscribe to skill events broadcast. Returns unsubscribe function. */

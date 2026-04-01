@@ -270,7 +270,7 @@ function handleAgentResume(ws, msg, sm) {
       history: history.length > 0 ? history : void 0,
       extraArgs
     });
-    sm.setProcess(sessionId, proc);
+    sm.setProcess(sessionId, proc, "resumed");
     sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
     wsReply(ws, msg, {
       status: "resumed",
