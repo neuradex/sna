@@ -254,6 +254,13 @@ import path4 from "path";
 import fs2 from "fs";
 import path2 from "path";
 function writeHistoryJsonl(history, opts) {
+  for (let i = 1; i < history.length; i++) {
+    if (history[i].role === history[i - 1].role) {
+      throw new Error(
+        `History validation failed: consecutive ${history[i].role} at index ${i - 1} and ${i}. Messages must alternate user\u2194assistant. Merge tool results into text before injecting.`
+      );
+    }
+  }
   try {
     const dir = path2.join(opts.cwd, ".sna", "history");
     fs2.mkdirSync(dir, { recursive: true });

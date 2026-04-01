@@ -29,6 +29,16 @@ export function writeHistoryJsonl(
   history: HistoryMessage[],
   opts: { cwd: string },
 ): { filePath: string; extraArgs: string[] } | null {
+  // Validate: must alternate user↔assistant, no consecutive same role
+  for (let i = 1; i < history.length; i++) {
+    if (history[i].role === history[i - 1].role) {
+      throw new Error(
+        `History validation failed: consecutive ${history[i].role} at index ${i - 1} and ${i}. ` +
+        `Messages must alternate user↔assistant. Merge tool results into text before injecting.`
+      );
+    }
+  }
+
   try {
     const dir = path.join(opts.cwd, ".sna", "history");
     fs.mkdirSync(dir, { recursive: true });
