@@ -83,24 +83,17 @@ class ClaudeCodeProcess {
       if (!options.prompt) {
         throw new Error("history requires a prompt \u2014 the last stdin message must be a user message");
       }
-      for (const msg of options.history) {
-        if (msg.role === "user") {
-          const line = JSON.stringify({
-            type: "user",
-            message: { role: "user", content: msg.content }
-          });
-          this.proc.stdin.write(line + "\n");
-        } else if (msg.role === "assistant") {
-          const line = JSON.stringify({
-            type: "assistant",
-            message: {
-              role: "assistant",
-              content: [{ type: "text", text: msg.content }]
-            }
-          });
-          this.proc.stdin.write(line + "\n");
+      const xml = options.history.map((msg) => `<${msg.role}>${msg.content}</${msg.role}>`).join("\n");
+      const line = JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: `<recalled-conversation>
+${xml}
+</recalled-conversation>` }]
         }
-      }
+      });
+      this.proc.stdin.write(line + "\n");
     }
     if (options.prompt) {
       this.send(options.prompt);

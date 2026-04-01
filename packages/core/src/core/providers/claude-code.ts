@@ -101,32 +101,24 @@ class ClaudeCodeProcess implements AgentProcess {
       this.emitter.emit("error", err);
     });
 
-    // Inject conversation history before first prompt.
-    // Rule: the final stdin message must be a user message (the prompt).
-    // History should alternate user↔assistant and end with assistant,
-    // so the prompt naturally becomes the next user turn.
+    // Inject conversation history as a single assistant message.
+    // Sent as type:"assistant" so CC adds it to mutableMessages without
+    // triggering an API call. The actual prompt (type:"user") follows.
     if (options.history?.length) {
       if (!options.prompt) {
         throw new Error("history requires a prompt — the last stdin message must be a user message");
       }
-      for (const msg of options.history) {
-        if (msg.role === "user") {
-          const line = JSON.stringify({
-            type: "user",
-            message: { role: "user", content: msg.content },
-          });
-          this.proc.stdin!.write(line + "\n");
-        } else if (msg.role === "assistant") {
-          const line = JSON.stringify({
-            type: "assistant",
-            message: {
-              role: "assistant",
-              content: [{ type: "text", text: msg.content }],
-            },
-          });
-          this.proc.stdin!.write(line + "\n");
-        }
-      }
+      const xml = options.history
+        .map((msg) => `<${msg.role}>${msg.content}</${msg.role}>`)
+        .join("\n");
+      const line = JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: `<recalled-conversation>\n${xml}\n</recalled-conversation>` }],
+        },
+      });
+      this.proc.stdin!.write(line + "\n");
     }
 
     // Send initial prompt if provided
