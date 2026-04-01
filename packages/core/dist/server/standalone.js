@@ -267,12 +267,15 @@ function writeSessionJsonl(history, opts) {
     for (const msg of history) {
       const uuid = crypto.randomUUID();
       const common = {
-        uuid,
         parentUuid: prevUuid,
         isSidechain: false,
+        userType: "external",
+        cwd: opts.cwd,
         sessionId,
-        timestamp: now,
-        cwd: opts.cwd
+        version: "0.0.0",
+        type: "",
+        uuid,
+        timestamp: now
       };
       if (msg.role === "user") {
         lines.push(JSON.stringify({
@@ -285,8 +288,14 @@ function writeSessionJsonl(history, opts) {
           ...common,
           type: "assistant",
           message: {
+            id: `msg_synth_${uuid.slice(0, 12)}`,
+            type: "message",
             role: "assistant",
-            content: [{ type: "text", text: msg.content }]
+            model: "synthetic",
+            content: [{ type: "text", text: msg.content }],
+            stop_reason: "end_turn",
+            stop_sequence: "",
+            usage: { input_tokens: 0, output_tokens: 0 }
           }
         }));
       }

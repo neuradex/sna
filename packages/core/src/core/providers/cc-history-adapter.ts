@@ -43,12 +43,15 @@ export function writeSessionJsonl(
       const uuid = crypto.randomUUID();
 
       const common = {
-        uuid,
         parentUuid: prevUuid,
         isSidechain: false,
-        sessionId,
-        timestamp: now,
+        userType: "external",
         cwd: opts.cwd,
+        sessionId,
+        version: "0.0.0",
+        type: "",
+        uuid,
+        timestamp: now,
       };
 
       if (msg.role === "user") {
@@ -62,8 +65,14 @@ export function writeSessionJsonl(
           ...common,
           type: "assistant",
           message: {
+            id: `msg_synth_${uuid.slice(0, 12)}`,
+            type: "message",
             role: "assistant",
+            model: "synthetic",
             content: [{ type: "text", text: msg.content }],
+            stop_reason: "end_turn",
+            stop_sequence: "",
+            usage: { input_tokens: 0, output_tokens: 0 },
           },
         }));
       }

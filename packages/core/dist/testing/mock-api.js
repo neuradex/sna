@@ -1,4 +1,6 @@
 import http from "http";
+import fs from "fs";
+import path from "path";
 function ts() {
   return (/* @__PURE__ */ new Date()).toISOString().slice(11, 23);
 }
@@ -34,6 +36,24 @@ async function startMockAnthropicServer() {
         const textBlocks = lastUser.content.filter((b) => b.type === "text").map((b) => b.text);
         const realText = textBlocks.find((t) => !t.startsWith("<system-reminder>"));
         userText = realText ?? textBlocks[textBlocks.length - 1] ?? "(no text)";
+      }
+      console.log(`[${ts()}] BODY KEYS: ${Object.keys(body).join(", ")}`);
+      try {
+        const dumpPath = path.join(process.cwd(), ".sna/mock-api-last-request.json");
+        fs.writeFileSync(dumpPath, JSON.stringify(body, null, 2));
+        console.log(`[${ts()}] FULL BODY dumped to .sna/mock-api-last-request.json`);
+      } catch {
+      }
+      if (body.system) {
+        const sysText = typeof body.system === "string" ? body.system : JSON.stringify(body.system);
+        console.log(`[${ts()}] SYSTEM PROMPT (${sysText.length} chars): ${sysText.slice(0, 300)}...`);
+        if (sysText.includes("\uC720\uB2C8") || sysText.includes("\uCEE4\uD53C") || sysText.includes("\uAE30\uC5B5")) {
+          console.log(`[${ts()}] *** HISTORY FOUND IN SYSTEM PROMPT ***`);
+          for (const keyword of ["\uC720\uB2C8", "\uCEE4\uD53C", "\uAE30\uC5B5"]) {
+            const idx = sysText.indexOf(keyword);
+            if (idx >= 0) console.log(`[${ts()}]   "${keyword}" at pos ${idx}: ...${sysText.slice(Math.max(0, idx - 50), idx + 80)}...`);
+          }
+        }
       }
       console.log(`[${ts()}] REQ model=${body.model} stream=${body.stream} messages=${body.messages?.length} user="${userText.slice(0, 120)}"`);
       for (let mi = 0; mi < body.messages.length; mi++) {

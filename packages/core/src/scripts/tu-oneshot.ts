@@ -1,8 +1,11 @@
 /**
- * sna tu claude:oneshot — auto mock API + run claude + show results.
- * Usage identical to `claude -p`:
- *   sna tu claude:oneshot -p "hello"
- *   sna tu claude:oneshot -p --model test-mock "say hi"
+ * sna tu claude:oneshot — auto mock API + run claude + dump all logs.
+ *
+ * Outputs:
+ *   - Claude stdout/stderr
+ *   - Mock API request body → .sna/mock-api-last-request.json
+ *   - Mock API log → .sna/mock-api.log
+ *   - Summary with file paths
  */
 
 import { startMockAnthropicServer } from "../testing/mock-api.js";
@@ -36,17 +39,42 @@ async function main() {
     CLAUDE_CONFIG_DIR: mockConfigDir,
   };
 
+  // Capture stdout and stderr
+  const stdoutPath = path.join(STATE_DIR, "mock-claude-stdout.log");
+  const stderrPath = path.join(STATE_DIR, "mock-claude-stderr.log");
+
   const proc = spawn(claudePath, args, {
     env,
     cwd: ROOT,
-    stdio: ["ignore", "inherit", "inherit"],
+    stdio: ["ignore", "pipe", "pipe"],
   });
 
+  let stdout = "";
+  let stderr = "";
+  proc.stdout!.on("data", (d: Buffer) => { stdout += d.toString(); });
+  proc.stderr!.on("data", (d: Buffer) => { stderr += d.toString(); });
+
+  // Also pipe to console for real-time output
+  proc.stdout!.pipe(process.stdout);
+
   proc.on("exit", (code) => {
-    console.log(`\n── Mock API: ${mock.requests.length} request(s) ──`);
+    // Save logs
+    fs.writeFileSync(stdoutPath, stdout);
+    fs.writeFileSync(stderrPath, stderr);
+
+    // Summary
+    console.log(`\n${"─".repeat(60)}`);
+    console.log(`Mock API: ${mock.requests.length} request(s)`);
     for (const req of mock.requests) {
       console.log(`  model=${req.model} stream=${req.stream} messages=${req.messages?.length}`);
     }
+    console.log(`\nLog files:`);
+    console.log(`  stdout:   ${stdoutPath}`);
+    console.log(`  stderr:   ${stderrPath}`);
+    console.log(`  api log:  ${path.join(STATE_DIR, "mock-api-last-request.json")}`);
+    console.log(`  config:   ${mockConfigDir}`);
+    console.log(`  exit:     ${code}`);
+
     mock.close();
     process.exit(code ?? 0);
   });

@@ -24,17 +24,38 @@ async function main() {
     ANTHROPIC_API_KEY: "sk-test-mock-oneshot",
     CLAUDE_CONFIG_DIR: mockConfigDir
   };
+  const stdoutPath = path.join(STATE_DIR, "mock-claude-stdout.log");
+  const stderrPath = path.join(STATE_DIR, "mock-claude-stderr.log");
   const proc = spawn(claudePath, args, {
     env,
     cwd: ROOT,
-    stdio: ["ignore", "inherit", "inherit"]
+    stdio: ["ignore", "pipe", "pipe"]
   });
+  let stdout = "";
+  let stderr = "";
+  proc.stdout.on("data", (d) => {
+    stdout += d.toString();
+  });
+  proc.stderr.on("data", (d) => {
+    stderr += d.toString();
+  });
+  proc.stdout.pipe(process.stdout);
   proc.on("exit", (code) => {
+    fs.writeFileSync(stdoutPath, stdout);
+    fs.writeFileSync(stderrPath, stderr);
     console.log(`
-\u2500\u2500 Mock API: ${mock.requests.length} request(s) \u2500\u2500`);
+${"\u2500".repeat(60)}`);
+    console.log(`Mock API: ${mock.requests.length} request(s)`);
     for (const req of mock.requests) {
       console.log(`  model=${req.model} stream=${req.stream} messages=${req.messages?.length}`);
     }
+    console.log(`
+Log files:`);
+    console.log(`  stdout:   ${stdoutPath}`);
+    console.log(`  stderr:   ${stderrPath}`);
+    console.log(`  api log:  ${path.join(STATE_DIR, "mock-api-last-request.json")}`);
+    console.log(`  config:   ${mockConfigDir}`);
+    console.log(`  exit:     ${code}`);
     mock.close();
     process.exit(code ?? 0);
   });

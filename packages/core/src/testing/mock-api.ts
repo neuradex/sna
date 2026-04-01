@@ -17,6 +17,8 @@
  */
 
 import http from "http";
+import fs from "fs";
+import path from "path";
 import net from "net";
 
 export interface MockServer {
@@ -75,6 +77,31 @@ export async function startMockAnthropicServer(): Promise<MockServer> {
         const realText = textBlocks.find((t: string) => !t.startsWith("<system-reminder>"));
         userText = realText ?? textBlocks[textBlocks.length - 1] ?? "(no text)";
       }
+      // Log all top-level keys in request body
+      console.log(`[${ts()}] BODY KEYS: ${Object.keys(body).join(", ")}`);
+
+      // Dump full body to file for inspection
+      try {
+        const dumpPath = path.join(process.cwd(), ".sna/mock-api-last-request.json");
+        fs.writeFileSync(dumpPath, JSON.stringify(body, null, 2));
+        console.log(`[${ts()}] FULL BODY dumped to .sna/mock-api-last-request.json`);
+      } catch {}
+
+      // Log system prompt if present
+      if (body.system) {
+        const sysText = typeof body.system === "string" ? body.system : JSON.stringify(body.system);
+        console.log(`[${ts()}] SYSTEM PROMPT (${sysText.length} chars): ${sysText.slice(0, 300)}...`);
+        // Check if system prompt contains our history keywords
+        if (sysText.includes("유니") || sysText.includes("커피") || sysText.includes("기억")) {
+          console.log(`[${ts()}] *** HISTORY FOUND IN SYSTEM PROMPT ***`);
+          // Find and print the relevant section
+          for (const keyword of ["유니", "커피", "기억"]) {
+            const idx = sysText.indexOf(keyword);
+            if (idx >= 0) console.log(`[${ts()}]   "${keyword}" at pos ${idx}: ...${sysText.slice(Math.max(0,idx-50), idx+80)}...`);
+          }
+        }
+      }
+
       console.log(`[${ts()}] REQ model=${body.model} stream=${body.stream} messages=${body.messages?.length} user="${userText.slice(0, 120)}"`);
 
       // Log full messages array for debugging
