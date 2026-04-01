@@ -195,7 +195,7 @@ function createAgentRoutes(sessionManager) {
       db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
     } catch {
     }
-    session.state = "processing";
+    sessionManager.updateSessionState(sessionId, "processing");
     sessionManager.touch(sessionId);
     if (body.images?.length) {
       const content = [
@@ -340,8 +340,10 @@ function createAgentRoutes(sessionManager) {
   app.get("/status", (c) => {
     const sessionId = getSessionId(c);
     const session = sessionManager.getSession(sessionId);
+    const alive = session?.process?.alive ?? false;
     return httpJson(c, "agent.status", {
-      alive: session?.process?.alive ?? false,
+      alive,
+      agentStatus: !alive ? "disconnected" : session?.state === "processing" ? "busy" : "idle",
       sessionId: session?.process?.sessionId ?? null,
       ccSessionId: session?.ccSessionId ?? null,
       eventCount: session?.eventCounter ?? 0,

@@ -33,11 +33,14 @@ export interface Session {
   lastActivityAt: number;
 }
 
+export type AgentStatus = "idle" | "busy" | "disconnected";
+
 export interface SessionInfo {
   id: string;
   label: string;
   alive: boolean;
   state: SessionState;
+  agentStatus: AgentStatus;
   cwd: string;
   meta: Record<string, unknown> | null;
   config: StartConfig | null;
@@ -83,6 +86,7 @@ export class SessionManager {
   private permissionRequestListeners = new Set<(sessionId: string, request: Record<string, unknown>, createdAt: number) => void>();
   private lifecycleListeners = new Set<(event: SessionLifecycleEvent) => void>();
   private configChangedListeners = new Set<(event: SessionConfigChangedEvent) => void>();
+  private stateChangedListeners = new Set<(event: { session: string; agentStatus: AgentStatus; state: SessionState }) => void>();
 
   constructor(options: SessionManagerOptions = {}) {
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
@@ -208,7 +212,7 @@ export class SessionManager {
     if (!session) throw new Error(`Session "${sessionId}" not found`);
 
     session.process = proc;
-    session.state = "processing";
+    this.setSessionState(sessionId, session, "processing");
     session.lastActivityAt = Date.now();
 
     proc.on("event", (e: AgentEvent) => {
@@ -224,7 +228,7 @@ export class SessionManager {
       }
       // Update session state based on event type
       if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
-        session.state = "waiting";
+        this.setSessionState(sessionId, session, "waiting");
       }
       // Persist assistant messages to chat_messages
       this.persistEvent(sessionId, e);
@@ -236,12 +240,12 @@ export class SessionManager {
     });
 
     proc.on("exit", (code) => {
-      session.state = "idle";
+      this.setSessionState(sessionId, session, "idle");
       this.emitLifecycle({ session: sessionId, state: code != null ? "exited" : "crashed", code });
     });
 
     proc.on("error", () => {
-      session.state = "idle";
+      this.setSessionState(sessionId, session, "idle");
       this.emitLifecycle({ session: sessionId, state: "crashed" });
     });
 
@@ -309,12 +313,34 @@ export class SessionManager {
     for (const cb of this.configChangedListeners) cb({ session: sessionId, config });
   }
 
+  // ── Agent status change pub/sub ────────────────────────────────
+
+  onStateChanged(cb: (event: { session: string; agentStatus: AgentStatus; state: SessionState }) => void): () => void {
+    this.stateChangedListeners.add(cb);
+    return () => this.stateChangedListeners.delete(cb);
+  }
+
+  /** Update session state and push agentStatus change to subscribers. */
+  updateSessionState(sessionId: string, newState: SessionState): void {
+    const session = this.sessions.get(sessionId);
+    if (session) this.setSessionState(sessionId, session, newState);
+  }
+
+  private setSessionState(sessionId: string, session: Session, newState: SessionState): void {
+    const oldStatus = !session.process?.alive ? "disconnected" : (session.state === "processing" ? "busy" : "idle");
+    session.state = newState;
+    const newStatus: AgentStatus = !session.process?.alive ? "disconnected" : (newState === "processing" ? "busy" : "idle");
+    if (oldStatus !== newStatus) {
+      for (const cb of this.stateChangedListeners) cb({ session: sessionId, agentStatus: newStatus, state: newState });
+    }
+  }
+
   // ── Permission management ─────────────────────────────────────
 
   /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
   createPendingPermission(sessionId: string, request: Record<string, unknown>): Promise<boolean> {
     const session = this.sessions.get(sessionId);
-    if (session) session.state = "permission";
+    if (session) this.setSessionState(sessionId, session, "permission");
 
     return new Promise<boolean>((resolve) => {
       const createdAt = Date.now();
@@ -338,7 +364,7 @@ export class SessionManager {
     pending.resolve(approved);
     this.pendingPermissions.delete(sessionId);
     const session = this.sessions.get(sessionId);
-    if (session) session.state = "processing";
+    if (session) this.setSessionState(sessionId, session, "processing");
     return true;
   }
 
@@ -408,7 +434,7 @@ export class SessionManager {
     const session = this.sessions.get(id);
     if (!session?.process?.alive) return false;
     session.process.interrupt();
-    session.state = "waiting";
+    this.setSessionState(id, session, "waiting");
     return true;
   }
 
@@ -471,6 +497,7 @@ export class SessionManager {
       label: s.label,
       alive: s.process?.alive ?? false,
       state: s.state,
+      agentStatus: !s.process?.alive ? "disconnected" : (s.state === "processing" ? "busy" : "idle") as AgentStatus,
       cwd: s.cwd,
       meta: s.meta,
       config: s.lastStartConfig,

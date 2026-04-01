@@ -313,7 +313,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
         .run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
     } catch { /* DB write failure is non-fatal */ }
 
-    session.state = "processing";
+    sessionManager.updateSessionState(sessionId, "processing");
     sessionManager.touch(sessionId);
 
     // Build content: plain string or content block array with images
@@ -498,8 +498,10 @@ export function createAgentRoutes(sessionManager: SessionManager) {
   app.get("/status", (c) => {
     const sessionId = getSessionId(c);
     const session = sessionManager.getSession(sessionId);
+    const alive = session?.process?.alive ?? false;
     return httpJson(c, "agent.status", {
-      alive: session?.process?.alive ?? false,
+      alive,
+      agentStatus: !alive ? "disconnected" : (session?.state === "processing" ? "busy" : "idle"),
       sessionId: session?.process?.sessionId ?? null,
       ccSessionId: session?.ccSessionId ?? null,
       eventCount: session?.eventCounter ?? 0,

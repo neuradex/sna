@@ -11,6 +11,7 @@ class SessionManager {
     this.permissionRequestListeners = /* @__PURE__ */ new Set();
     this.lifecycleListeners = /* @__PURE__ */ new Set();
     this.configChangedListeners = /* @__PURE__ */ new Set();
+    this.stateChangedListeners = /* @__PURE__ */ new Set();
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
     this.restoreFromDb();
   }
@@ -127,7 +128,7 @@ class SessionManager {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Session "${sessionId}" not found`);
     session.process = proc;
-    session.state = "processing";
+    this.setSessionState(sessionId, session, "processing");
     session.lastActivityAt = Date.now();
     proc.on("event", (e) => {
       if (e.type === "init" && e.data?.sessionId && !session.ccSessionId) {
@@ -140,7 +141,7 @@ class SessionManager {
         session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
       }
       if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
-        session.state = "waiting";
+        this.setSessionState(sessionId, session, "waiting");
       }
       this.persistEvent(sessionId, e);
       const listeners = this.eventListeners.get(sessionId);
@@ -149,11 +150,11 @@ class SessionManager {
       }
     });
     proc.on("exit", (code) => {
-      session.state = "idle";
+      this.setSessionState(sessionId, session, "idle");
       this.emitLifecycle({ session: sessionId, state: code != null ? "exited" : "crashed", code });
     });
     proc.on("error", () => {
-      session.state = "idle";
+      this.setSessionState(sessionId, session, "idle");
       this.emitLifecycle({ session: sessionId, state: "crashed" });
     });
     this.emitLifecycle({ session: sessionId, state: lifecycleState ?? "started" });
@@ -206,11 +207,29 @@ class SessionManager {
   emitConfigChanged(sessionId, config) {
     for (const cb of this.configChangedListeners) cb({ session: sessionId, config });
   }
+  // ── Agent status change pub/sub ────────────────────────────────
+  onStateChanged(cb) {
+    this.stateChangedListeners.add(cb);
+    return () => this.stateChangedListeners.delete(cb);
+  }
+  /** Update session state and push agentStatus change to subscribers. */
+  updateSessionState(sessionId, newState) {
+    const session = this.sessions.get(sessionId);
+    if (session) this.setSessionState(sessionId, session, newState);
+  }
+  setSessionState(sessionId, session, newState) {
+    const oldStatus = !session.process?.alive ? "disconnected" : session.state === "processing" ? "busy" : "idle";
+    session.state = newState;
+    const newStatus = !session.process?.alive ? "disconnected" : newState === "processing" ? "busy" : "idle";
+    if (oldStatus !== newStatus) {
+      for (const cb of this.stateChangedListeners) cb({ session: sessionId, agentStatus: newStatus, state: newState });
+    }
+  }
   // ── Permission management ─────────────────────────────────────
   /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
   createPendingPermission(sessionId, request) {
     const session = this.sessions.get(sessionId);
-    if (session) session.state = "permission";
+    if (session) this.setSessionState(sessionId, session, "permission");
     return new Promise((resolve) => {
       const createdAt = Date.now();
       this.pendingPermissions.set(sessionId, { resolve, request, createdAt });
@@ -230,7 +249,7 @@ class SessionManager {
     pending.resolve(approved);
     this.pendingPermissions.delete(sessionId);
     const session = this.sessions.get(sessionId);
-    if (session) session.state = "processing";
+    if (session) this.setSessionState(sessionId, session, "processing");
     return true;
   }
   /** Get a pending permission for a specific session. */
@@ -282,7 +301,7 @@ class SessionManager {
     const session = this.sessions.get(id);
     if (!session?.process?.alive) return false;
     session.process.interrupt();
-    session.state = "waiting";
+    this.setSessionState(id, session, "waiting");
     return true;
   }
   /** Change model. Sends control message if alive, always persists to config. */
@@ -339,6 +358,7 @@ class SessionManager {
       label: s.label,
       alive: s.process?.alive ?? false,
       state: s.state,
+      agentStatus: !s.process?.alive ? "disconnected" : s.state === "processing" ? "busy" : "idle",
       cwd: s.cwd,
       meta: s.meta,
       config: s.lastStartConfig,

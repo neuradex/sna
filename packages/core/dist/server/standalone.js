@@ -985,7 +985,7 @@ function createAgentRoutes(sessionManager2) {
       db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
     } catch {
     }
-    session.state = "processing";
+    sessionManager2.updateSessionState(sessionId, "processing");
     sessionManager2.touch(sessionId);
     if (body.images?.length) {
       const content = [
@@ -1130,8 +1130,10 @@ function createAgentRoutes(sessionManager2) {
   app.get("/status", (c) => {
     const sessionId = getSessionId(c);
     const session = sessionManager2.getSession(sessionId);
+    const alive = session?.process?.alive ?? false;
     return httpJson(c, "agent.status", {
-      alive: session?.process?.alive ?? false,
+      alive,
+      agentStatus: !alive ? "disconnected" : session?.state === "processing" ? "busy" : "idle",
       sessionId: session?.process?.sessionId ?? null,
       ccSessionId: session?.ccSessionId ?? null,
       eventCount: session?.eventCounter ?? 0,
@@ -1294,6 +1296,7 @@ var SessionManager = class {
     this.permissionRequestListeners = /* @__PURE__ */ new Set();
     this.lifecycleListeners = /* @__PURE__ */ new Set();
     this.configChangedListeners = /* @__PURE__ */ new Set();
+    this.stateChangedListeners = /* @__PURE__ */ new Set();
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
     this.restoreFromDb();
   }
@@ -1410,7 +1413,7 @@ var SessionManager = class {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Session "${sessionId}" not found`);
     session.process = proc;
-    session.state = "processing";
+    this.setSessionState(sessionId, session, "processing");
     session.lastActivityAt = Date.now();
     proc.on("event", (e) => {
       if (e.type === "init" && e.data?.sessionId && !session.ccSessionId) {
@@ -1423,7 +1426,7 @@ var SessionManager = class {
         session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
       }
       if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
-        session.state = "waiting";
+        this.setSessionState(sessionId, session, "waiting");
       }
       this.persistEvent(sessionId, e);
       const listeners = this.eventListeners.get(sessionId);
@@ -1432,11 +1435,11 @@ var SessionManager = class {
       }
     });
     proc.on("exit", (code) => {
-      session.state = "idle";
+      this.setSessionState(sessionId, session, "idle");
       this.emitLifecycle({ session: sessionId, state: code != null ? "exited" : "crashed", code });
     });
     proc.on("error", () => {
-      session.state = "idle";
+      this.setSessionState(sessionId, session, "idle");
       this.emitLifecycle({ session: sessionId, state: "crashed" });
     });
     this.emitLifecycle({ session: sessionId, state: lifecycleState ?? "started" });
@@ -1489,11 +1492,29 @@ var SessionManager = class {
   emitConfigChanged(sessionId, config) {
     for (const cb of this.configChangedListeners) cb({ session: sessionId, config });
   }
+  // ── Agent status change pub/sub ────────────────────────────────
+  onStateChanged(cb) {
+    this.stateChangedListeners.add(cb);
+    return () => this.stateChangedListeners.delete(cb);
+  }
+  /** Update session state and push agentStatus change to subscribers. */
+  updateSessionState(sessionId, newState) {
+    const session = this.sessions.get(sessionId);
+    if (session) this.setSessionState(sessionId, session, newState);
+  }
+  setSessionState(sessionId, session, newState) {
+    const oldStatus = !session.process?.alive ? "disconnected" : session.state === "processing" ? "busy" : "idle";
+    session.state = newState;
+    const newStatus = !session.process?.alive ? "disconnected" : newState === "processing" ? "busy" : "idle";
+    if (oldStatus !== newStatus) {
+      for (const cb of this.stateChangedListeners) cb({ session: sessionId, agentStatus: newStatus, state: newState });
+    }
+  }
   // ── Permission management ─────────────────────────────────────
   /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
   createPendingPermission(sessionId, request) {
     const session = this.sessions.get(sessionId);
-    if (session) session.state = "permission";
+    if (session) this.setSessionState(sessionId, session, "permission");
     return new Promise((resolve) => {
       const createdAt = Date.now();
       this.pendingPermissions.set(sessionId, { resolve, request, createdAt });
@@ -1513,7 +1534,7 @@ var SessionManager = class {
     pending.resolve(approved);
     this.pendingPermissions.delete(sessionId);
     const session = this.sessions.get(sessionId);
-    if (session) session.state = "processing";
+    if (session) this.setSessionState(sessionId, session, "processing");
     return true;
   }
   /** Get a pending permission for a specific session. */
@@ -1565,7 +1586,7 @@ var SessionManager = class {
     const session = this.sessions.get(id);
     if (!session?.process?.alive) return false;
     session.process.interrupt();
-    session.state = "waiting";
+    this.setSessionState(id, session, "waiting");
     return true;
   }
   /** Change model. Sends control message if alive, always persists to config. */
@@ -1622,6 +1643,7 @@ var SessionManager = class {
       label: s.label,
       alive: s.process?.alive ?? false,
       state: s.state,
+      agentStatus: !s.process?.alive ? "disconnected" : s.state === "processing" ? "busy" : "idle",
       cwd: s.cwd,
       meta: s.meta,
       config: s.lastStartConfig,
@@ -1709,12 +1731,15 @@ function attachWebSocket(server2, sessionManager2) {
   });
   wss.on("connection", (ws) => {
     logger.log("ws", "client connected");
-    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null };
+    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null, stateChangedUnsub: null };
     state.lifecycleUnsub = sessionManager2.onSessionLifecycle((event) => {
       send(ws, { type: "session.lifecycle", ...event });
     });
     state.configChangedUnsub = sessionManager2.onConfigChanged((event) => {
       send(ws, { type: "session.config-changed", ...event });
+    });
+    state.stateChangedUnsub = sessionManager2.onStateChanged((event) => {
+      send(ws, { type: "session.state-changed", ...event });
     });
     ws.on("message", (raw) => {
       let msg;
@@ -1746,6 +1771,8 @@ function attachWebSocket(server2, sessionManager2) {
       state.lifecycleUnsub = null;
       state.configChangedUnsub?.();
       state.configChangedUnsub = null;
+      state.stateChangedUnsub?.();
+      state.stateChangedUnsub = null;
     });
   });
   return wss;
@@ -1907,7 +1934,7 @@ function handleAgentSend(ws, msg, sm) {
     db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
   } catch {
   }
-  session.state = "processing";
+  sm.updateSessionState(sessionId, "processing");
   sm.touch(sessionId);
   if (images?.length) {
     const content = [
@@ -2016,8 +2043,10 @@ function handleAgentKill(ws, msg, sm) {
 function handleAgentStatus(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
   const session = sm.getSession(sessionId);
+  const alive = session?.process?.alive ?? false;
   wsReply(ws, msg, {
-    alive: session?.process?.alive ?? false,
+    alive,
+    agentStatus: !alive ? "disconnected" : session?.state === "processing" ? "busy" : "idle",
     sessionId: session?.process?.sessionId ?? null,
     ccSessionId: session?.ccSessionId ?? null,
     eventCount: session?.eventCounter ?? 0,

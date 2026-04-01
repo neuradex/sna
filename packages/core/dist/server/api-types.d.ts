@@ -52,6 +52,7 @@ interface ApiResponses {
     };
     "agent.status": {
         alive: boolean;
+        agentStatus: "idle" | "busy" | "disconnected";
         sessionId: string | null;
         ccSessionId: string | null;
         eventCount: number;

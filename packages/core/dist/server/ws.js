@@ -31,12 +31,15 @@ function attachWebSocket(server, sessionManager) {
   });
   wss.on("connection", (ws) => {
     logger.log("ws", "client connected");
-    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null };
+    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null, stateChangedUnsub: null };
     state.lifecycleUnsub = sessionManager.onSessionLifecycle((event) => {
       send(ws, { type: "session.lifecycle", ...event });
     });
     state.configChangedUnsub = sessionManager.onConfigChanged((event) => {
       send(ws, { type: "session.config-changed", ...event });
+    });
+    state.stateChangedUnsub = sessionManager.onStateChanged((event) => {
+      send(ws, { type: "session.state-changed", ...event });
     });
     ws.on("message", (raw) => {
       let msg;
@@ -68,6 +71,8 @@ function attachWebSocket(server, sessionManager) {
       state.lifecycleUnsub = null;
       state.configChangedUnsub?.();
       state.configChangedUnsub = null;
+      state.stateChangedUnsub?.();
+      state.stateChangedUnsub = null;
     });
   });
   return wss;
@@ -229,7 +234,7 @@ function handleAgentSend(ws, msg, sm) {
     db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
   } catch {
   }
-  session.state = "processing";
+  sm.updateSessionState(sessionId, "processing");
   sm.touch(sessionId);
   if (images?.length) {
     const content = [
@@ -338,8 +343,10 @@ function handleAgentKill(ws, msg, sm) {
 function handleAgentStatus(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
   const session = sm.getSession(sessionId);
+  const alive = session?.process?.alive ?? false;
   wsReply(ws, msg, {
-    alive: session?.process?.alive ?? false,
+    alive,
+    agentStatus: !alive ? "disconnected" : session?.state === "processing" ? "busy" : "idle",
     sessionId: session?.process?.sessionId ?? null,
     ccSessionId: session?.ccSessionId ?? null,
     eventCount: session?.eventCounter ?? 0,

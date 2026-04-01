@@ -68,6 +68,7 @@ interface ConnState {
   permissionUnsub: (() => void) | null;
   lifecycleUnsub: (() => void) | null;
   configChangedUnsub: (() => void) | null;
+  stateChangedUnsub: (() => void) | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -111,7 +112,7 @@ export function attachWebSocket(
 
   wss.on("connection", (ws) => {
     logger.log("ws", "client connected");
-    const state: ConnState = { agentUnsubs: new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null };
+    const state: ConnState = { agentUnsubs: new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null, stateChangedUnsub: null };
 
     // Auto-push session lifecycle events to all clients (no subscribe needed)
     state.lifecycleUnsub = sessionManager.onSessionLifecycle((event) => {
@@ -121,6 +122,11 @@ export function attachWebSocket(
     // Auto-push config changes to all clients (no subscribe needed)
     state.configChangedUnsub = sessionManager.onConfigChanged((event) => {
       send(ws, { type: "session.config-changed", ...event });
+    });
+
+    // Auto-push agent status changes (idle/busy/disconnected)
+    state.stateChangedUnsub = sessionManager.onStateChanged((event) => {
+      send(ws, { type: "session.state-changed", ...event });
     });
 
     ws.on("message", (raw) => {
@@ -154,6 +160,8 @@ export function attachWebSocket(
       state.lifecycleUnsub = null;
       state.configChangedUnsub?.();
       state.configChangedUnsub = null;
+      state.stateChangedUnsub?.();
+      state.stateChangedUnsub = null;
     });
   });
 
@@ -352,7 +360,7 @@ function handleAgentSend(ws: WebSocket, msg: WsRequest, sm: SessionManager): voi
       .run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
   } catch { /* non-fatal */ }
 
-  session.state = "processing";
+  sm.updateSessionState(sessionId, "processing");
   sm.touch(sessionId);
 
   if (images?.length) {
@@ -473,8 +481,10 @@ function handleAgentKill(ws: WebSocket, msg: WsRequest, sm: SessionManager): voi
 function handleAgentStatus(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
   const sessionId = (msg.session as string) ?? "default";
   const session = sm.getSession(sessionId);
+  const alive = session?.process?.alive ?? false;
   wsReply(ws, msg, {
-    alive: session?.process?.alive ?? false,
+    alive,
+    agentStatus: !alive ? "disconnected" : (session?.state === "processing" ? "busy" : "idle"),
     sessionId: session?.process?.sessionId ?? null,
     ccSessionId: session?.ccSessionId ?? null,
     eventCount: session?.eventCounter ?? 0,

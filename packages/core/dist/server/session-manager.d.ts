@@ -29,11 +29,13 @@ interface Session {
     createdAt: number;
     lastActivityAt: number;
 }
+type AgentStatus = "idle" | "busy" | "disconnected";
 interface SessionInfo {
     id: string;
     label: string;
     alive: boolean;
     state: SessionState;
+    agentStatus: AgentStatus;
     cwd: string;
     meta: Record<string, unknown> | null;
     config: StartConfig | null;
@@ -64,6 +66,7 @@ declare class SessionManager {
     private permissionRequestListeners;
     private lifecycleListeners;
     private configChangedListeners;
+    private stateChangedListeners;
     constructor(options?: SessionManagerOptions);
     /** Restore session metadata from DB (cwd, label, meta). Process state is not restored. */
     private restoreFromDb;
@@ -99,6 +102,14 @@ declare class SessionManager {
     /** Subscribe to session config changes. Returns unsubscribe function. */
     onConfigChanged(cb: (event: SessionConfigChangedEvent) => void): () => void;
     private emitConfigChanged;
+    onStateChanged(cb: (event: {
+        session: string;
+        agentStatus: AgentStatus;
+        state: SessionState;
+    }) => void): () => void;
+    /** Update session state and push agentStatus change to subscribers. */
+    updateSessionState(sessionId: string, newState: SessionState): void;
+    private setSessionState;
     /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
     createPendingPermission(sessionId: string, request: Record<string, unknown>): Promise<boolean>;
     /** Resolve a pending permission request. Returns false if no pending request. */
@@ -142,4 +153,4 @@ declare class SessionManager {
     get size(): number;
 }
 
-export { type Session, type SessionConfigChangedEvent, type SessionInfo, type SessionLifecycleEvent, type SessionLifecycleState, SessionManager, type SessionManagerOptions, type SessionState, type StartConfig };
+export { type AgentStatus, type Session, type SessionConfigChangedEvent, type SessionInfo, type SessionLifecycleEvent, type SessionLifecycleState, SessionManager, type SessionManagerOptions, type SessionState, type StartConfig };
