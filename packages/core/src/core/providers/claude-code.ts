@@ -108,9 +108,8 @@ class ClaudeCodeProcess implements AgentProcess {
     // Note: JSONL resume args are added by the caller (spawn method) before
     // the process is created, so here we only handle the fallback case.
     if (options.history?.length && !options._historyViaResume) {
-      if (!options.prompt) {
-        throw new Error("history requires a prompt — the last stdin message must be a user message");
-      }
+      // Fallback: recalled-conversation as single assistant message.
+      // Works with or without prompt — if no prompt, CC enters waiting state.
       const line = buildRecalledConversation(options.history);
       this.proc.stdin!.write(line + "\n");
     }

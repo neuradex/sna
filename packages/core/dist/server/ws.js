@@ -258,7 +258,7 @@ function handleAgentResume(ws, msg, sm) {
   }
   const history = buildHistoryFromDb(sessionId);
   if (history.length === 0 && !msg.prompt) {
-    return replyError(ws, msg, "No history and no prompt \u2014 nothing to resume.");
+    return replyError(ws, msg, "No history in DB \u2014 nothing to resume.");
   }
   const providerName = msg.provider ?? session.lastStartConfig?.provider ?? "claude-code";
   const model = msg.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";

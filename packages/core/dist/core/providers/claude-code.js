@@ -81,9 +81,6 @@ class ClaudeCodeProcess {
       this.emitter.emit("error", err);
     });
     if (options.history?.length && !options._historyViaResume) {
-      if (!options.prompt) {
-        throw new Error("history requires a prompt \u2014 the last stdin message must be a user message");
-      }
       const line = buildRecalledConversation(options.history);
       this.proc.stdin.write(line + "\n");
     }

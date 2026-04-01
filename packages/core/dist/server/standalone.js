@@ -447,9 +447,6 @@ var ClaudeCodeProcess = class {
       this.emitter.emit("error", err2);
     });
     if (options.history?.length && !options._historyViaResume) {
-      if (!options.prompt) {
-        throw new Error("history requires a prompt \u2014 the last stdin message must be a user message");
-      }
       const line = buildRecalledConversation(options.history);
       this.proc.stdin.write(line + "\n");
     }
@@ -1072,7 +1069,7 @@ function createAgentRoutes(sessionManager2) {
     }
     const history = buildHistoryFromDb(sessionId);
     if (history.length === 0 && !body.prompt) {
-      return c.json({ status: "error", message: "No history and no prompt \u2014 nothing to resume." }, 400);
+      return c.json({ status: "error", message: "No history in DB \u2014 nothing to resume." }, 400);
     }
     const providerName = body.provider ?? "claude-code";
     const model = body.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
@@ -1958,7 +1955,7 @@ function handleAgentResume(ws, msg, sm) {
   }
   const history = buildHistoryFromDb(sessionId);
   if (history.length === 0 && !msg.prompt) {
-    return replyError(ws, msg, "No history and no prompt \u2014 nothing to resume.");
+    return replyError(ws, msg, "No history in DB \u2014 nothing to resume.");
   }
   const providerName = msg.provider ?? session.lastStartConfig?.provider ?? "claude-code";
   const model = msg.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";

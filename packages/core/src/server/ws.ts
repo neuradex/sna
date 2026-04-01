@@ -388,7 +388,7 @@ function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManager): v
 
   const history = buildHistoryFromDb(sessionId);
   if (history.length === 0 && !msg.prompt) {
-    return replyError(ws, msg, "No history and no prompt — nothing to resume.");
+    return replyError(ws, msg, "No history in DB — nothing to resume.");
   }
 
   const providerName = (msg.provider as string) ?? session.lastStartConfig?.provider ?? "claude-code";

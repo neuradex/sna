@@ -428,7 +428,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
 
     const history = buildHistoryFromDb(sessionId);
     if (history.length === 0 && !body.prompt) {
-      return c.json({ status: "error", message: "No history and no prompt — nothing to resume." }, 400);
+      return c.json({ status: "error", message: "No history in DB — nothing to resume." }, 400);
     }
 
     const providerName = body.provider ?? "claude-code";

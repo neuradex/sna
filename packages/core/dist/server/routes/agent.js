@@ -282,7 +282,7 @@ function createAgentRoutes(sessionManager) {
     }
     const history = buildHistoryFromDb(sessionId);
     if (history.length === 0 && !body.prompt) {
-      return c.json({ status: "error", message: "No history and no prompt \u2014 nothing to resume." }, 400);
+      return c.json({ status: "error", message: "No history in DB \u2014 nothing to resume." }, 400);
     }
     const providerName = body.provider ?? "claude-code";
     const model = body.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
