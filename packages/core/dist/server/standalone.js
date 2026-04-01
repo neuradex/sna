@@ -2089,7 +2089,38 @@ function handleAgentSubscribe(ws, msg, sm, state) {
   const sessionId = msg.session ?? "default";
   const session = sm.getOrCreateSession(sessionId);
   state.agentUnsubs.get(sessionId)?.();
-  let cursor = typeof msg.since === "number" ? msg.since : session.eventCounter;
+  const includeHistory = msg.since === 0 || msg.includeHistory === true;
+  let cursor = 0;
+  if (includeHistory) {
+    try {
+      const db = getDb();
+      const rows = db.prepare(
+        `SELECT role, content, meta, created_at FROM chat_messages
+         WHERE session_id = ? ORDER BY id ASC`
+      ).all(sessionId);
+      for (const row of rows) {
+        cursor++;
+        const eventType = row.role === "user" ? "user_message" : row.role === "assistant" ? "assistant" : row.role === "thinking" ? "thinking" : row.role === "tool" ? "tool_use" : row.role === "tool_result" ? "tool_result" : row.role === "error" ? "error" : null;
+        if (!eventType) continue;
+        const meta = row.meta ? JSON.parse(row.meta) : void 0;
+        send(ws, {
+          type: "agent.event",
+          session: sessionId,
+          cursor,
+          isHistory: true,
+          event: {
+            type: eventType,
+            message: row.content,
+            data: meta,
+            timestamp: new Date(row.created_at).getTime()
+          }
+        });
+      }
+    } catch {
+    }
+  }
+  const bufferStart = typeof msg.since === "number" && msg.since > 0 ? msg.since : session.eventCounter;
+  if (!includeHistory) cursor = bufferStart;
   if (cursor < session.eventCounter) {
     const startIdx = Math.max(0, session.eventBuffer.length - (session.eventCounter - cursor));
     const events = session.eventBuffer.slice(startIdx);
@@ -2097,6 +2128,8 @@ function handleAgentSubscribe(ws, msg, sm, state) {
       cursor++;
       send(ws, { type: "agent.event", session: sessionId, cursor, event });
     }
+  } else {
+    cursor = session.eventCounter;
   }
   const unsub = sm.onSessionEvent(sessionId, (eventCursor, event) => {
     send(ws, { type: "agent.event", session: sessionId, cursor: eventCursor, event });

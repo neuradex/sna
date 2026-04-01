@@ -524,8 +524,48 @@ function handleAgentSubscribe(
   // Unsubscribe existing for this session
   state.agentUnsubs.get(sessionId)?.();
 
-  // Replay buffered events from cursor
-  let cursor = typeof msg.since === "number" ? msg.since : session.eventCounter;
+  // If since=0 (or includeHistory=true), replay DB history as events first
+  const includeHistory = msg.since === 0 || msg.includeHistory === true;
+  let cursor = 0;
+
+  if (includeHistory) {
+    try {
+      const db = getDb();
+      const rows = db.prepare(
+        `SELECT role, content, meta, created_at FROM chat_messages
+         WHERE session_id = ? ORDER BY id ASC`,
+      ).all(sessionId) as { role: string; content: string; meta: string | null; created_at: string }[];
+
+      for (const row of rows) {
+        cursor++;
+        const eventType = row.role === "user" ? "user_message"
+          : row.role === "assistant" ? "assistant"
+          : row.role === "thinking" ? "thinking"
+          : row.role === "tool" ? "tool_use"
+          : row.role === "tool_result" ? "tool_result"
+          : row.role === "error" ? "error"
+          : null;
+        if (!eventType) continue;
+        const meta = row.meta ? JSON.parse(row.meta) : undefined;
+        send(ws, {
+          type: "agent.event",
+          session: sessionId,
+          cursor,
+          isHistory: true,
+          event: {
+            type: eventType,
+            message: row.content,
+            data: meta,
+            timestamp: new Date(row.created_at).getTime(),
+          },
+        });
+      }
+    } catch { /* DB not ready */ }
+  }
+
+  // Then replay in-memory buffer (for events not yet persisted or current-turn events)
+  const bufferStart = typeof msg.since === "number" && msg.since > 0 ? msg.since : session.eventCounter;
+  if (!includeHistory) cursor = bufferStart;
   if (cursor < session.eventCounter) {
     const startIdx = Math.max(0, session.eventBuffer.length - (session.eventCounter - cursor));
     const events = session.eventBuffer.slice(startIdx);
@@ -533,6 +573,8 @@ function handleAgentSubscribe(
       cursor++;
       send(ws, { type: "agent.event", session: sessionId, cursor, event });
     }
+  } else {
+    cursor = session.eventCounter;
   }
 
   // Subscribe to future events — pushed instantly, no polling
