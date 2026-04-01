@@ -3,7 +3,7 @@ import { EventEmitter } from "events";
 import fs from "fs";
 import path from "path";
 import type { AgentProvider, AgentProcess, AgentEvent, SpawnOptions } from "./types.js";
-import { writeSessionJsonl, buildRecalledConversation } from "./cc-history-adapter.js";
+import { writeHistoryJsonl, buildRecalledConversation } from "./cc-history-adapter.js";
 import { logger } from "../../lib/logger.js";
 
 const SHELL = process.env.SHELL || "/bin/zsh";
@@ -384,13 +384,13 @@ export class ClaudeCodeProvider implements AgentProvider {
       args.push("--permission-mode", options.permissionMode);
     }
 
-    // Try JSONL resume for history injection (primary adapter)
+    // History injection: write JSONL file, pass --resume <filepath>
     if (options.history?.length && options.prompt) {
-      const result = writeSessionJsonl(options.history, { cwd: options.cwd });
+      const result = writeHistoryJsonl(options.history, { cwd: options.cwd });
       if (result) {
         args.push(...result.extraArgs);
         options._historyViaResume = true;
-        logger.log("agent", `history injected via JSONL resume (session=${result.sessionId})`);
+        logger.log("agent", `history via JSONL resume → ${result.filePath}`);
       }
     }
 

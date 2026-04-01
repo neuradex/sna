@@ -1,34 +1,37 @@
 import { HistoryMessage } from './types.js';
 
 /**
- * History injection adapters for Claude Code.
+ * History injection for Claude Code via JSONL resume.
  *
- * Primary: JSONL resume — writes a session file and uses --resume.
- *   Pro: Real multi-turn structure, tool_use preserved.
- *   Con: Depends on CC's JSONL format, CLAUDE_CONFIG_DIR path.
+ * Writes a JSONL session file and passes --resume <filepath> to CC.
+ * CC loads it as real multi-turn conversation history.
  *
- * Fallback: recalled-conversation — packs history into a single assistant message.
- *   Pro: No file system dependency, format-agnostic.
- *   Con: Loses turn structure (text only).
+ * Key discovery: --resume with a .jsonl file path bypasses CC's project
+ * directory lookup and calls loadMessagesFromJsonlPath directly.
+ * This is the only reliable way to inject synthetic history.
+ *
+ * Verified: real Claude Haiku correctly recalls injected context.
+ * Fallback: recalled-conversation XML if file write fails.
  */
 
 /**
- * Write a synthetic JSONL session file that CC can --resume.
- * Returns the session ID to pass as --resume <id>.
+ * Write a JSONL session file for --resume <filepath>.
  *
- * File location: {configDir}/projects/{projectHash}/{sessionId}.jsonl
+ * Minimal format (verified working):
+ *   {"parentUuid":null,"isSidechain":false,"type":"user","uuid":"...","timestamp":"...","cwd":"...","sessionId":"...","message":{"role":"user","content":"..."}}
+ *   {"parentUuid":"<prev>","isSidechain":false,"type":"assistant","uuid":"...","timestamp":"...","cwd":"...","sessionId":"...","message":{"role":"assistant","content":[{"type":"text","text":"..."}]}}
  */
-declare function writeSessionJsonl(history: HistoryMessage[], opts: {
+declare function writeHistoryJsonl(history: HistoryMessage[], opts: {
     cwd: string;
-    configDir?: string;
 }): {
-    sessionId: string;
+    filePath: string;
     extraArgs: string[];
 } | null;
 /**
- * Pack history into a single assistant stdin message using XML tags.
- * CC treats type:"assistant" as mutableMessages.push + continue (no API call).
+ * Pack history into a single assistant stdin message.
+ * CC treats type:"assistant" as context injection (no API call triggered).
+ * Used when file write fails.
  */
 declare function buildRecalledConversation(history: HistoryMessage[]): string;
 
-export { buildRecalledConversation, writeSessionJsonl };
+export { buildRecalledConversation, writeHistoryJsonl };

@@ -2,7 +2,7 @@ import { spawn, execSync } from "child_process";
 import { EventEmitter } from "events";
 import fs from "fs";
 import path from "path";
-import { writeSessionJsonl, buildRecalledConversation } from "./cc-history-adapter.js";
+import { writeHistoryJsonl, buildRecalledConversation } from "./cc-history-adapter.js";
 import { logger } from "../../lib/logger.js";
 const SHELL = process.env.SHELL || "/bin/zsh";
 function resolveClaudePath(cwd) {
@@ -327,11 +327,11 @@ class ClaudeCodeProvider {
       args.push("--permission-mode", options.permissionMode);
     }
     if (options.history?.length && options.prompt) {
-      const result = writeSessionJsonl(options.history, { cwd: options.cwd });
+      const result = writeHistoryJsonl(options.history, { cwd: options.cwd });
       if (result) {
         args.push(...result.extraArgs);
         options._historyViaResume = true;
-        logger.log("agent", `history injected via JSONL resume (session=${result.sessionId})`);
+        logger.log("agent", `history via JSONL resume \u2192 ${result.filePath}`);
       }
     }
     if (extraArgsClean.length > 0) {

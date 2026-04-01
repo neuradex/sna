@@ -1,39 +1,40 @@
 /**
- * History injection adapters for Claude Code.
+ * History injection for Claude Code via JSONL resume.
  *
- * Primary: JSONL resume — writes a session file and uses --resume.
- *   Pro: Real multi-turn structure, tool_use preserved.
- *   Con: Depends on CC's JSONL format, CLAUDE_CONFIG_DIR path.
+ * Writes a JSONL session file and passes --resume <filepath> to CC.
+ * CC loads it as real multi-turn conversation history.
  *
- * Fallback: recalled-conversation — packs history into a single assistant message.
- *   Pro: No file system dependency, format-agnostic.
- *   Con: Loses turn structure (text only).
+ * Key discovery: --resume with a .jsonl file path bypasses CC's project
+ * directory lookup and calls loadMessagesFromJsonlPath directly.
+ * This is the only reliable way to inject synthetic history.
+ *
+ * Verified: real Claude Haiku correctly recalls injected context.
+ * Fallback: recalled-conversation XML if file write fails.
  */
 
 import fs from "fs";
 import path from "path";
 import type { HistoryMessage } from "./types.js";
 
-// ── JSONL Resume Adapter ────────────────────────────────────────
+// ── JSONL Resume (Primary) ──────────────────────────────────────
 
 /**
- * Write a synthetic JSONL session file that CC can --resume.
- * Returns the session ID to pass as --resume <id>.
+ * Write a JSONL session file for --resume <filepath>.
  *
- * File location: {configDir}/projects/{projectHash}/{sessionId}.jsonl
+ * Minimal format (verified working):
+ *   {"parentUuid":null,"isSidechain":false,"type":"user","uuid":"...","timestamp":"...","cwd":"...","sessionId":"...","message":{"role":"user","content":"..."}}
+ *   {"parentUuid":"<prev>","isSidechain":false,"type":"assistant","uuid":"...","timestamp":"...","cwd":"...","sessionId":"...","message":{"role":"assistant","content":[{"type":"text","text":"..."}]}}
  */
-export function writeSessionJsonl(
+export function writeHistoryJsonl(
   history: HistoryMessage[],
-  opts: { cwd: string; configDir?: string },
-): { sessionId: string; extraArgs: string[] } | null {
+  opts: { cwd: string },
+): { filePath: string; extraArgs: string[] } | null {
   try {
-    const configDir = opts.configDir ?? process.env.CLAUDE_CONFIG_DIR ?? path.join(process.env.HOME ?? "", ".claude");
-    const projectHash = sanitizePath(opts.cwd);
-    const projectDir = path.join(configDir, "projects", projectHash);
-    fs.mkdirSync(projectDir, { recursive: true });
+    const dir = path.join(opts.cwd, ".sna", "history");
+    fs.mkdirSync(dir, { recursive: true });
 
     const sessionId = crypto.randomUUID();
-    const filePath = path.join(projectDir, `${sessionId}.jsonl`);
+    const filePath = path.join(dir, `${sessionId}.jsonl`);
     const now = new Date().toISOString();
 
     const lines: string[] = [];
@@ -42,37 +43,29 @@ export function writeSessionJsonl(
     for (const msg of history) {
       const uuid = crypto.randomUUID();
 
-      const common = {
-        parentUuid: prevUuid,
-        isSidechain: false,
-        userType: "external",
-        cwd: opts.cwd,
-        sessionId,
-        version: "0.0.0",
-        type: "",
-        uuid,
-        timestamp: now,
-      };
-
       if (msg.role === "user") {
         lines.push(JSON.stringify({
-          ...common,
+          parentUuid: prevUuid,
+          isSidechain: false,
           type: "user",
+          uuid,
+          timestamp: now,
+          cwd: opts.cwd,
+          sessionId,
           message: { role: "user", content: msg.content },
         }));
       } else {
         lines.push(JSON.stringify({
-          ...common,
+          parentUuid: prevUuid,
+          isSidechain: false,
           type: "assistant",
+          uuid,
+          timestamp: now,
+          cwd: opts.cwd,
+          sessionId,
           message: {
-            id: `msg_synth_${uuid.slice(0, 12)}`,
-            type: "message",
             role: "assistant",
-            model: "synthetic",
             content: [{ type: "text", text: msg.content }],
-            stop_reason: "end_turn",
-            stop_sequence: "",
-            usage: { input_tokens: 0, output_tokens: 0 },
           },
         }));
       }
@@ -81,17 +74,18 @@ export function writeSessionJsonl(
     }
 
     fs.writeFileSync(filePath, lines.join("\n") + "\n");
-    return { sessionId, extraArgs: ["--resume", sessionId] };
+    return { filePath, extraArgs: ["--resume", filePath] };
   } catch {
-    return null; // Fallback to recalled-conversation
+    return null;
   }
 }
 
-// ── Recalled-Conversation Fallback ──────────────────────────────
+// ── Recalled-Conversation (Fallback) ────────────────────────────
 
 /**
- * Pack history into a single assistant stdin message using XML tags.
- * CC treats type:"assistant" as mutableMessages.push + continue (no API call).
+ * Pack history into a single assistant stdin message.
+ * CC treats type:"assistant" as context injection (no API call triggered).
+ * Used when file write fails.
  */
 export function buildRecalledConversation(history: HistoryMessage[]): string {
   const xml = history
@@ -104,11 +98,4 @@ export function buildRecalledConversation(history: HistoryMessage[]): string {
       content: [{ type: "text", text: `<recalled-conversation>\n${xml}\n</recalled-conversation>` }],
     },
   });
-}
-
-// ── Path sanitization (matches CC's format) ─────────────────────
-
-function sanitizePath(p: string): string {
-  // CC uses this format: /Users/foo/bar → -Users-foo-bar
-  return p.replace(/\//g, "-");
 }
