@@ -27,6 +27,7 @@ import { createAgentRoutes as createAgentRoutes2 } from "./routes/agent.js";
 import { createChatRoutes as createChatRoutes2 } from "./routes/chat.js";
 import { SessionManager as SessionManager2 } from "./session-manager.js";
 import { attachWebSocket } from "./ws.js";
+import { buildHistoryFromDb } from "./history-builder.js";
 function snaPortRoute(c) {
   const portFile = _path.join(process.cwd(), ".sna/sna-api.port");
   try {
@@ -39,6 +40,7 @@ function snaPortRoute(c) {
 export {
   SessionManager2 as SessionManager,
   attachWebSocket,
+  buildHistoryFromDb,
   createAgentRoutes2 as createAgentRoutes,
   createChatRoutes2 as createChatRoutes,
   createEmitRoute2 as createEmitRoute,

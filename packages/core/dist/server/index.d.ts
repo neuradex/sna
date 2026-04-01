@@ -8,6 +8,7 @@ export { createRunRoute } from './routes/run.js';
 export { createAgentRoutes } from './routes/agent.js';
 export { createChatRoutes } from './routes/chat.js';
 export { attachWebSocket } from './ws.js';
+export { buildHistoryFromDb } from './history-builder.js';
 import '../core/providers/types.js';
 import 'hono/utils/http-status';
 import 'ws';

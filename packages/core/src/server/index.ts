@@ -69,6 +69,7 @@ export { createChatRoutes } from "./routes/chat.js";
 export { SessionManager } from "./session-manager.js";
 export type { Session, SessionInfo, SessionManagerOptions, SessionLifecycleEvent, SessionLifecycleState, SessionConfigChangedEvent, StartConfig } from "./session-manager.js";
 export { attachWebSocket } from "./ws.js";
+export { buildHistoryFromDb } from "./history-builder.js";
 
 /**
  * GET /api/sna-port handler for consumer servers.
