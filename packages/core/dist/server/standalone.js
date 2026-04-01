@@ -2242,10 +2242,14 @@ function handlePermissionPending(ws, msg, sm) {
 }
 function handlePermissionSubscribe(ws, msg, sm, state) {
   state.permissionUnsub?.();
+  const pending = sm.getAllPendingPermissions();
+  for (const p of pending) {
+    send(ws, { type: "permission.request", session: p.sessionId, request: p.request, createdAt: p.createdAt, isHistory: true });
+  }
   state.permissionUnsub = sm.onPermissionRequest((sessionId, request, createdAt) => {
     send(ws, { type: "permission.request", session: sessionId, request, createdAt });
   });
-  reply(ws, msg, {});
+  reply(ws, msg, { pendingCount: pending.length });
 }
 function handlePermissionUnsubscribe(ws, msg, state) {
   state.permissionUnsub?.();

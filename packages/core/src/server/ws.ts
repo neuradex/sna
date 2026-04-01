@@ -714,10 +714,18 @@ function handlePermissionPending(ws: WebSocket, msg: WsRequest, sm: SessionManag
 
 function handlePermissionSubscribe(ws: WebSocket, msg: WsRequest, sm: SessionManager, state: ConnState): void {
   state.permissionUnsub?.();
+
+  // Replay existing pending permissions
+  const pending = sm.getAllPendingPermissions();
+  for (const p of pending) {
+    send(ws, { type: "permission.request", session: p.sessionId, request: p.request, createdAt: p.createdAt, isHistory: true });
+  }
+
+  // Subscribe to future permission requests
   state.permissionUnsub = sm.onPermissionRequest((sessionId, request, createdAt) => {
     send(ws, { type: "permission.request", session: sessionId, request, createdAt });
   });
-  reply(ws, msg, {});
+  reply(ws, msg, { pendingCount: pending.length });
 }
 
 function handlePermissionUnsubscribe(ws: WebSocket, msg: WsRequest, state: ConnState): void {
