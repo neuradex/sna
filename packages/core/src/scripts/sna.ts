@@ -257,6 +257,7 @@ function cmdTu(args: string[]) {
     case "api:down": cmdTuApiDown(); break;
     case "api:log":  cmdTuApiLog(args.slice(1)); break;
     case "claude":   cmdTuClaude(args.slice(1)); break;
+    case "claude:oneshot": cmdTuClaudeOneshot(args.slice(1)); break;
     default:
       console.log(`
   sna tu — Test utilities (mock Anthropic API)
@@ -266,7 +267,8 @@ function cmdTu(args: string[]) {
     sna tu api:down     Stop mock API server
     sna tu api:log      Show mock API request/response log
     sna tu api:log -f   Follow log in real-time (tail -f)
-    sna tu claude ...   Run claude with mock API env vars (proxy)
+    sna tu claude ...          Run claude with mock API env vars (proxy)
+    sna tu claude:oneshot ...  One-shot: mock server → claude → results → cleanup
 
   Flow:
     1. sna tu api:up            → mock server on random port
@@ -388,6 +390,23 @@ function cmdTuClaude(args: string[]) {
       stdio: "inherit",
       env,
       cwd: ROOT,
+    });
+  } catch (e: any) {
+    process.exit(e.status ?? 1);
+  }
+}
+
+function cmdTuClaudeOneshot(args: string[]) {
+  const scriptDir = path.dirname(new URL(import.meta.url).pathname);
+  const oneshotScript = fs.existsSync(path.join(scriptDir, "tu-oneshot.js"))
+    ? path.join(scriptDir, "tu-oneshot.js")
+    : path.join(scriptDir, "tu-oneshot.ts");
+
+  try {
+    execSync(`node --import tsx "${oneshotScript}" ${args.map(a => `"${a}"`).join(" ")}`, {
+      stdio: "inherit",
+      cwd: ROOT,
+      timeout: 90000,
     });
   } catch (e: any) {
     process.exit(e.status ?? 1);
@@ -914,7 +933,8 @@ Testing:
   sna tu api:down     Stop mock API server
   sna tu api:log      Show mock API request/response log
   sna tu api:log -f   Follow log in real-time
-  sna tu claude ...   Run claude with mock API (isolated env, no account pollution)
+  sna tu claude ...          Run claude with mock API (isolated env)
+  sna tu claude:oneshot ...  One-shot: mock server → claude → structured results → cleanup
 
   Set SNA_CLAUDE_COMMAND to override claude binary in SDK.
   See: docs/testing.md

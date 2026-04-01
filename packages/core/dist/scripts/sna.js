@@ -212,6 +212,9 @@ function cmdTu(args2) {
     case "claude":
       cmdTuClaude(args2.slice(1));
       break;
+    case "claude:oneshot":
+      cmdTuClaudeOneshot(args2.slice(1));
+      break;
     default:
       console.log(`
   sna tu \u2014 Test utilities (mock Anthropic API)
@@ -221,7 +224,8 @@ function cmdTu(args2) {
     sna tu api:down     Stop mock API server
     sna tu api:log      Show mock API request/response log
     sna tu api:log -f   Follow log in real-time (tail -f)
-    sna tu claude ...   Run claude with mock API env vars (proxy)
+    sna tu claude ...          Run claude with mock API env vars (proxy)
+    sna tu claude:oneshot ...  One-shot: mock server \u2192 claude \u2192 results \u2192 cleanup
 
   Flow:
     1. sna tu api:up            \u2192 mock server on random port
@@ -333,6 +337,19 @@ function cmdTuClaude(args2) {
       stdio: "inherit",
       env,
       cwd: ROOT
+    });
+  } catch (e) {
+    process.exit(e.status ?? 1);
+  }
+}
+function cmdTuClaudeOneshot(args2) {
+  const scriptDir = path.dirname(new URL(import.meta.url).pathname);
+  const oneshotScript = fs.existsSync(path.join(scriptDir, "tu-oneshot.js")) ? path.join(scriptDir, "tu-oneshot.js") : path.join(scriptDir, "tu-oneshot.ts");
+  try {
+    execSync(`node --import tsx "${oneshotScript}" ${args2.map((a) => `"${a}"`).join(" ")}`, {
+      stdio: "inherit",
+      cwd: ROOT,
+      timeout: 9e4
     });
   } catch (e) {
     process.exit(e.status ?? 1);
@@ -784,7 +801,8 @@ Testing:
   sna tu api:down     Stop mock API server
   sna tu api:log      Show mock API request/response log
   sna tu api:log -f   Follow log in real-time
-  sna tu claude ...   Run claude with mock API (isolated env, no account pollution)
+  sna tu claude ...          Run claude with mock API (isolated env)
+  sna tu claude:oneshot ...  One-shot: mock server \u2192 claude \u2192 structured results \u2192 cleanup
 
   Set SNA_CLAUDE_COMMAND to override claude binary in SDK.
   See: docs/testing.md
