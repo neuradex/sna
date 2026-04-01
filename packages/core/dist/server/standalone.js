@@ -742,6 +742,29 @@ function getProvider(name = "claude-code") {
   return provider2;
 }
 
+// src/server/history-builder.ts
+function buildHistoryFromDb(sessionId) {
+  const db = getDb();
+  const rows = db.prepare(
+    `SELECT role, content FROM chat_messages
+     WHERE session_id = ? AND role IN ('user', 'assistant')
+     ORDER BY id ASC`
+  ).all(sessionId);
+  if (rows.length === 0) return [];
+  const merged = [];
+  for (const row of rows) {
+    const role = row.role;
+    if (!row.content?.trim()) continue;
+    const last = merged[merged.length - 1];
+    if (last && last.role === role) {
+      last.content += "\n\n" + row.content;
+    } else {
+      merged.push({ role, content: row.content });
+    }
+  }
+  return merged;
+}
+
 // src/server/image-store.ts
 import fs5 from "fs";
 import path5 from "path";
@@ -1037,6 +1060,46 @@ function createAgentRoutes(sessionManager2) {
       });
     } catch (e) {
       logger.err("err", `POST /restart?session=${sessionId} \u2192 ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 500);
+    }
+  });
+  app.post("/resume", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = await c.req.json().catch(() => ({}));
+    const session = sessionManager2.getOrCreateSession(sessionId);
+    if (session.process?.alive) {
+      return c.json({ status: "error", message: "Session already running. Use agent.send instead." }, 400);
+    }
+    const history = buildHistoryFromDb(sessionId);
+    if (history.length === 0 && !body.prompt) {
+      return c.json({ status: "error", message: "No history and no prompt \u2014 nothing to resume." }, 400);
+    }
+    const providerName = body.provider ?? "claude-code";
+    const model = body.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
+    const permissionMode2 = body.permissionMode ?? session.lastStartConfig?.permissionMode ?? "acceptEdits";
+    const extraArgs = body.extraArgs ?? session.lastStartConfig?.extraArgs;
+    const provider2 = getProvider(providerName);
+    try {
+      const proc = provider2.spawn({
+        cwd: session.cwd,
+        prompt: body.prompt,
+        model,
+        permissionMode: permissionMode2,
+        env: { SNA_SESSION_ID: sessionId },
+        history: history.length > 0 ? history : void 0,
+        extraArgs
+      });
+      sessionManager2.setProcess(sessionId, proc);
+      sessionManager2.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, extraArgs });
+      logger.log("route", `POST /resume?session=${sessionId} \u2192 resumed (${history.length} history msgs)`);
+      return httpJson(c, "agent.resume", {
+        status: "resumed",
+        provider: providerName,
+        sessionId: session.id,
+        historyCount: history.length
+      });
+    } catch (e) {
+      logger.err("err", `POST /resume?session=${sessionId} \u2192 ${e.message}`);
       return c.json({ status: "error", message: e.message }, 500);
     }
   });
@@ -1701,6 +1764,8 @@ function handleMessage(ws, msg, sm, state) {
       return handleAgentStart(ws, msg, sm);
     case "agent.send":
       return handleAgentSend(ws, msg, sm);
+    case "agent.resume":
+      return handleAgentResume(ws, msg, sm);
     case "agent.restart":
       return handleAgentRestart(ws, msg, sm);
     case "agent.interrupt":
@@ -1857,6 +1922,43 @@ function handleAgentSend(ws, msg, sm) {
     session.process.send(msg.message);
   }
   wsReply(ws, msg, { status: "sent" });
+}
+function handleAgentResume(ws, msg, sm) {
+  const sessionId = msg.session ?? "default";
+  const session = sm.getOrCreateSession(sessionId);
+  if (session.process?.alive) {
+    return replyError(ws, msg, "Session already running. Use agent.send instead.");
+  }
+  const history = buildHistoryFromDb(sessionId);
+  if (history.length === 0 && !msg.prompt) {
+    return replyError(ws, msg, "No history and no prompt \u2014 nothing to resume.");
+  }
+  const providerName = msg.provider ?? session.lastStartConfig?.provider ?? "claude-code";
+  const model = msg.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
+  const permissionMode2 = msg.permissionMode ?? session.lastStartConfig?.permissionMode ?? "acceptEdits";
+  const extraArgs = msg.extraArgs ?? session.lastStartConfig?.extraArgs;
+  const provider2 = getProvider(providerName);
+  try {
+    const proc = provider2.spawn({
+      cwd: session.cwd,
+      prompt: msg.prompt,
+      model,
+      permissionMode: permissionMode2,
+      env: { SNA_SESSION_ID: sessionId },
+      history: history.length > 0 ? history : void 0,
+      extraArgs
+    });
+    sm.setProcess(sessionId, proc);
+    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, extraArgs });
+    wsReply(ws, msg, {
+      status: "resumed",
+      provider: providerName,
+      sessionId: session.id,
+      historyCount: history.length
+    });
+  } catch (e) {
+    replyError(ws, msg, e.message);
+  }
 }
 function handleAgentRestart(ws, msg, sm) {
   const sessionId = msg.session ?? "default";

@@ -49,6 +49,7 @@ import { getDb } from "../db/schema.js";
 import { logger } from "../lib/logger.js";
 import { runOnce, type RunOnceOptions } from "./routes/agent.js";
 import { wsReply } from "./api-types.js";
+import { buildHistoryFromDb } from "./history-builder.js";
 import { saveImages } from "./image-store.js";
 import type { SessionManager } from "./session-manager.js";
 
@@ -181,6 +182,8 @@ function handleMessage(
       return handleAgentStart(ws, msg, sm);
     case "agent.send":
       return handleAgentSend(ws, msg, sm);
+    case "agent.resume":
+      return handleAgentResume(ws, msg, sm);
     case "agent.restart":
       return handleAgentRestart(ws, msg, sm);
     case "agent.interrupt":
@@ -365,6 +368,48 @@ function handleAgentSend(ws: WebSocket, msg: WsRequest, sm: SessionManager): voi
     session.process.send(msg.message as string);
   }
   wsReply(ws, msg, { status: "sent" });
+}
+
+function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
+  const sessionId = (msg.session as string) ?? "default";
+  const session = sm.getOrCreateSession(sessionId);
+
+  if (session.process?.alive) {
+    return replyError(ws, msg, "Session already running. Use agent.send instead.");
+  }
+
+  const history = buildHistoryFromDb(sessionId);
+  if (history.length === 0 && !msg.prompt) {
+    return replyError(ws, msg, "No history and no prompt — nothing to resume.");
+  }
+
+  const providerName = (msg.provider as string) ?? session.lastStartConfig?.provider ?? "claude-code";
+  const model = (msg.model as string) ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
+  const permissionMode = (msg.permissionMode as string) ?? session.lastStartConfig?.permissionMode ?? "acceptEdits";
+  const extraArgs = (msg.extraArgs as string[]) ?? session.lastStartConfig?.extraArgs;
+  const provider = getProvider(providerName);
+
+  try {
+    const proc = provider.spawn({
+      cwd: session.cwd,
+      prompt: msg.prompt as string | undefined,
+      model,
+      permissionMode: permissionMode as any,
+      env: { SNA_SESSION_ID: sessionId },
+      history: history.length > 0 ? history : undefined,
+      extraArgs,
+    });
+    sm.setProcess(sessionId, proc);
+    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
+    wsReply(ws, msg, {
+      status: "resumed",
+      provider: providerName,
+      sessionId: session.id,
+      historyCount: history.length,
+    });
+  } catch (e: any) {
+    replyError(ws, msg, e.message);
+  }
 }
 
 function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {

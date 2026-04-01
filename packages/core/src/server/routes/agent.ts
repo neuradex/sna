@@ -24,6 +24,7 @@ import {
 import { logger } from "../../lib/logger.js";
 import { getDb } from "../../db/schema.js";
 import { SessionManager } from "../session-manager.js";
+import { buildHistoryFromDb } from "../history-builder.js";
 import { httpJson } from "../api-types.js";
 import { saveImages } from "../image-store.js";
 
@@ -405,6 +406,58 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       });
     } catch (e: any) {
       logger.err("err", `POST /restart?session=${sessionId} → ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 500);
+    }
+  });
+
+  // POST /resume — resume session with DB history auto-injected
+  app.post("/resume", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      prompt?: string;
+      model?: string;
+      permissionMode?: string;
+      provider?: string;
+      extraArgs?: string[];
+    };
+
+    const session = sessionManager.getOrCreateSession(sessionId);
+    if (session.process?.alive) {
+      return c.json({ status: "error", message: "Session already running. Use agent.send instead." }, 400);
+    }
+
+    const history = buildHistoryFromDb(sessionId);
+    if (history.length === 0 && !body.prompt) {
+      return c.json({ status: "error", message: "No history and no prompt — nothing to resume." }, 400);
+    }
+
+    const providerName = body.provider ?? "claude-code";
+    const model = body.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
+    const permissionMode = body.permissionMode ?? session.lastStartConfig?.permissionMode ?? "acceptEdits";
+    const extraArgs = body.extraArgs ?? session.lastStartConfig?.extraArgs;
+    const provider = getProvider(providerName);
+
+    try {
+      const proc = provider.spawn({
+        cwd: session.cwd,
+        prompt: body.prompt,
+        model,
+        permissionMode: permissionMode as any,
+        env: { SNA_SESSION_ID: sessionId },
+        history: history.length > 0 ? history : undefined,
+        extraArgs,
+      });
+      sessionManager.setProcess(sessionId, proc);
+      sessionManager.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
+      logger.log("route", `POST /resume?session=${sessionId} → resumed (${history.length} history msgs)`);
+      return httpJson(c, "agent.resume", {
+        status: "resumed",
+        provider: providerName,
+        sessionId: session.id,
+        historyCount: history.length,
+      });
+    } catch (e: any) {
+      logger.err("err", `POST /resume?session=${sessionId} → ${e.message}`);
       return c.json({ status: "error", message: e.message }, 500);
     }
   });

@@ -4,6 +4,7 @@ import { getDb } from "../db/schema.js";
 import { logger } from "../lib/logger.js";
 import { runOnce } from "./routes/agent.js";
 import { wsReply } from "./api-types.js";
+import { buildHistoryFromDb } from "./history-builder.js";
 import { saveImages } from "./image-store.js";
 function send(ws, data) {
   if (ws.readyState === ws.OPEN) {
@@ -85,6 +86,8 @@ function handleMessage(ws, msg, sm, state) {
       return handleAgentStart(ws, msg, sm);
     case "agent.send":
       return handleAgentSend(ws, msg, sm);
+    case "agent.resume":
+      return handleAgentResume(ws, msg, sm);
     case "agent.restart":
       return handleAgentRestart(ws, msg, sm);
     case "agent.interrupt":
@@ -241,6 +244,43 @@ function handleAgentSend(ws, msg, sm) {
     session.process.send(msg.message);
   }
   wsReply(ws, msg, { status: "sent" });
+}
+function handleAgentResume(ws, msg, sm) {
+  const sessionId = msg.session ?? "default";
+  const session = sm.getOrCreateSession(sessionId);
+  if (session.process?.alive) {
+    return replyError(ws, msg, "Session already running. Use agent.send instead.");
+  }
+  const history = buildHistoryFromDb(sessionId);
+  if (history.length === 0 && !msg.prompt) {
+    return replyError(ws, msg, "No history and no prompt \u2014 nothing to resume.");
+  }
+  const providerName = msg.provider ?? session.lastStartConfig?.provider ?? "claude-code";
+  const model = msg.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
+  const permissionMode = msg.permissionMode ?? session.lastStartConfig?.permissionMode ?? "acceptEdits";
+  const extraArgs = msg.extraArgs ?? session.lastStartConfig?.extraArgs;
+  const provider = getProvider(providerName);
+  try {
+    const proc = provider.spawn({
+      cwd: session.cwd,
+      prompt: msg.prompt,
+      model,
+      permissionMode,
+      env: { SNA_SESSION_ID: sessionId },
+      history: history.length > 0 ? history : void 0,
+      extraArgs
+    });
+    sm.setProcess(sessionId, proc);
+    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
+    wsReply(ws, msg, {
+      status: "resumed",
+      provider: providerName,
+      sessionId: session.id,
+      historyCount: history.length
+    });
+  } catch (e) {
+    replyError(ws, msg, e.message);
+  }
 }
 function handleAgentRestart(ws, msg, sm) {
   const sessionId = msg.session ?? "default";

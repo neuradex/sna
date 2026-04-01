@@ -25,6 +25,12 @@ interface ApiResponses {
     "agent.send": {
         status: "sent";
     };
+    "agent.resume": {
+        status: "resumed";
+        provider: string;
+        sessionId: string;
+        historyCount: number;
+    };
     "agent.restart": {
         status: "restarted";
         provider: string;
