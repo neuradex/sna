@@ -1,0 +1,45 @@
+[17:01:50.382] Mock Anthropic API server listening on :59258
+Mock Anthropic API ready on :59258
+[17:02:08.847] HEAD / 
+[17:02:08.848] 404 HEAD /
+[17:02:08.977] POST /v1/messages?beta=true application/json
+[17:02:08.979] REQ model=test-mock stream=true messages=3 user="현재 디렉토리 확인해줘"
+[17:02:08.979]   [0] user: <system-reminder>
+As you answer the user's questions, you can use the following context:
+# claudeMd
+Codebase and user instructions are shown below. Be
+[17:02:08.979]   [1] assistant: tool_use | text:"현재 디렉토리는 /Users/test/project 입니다."
+[17:02:08.979]   [2] user: tool_result | text:"<system-reminder>
+The following skills are available for use with the Skill tool:
+
+- update-config: " | text:"현재 디렉토리 확인해줘"
+[17:02:08.980] RES stream complete reply="줘해인확 리토렉디 재현"
+[17:02:08.987] POST /v1/messages?beta=true application/json
+[17:02:08.988] REQ model=test-mock stream=true messages=4 user="현재 디렉토리 확인해줘"
+[17:02:08.988]   [0] user: <system-reminder>
+As you answer the user's questions, you can use the following context:
+# claudeMd
+Codebase and user instructions are shown below. Be
+[17:02:08.988]   [1] assistant: tool_use | text:"현재 디렉토리는 /Users/test/project 입니다."
+[17:02:08.988]   [2] user: tool_result | text:"<system-reminder>
+The following skills are available for use with the Skill tool:
+
+- update-config: " | text:"현재 디렉토리 확인해줘"
+[17:02:08.988]   [3] assistant: text:"줘해인확 리토렉디 재현 "
+[17:02:08.989] RES stream complete reply="줘해인확 리토렉디 재현"
+[17:02:09.663] POST /v1/messages?beta=true application/json
+[17:02:09.664] REQ model=test-mock stream=true messages=6 user="그 디렉토리에 뭐가 있어?"
+[17:02:09.664]   [0] user: <system-reminder>
+As you answer the user's questions, you can use the following context:
+# claudeMd
+Codebase and user instructions are shown below. Be
+[17:02:09.664]   [1] assistant: tool_use | text:"현재 디렉토리는 /Users/test/project 입니다."
+[17:02:09.664]   [2] user: tool_result | text:"<system-reminder>
+The following skills are available for use with the Skill tool:
+
+- update-config: " | text:"현재 디렉토리 확인해줘"
+[17:02:09.664]   [3] assistant: text:"줘해인확 리토렉디 재현 "
+[17:02:09.664]   [4] assistant: text:"줘해인확 리토렉디 재현 "
+[17:02:09.664]   [5] user: text:"그 디렉토리에 뭐가 있어?"
+[17:02:09.664] RES stream complete reply="?어있 가뭐 에리토렉디 그"
+[17:02:38.768] Mock API server shutting down
