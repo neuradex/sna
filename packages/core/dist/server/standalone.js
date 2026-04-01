@@ -14,7 +14,7 @@ import { streamSSE } from "hono/streaming";
 import { createRequire } from "module";
 import fs from "fs";
 import path from "path";
-var DB_PATH = path.join(process.cwd(), "data/sna.db");
+var DB_PATH = process.env.SNA_DB_PATH ?? path.join(process.cwd(), "data/sna.db");
 var NATIVE_DIR = path.join(process.cwd(), ".sna/native");
 var _db = null;
 function loadBetterSqlite3() {

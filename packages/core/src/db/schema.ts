@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import fs from "fs";
 import path from "path";
 
-const DB_PATH = path.join(process.cwd(), "data/sna.db");
+const DB_PATH = process.env.SNA_DB_PATH ?? path.join(process.cwd(), "data/sna.db");
 
 /**
  * Directory for isolated native dependencies.
