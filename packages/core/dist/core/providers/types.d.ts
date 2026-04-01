@@ -63,6 +63,8 @@ interface SpawnOptions {
      * Must alternate user→assistant. Assistant content is auto-wrapped in array format.
      */
     history?: HistoryMessage[];
+    /** @internal Set by provider when history was injected via JSONL resume. */
+    _historyViaResume?: boolean;
     /**
      * Additional CLI flags passed directly to the agent binary.
      * e.g. ["--system-prompt", "You are...", "--append-system-prompt", "Also...", "--mcp-config", "path"]

@@ -3,6 +3,7 @@ import { EventEmitter } from "events";
 import fs from "fs";
 import path from "path";
 import type { AgentProvider, AgentProcess, AgentEvent, SpawnOptions } from "./types.js";
+import { writeSessionJsonl, buildRecalledConversation } from "./cc-history-adapter.js";
 import { logger } from "../../lib/logger.js";
 
 const SHELL = process.env.SHELL || "/bin/zsh";
@@ -101,23 +102,16 @@ class ClaudeCodeProcess implements AgentProcess {
       this.emitter.emit("error", err);
     });
 
-    // Inject conversation history as a single assistant message.
-    // Sent as type:"assistant" so CC adds it to mutableMessages without
-    // triggering an API call. The actual prompt (type:"user") follows.
-    if (options.history?.length) {
+    // Inject conversation history.
+    // Primary: JSONL resume (real multi-turn structure).
+    // Fallback: recalled-conversation (single assistant message with XML).
+    // Note: JSONL resume args are added by the caller (spawn method) before
+    // the process is created, so here we only handle the fallback case.
+    if (options.history?.length && !options._historyViaResume) {
       if (!options.prompt) {
         throw new Error("history requires a prompt — the last stdin message must be a user message");
       }
-      const xml = options.history
-        .map((msg) => `<${msg.role}>${msg.content}</${msg.role}>`)
-        .join("\n");
-      const line = JSON.stringify({
-        type: "assistant",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: `<recalled-conversation>\n${xml}\n</recalled-conversation>` }],
-        },
-      });
+      const line = buildRecalledConversation(options.history);
       this.proc.stdin!.write(line + "\n");
     }
 
@@ -388,6 +382,16 @@ export class ClaudeCodeProvider implements AgentProvider {
 
     if (options.permissionMode) {
       args.push("--permission-mode", options.permissionMode);
+    }
+
+    // Try JSONL resume for history injection (primary adapter)
+    if (options.history?.length && options.prompt) {
+      const result = writeSessionJsonl(options.history, { cwd: options.cwd });
+      if (result) {
+        args.push(...result.extraArgs);
+        options._historyViaResume = true;
+        logger.log("agent", `history injected via JSONL resume (session=${result.sessionId})`);
+      }
     }
 
     if (extraArgsClean.length > 0) {

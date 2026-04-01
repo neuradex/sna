@@ -2,6 +2,7 @@ import { spawn, execSync } from "child_process";
 import { EventEmitter } from "events";
 import fs from "fs";
 import path from "path";
+import { writeSessionJsonl, buildRecalledConversation } from "./cc-history-adapter.js";
 import { logger } from "../../lib/logger.js";
 const SHELL = process.env.SHELL || "/bin/zsh";
 function resolveClaudePath(cwd) {
@@ -79,20 +80,11 @@ class ClaudeCodeProcess {
       this._alive = false;
       this.emitter.emit("error", err);
     });
-    if (options.history?.length) {
+    if (options.history?.length && !options._historyViaResume) {
       if (!options.prompt) {
         throw new Error("history requires a prompt \u2014 the last stdin message must be a user message");
       }
-      const xml = options.history.map((msg) => `<${msg.role}>${msg.content}</${msg.role}>`).join("\n");
-      const line = JSON.stringify({
-        type: "assistant",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: `<recalled-conversation>
-${xml}
-</recalled-conversation>` }]
-        }
-      });
+      const line = buildRecalledConversation(options.history);
       this.proc.stdin.write(line + "\n");
     }
     if (options.prompt) {
@@ -333,6 +325,14 @@ class ClaudeCodeProvider {
     }
     if (options.permissionMode) {
       args.push("--permission-mode", options.permissionMode);
+    }
+    if (options.history?.length && options.prompt) {
+      const result = writeSessionJsonl(options.history, { cwd: options.cwd });
+      if (result) {
+        args.push(...result.extraArgs);
+        options._historyViaResume = true;
+        logger.log("agent", `history injected via JSONL resume (session=${result.sessionId})`);
+      }
     }
     if (extraArgsClean.length > 0) {
       args.push(...extraArgsClean);

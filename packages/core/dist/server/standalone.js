@@ -247,16 +247,79 @@ import { streamSSE as streamSSE3 } from "hono/streaming";
 // src/core/providers/claude-code.ts
 import { spawn as spawn2, execSync } from "child_process";
 import { EventEmitter } from "events";
-import fs3 from "fs";
-import path3 from "path";
+import fs4 from "fs";
+import path4 from "path";
+
+// src/core/providers/cc-history-adapter.ts
+import fs2 from "fs";
+import path2 from "path";
+function writeSessionJsonl(history, opts) {
+  try {
+    const configDir = opts.configDir ?? process.env.CLAUDE_CONFIG_DIR ?? path2.join(process.env.HOME ?? "", ".claude");
+    const projectHash = sanitizePath(opts.cwd);
+    const projectDir = path2.join(configDir, "projects", projectHash);
+    fs2.mkdirSync(projectDir, { recursive: true });
+    const sessionId = crypto.randomUUID();
+    const filePath = path2.join(projectDir, `${sessionId}.jsonl`);
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const lines = [];
+    let prevUuid = null;
+    for (const msg of history) {
+      const uuid = crypto.randomUUID();
+      if (msg.role === "user") {
+        lines.push(JSON.stringify({
+          type: "user",
+          uuid,
+          parentUuid: prevUuid,
+          sessionId,
+          timestamp: now,
+          cwd: opts.cwd,
+          message: { role: "user", content: msg.content }
+        }));
+      } else {
+        lines.push(JSON.stringify({
+          type: "assistant",
+          uuid,
+          parentUuid: prevUuid,
+          sessionId,
+          timestamp: now,
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: msg.content }]
+          }
+        }));
+      }
+      prevUuid = uuid;
+    }
+    fs2.writeFileSync(filePath, lines.join("\n") + "\n");
+    return { sessionId, extraArgs: ["--resume", sessionId] };
+  } catch {
+    return null;
+  }
+}
+function buildRecalledConversation(history) {
+  const xml = history.map((msg) => `<${msg.role}>${msg.content}</${msg.role}>`).join("\n");
+  return JSON.stringify({
+    type: "assistant",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: `<recalled-conversation>
+${xml}
+</recalled-conversation>` }]
+    }
+  });
+}
+function sanitizePath(p) {
+  return p.replace(/\//g, "-");
+}
 
 // src/lib/logger.ts
 import chalk from "chalk";
-import fs2 from "fs";
-import path2 from "path";
-var LOG_PATH = path2.join(process.cwd(), ".dev.log");
+import fs3 from "fs";
+import path3 from "path";
+var LOG_PATH = path3.join(process.cwd(), ".dev.log");
 try {
-  fs2.writeFileSync(LOG_PATH, "");
+  fs3.writeFileSync(LOG_PATH, "");
 } catch {
 }
 function tsPlain() {
@@ -288,7 +351,7 @@ var tagPlain = {
 function appendFile(tag, args) {
   const line = `${tsPlain()} ${tag} ${args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}
 `;
-  fs2.appendFile(LOG_PATH, line, () => {
+  fs3.appendFile(LOG_PATH, line, () => {
   });
 }
 function log(tag, ...args) {
@@ -305,9 +368,9 @@ var logger = { log, err };
 var SHELL = process.env.SHELL || "/bin/zsh";
 function resolveClaudePath(cwd) {
   if (process.env.SNA_CLAUDE_COMMAND) return process.env.SNA_CLAUDE_COMMAND;
-  const cached = path3.join(cwd, ".sna/claude-path");
-  if (fs3.existsSync(cached)) {
-    const p = fs3.readFileSync(cached, "utf8").trim();
+  const cached = path4.join(cwd, ".sna/claude-path");
+  if (fs4.existsSync(cached)) {
+    const p = fs4.readFileSync(cached, "utf8").trim();
     if (p) {
       try {
         execSync(`test -x "${p}"`, { stdio: "pipe" });
@@ -378,20 +441,11 @@ var ClaudeCodeProcess = class {
       this._alive = false;
       this.emitter.emit("error", err2);
     });
-    if (options.history?.length) {
+    if (options.history?.length && !options._historyViaResume) {
       if (!options.prompt) {
         throw new Error("history requires a prompt \u2014 the last stdin message must be a user message");
       }
-      const xml = options.history.map((msg) => `<${msg.role}>${msg.content}</${msg.role}>`).join("\n");
-      const line = JSON.stringify({
-        type: "assistant",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: `<recalled-conversation>
-${xml}
-</recalled-conversation>` }]
-        }
-      });
+      const line = buildRecalledConversation(options.history);
       this.proc.stdin.write(line + "\n");
     }
     if (options.prompt) {
@@ -633,6 +687,14 @@ var ClaudeCodeProvider = class {
     if (options.permissionMode) {
       args.push("--permission-mode", options.permissionMode);
     }
+    if (options.history?.length && options.prompt) {
+      const result = writeSessionJsonl(options.history, { cwd: options.cwd });
+      if (result) {
+        args.push(...result.extraArgs);
+        options._historyViaResume = true;
+        logger.log("agent", `history injected via JSONL resume (session=${result.sessionId})`);
+      }
+    }
     if (extraArgsClean.length > 0) {
       args.push(...extraArgsClean);
     }
@@ -676,10 +738,10 @@ function getProvider(name = "claude-code") {
 }
 
 // src/server/image-store.ts
-import fs4 from "fs";
-import path4 from "path";
+import fs5 from "fs";
+import path5 from "path";
 import { createHash } from "crypto";
-var IMAGE_DIR = path4.join(process.cwd(), "data/images");
+var IMAGE_DIR = path5.join(process.cwd(), "data/images");
 var MIME_TO_EXT = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -688,23 +750,23 @@ var MIME_TO_EXT = {
   "image/svg+xml": "svg"
 };
 function saveImages(sessionId, images) {
-  const dir = path4.join(IMAGE_DIR, sessionId);
-  fs4.mkdirSync(dir, { recursive: true });
+  const dir = path5.join(IMAGE_DIR, sessionId);
+  fs5.mkdirSync(dir, { recursive: true });
   return images.map((img) => {
     const ext = MIME_TO_EXT[img.mimeType] ?? "bin";
     const hash = createHash("sha256").update(img.base64).digest("hex").slice(0, 12);
     const filename = `${hash}.${ext}`;
-    const filePath = path4.join(dir, filename);
-    if (!fs4.existsSync(filePath)) {
-      fs4.writeFileSync(filePath, Buffer.from(img.base64, "base64"));
+    const filePath = path5.join(dir, filename);
+    if (!fs5.existsSync(filePath)) {
+      fs5.writeFileSync(filePath, Buffer.from(img.base64, "base64"));
     }
     return filename;
   });
 }
 function resolveImagePath(sessionId, filename) {
   if (filename.includes("..") || filename.includes("/")) return null;
-  const filePath = path4.join(IMAGE_DIR, sessionId, filename);
-  return fs4.existsSync(filePath) ? filePath : null;
+  const filePath = path5.join(IMAGE_DIR, sessionId, filename);
+  return fs5.existsSync(filePath) ? filePath : null;
 }
 
 // src/server/routes/agent.ts
@@ -1039,7 +1101,7 @@ function createAgentRoutes(sessionManager2) {
 
 // src/server/routes/chat.ts
 import { Hono as Hono2 } from "hono";
-import fs5 from "fs";
+import fs6 from "fs";
 function createChatRoutes() {
   const app = new Hono2();
   app.get("/sessions", (c) => {
@@ -1145,7 +1207,7 @@ function createChatRoutes() {
       svg: "image/svg+xml"
     };
     const contentType = mimeMap[ext ?? ""] ?? "application/octet-stream";
-    const data = fs5.readFileSync(filePath);
+    const data = fs6.readFileSync(filePath);
     return new Response(data, { headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=31536000, immutable" } });
   });
   return app;
@@ -2128,8 +2190,8 @@ var methodColor = {
 root.use("*", async (c, next) => {
   const m = c.req.method;
   const colorFn = methodColor[m] ?? chalk2.white;
-  const path5 = new URL(c.req.url).pathname;
-  logger.log("req", `${colorFn(m.padEnd(6))} ${path5}`);
+  const path6 = new URL(c.req.url).pathname;
+  logger.log("req", `${colorFn(m.padEnd(6))} ${path6}`);
   await next();
 });
 var sessionManager = new SessionManager({ maxSessions });
