@@ -94,6 +94,8 @@ declare class SessionManager {
     onSkillEvent(cb: (event: Record<string, unknown>) => void): () => void;
     /** Broadcast a skill event to all subscribers (called after DB insert). */
     broadcastSkillEvent(event: Record<string, unknown>): void;
+    /** Push a synthetic event into a session's event stream (for user message broadcast). */
+    pushEvent(sessionId: string, event: AgentEvent): void;
     /** Subscribe to permission request notifications. Returns unsubscribe function. */
     onPermissionRequest(cb: (sessionId: string, request: Record<string, unknown>, createdAt: number) => void): () => void;
     /** Subscribe to session lifecycle events (started/killed/exited/crashed). Returns unsubscribe function. */

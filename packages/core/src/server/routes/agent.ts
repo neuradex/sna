@@ -313,6 +313,14 @@ export function createAgentRoutes(sessionManager: SessionManager) {
         .run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
     } catch { /* DB write failure is non-fatal */ }
 
+    // Broadcast user message to agent.subscribe listeners (multi-client sync)
+    sessionManager.pushEvent(sessionId, {
+      type: "user_message",
+      message: textContent,
+      data: Object.keys(meta).length > 0 ? meta : undefined,
+      timestamp: Date.now(),
+    });
+
     sessionManager.updateSessionState(sessionId, "processing");
     sessionManager.touch(sessionId);
 

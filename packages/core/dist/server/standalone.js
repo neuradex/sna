@@ -982,6 +982,12 @@ function createAgentRoutes(sessionManager2) {
       db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
     } catch {
     }
+    sessionManager2.pushEvent(sessionId, {
+      type: "user_message",
+      message: textContent,
+      data: Object.keys(meta).length > 0 ? meta : void 0,
+      timestamp: Date.now()
+    });
     sessionManager2.updateSessionState(sessionId, "processing");
     sessionManager2.touch(sessionId);
     if (body.images?.length) {
@@ -1465,6 +1471,20 @@ var SessionManager = class {
   broadcastSkillEvent(event) {
     for (const cb of this.skillEventListeners) cb(event);
   }
+  /** Push a synthetic event into a session's event stream (for user message broadcast). */
+  pushEvent(sessionId, event) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.eventBuffer.push(event);
+    session.eventCounter++;
+    if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
+      session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
+    }
+    const listeners = this.eventListeners.get(sessionId);
+    if (listeners) {
+      for (const cb of listeners) cb(session.eventCounter, event);
+    }
+  }
   // ── Permission pub/sub ────────────────────────────────────────
   /** Subscribe to permission request notifications. Returns unsubscribe function. */
   onPermissionRequest(cb) {
@@ -1931,6 +1951,12 @@ function handleAgentSend(ws, msg, sm) {
     db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
   } catch {
   }
+  sm.pushEvent(sessionId, {
+    type: "user_message",
+    message: textContent,
+    data: Object.keys(meta).length > 0 ? meta : void 0,
+    timestamp: Date.now()
+  });
   sm.updateSessionState(sessionId, "processing");
   sm.touch(sessionId);
   if (images?.length) {

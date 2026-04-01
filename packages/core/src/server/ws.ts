@@ -360,6 +360,14 @@ function handleAgentSend(ws: WebSocket, msg: WsRequest, sm: SessionManager): voi
       .run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
   } catch { /* non-fatal */ }
 
+  // Broadcast user message to agent.subscribe listeners (multi-client sync)
+  sm.pushEvent(sessionId, {
+    type: "user_message",
+    message: textContent,
+    data: Object.keys(meta).length > 0 ? meta : undefined,
+    timestamp: Date.now(),
+  });
+
   sm.updateSessionState(sessionId, "processing");
   sm.touch(sessionId);
 

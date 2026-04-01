@@ -183,6 +183,20 @@ class SessionManager {
   broadcastSkillEvent(event) {
     for (const cb of this.skillEventListeners) cb(event);
   }
+  /** Push a synthetic event into a session's event stream (for user message broadcast). */
+  pushEvent(sessionId, event) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.eventBuffer.push(event);
+    session.eventCounter++;
+    if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
+      session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
+    }
+    const listeners = this.eventListeners.get(sessionId);
+    if (listeners) {
+      for (const cb of listeners) cb(session.eventCounter, event);
+    }
+  }
   // ── Permission pub/sub ────────────────────────────────────────
   /** Subscribe to permission request notifications. Returns unsubscribe function. */
   onPermissionRequest(cb) {

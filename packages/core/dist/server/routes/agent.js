@@ -195,6 +195,12 @@ function createAgentRoutes(sessionManager) {
       db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
     } catch {
     }
+    sessionManager.pushEvent(sessionId, {
+      type: "user_message",
+      message: textContent,
+      data: Object.keys(meta).length > 0 ? meta : void 0,
+      timestamp: Date.now()
+    });
     sessionManager.updateSessionState(sessionId, "processing");
     sessionManager.touch(sessionId);
     if (body.images?.length) {

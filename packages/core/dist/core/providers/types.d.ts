@@ -5,7 +5,7 @@
  * Codex JSONL, etc.) into these common types.
  */
 interface AgentEvent {
-    type: "init" | "thinking" | "text_delta" | "assistant" | "tool_use" | "tool_result" | "permission_needed" | "milestone" | "interrupted" | "error" | "complete";
+    type: "init" | "thinking" | "text_delta" | "assistant" | "tool_use" | "tool_result" | "permission_needed" | "milestone" | "user_message" | "interrupted" | "error" | "complete";
     message?: string;
     data?: Record<string, unknown>;
     timestamp: number;
