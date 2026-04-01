@@ -86,6 +86,11 @@ const db = getDb(); // SQLite instance (data/sna.db)
 | `@sna-sdk/core/lib/sna-run` | `snaRun()` helper for spawning Claude Code |
 | `@sna-sdk/core/testing` | `startMockAnthropicServer()` for testing without real API calls |
 
+**Environment Variables:**
+- `SNA_DB_PATH` — Override SQLite database location (default: `process.cwd()/data/sna.db`)
+- `SNA_CLAUDE_COMMAND` — Override claude binary path
+- `SNA_PORT` — API server port (default: 3099)
+
 ## Documentation
 
 - [Architecture](https://github.com/neuradex/sna/blob/main/docs/architecture.md)

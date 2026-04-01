@@ -126,6 +126,7 @@ This server provides:
 - `POST /agent/send` — Send message to agent (auto-persists to chat_messages)
 - `GET /agent/events` — Agent SSE stream
 - `POST /agent/run-once` — One-shot execution (spawn → run → return result → cleanup)
+- `POST /agent/resume` — Resume with DB history auto-injected (JSONL + `--resume <filepath>`)
 - `POST /agent/restart` — Kill + re-spawn with merged config + `--resume`
 - `POST /agent/interrupt` — Interrupt current turn (process stays alive)
 - `POST /agent/set-model` — Change model at runtime (no restart)
@@ -173,6 +174,28 @@ sna gen client --out src/sna-client.ts
 ```
 
 See [Skill Authoring](skill-authoring.md) for frontmatter schema and [App Setup](app-setup.md) for usage.
+
+### History Management
+
+`agent.resume` automatically loads conversation history from the DB and injects it via JSONL resume:
+
+```
+agent.resume({ session, prompt })
+  → buildHistoryFromDb(sessionId)        // query chat_messages
+  → writeHistoryJsonl(history, { cwd })  // write .sna/history/<uuid>.jsonl
+  → claude --resume <filepath> prompt    // CC loads full multi-turn history
+  → single response, full context        // no duplicate turns
+```
+
+Two adapters in `cc-history-adapter.ts`:
+- **Primary**: JSONL file + `--resume <filepath>` — real multi-turn structure
+- **Fallback**: `<recalled-conversation>` XML in single assistant message — if file write fails
+
+`agent.start` also accepts a `history` parameter for manual injection.
+
+### Database Path
+
+Default: `process.cwd()/data/sna.db`. Override with `SNA_DB_PATH` env var for Electron apps or other environments where the project root is not persistent.
 
 ### Test Utilities
 

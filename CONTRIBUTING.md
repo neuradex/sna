@@ -83,6 +83,8 @@ Legacy `emit.js` is a thin wrapper around dispatch for backward compatibility.
 | `packages/core/src/lib/skill-parser.ts` | SKILL.md frontmatter parser |
 | `packages/core/src/server/index.ts` | createSnaApp() Hono factory |
 | `packages/core/src/server/session-manager.ts` | Multi-session management, event pub/sub, permission flow |
+| `packages/core/src/server/history-builder.ts` | Build HistoryMessage[] from chat_messages DB |
+| `packages/core/src/core/providers/cc-history-adapter.ts` | JSONL resume + recalled-conversation fallback |
 | `packages/core/src/server/ws.ts` | WebSocket API wrapping all HTTP routes |
 | `packages/core/src/server/routes/agent.ts` | Agent lifecycle, sessions, run-once, permission routes |
 | `packages/core/src/server/routes/chat.ts` | Chat persistence CRUD routes |
