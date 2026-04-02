@@ -31,11 +31,14 @@ export default defineConfig([
       options.platform = "node";
     },
   },
-  // Electron launcher — bundled CJS for compatibility with Electron main process (require())
+  // Electron / Node.js launcher — bundled CJS for require() compat in main processes
   // shims: true injects import.meta.url polyfill so path resolution works in CJS
   {
     bundle: true,
-    entry: { "electron/index": "src/electron/index.ts" },
+    entry: {
+      "electron/index": "src/electron/index.ts",
+      "node/index": "src/node/index.ts",
+    },
     format: ["cjs"],
     shims: true,
     dts: false,

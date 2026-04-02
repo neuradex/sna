@@ -1,6 +1,6 @@
 {
   "name": "@sna-sdk/core",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Skills-Native Application runtime — server, providers, session management, database, and CLI",
   "type": "module",
   "bin": {
@@ -75,6 +75,13 @@
       "require": "./dist/electron/index.cjs",
       "import": "./dist/electron/index.js",
       "default": "./dist/electron/index.js"
+    },
+    "./node": {
+      "source": "./src/node/index.ts",
+      "types": "./dist/node/index.d.ts",
+      "require": "./dist/node/index.cjs",
+      "import": "./dist/node/index.js",
+      "default": "./dist/node/index.js"
     }
   },
   "scripts": {
