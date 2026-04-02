@@ -1,6 +1,6 @@
 {
   "name": "@sna-sdk/core",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Skills-Native Application runtime — server, providers, session management, database, and CLI",
   "type": "module",
   "bin": {
@@ -68,6 +68,13 @@
       "source": "./src/testing/mock-api.ts",
       "types": "./dist/testing/mock-api.d.ts",
       "default": "./dist/testing/mock-api.js"
+    },
+    "./electron": {
+      "source": "./src/electron/index.ts",
+      "types": "./dist/electron/index.d.ts",
+      "require": "./dist/electron/index.cjs",
+      "import": "./dist/electron/index.js",
+      "default": "./dist/electron/index.js"
     }
   },
   "scripts": {

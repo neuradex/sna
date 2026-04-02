@@ -135,11 +135,13 @@ class SessionManager {
         session.ccSessionId = e.data.sessionId;
         this.persistSession(session);
       }
-      session.eventBuffer.push(e);
-      session.eventCounter++;
-      if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
-        session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
+      if (e.type !== "assistant_delta") {
+        session.eventBuffer.push(e);
+        if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
+          session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
+        }
       }
+      session.eventCounter++;
       if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
         this.setSessionState(sessionId, session, "waiting");
       }

@@ -88,6 +88,36 @@ class ClaudeCodeProcess {
       this.send(options.prompt);
     }
   }
+  /**
+   * Split completed assistant text into chunks and emit assistant_delta events
+   * at a fixed rate (~270 chars/sec), followed by the final assistant event.
+   *
+   * CHUNK_SIZE chars every CHUNK_DELAY_MS → natural TPS feel regardless of length.
+   */
+  emitTextAsDeltas(text) {
+    const CHUNK_SIZE = 4;
+    const CHUNK_DELAY_MS = 15;
+    let t = 0;
+    for (let i = 0; i < text.length; i += CHUNK_SIZE) {
+      const chunk = text.slice(i, i + CHUNK_SIZE);
+      setTimeout(() => {
+        this.emitter.emit("event", {
+          type: "assistant_delta",
+          delta: chunk,
+          index: 0,
+          timestamp: Date.now()
+        });
+      }, t);
+      t += CHUNK_DELAY_MS;
+    }
+    setTimeout(() => {
+      this.emitter.emit("event", {
+        type: "assistant",
+        message: text,
+        timestamp: Date.now()
+      });
+    }, t);
+  }
   get alive() {
     return this._alive;
   }
@@ -163,6 +193,7 @@ class ClaudeCodeProcess {
         const content = msg.message?.content;
         if (!Array.isArray(content)) return null;
         const events = [];
+        const textBlocks = [];
         for (const block of content) {
           if (block.type === "thinking") {
             events.push({
@@ -180,15 +211,17 @@ class ClaudeCodeProcess {
           } else if (block.type === "text") {
             const text = (block.text ?? "").trim();
             if (text) {
-              events.push({ type: "assistant", message: text, timestamp: Date.now() });
+              textBlocks.push(text);
             }
           }
         }
-        if (events.length > 0) {
-          for (let i = 1; i < events.length; i++) {
-            this.emitter.emit("event", events[i]);
+        if (events.length > 0 || textBlocks.length > 0) {
+          for (const e of events) {
+            this.emitter.emit("event", e);
           }
-          return events[0];
+          for (const text of textBlocks) {
+            this.emitTextAsDeltas(text);
+          }
         }
         return null;
       }

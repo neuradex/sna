@@ -18,7 +18,8 @@ function getDb() {
     const BetterSqlite3 = loadBetterSqlite3();
     const dir = path.dirname(DB_PATH);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    _db = new BetterSqlite3(DB_PATH);
+    const nativeBinding = process.env.SNA_SQLITE_NATIVE_BINDING || void 0;
+    _db = nativeBinding ? new BetterSqlite3(DB_PATH, { nativeBinding }) : new BetterSqlite3(DB_PATH);
     _db.pragma("journal_mode = WAL");
     initSchema(_db);
   }

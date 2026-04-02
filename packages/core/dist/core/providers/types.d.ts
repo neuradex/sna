@@ -5,9 +5,13 @@
  * Codex JSONL, etc.) into these common types.
  */
 interface AgentEvent {
-    type: "init" | "thinking" | "text_delta" | "assistant" | "tool_use" | "tool_result" | "permission_needed" | "milestone" | "user_message" | "interrupted" | "error" | "complete";
+    type: "init" | "thinking" | "text_delta" | "assistant_delta" | "assistant" | "tool_use" | "tool_result" | "permission_needed" | "milestone" | "user_message" | "interrupted" | "error" | "complete";
     message?: string;
     data?: Record<string, unknown>;
+    /** Streaming text delta (for assistant_delta events only) */
+    delta?: string;
+    /** Content block index (for assistant_delta events only) */
+    index?: number;
     timestamp: number;
 }
 /**

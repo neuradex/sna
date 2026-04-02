@@ -36,7 +36,11 @@ export function getDb(): Database.Database {
     const BetterSqlite3 = loadBetterSqlite3();
     const dir = path.dirname(DB_PATH);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    _db = new BetterSqlite3(DB_PATH);
+    // SNA_SQLITE_NATIVE_BINDING: bypass the 'bindings' package for native module resolution.
+    // Required in Electron packaged apps where 'bindings' cannot traverse the asar bundle.
+    // Set to the absolute path of the better_sqlite3.node file.
+    const nativeBinding = process.env.SNA_SQLITE_NATIVE_BINDING || undefined;
+    _db = nativeBinding ? new BetterSqlite3(DB_PATH, { nativeBinding }) : new BetterSqlite3(DB_PATH);
     _db.pragma("journal_mode = WAL");
     initSchema(_db);
   }

@@ -31,7 +31,8 @@ function getDb() {
     const BetterSqlite3 = loadBetterSqlite3();
     const dir = path.dirname(DB_PATH);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    _db = new BetterSqlite3(DB_PATH);
+    const nativeBinding = process.env.SNA_SQLITE_NATIVE_BINDING || void 0;
+    _db = nativeBinding ? new BetterSqlite3(DB_PATH, { nativeBinding }) : new BetterSqlite3(DB_PATH);
     _db.pragma("journal_mode = WAL");
     initSchema(_db);
   }
@@ -454,6 +455,36 @@ var ClaudeCodeProcess = class {
       this.send(options.prompt);
     }
   }
+  /**
+   * Split completed assistant text into chunks and emit assistant_delta events
+   * at a fixed rate (~270 chars/sec), followed by the final assistant event.
+   *
+   * CHUNK_SIZE chars every CHUNK_DELAY_MS → natural TPS feel regardless of length.
+   */
+  emitTextAsDeltas(text) {
+    const CHUNK_SIZE = 4;
+    const CHUNK_DELAY_MS = 15;
+    let t = 0;
+    for (let i = 0; i < text.length; i += CHUNK_SIZE) {
+      const chunk = text.slice(i, i + CHUNK_SIZE);
+      setTimeout(() => {
+        this.emitter.emit("event", {
+          type: "assistant_delta",
+          delta: chunk,
+          index: 0,
+          timestamp: Date.now()
+        });
+      }, t);
+      t += CHUNK_DELAY_MS;
+    }
+    setTimeout(() => {
+      this.emitter.emit("event", {
+        type: "assistant",
+        message: text,
+        timestamp: Date.now()
+      });
+    }, t);
+  }
   get alive() {
     return this._alive;
   }
@@ -529,6 +560,7 @@ var ClaudeCodeProcess = class {
         const content = msg.message?.content;
         if (!Array.isArray(content)) return null;
         const events = [];
+        const textBlocks = [];
         for (const block of content) {
           if (block.type === "thinking") {
             events.push({
@@ -546,15 +578,17 @@ var ClaudeCodeProcess = class {
           } else if (block.type === "text") {
             const text = (block.text ?? "").trim();
             if (text) {
-              events.push({ type: "assistant", message: text, timestamp: Date.now() });
+              textBlocks.push(text);
             }
           }
         }
-        if (events.length > 0) {
-          for (let i = 1; i < events.length; i++) {
-            this.emitter.emit("event", events[i]);
+        if (events.length > 0 || textBlocks.length > 0) {
+          for (const e of events) {
+            this.emitter.emit("event", e);
           }
-          return events[0];
+          for (const text of textBlocks) {
+            this.emitTextAsDeltas(text);
+          }
         }
         return null;
       }
@@ -1010,32 +1044,59 @@ function createAgentRoutes(sessionManager2) {
     const sessionId = getSessionId(c);
     const session = sessionManager2.getOrCreateSession(sessionId);
     const sinceParam = c.req.query("since");
-    let cursor = sinceParam ? parseInt(sinceParam, 10) : session.eventCounter;
+    const sinceCursor = sinceParam ? parseInt(sinceParam, 10) : session.eventCounter;
     return streamSSE3(c, async (stream) => {
-      const POLL_MS = 300;
       const KEEPALIVE_MS = 15e3;
-      let lastSend = Date.now();
-      while (true) {
+      const signal = c.req.raw.signal;
+      const queue = [];
+      let wakeUp = null;
+      const unsub = sessionManager2.onSessionEvent(sessionId, (eventCursor, event) => {
+        queue.push({ cursor: eventCursor, event });
+        const fn = wakeUp;
+        wakeUp = null;
+        fn?.();
+      });
+      signal.addEventListener("abort", () => {
+        const fn = wakeUp;
+        wakeUp = null;
+        fn?.();
+      });
+      try {
+        let cursor = sinceCursor;
         if (cursor < session.eventCounter) {
           const startIdx = Math.max(
             0,
             session.eventBuffer.length - (session.eventCounter - cursor)
           );
-          const newEvents = session.eventBuffer.slice(startIdx);
-          for (const event of newEvents) {
+          for (const event of session.eventBuffer.slice(startIdx)) {
             cursor++;
-            await stream.writeSSE({
-              id: String(cursor),
-              data: JSON.stringify(event)
-            });
-            lastSend = Date.now();
+            await stream.writeSSE({ id: String(cursor), data: JSON.stringify(event) });
+          }
+        } else {
+          cursor = session.eventCounter;
+        }
+        while (queue.length > 0 && queue[0].cursor <= cursor) queue.shift();
+        while (!signal.aborted) {
+          if (queue.length === 0) {
+            await Promise.race([
+              new Promise((r) => {
+                wakeUp = r;
+              }),
+              new Promise((r) => setTimeout(r, KEEPALIVE_MS))
+            ]);
+          }
+          if (signal.aborted) break;
+          if (queue.length > 0) {
+            while (queue.length > 0) {
+              const item = queue.shift();
+              await stream.writeSSE({ id: String(item.cursor), data: JSON.stringify(item.event) });
+            }
+          } else {
+            await stream.writeSSE({ data: "" });
           }
         }
-        if (Date.now() - lastSend > KEEPALIVE_MS) {
-          await stream.writeSSE({ data: "" });
-          lastSend = Date.now();
-        }
-        await new Promise((r) => setTimeout(r, POLL_MS));
+      } finally {
+        unsub();
       }
     });
   });
@@ -1435,11 +1496,13 @@ var SessionManager = class {
         session.ccSessionId = e.data.sessionId;
         this.persistSession(session);
       }
-      session.eventBuffer.push(e);
-      session.eventCounter++;
-      if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
-        session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
+      if (e.type !== "assistant_delta") {
+        session.eventBuffer.push(e);
+        if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
+          session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
+        }
       }
+      session.eventCounter++;
       if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
         this.setSessionState(sessionId, session, "waiting");
       }
