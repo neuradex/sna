@@ -53,6 +53,37 @@ class ClaudeCodeProcess implements AgentProcess {
   private _sessionId: string | null = null;
   private _initEmitted = false;
   private buffer = "";
+  /**
+   * Split completed assistant text into chunks and emit assistant_delta events
+   * at a fixed rate (~270 chars/sec), followed by the final assistant event.
+   *
+   * CHUNK_SIZE chars every CHUNK_DELAY_MS → natural TPS feel regardless of length.
+   */
+  private emitTextAsDeltas(text: string): void {
+    const CHUNK_SIZE = 4;
+    const CHUNK_DELAY_MS = 15; // ~270 chars/sec
+
+    let t = 0;
+    for (let i = 0; i < text.length; i += CHUNK_SIZE) {
+      const chunk = text.slice(i, i + CHUNK_SIZE);
+      setTimeout(() => {
+        this.emitter.emit("event", {
+          type: "assistant_delta",
+          delta: chunk,
+          index: 0,
+          timestamp: Date.now(),
+        } satisfies AgentEvent);
+      }, t);
+      t += CHUNK_DELAY_MS;
+    }
+    setTimeout(() => {
+      this.emitter.emit("event", {
+        type: "assistant",
+        message: text,
+        timestamp: Date.now(),
+      } satisfies AgentEvent);
+    }, t);
+  }
 
   get alive() { return this._alive; }
   get sessionId() { return this._sessionId; }
@@ -199,6 +230,7 @@ class ClaudeCodeProcess implements AgentProcess {
         if (!Array.isArray(content)) return null;
 
         const events: AgentEvent[] = [];
+        const textBlocks: string[] = [];
 
         for (const block of content) {
           if (block.type === "thinking") {
@@ -217,16 +249,19 @@ class ClaudeCodeProcess implements AgentProcess {
           } else if (block.type === "text") {
             const text = (block.text ?? "").trim();
             if (text) {
-              events.push({ type: "assistant", message: text, timestamp: Date.now() });
+              // Schedule after synchronous events so thinking/tool_use emit first
+              textBlocks.push(text);
             }
           }
         }
 
-        if (events.length > 0) {
-          for (let i = 1; i < events.length; i++) {
-            this.emitter.emit("event", events[i]);
+        if (events.length > 0 || textBlocks.length > 0) {
+          for (const e of events) {
+            this.emitter.emit("event", e);
           }
-          return events[0];
+          for (const text of textBlocks) {
+            this.emitTextAsDeltas(text);
+          }
         }
         return null;
       }

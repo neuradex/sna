@@ -348,37 +348,64 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     const session = sessionManager.getOrCreateSession(sessionId);
 
     const sinceParam = c.req.query("since");
-    let cursor = sinceParam ? parseInt(sinceParam, 10) : session.eventCounter;
+    const sinceCursor = sinceParam ? parseInt(sinceParam, 10) : session.eventCounter;
 
     return streamSSE(c, async (stream) => {
-      const POLL_MS = 300;
       const KEEPALIVE_MS = 15_000;
-      let lastSend = Date.now();
+      const signal = c.req.raw.signal;
 
-      while (true) {
+      // Queue bridges sync event callbacks → async SSE writes
+      const queue: Array<{ cursor: number; event: AgentEvent }> = [];
+      let wakeUp: (() => void) | null = null;
+
+      const unsub = sessionManager.onSessionEvent(sessionId, (eventCursor, event) => {
+        queue.push({ cursor: eventCursor, event });
+        const fn = wakeUp; wakeUp = null; fn?.();
+      });
+      signal.addEventListener("abort", () => { const fn = wakeUp; wakeUp = null; fn?.(); });
+
+      try {
+        // Replay buffer history for requested cursor range
+        let cursor = sinceCursor;
         if (cursor < session.eventCounter) {
           const startIdx = Math.max(
             0,
             session.eventBuffer.length - (session.eventCounter - cursor),
           );
-          const newEvents = session.eventBuffer.slice(startIdx);
-
-          for (const event of newEvents) {
+          for (const event of session.eventBuffer.slice(startIdx)) {
             cursor++;
-            await stream.writeSSE({
-              id: String(cursor),
-              data: JSON.stringify(event),
-            });
-            lastSend = Date.now();
+            await stream.writeSSE({ id: String(cursor), data: JSON.stringify(event) });
+          }
+        } else {
+          cursor = session.eventCounter;
+        }
+
+        // Drop real-time events that were already covered by buffer replay
+        while (queue.length > 0 && queue[0].cursor <= cursor) queue.shift();
+
+        // Event-driven loop — no polling
+        while (!signal.aborted) {
+          if (queue.length === 0) {
+            await Promise.race([
+              new Promise<void>((r) => { wakeUp = r; }),
+              new Promise<void>((r) => setTimeout(r, KEEPALIVE_MS)),
+            ]);
+          }
+
+          if (signal.aborted) break;
+
+          if (queue.length > 0) {
+            while (queue.length > 0) {
+              const item = queue.shift()!;
+              await stream.writeSSE({ id: String(item.cursor), data: JSON.stringify(item.event) });
+            }
+          } else {
+            // Keepalive — no events arrived within KEEPALIVE_MS
+            await stream.writeSSE({ data: "" });
           }
         }
-
-        if (Date.now() - lastSend > KEEPALIVE_MS) {
-          await stream.writeSSE({ data: "" });
-          lastSend = Date.now();
-        }
-
-        await new Promise((r) => setTimeout(r, POLL_MS));
+      } finally {
+        unsub();
       }
     });
   });

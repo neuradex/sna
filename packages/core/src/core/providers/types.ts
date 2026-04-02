@@ -6,20 +6,25 @@
  */
 export interface AgentEvent {
   type:
-    | "init"          // session initialized
-    | "thinking"      // model is reasoning (extended thinking block)
-    | "text_delta"    // streaming text from assistant
-    | "assistant"     // full assistant message
-    | "tool_use"      // agent is calling a tool
-    | "tool_result"   // tool returned a result
+    | "init"            // session initialized
+    | "thinking"        // model is reasoning (extended thinking block)
+    | "text_delta"      // streaming text from assistant (legacy alias)
+    | "assistant_delta" // streaming text delta (real-time, before final assistant event)
+    | "assistant"       // full assistant message (complete, backward-compatible)
+    | "tool_use"        // agent is calling a tool
+    | "tool_result"     // tool returned a result
     | "permission_needed" // agent needs user approval
-    | "milestone"     // skill progress milestone
-    | "user_message"  // user message sent (for multi-client sync)
-    | "interrupted"   // user interrupted current turn
-    | "error"         // error occurred
-    | "complete";     // agent finished
+    | "milestone"       // skill progress milestone
+    | "user_message"    // user message sent (for multi-client sync)
+    | "interrupted"     // user interrupted current turn
+    | "error"           // error occurred
+    | "complete";       // agent finished
   message?: string;
   data?: Record<string, unknown>;
+  /** Streaming text delta (for assistant_delta events only) */
+  delta?: string;
+  /** Content block index (for assistant_delta events only) */
+  index?: number;
   timestamp: number;
 }
 

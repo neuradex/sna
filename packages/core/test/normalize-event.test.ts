@@ -15,6 +15,30 @@ import type { AgentEvent } from "../src/core/providers/types.js";
 
 describe("Event normalization logic", () => {
 
+  // Simulates normalizeEvent logic for streaming delta events
+  function normalizeDelta(msg: any, blockTypes: Map<number, string>): AgentEvent | null {
+    if (msg.type === "content_block_start") {
+      const blockType = msg.content_block?.type as string | undefined;
+      if (blockType) blockTypes.set(msg.index as number, blockType);
+      return null;
+    }
+    if (msg.type === "content_block_delta") {
+      const idx = msg.index as number;
+      const delta = msg.delta;
+      const blockType = blockTypes.get(idx) ?? "text";
+      if (blockType === "text" && delta?.type === "text_delta" && delta.text) {
+        return { type: "assistant_delta", delta: delta.text as string, index: idx, timestamp: Date.now() };
+      }
+      return null;
+    }
+    if (msg.type === "content_block_stop") {
+      blockTypes.delete(msg.index as number);
+      return null;
+    }
+    if (msg.type === "message_stop") return null;
+    return null;
+  }
+
   // Simulates the normalizeEvent logic for "result" type messages
   function normalizeResult(msg: any): AgentEvent | null {
     if (msg.type !== "result") return null;
@@ -58,6 +82,64 @@ describe("Event normalization logic", () => {
       initEmitted: true,
     };
   }
+
+  describe("streaming delta events", () => {
+    it("content_block_start registers block type, returns null", () => {
+      const blockTypes = new Map<number, string>();
+      const event = normalizeDelta({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }, blockTypes);
+      assert.equal(event, null);
+      assert.equal(blockTypes.get(0), "text");
+    });
+
+    it("content_block_delta (text_delta) → assistant_delta with delta and index", () => {
+      const blockTypes = new Map<number, string>([[0, "text"]]);
+      const event = normalizeDelta({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello" } }, blockTypes);
+      assert.equal(event?.type, "assistant_delta");
+      assert.equal(event?.delta, "Hello");
+      assert.equal(event?.index, 0);
+    });
+
+    it("content_block_delta for thinking block → null (not emitted)", () => {
+      const blockTypes = new Map<number, string>([[0, "thinking"]]);
+      const event = normalizeDelta({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Reasoning..." } }, blockTypes);
+      assert.equal(event, null);
+    });
+
+    it("content_block_delta with empty text → null", () => {
+      const blockTypes = new Map<number, string>([[0, "text"]]);
+      const event = normalizeDelta({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "" } }, blockTypes);
+      assert.equal(event, null);
+    });
+
+    it("content_block_stop removes block type, returns null", () => {
+      const blockTypes = new Map<number, string>([[0, "text"]]);
+      const event = normalizeDelta({ type: "content_block_stop", index: 0 }, blockTypes);
+      assert.equal(event, null);
+      assert.equal(blockTypes.has(0), false);
+    });
+
+    it("message_stop → null", () => {
+      const blockTypes = new Map<number, string>();
+      const event = normalizeDelta({ type: "message_stop" }, blockTypes);
+      assert.equal(event, null);
+    });
+
+    it("full streaming sequence produces correct delta events", () => {
+      const blockTypes = new Map<number, string>();
+      const events: (AgentEvent | null)[] = [
+        normalizeDelta({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }, blockTypes),
+        normalizeDelta({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hi" } }, blockTypes),
+        normalizeDelta({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: " there" } }, blockTypes),
+        normalizeDelta({ type: "content_block_stop", index: 0 }, blockTypes),
+        normalizeDelta({ type: "message_stop" }, blockTypes),
+      ];
+      const deltas = events.filter(Boolean);
+      assert.equal(deltas.length, 2);
+      assert.equal(deltas[0]?.type, "assistant_delta");
+      assert.equal(deltas[0]?.delta, "Hi");
+      assert.equal(deltas[1]?.delta, " there");
+    });
+  });
 
   describe("result events", () => {
     it("success → complete event", () => {

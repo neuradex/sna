@@ -223,11 +223,15 @@ export class SessionManager {
         session.ccSessionId = e.data.sessionId as string;
         this.persistSession(session);
       }
-      session.eventBuffer.push(e);
-      session.eventCounter++;
-      if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
-        session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
+      // assistant_delta events are transient streaming chunks — exclude from buffer
+      // so reconnecting clients don't replay hundreds of delta fragments
+      if (e.type !== "assistant_delta") {
+        session.eventBuffer.push(e);
+        if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
+          session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
+        }
       }
+      session.eventCounter++;
       // Update session state based on event type
       if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
         this.setSessionState(sessionId, session, "waiting");
