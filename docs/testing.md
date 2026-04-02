@@ -99,7 +99,7 @@ Supports multi-word commands — split on whitespace, first word is the binary, 
 ```bash
 cd packages/core
 
-# All tests (101 tests, 7 modules)
+# All tests (123 tests, 7 modules)
 pnpm test
 
 # Individual modules
@@ -119,12 +119,12 @@ node --import tsx --experimental-test-coverage --test test/**/*.test.ts
 
 | Module | Tests | What It Covers |
 |--------|-------|----------------|
-| `session-manager` | 16 | Session CRUD, config persistence, CASCADE safety, pub/sub |
+| `session-manager` | 20 | Session CRUD, config persistence, CASCADE safety, pub/sub |
 | `db-schema` | 8 | Tables, columns, indexes, migration, CASCADE behavior |
-| `normalize-event` | 9 | init/interrupted/error event parsing from Claude Code |
-| `api-routes` | 22 | All HTTP endpoints via Hono test client |
+| `normalize-event` | 16 | init/interrupted/error parsing; streaming delta event sequences; assistant_delta type |
+| `api-routes` | 27 | All HTTP endpoints via Hono test client |
 | `api-parity` | 5 | HTTP/WS operation key match, typed helper usage |
-| `ws-handler` | 33 | All WS message types with real WS server + client |
+| `ws-handler` | 39 | All WS message types with real WS server + client |
 | `agent-integration` | 8 | Real Claude Code + mock API E2E pipeline |
 
 ### Writing Integration Tests
@@ -158,6 +158,6 @@ sna tu api:down
 
 - `agent-integration` tests require the `claude` binary installed
 - If `claude` is not found, integration tests are **skipped** (not failed)
-- All other tests (93 of 101) run without `claude` installed
+- All other tests (115 of 123) run without `claude` installed
 - Mock API server uses random ports — no port conflicts in parallel runs
 - Each test module uses its own temp DB directory — no state leakage

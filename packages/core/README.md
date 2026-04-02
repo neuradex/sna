@@ -84,13 +84,18 @@ const db = getDb(); // SQLite instance (data/sna.db)
 | `@sna-sdk/core/server/routes/agent` | `createAgentRoutes()`, `runOnce()` |
 | `@sna-sdk/core/db/schema` | `getDb()`, `ChatSession`, `ChatMessage`, `SkillEvent` types |
 | `@sna-sdk/core/providers` | Agent provider factory, `ClaudeCodeProvider` |
-| `@sna-sdk/core/lib/sna-run` | `snaRun()` helper for spawning Claude Code |
+| `@sna-sdk/core/lib/sna-run` | `sna` object with `sna.run()` — awaitable skill invocation |
 | `@sna-sdk/core/testing` | `startMockAnthropicServer()` for testing without real API calls |
+| `@sna-sdk/core/electron` | `startSnaServer()` — launch SNA server from Electron main process (asar-aware) |
+| `@sna-sdk/core/node` | `startSnaServer()` — launch SNA server from Node.js (Next.js, Express, etc.) |
 
 **Environment Variables:**
 - `SNA_DB_PATH` — Override SQLite database location (default: `process.cwd()/data/sna.db`)
 - `SNA_CLAUDE_COMMAND` — Override claude binary path
 - `SNA_PORT` — API server port (default: 3099)
+- `SNA_SQLITE_NATIVE_BINDING` — Absolute path to `better_sqlite3.node` native binary; bypasses `bindings` module resolution for Electron packaged apps
+- `SNA_MAX_SESSIONS` — Maximum concurrent agent sessions (default: 5)
+- `SNA_PERMISSION_MODE` — Default permission mode for spawned agents (`acceptEdits` | `bypassPermissions` | `default`)
 
 ## Documentation
 

@@ -145,6 +145,7 @@ This server provides:
 - `GET /chat/sessions/:id/messages` — Get messages
 - `POST /chat/sessions/:id/messages` — Add message
 - `DELETE /chat/sessions/:id/messages` — Clear messages
+- `GET /chat/images/:sessionId/:filename` — Serve stored image files
 
 **WebSocket API (`ws://host:port/ws`):**
 - Full bidirectional API wrapping all HTTP routes over a single connection
@@ -198,6 +199,50 @@ Two adapters in `cc-history-adapter.ts`:
 ### Database Path
 
 Default: `process.cwd()/data/sna.db`. Override with `SNA_DB_PATH` env var for Electron apps or other environments where the project root is not persistent.
+
+**Relevant env vars:**
+- `SNA_DB_PATH` — absolute path to the SQLite database file
+- `SNA_SQLITE_NATIVE_BINDING` — absolute path to `better_sqlite3.node`; bypasses the `bindings` package for Electron packaged apps where `bindings` cannot traverse the asar bundle
+
+### Launcher API (Electron / Node.js)
+
+For Electron and Node.js applications that manage the SNA server lifecycle programmatically, the SDK provides a launcher API that handles `fork()`, path resolution, env setup, and ready detection.
+
+**Electron (asar-aware — auto-detects native binding and unpacked paths):**
+
+```javascript
+const { startSnaServer } = require("@sna-sdk/core/electron");
+
+const sna = await startSnaServer({
+  port: 3099,
+  dbPath: path.join(app.getPath("userData"), "sna.db"),
+  maxSessions: 20,
+  permissionMode: "acceptEdits",
+  onLog: (line) => console.log("[sna]", line),
+});
+
+// sna.process — ChildProcess ref
+// sna.port    — actual port
+// sna.stop()  — graceful shutdown (SIGTERM)
+```
+
+Electron packaging requirement — add to `electron-builder` config:
+```json
+{ "asarUnpack": ["node_modules/@sna-sdk/core/**"] }
+```
+
+**Node.js (Next.js, Express, Vite, etc.):**
+
+```javascript
+const { startSnaServer } = require("@sna-sdk/core/node");
+
+const sna = await startSnaServer({
+  port: 3099,
+  dbPath: path.join(process.cwd(), "data/sna.db"),
+});
+```
+
+Both launchers support the same `SnaServerOptions`: `port`, `dbPath`, `cwd`, `maxSessions`, `permissionMode`, `model`, `nativeBinding`, `env`, `readyTimeout`, `onLog`.
 
 ### Test Utilities
 
