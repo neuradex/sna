@@ -56,6 +56,12 @@ interface ApiResponses {
         sessionId: string | null;
         ccSessionId: string | null;
         eventCount: number;
+        messageCount: number;
+        lastMessage: {
+            role: string;
+            content: string;
+            created_at: string;
+        } | null;
         config: {
             provider: string;
             model: string;

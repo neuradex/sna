@@ -350,12 +350,24 @@ function handleAgentStatus(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
   const session = sm.getSession(sessionId);
   const alive = session?.process?.alive ?? false;
+  let messageCount = 0;
+  let lastMessage = null;
+  try {
+    const db = getDb();
+    const count = db.prepare("SELECT COUNT(*) as c FROM chat_messages WHERE session_id = ?").get(sessionId);
+    messageCount = count?.c ?? 0;
+    const last = db.prepare("SELECT role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1").get(sessionId);
+    if (last) lastMessage = { role: last.role, content: last.content, created_at: last.created_at };
+  } catch {
+  }
   wsReply(ws, msg, {
     alive,
     agentStatus: !alive ? "disconnected" : session?.state === "processing" ? "busy" : "idle",
     sessionId: session?.process?.sessionId ?? null,
     ccSessionId: session?.ccSessionId ?? null,
     eventCount: session?.eventCounter ?? 0,
+    messageCount,
+    lastMessage,
     config: session?.lastStartConfig ?? null
   });
 }
