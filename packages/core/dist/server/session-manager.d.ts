@@ -41,6 +41,12 @@ interface SessionInfo {
     config: StartConfig | null;
     ccSessionId: string | null;
     eventCount: number;
+    messageCount: number;
+    lastMessage: {
+        role: string;
+        content: string;
+        created_at: string;
+    } | null;
     createdAt: number;
     lastActivityAt: number;
 }
@@ -149,6 +155,7 @@ declare class SessionManager {
     /** Touch a session's lastActivityAt timestamp. */
     touch(id: string): void;
     /** Persist an agent event to chat_messages. */
+    private getMessageStats;
     private persistEvent;
     /** Kill all sessions. Used during shutdown. */
     killAll(): void;

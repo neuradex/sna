@@ -46,6 +46,8 @@ export interface SessionInfo {
   config: StartConfig | null;
   ccSessionId: string | null;
   eventCount: number;
+  messageCount: number;
+  lastMessage: { role: string; content: string; created_at: string } | null;
   createdAt: number;
   lastActivityAt: number;
 }
@@ -518,6 +520,7 @@ export class SessionManager {
       config: s.lastStartConfig,
       ccSessionId: s.ccSessionId,
       eventCount: s.eventCounter,
+      ...this.getMessageStats(s.id),
       createdAt: s.createdAt,
       lastActivityAt: s.lastActivityAt,
     }));
@@ -530,6 +533,24 @@ export class SessionManager {
   }
 
   /** Persist an agent event to chat_messages. */
+  private getMessageStats(sessionId: string): { messageCount: number; lastMessage: { role: string; content: string; created_at: string } | null } {
+    try {
+      const db = getDb();
+      const count = db.prepare(
+        `SELECT COUNT(*) as c FROM chat_messages WHERE session_id = ?`
+      ).get(sessionId) as { c: number };
+      const last = db.prepare(
+        `SELECT role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1`
+      ).get(sessionId) as { role: string; content: string; created_at: string } | undefined;
+      return {
+        messageCount: count.c,
+        lastMessage: last ? { role: last.role, content: last.content, created_at: last.created_at } : null,
+      };
+    } catch {
+      return { messageCount: 0, lastMessage: null };
+    }
+  }
+
   private persistEvent(sessionId: string, e: AgentEvent): void {
     try {
       const db = getDb();
