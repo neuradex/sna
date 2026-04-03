@@ -27,10 +27,10 @@
  *
  *   asarUnpack: ["node_modules/@sna-sdk/core/**"]
  *
- * The better-sqlite3 native binding used by the forked process must be
- * compiled for the system Node.js (not Electron). If your app uses
- * electron-rebuild, set options.nativeBinding to a Node.js-compiled
- * .node file, or let SNA manage its own native install via `sna api:up`.
+ * The forked server process runs on Electron's Node.js. The launcher
+ * automatically detects the consumer app's electron-rebuilt native modules
+ * and passes their path to the server process, so better-sqlite3 just works
+ * without any manual configuration.
  */
 
 import { fork, type ChildProcess } from "child_process";
@@ -135,49 +135,6 @@ function resolveStandaloneScript(): string {
 }
 
 /**
- * Auto-detect the better-sqlite3 native .node binding path.
- *
- * Priority:
- *   1. Explicit override via options.nativeBinding
- *   2. app.asar.unpacked (Electron packaged app) — multiple candidate paths
- *   3. SDK-local node_modules (dev / non-packaged)
- */
-function resolveNativeBinding(override?: string): string | undefined {
-  if (override) {
-    if (!fs.existsSync(override)) {
-      console.warn(`[sna] SNA nativeBinding override not found: ${override}`);
-      return undefined;
-    }
-    return override;
-  }
-
-  const BINDING_REL = path.join("better-sqlite3", "build", "Release", "better_sqlite3.node");
-
-  // Electron packaged app: process.resourcesPath is set in Electron main
-  // process.resourcesPath is only present in Electron main/renderer processes
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const resourcesPath = (process as any).resourcesPath as string | undefined;
-  if (resourcesPath) {
-    const unpackedBase = path.join(resourcesPath, "app.asar.unpacked", "node_modules");
-    const candidates = [
-      path.join(unpackedBase, BINDING_REL),
-      // nested under @sna-sdk/core if hoisting differs
-      path.join(unpackedBase, "@sna-sdk", "core", "node_modules", BINDING_REL),
-    ];
-    for (const c of candidates) {
-      if (fs.existsSync(c)) return c;
-    }
-  }
-
-  // Dev / non-packaged: check SDK's own node_modules
-  const selfPath = fileURLToPath(import.meta.url);
-  const local = path.resolve(path.dirname(selfPath), "../../node_modules", BINDING_REL);
-  if (fs.existsSync(local)) return local;
-
-  return undefined;
-}
-
-/**
  * Build NODE_PATH that includes app.asar.unpacked/node_modules so the
  * forked process can resolve native modules that are excluded from the asar.
  *
@@ -210,8 +167,15 @@ export async function startSnaServer(options: SnaServerOptions): Promise<SnaServ
   const { onLog } = options;
 
   const standaloneScript = resolveStandaloneScript();
-  const nativeBinding = resolveNativeBinding(options.nativeBinding);
   const nodePath = buildNodePath();
+
+  // Resolve consumer's node_modules for the forked process.
+  // Needed when SDK is symlinked (link:) — published installs resolve via peer dep naturally.
+  let consumerModules: string | undefined;
+  try {
+    const bsPkg = require.resolve("better-sqlite3/package.json", { paths: [process.cwd()] });
+    consumerModules = path.resolve(bsPkg, "../..");
+  } catch { /* not found — peer dep will resolve normally */ }
 
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
@@ -220,7 +184,8 @@ export async function startSnaServer(options: SnaServerOptions): Promise<SnaServ
     ...(options.maxSessions != null ? { SNA_MAX_SESSIONS: String(options.maxSessions) } : {}),
     ...(options.permissionMode ? { SNA_PERMISSION_MODE: options.permissionMode } : {}),
     ...(options.model ? { SNA_MODEL: options.model } : {}),
-    ...(nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: nativeBinding } : {}),
+    ...(options.nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: options.nativeBinding } : {}),
+    ...(consumerModules ? { SNA_MODULES_PATH: consumerModules } : {}),
     ...(nodePath ? { NODE_PATH: nodePath } : {}),
     // Consumer overrides last so they can always win
     ...(options.env ?? {}),

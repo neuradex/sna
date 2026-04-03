@@ -57,32 +57,6 @@ Ensure "@sna-sdk/core" is listed in asarUnpack in your electron-builder config.`
   }
   return script;
 }
-function resolveNativeBinding(override) {
-  if (override) {
-    if (!import_fs.default.existsSync(override)) {
-      console.warn(`[sna] SNA nativeBinding override not found: ${override}`);
-      return void 0;
-    }
-    return override;
-  }
-  const BINDING_REL = import_path.default.join("better-sqlite3", "build", "Release", "better_sqlite3.node");
-  const resourcesPath = process.resourcesPath;
-  if (resourcesPath) {
-    const unpackedBase = import_path.default.join(resourcesPath, "app.asar.unpacked", "node_modules");
-    const candidates = [
-      import_path.default.join(unpackedBase, BINDING_REL),
-      // nested under @sna-sdk/core if hoisting differs
-      import_path.default.join(unpackedBase, "@sna-sdk", "core", "node_modules", BINDING_REL)
-    ];
-    for (const c of candidates) {
-      if (import_fs.default.existsSync(c)) return c;
-    }
-  }
-  const selfPath = (0, import_url.fileURLToPath)(importMetaUrl);
-  const local = import_path.default.resolve(import_path.default.dirname(selfPath), "../../node_modules", BINDING_REL);
-  if (import_fs.default.existsSync(local)) return local;
-  return void 0;
-}
 function buildNodePath() {
   const resourcesPath = process.resourcesPath;
   if (!resourcesPath) return void 0;
@@ -97,8 +71,13 @@ async function startSnaServer(options) {
   const readyTimeout = options.readyTimeout ?? 15e3;
   const { onLog } = options;
   const standaloneScript = resolveStandaloneScript();
-  const nativeBinding = resolveNativeBinding(options.nativeBinding);
   const nodePath = buildNodePath();
+  let consumerModules;
+  try {
+    const bsPkg = require.resolve("better-sqlite3/package.json", { paths: [process.cwd()] });
+    consumerModules = import_path.default.resolve(bsPkg, "../..");
+  } catch {
+  }
   const env = {
     ...process.env,
     SNA_PORT: String(port),
@@ -106,7 +85,8 @@ async function startSnaServer(options) {
     ...options.maxSessions != null ? { SNA_MAX_SESSIONS: String(options.maxSessions) } : {},
     ...options.permissionMode ? { SNA_PERMISSION_MODE: options.permissionMode } : {},
     ...options.model ? { SNA_MODEL: options.model } : {},
-    ...nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: nativeBinding } : {},
+    ...options.nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: options.nativeBinding } : {},
+    ...consumerModules ? { SNA_MODULES_PATH: consumerModules } : {},
     ...nodePath ? { NODE_PATH: nodePath } : {},
     // Consumer overrides last so they can always win
     ...options.env ?? {}

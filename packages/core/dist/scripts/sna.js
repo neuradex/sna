@@ -379,6 +379,14 @@ function isPortInUse(port) {
 }
 function resolveAndCacheClaudePath() {
   const SHELL = process.env.SHELL || "/bin/zsh";
+  try {
+    const resolved = execSync(`${SHELL} -l -c "which claude"`, { encoding: "utf8" }).trim();
+    if (resolved) {
+      fs.writeFileSync(CLAUDE_PATH_FILE, resolved);
+      return resolved;
+    }
+  } catch {
+  }
   const candidates = [
     "/opt/homebrew/bin/claude",
     "/usr/local/bin/claude",
@@ -392,13 +400,7 @@ function resolveAndCacheClaudePath() {
     } catch {
     }
   }
-  try {
-    const resolved = execSync(`${SHELL} -l -c "which claude"`, { encoding: "utf8" }).trim();
-    fs.writeFileSync(CLAUDE_PATH_FILE, resolved);
-    return resolved;
-  } catch {
-    return "claude";
-  }
+  return "claude";
 }
 function openBrowser(url) {
   try {

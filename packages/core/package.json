@@ -1,6 +1,6 @@
 {
   "name": "@sna-sdk/core",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Skills-Native Application runtime — server, providers, session management, database, and CLI",
   "type": "module",
   "bin": {
@@ -108,11 +108,13 @@
   ],
   "dependencies": {
     "@hono/node-server": "^1.19.11",
-    "better-sqlite3": "^12.6.2",
     "chalk": "^5.0.0",
     "hono": "^4.12.7",
     "js-yaml": "^4.1.0",
     "ws": "^8.20.0"
+  },
+  "peerDependencies": {
+    "better-sqlite3": ">=11.0.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

@@ -18,6 +18,14 @@ var DB_PATH = process.env.SNA_DB_PATH ?? path.join(process.cwd(), "data/sna.db")
 var NATIVE_DIR = path.join(process.cwd(), ".sna/native");
 var _db = null;
 function loadBetterSqlite3() {
+  const modulesPath = process.env.SNA_MODULES_PATH;
+  if (modulesPath) {
+    const entry = path.join(modulesPath, "better-sqlite3");
+    if (fs.existsSync(entry)) {
+      const req2 = createRequire(path.join(modulesPath, "noop.js"));
+      return req2("better-sqlite3");
+    }
+  }
   const nativeEntry = path.join(NATIVE_DIR, "node_modules", "better-sqlite3");
   if (fs.existsSync(nativeEntry)) {
     const req2 = createRequire(path.join(NATIVE_DIR, "noop.js"));

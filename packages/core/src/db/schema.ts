@@ -16,17 +16,28 @@ const NATIVE_DIR = path.join(process.cwd(), ".sna/native");
 let _db: Database.Database | null = null;
 
 /**
- * Load better-sqlite3 from the isolated .sna/native/ directory.
- * Falls back to SDK's own node_modules only if .sna/native/ doesn't exist
- * (e.g., during SDK development or `pnpm build`).
+ * Load better-sqlite3 (peer dependency — installed by consumer).
+ *
+ * Resolution order:
+ *   1. SNA_MODULES_PATH env — consumer's node_modules (set by Electron launcher for link: dev)
+ *   2. .sna/native/ — isolated copy installed by `sna api:up` (legacy)
+ *   3. Standard resolution — peer dep in consumer's node_modules (published install)
  */
 function loadBetterSqlite3(): typeof Database {
+  const modulesPath = process.env.SNA_MODULES_PATH;
+  if (modulesPath) {
+    const entry = path.join(modulesPath, "better-sqlite3");
+    if (fs.existsSync(entry)) {
+      const req = createRequire(path.join(modulesPath, "noop.js"));
+      return req("better-sqlite3");
+    }
+  }
+
   const nativeEntry = path.join(NATIVE_DIR, "node_modules", "better-sqlite3");
   if (fs.existsSync(nativeEntry)) {
     const req = createRequire(path.join(NATIVE_DIR, "noop.js"));
     return req("better-sqlite3");
   }
-  // Fallback for SDK development (no .sna/native/) or DB init scripts
   const req = createRequire(import.meta.url);
   return req("better-sqlite3");
 }
@@ -36,9 +47,6 @@ export function getDb(): Database.Database {
     const BetterSqlite3 = loadBetterSqlite3();
     const dir = path.dirname(DB_PATH);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    // SNA_SQLITE_NATIVE_BINDING: bypass the 'bindings' package for native module resolution.
-    // Required in Electron packaged apps where 'bindings' cannot traverse the asar bundle.
-    // Set to the absolute path of the better_sqlite3.node file.
     const nativeBinding = process.env.SNA_SQLITE_NATIVE_BINDING || undefined;
     _db = nativeBinding ? new BetterSqlite3(DB_PATH, { nativeBinding }) : new BetterSqlite3(DB_PATH);
     _db.pragma("journal_mode = WAL");

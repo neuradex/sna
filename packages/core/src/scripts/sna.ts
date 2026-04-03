@@ -432,6 +432,15 @@ function isPortInUse(port: string): boolean {
 
 function resolveAndCacheClaudePath(): string {
   const SHELL = process.env.SHELL || "/bin/zsh";
+  // Prefer `which` first — it respects the user's $PATH
+  try {
+    const resolved = execSync(`${SHELL} -l -c "which claude"`, { encoding: "utf8" }).trim();
+    if (resolved) {
+      fs.writeFileSync(CLAUDE_PATH_FILE, resolved);
+      return resolved;
+    }
+  } catch { /* not in PATH */ }
+  // Fallback: well-known install locations
   const candidates = [
     "/opt/homebrew/bin/claude",
     "/usr/local/bin/claude",
@@ -444,13 +453,7 @@ function resolveAndCacheClaudePath(): string {
       return p;
     } catch { /* not found */ }
   }
-  try {
-    const resolved = execSync(`${SHELL} -l -c "which claude"`, { encoding: "utf8" }).trim();
-    fs.writeFileSync(CLAUDE_PATH_FILE, resolved);
-    return resolved;
-  } catch {
-    return "claude";
-  }
+  return "claude";
 }
 
 function openBrowser(url: string) {

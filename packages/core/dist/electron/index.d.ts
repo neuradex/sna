@@ -29,10 +29,10 @@ import { ChildProcess } from 'child_process';
  *
  *   asarUnpack: ["node_modules/@sna-sdk/core/**"]
  *
- * The better-sqlite3 native binding used by the forked process must be
- * compiled for the system Node.js (not Electron). If your app uses
- * electron-rebuild, set options.nativeBinding to a Node.js-compiled
- * .node file, or let SNA manage its own native install via `sna api:up`.
+ * The forked server process runs on Electron's Node.js. The launcher
+ * automatically detects the consumer app's electron-rebuilt native modules
+ * and passes their path to the server process, so better-sqlite3 just works
+ * without any manual configuration.
  */
 
 interface SnaServerOptions {
