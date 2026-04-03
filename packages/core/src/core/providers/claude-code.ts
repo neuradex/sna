@@ -53,36 +53,70 @@ class ClaudeCodeProcess implements AgentProcess {
   private _sessionId: string | null = null;
   private _initEmitted = false;
   private buffer = "";
-  /**
-   * Split completed assistant text into chunks and emit assistant_delta events
-   * at a fixed rate (~270 chars/sec), followed by the final assistant event.
-   *
-   * CHUNK_SIZE chars every CHUNK_DELAY_MS → natural TPS feel regardless of length.
-   */
-  private emitTextAsDeltas(text: string): void {
-    const CHUNK_SIZE = 4;
-    const CHUNK_DELAY_MS = 15; // ~270 chars/sec
 
-    let t = 0;
-    for (let i = 0; i < text.length; i += CHUNK_SIZE) {
-      const chunk = text.slice(i, i + CHUNK_SIZE);
-      setTimeout(() => {
-        this.emitter.emit("event", {
-          type: "assistant_delta",
-          delta: chunk,
-          index: 0,
-          timestamp: Date.now(),
-        } satisfies AgentEvent);
-      }, t);
-      t += CHUNK_DELAY_MS;
+  /**
+   * FIFO event queue — ALL events (deltas, assistant, complete, etc.) go through
+   * this queue. A fixed-interval timer drains one item at a time, guaranteeing
+   * strict ordering: deltas → assistant → complete, never out of order.
+   */
+  private eventQueue: AgentEvent[] = [];
+  private drainTimer: ReturnType<typeof setInterval> | null = null;
+  private static readonly DRAIN_INTERVAL_MS = 15; // ~67 events/sec
+
+  /**
+   * Enqueue an event for ordered emission.
+   * Starts the drain timer if not already running.
+   */
+  private enqueue(event: AgentEvent): void {
+    this.eventQueue.push(event);
+    if (!this.drainTimer) {
+      this.drainTimer = setInterval(() => this.drainOne(), ClaudeCodeProcess.DRAIN_INTERVAL_MS);
     }
-    setTimeout(() => {
-      this.emitter.emit("event", {
-        type: "assistant",
-        message: text,
+  }
+
+  /** Emit one event from the front of the queue. Stop timer when empty. */
+  private drainOne(): void {
+    const event = this.eventQueue.shift();
+    if (event) {
+      this.emitter.emit("event", event);
+    }
+    if (this.eventQueue.length === 0 && this.drainTimer) {
+      clearInterval(this.drainTimer);
+      this.drainTimer = null;
+    }
+  }
+
+  /** Flush all remaining queued events immediately (used on process exit). */
+  private flushQueue(): void {
+    if (this.drainTimer) {
+      clearInterval(this.drainTimer);
+      this.drainTimer = null;
+    }
+    while (this.eventQueue.length > 0) {
+      this.emitter.emit("event", this.eventQueue.shift()!);
+    }
+  }
+
+  /**
+   * Split completed assistant text into delta chunks and enqueue them,
+   * followed by the final assistant event. All go through the FIFO queue
+   * so subsequent events (complete, etc.) are guaranteed to come after.
+   */
+  private enqueueTextAsDeltas(text: string): void {
+    const CHUNK_SIZE = 4;
+    for (let i = 0; i < text.length; i += CHUNK_SIZE) {
+      this.enqueue({
+        type: "assistant_delta",
+        delta: text.slice(i, i + CHUNK_SIZE),
+        index: 0,
         timestamp: Date.now(),
       } satisfies AgentEvent);
-    }, t);
+    }
+    this.enqueue({
+      type: "assistant",
+      message: text,
+      timestamp: Date.now(),
+    } satisfies AgentEvent);
   }
 
   get alive() { return this._alive; }
@@ -105,7 +139,7 @@ class ClaudeCodeProcess implements AgentProcess {
             this._sessionId = msg.session_id;
           }
           const event = this.normalizeEvent(msg);
-          if (event) this.emitter.emit("event", event);
+          if (event) this.enqueue(event);
         } catch { /* non-JSON */ }
       }
     });
@@ -121,9 +155,11 @@ class ClaudeCodeProcess implements AgentProcess {
         try {
           const msg = JSON.parse(this.buffer);
           const event = this.normalizeEvent(msg);
-          if (event) this.emitter.emit("event", event);
+          if (event) this.enqueue(event);
         } catch { /* ignore */ }
       }
+      // Flush all queued events before emitting exit
+      this.flushQueue();
       this.emitter.emit("exit", code);
       logger.log("agent", `process exited (code=${code})`);
     });
@@ -257,10 +293,10 @@ class ClaudeCodeProcess implements AgentProcess {
 
         if (events.length > 0 || textBlocks.length > 0) {
           for (const e of events) {
-            this.emitter.emit("event", e);
+            this.enqueue(e);
           }
           for (const text of textBlocks) {
-            this.emitTextAsDeltas(text);
+            this.enqueueTextAsDeltas(text);
           }
         }
         return null;

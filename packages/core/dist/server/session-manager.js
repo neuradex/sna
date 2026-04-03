@@ -125,12 +125,14 @@ class SessionManager {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Session "${sessionId}" not found`);
     session.process = proc;
-    this.setSessionState(sessionId, session, "processing");
     session.lastActivityAt = Date.now();
     proc.on("event", (e) => {
-      if (e.type === "init" && e.data?.sessionId && !session.ccSessionId) {
-        session.ccSessionId = e.data.sessionId;
-        this.persistSession(session);
+      if (e.type === "init") {
+        if (e.data?.sessionId && !session.ccSessionId) {
+          session.ccSessionId = e.data.sessionId;
+          this.persistSession(session);
+        }
+        this.setSessionState(sessionId, session, "waiting");
       }
       if (e.type !== "assistant_delta") {
         session.eventBuffer.push(e);
@@ -139,7 +141,9 @@ class SessionManager {
         }
       }
       session.eventCounter++;
-      if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
+      if (e.type === "thinking" || e.type === "tool_use" || e.type === "assistant_delta") {
+        this.setSessionState(sessionId, session, "processing");
+      } else if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
         this.setSessionState(sessionId, session, "waiting");
       }
       this.persistEvent(sessionId, e);

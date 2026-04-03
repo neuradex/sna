@@ -226,14 +226,20 @@ export class SessionManager {
     if (!session) throw new Error(`Session "${sessionId}" not found`);
 
     session.process = proc;
-    this.setSessionState(sessionId, session, "processing");
     session.lastActivityAt = Date.now();
 
     proc.on("event", (e: AgentEvent) => {
       // Capture Claude Code's session ID from init event
-      if (e.type === "init" && e.data?.sessionId && !session.ccSessionId) {
-        session.ccSessionId = e.data.sessionId as string;
-        this.persistSession(session);
+      if (e.type === "init") {
+        if (e.data?.sessionId && !session.ccSessionId) {
+          session.ccSessionId = e.data.sessionId as string;
+          this.persistSession(session);
+        }
+        // Agent is ready for input — transition from "processing" to "waiting".
+        // If a prompt was sent, the agent immediately starts processing and
+        // a subsequent complete/error event will fire. If no prompt (e.g. resume
+        // without prompt), the agent stays in "waiting" as expected.
+        this.setSessionState(sessionId, session, "waiting");
       }
       // assistant_delta events are transient streaming chunks — exclude from buffer
       // so reconnecting clients don't replay hundreds of delta fragments
@@ -245,7 +251,9 @@ export class SessionManager {
       }
       session.eventCounter++;
       // Update session state based on event type
-      if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
+      if (e.type === "thinking" || e.type === "tool_use" || e.type === "assistant_delta") {
+        this.setSessionState(sessionId, session, "processing");
+      } else if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
         this.setSessionState(sessionId, session, "waiting");
       }
       // Persist assistant messages to chat_messages
