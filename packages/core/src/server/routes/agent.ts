@@ -378,8 +378,9 @@ export function createAgentRoutes(sessionManager: SessionManager) {
           cursor = session.eventCounter;
         }
 
-        // Drop real-time events that were already covered by buffer replay
-        while (queue.length > 0 && queue[0].cursor <= cursor) queue.shift();
+        // Drop real-time events that were already covered by buffer replay.
+        // cursor=-1 events (transient deltas) always pass through.
+        while (queue.length > 0 && queue[0].cursor !== -1 && queue[0].cursor <= cursor) queue.shift();
 
         // Event-driven loop — no polling
         while (!signal.aborted) {
@@ -395,7 +396,12 @@ export function createAgentRoutes(sessionManager: SessionManager) {
           if (queue.length > 0) {
             while (queue.length > 0) {
               const item = queue.shift()!;
-              await stream.writeSSE({ id: String(item.cursor), data: JSON.stringify(item.event) });
+              // cursor=-1 = transient event (assistant_delta) — send without SSE id
+              if (item.cursor === -1) {
+                await stream.writeSSE({ data: JSON.stringify(item.event) });
+              } else {
+                await stream.writeSSE({ id: String(item.cursor), data: JSON.stringify(item.event) });
+              }
             }
           } else {
             // Keepalive — no events arrived within KEEPALIVE_MS

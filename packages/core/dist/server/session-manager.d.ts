@@ -108,6 +108,12 @@ declare class SessionManager {
     /** Broadcast a skill event to all subscribers (called after DB insert). */
     broadcastSkillEvent(event: Record<string, unknown>): void;
     /** Push a synthetic event into a session's event stream (for user message broadcast). */
+    /**
+     * Push an externally-persisted event into the session.
+     * The caller is responsible for DB persistence — this method only updates
+     * the in-memory counter/buffer and notifies listeners.
+     * eventCounter increments to stay in sync with the DB row count.
+     */
     pushEvent(sessionId: string, event: AgentEvent): void;
     /** Subscribe to permission request notifications. Returns unsubscribe function. */
     onPermissionRequest(cb: (sessionId: string, request: Record<string, unknown>, createdAt: number) => void): () => void;
@@ -165,6 +171,7 @@ declare class SessionManager {
     touch(id: string): void;
     /** Persist an agent event to chat_messages. */
     private getMessageStats;
+    /** Persist an agent event to chat_messages. Returns true if a row was inserted. */
     private persistEvent;
     /** Kill all sessions. Used during shutdown. */
     killAll(): void;

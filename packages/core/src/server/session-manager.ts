@@ -256,27 +256,36 @@ export class SessionManager {
         // without prompt), the agent stays in "waiting" as expected.
         this.setSessionState(sessionId, session, "waiting");
       }
-      // assistant_delta events are transient streaming chunks — exclude from buffer
-      // so reconnecting clients don't replay hundreds of delta fragments
-      if (e.type !== "assistant_delta") {
-        session.eventBuffer.push(e);
-        if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
-          session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
-        }
-      }
-      session.eventCounter++;
       // Update session state based on event type
       if (e.type === "thinking" || e.type === "tool_use" || e.type === "assistant_delta") {
         this.setSessionState(sessionId, session, "processing");
       } else if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
         this.setSessionState(sessionId, session, "waiting");
       }
-      // Persist assistant messages to chat_messages
-      this.persistEvent(sessionId, e);
-      // Notify real-time listeners (WebSocket subscribers)
-      const listeners = this.eventListeners.get(sessionId);
-      if (listeners) {
-        for (const cb of listeners) cb(session.eventCounter, e);
+
+      // Persist to DB first — only persisted events increment the cursor.
+      // This keeps eventCounter === DB row count, so history replay and
+      // live cursors share the same monotonic sequence with no gaps or overlaps.
+      const persisted = this.persistEvent(sessionId, e);
+
+      if (persisted) {
+        session.eventCounter++;
+        session.eventBuffer.push(e);
+        if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
+          session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
+        }
+        // Notify real-time listeners (WebSocket subscribers)
+        const listeners = this.eventListeners.get(sessionId);
+        if (listeners) {
+          for (const cb of listeners) cb(session.eventCounter, e);
+        }
+      } else if (e.type === "assistant_delta") {
+        // Deltas are transient — broadcast without cursor/buffer for streaming UI.
+        // Subscribers receive them but they don't affect cursor position.
+        const listeners = this.eventListeners.get(sessionId);
+        if (listeners) {
+          for (const cb of listeners) cb(-1, e);
+        }
       }
     });
 
@@ -323,11 +332,17 @@ export class SessionManager {
   }
 
   /** Push a synthetic event into a session's event stream (for user message broadcast). */
+  /**
+   * Push an externally-persisted event into the session.
+   * The caller is responsible for DB persistence — this method only updates
+   * the in-memory counter/buffer and notifies listeners.
+   * eventCounter increments to stay in sync with the DB row count.
+   */
   pushEvent(sessionId: string, event: AgentEvent): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
-    session.eventBuffer.push(event);
     session.eventCounter++;
+    session.eventBuffer.push(event);
     if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
       session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
     }
@@ -600,7 +615,8 @@ export class SessionManager {
     }
   }
 
-  private persistEvent(sessionId: string, e: AgentEvent): void {
+  /** Persist an agent event to chat_messages. Returns true if a row was inserted. */
+  private persistEvent(sessionId: string, e: AgentEvent): boolean {
     try {
       const db = getDb();
       switch (e.type) {
@@ -608,35 +624,38 @@ export class SessionManager {
           if (e.message) {
             db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`)
               .run(sessionId, e.message);
+            return true;
           }
-          break;
+          return false;
         case "thinking":
           if (e.message) {
             db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'thinking', ?)`)
               .run(sessionId, e.message);
+            return true;
           }
-          break;
+          return false;
         case "tool_use": {
           const toolName = (e.data?.toolName as string) ?? e.message ?? "tool";
           db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool', ?, ?)`)
             .run(sessionId, toolName, JSON.stringify(e.data ?? {}));
-          break;
+          return true;
         }
         case "tool_result":
           db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool_result', ?, ?)`)
             .run(sessionId, e.message ?? "", JSON.stringify(e.data ?? {}));
-          break;
+          return true;
         case "complete":
-          // Turn-end metadata only — the text was already saved by the "assistant" event
           db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'status', '', ?)`)
             .run(sessionId, JSON.stringify({ status: "complete", ...e.data }));
-          break;
+          return true;
         case "error":
           db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'error', ?, ?)`)
             .run(sessionId, e.message ?? "Error", JSON.stringify({ status: "error" }));
-          break;
+          return true;
+        default:
+          return false;
       }
-    } catch { /* DB failure is non-fatal */ }
+    } catch { return false; /* DB failure is non-fatal */ }
   }
 
   /** Kill all sessions. Used during shutdown. */

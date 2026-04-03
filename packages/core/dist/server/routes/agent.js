@@ -253,7 +253,7 @@ function createAgentRoutes(sessionManager) {
         } else {
           cursor = session.eventCounter;
         }
-        while (queue.length > 0 && queue[0].cursor <= cursor) queue.shift();
+        while (queue.length > 0 && queue[0].cursor !== -1 && queue[0].cursor <= cursor) queue.shift();
         while (!signal.aborted) {
           if (queue.length === 0) {
             await Promise.race([
@@ -267,7 +267,11 @@ function createAgentRoutes(sessionManager) {
           if (queue.length > 0) {
             while (queue.length > 0) {
               const item = queue.shift();
-              await stream.writeSSE({ id: String(item.cursor), data: JSON.stringify(item.event) });
+              if (item.cursor === -1) {
+                await stream.writeSSE({ data: JSON.stringify(item.event) });
+              } else {
+                await stream.writeSSE({ id: String(item.cursor), data: JSON.stringify(item.event) });
+              }
             }
           } else {
             await stream.writeSSE({ data: "" });

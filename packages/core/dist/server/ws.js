@@ -459,7 +459,11 @@ function handleAgentSubscribe(ws, msg, sm, state) {
     }
   }
   const unsub = sm.onSessionEvent(sessionId, (eventCursor, event) => {
-    send(ws, { type: "agent.event", session: sessionId, cursor: eventCursor, event });
+    if (eventCursor === -1) {
+      send(ws, { type: "agent.event", session: sessionId, event });
+    } else {
+      send(ws, { type: "agent.event", session: sessionId, cursor: eventCursor, event });
+    }
   });
   state.agentUnsubs.set(sessionId, unsub);
   reply(ws, msg, { cursor });

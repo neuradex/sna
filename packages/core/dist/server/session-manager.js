@@ -143,22 +143,27 @@ class SessionManager {
         }
         this.setSessionState(sessionId, session, "waiting");
       }
-      if (e.type !== "assistant_delta") {
-        session.eventBuffer.push(e);
-        if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
-          session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
-        }
-      }
-      session.eventCounter++;
       if (e.type === "thinking" || e.type === "tool_use" || e.type === "assistant_delta") {
         this.setSessionState(sessionId, session, "processing");
       } else if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
         this.setSessionState(sessionId, session, "waiting");
       }
-      this.persistEvent(sessionId, e);
-      const listeners = this.eventListeners.get(sessionId);
-      if (listeners) {
-        for (const cb of listeners) cb(session.eventCounter, e);
+      const persisted = this.persistEvent(sessionId, e);
+      if (persisted) {
+        session.eventCounter++;
+        session.eventBuffer.push(e);
+        if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
+          session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
+        }
+        const listeners = this.eventListeners.get(sessionId);
+        if (listeners) {
+          for (const cb of listeners) cb(session.eventCounter, e);
+        }
+      } else if (e.type === "assistant_delta") {
+        const listeners = this.eventListeners.get(sessionId);
+        if (listeners) {
+          for (const cb of listeners) cb(-1, e);
+        }
       }
     });
     proc.on("exit", (code) => {
@@ -196,11 +201,17 @@ class SessionManager {
     for (const cb of this.skillEventListeners) cb(event);
   }
   /** Push a synthetic event into a session's event stream (for user message broadcast). */
+  /**
+   * Push an externally-persisted event into the session.
+   * The caller is responsible for DB persistence — this method only updates
+   * the in-memory counter/buffer and notifies listeners.
+   * eventCounter increments to stay in sync with the DB row count.
+   */
   pushEvent(sessionId, event) {
     const session = this.sessions.get(sessionId);
     if (!session) return;
-    session.eventBuffer.push(event);
     session.eventCounter++;
+    session.eventBuffer.push(event);
     if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
       session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
     }
@@ -425,6 +436,7 @@ class SessionManager {
       return { messageCount: 0, lastMessage: null };
     }
   }
+  /** Persist an agent event to chat_messages. Returns true if a row was inserted. */
   persistEvent(sessionId, e) {
     try {
       const db = getDb();
@@ -432,29 +444,34 @@ class SessionManager {
         case "assistant":
           if (e.message) {
             db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`).run(sessionId, e.message);
+            return true;
           }
-          break;
+          return false;
         case "thinking":
           if (e.message) {
             db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'thinking', ?)`).run(sessionId, e.message);
+            return true;
           }
-          break;
+          return false;
         case "tool_use": {
           const toolName = e.data?.toolName ?? e.message ?? "tool";
           db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool', ?, ?)`).run(sessionId, toolName, JSON.stringify(e.data ?? {}));
-          break;
+          return true;
         }
         case "tool_result":
           db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool_result', ?, ?)`).run(sessionId, e.message ?? "", JSON.stringify(e.data ?? {}));
-          break;
+          return true;
         case "complete":
           db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'status', '', ?)`).run(sessionId, JSON.stringify({ status: "complete", ...e.data }));
-          break;
+          return true;
         case "error":
           db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'error', ?, ?)`).run(sessionId, e.message ?? "Error", JSON.stringify({ status: "error" }));
-          break;
+          return true;
+        default:
+          return false;
       }
     } catch {
+      return false;
     }
   }
   /** Kill all sessions. Used during shutdown. */
