@@ -1,0 +1,47 @@
+{
+  "name": "@sna-sdk/client",
+  "version": "0.1.0",
+  "description": "Typed WebSocket client for the SNA API server",
+  "type": "module",
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "node --import tsx --test src/**/*.spec.ts",
+    "prepublishOnly": "pnpm build"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "homepage": "https://skills-native.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/neuradex/sna",
+    "directory": "packages/client"
+  },
+  "license": "MIT",
+  "keywords": [
+    "sna",
+    "skills-native",
+    "websocket",
+    "client"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
+    "tsup": "^8.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "ws": "^8.20.0"
+  }
+}
