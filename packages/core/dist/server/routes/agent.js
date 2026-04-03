@@ -125,7 +125,6 @@ function createAgentRoutes(sessionManager) {
     if (session.process?.alive) {
       session.process.kill();
     }
-    session.eventBuffer.length = 0;
     const provider = getProvider(body.provider ?? "claude-code");
     try {
       const db = getDb();

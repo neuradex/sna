@@ -126,6 +126,15 @@ class SessionManager {
     if (!session) throw new Error(`Session "${sessionId}" not found`);
     session.process = proc;
     session.lastActivityAt = Date.now();
+    session.eventBuffer.length = 0;
+    try {
+      const db = getDb();
+      const row = db.prepare(
+        `SELECT COUNT(*) as c FROM chat_messages WHERE session_id = ?`
+      ).get(sessionId);
+      session.eventCounter = row.c;
+    } catch {
+    }
     proc.on("event", (e) => {
       if (e.type === "init") {
         if (e.data?.sessionId && !session.ccSessionId) {
@@ -312,7 +321,6 @@ class SessionManager {
       extraArgs: overrides.extraArgs ?? base.extraArgs
     };
     if (session.process?.alive) session.process.kill();
-    session.eventBuffer.length = 0;
     const proc = spawnFn(config);
     this.setProcess(id, proc);
     session.lastStartConfig = config;

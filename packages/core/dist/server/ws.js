@@ -202,7 +202,6 @@ function handleAgentStart(ws, msg, sm) {
     return;
   }
   if (session.process?.alive) session.process.kill();
-  session.eventBuffer.length = 0;
   const provider = getProvider(msg.provider ?? "claude-code");
   try {
     const db = getDb();
@@ -438,18 +437,26 @@ function handleAgentSubscribe(ws, msg, sm, state) {
       }
     } catch {
     }
-  }
-  const bufferStart = typeof msg.since === "number" && msg.since > 0 ? msg.since : session.eventCounter;
-  if (!includeHistory) cursor = bufferStart;
-  if (cursor < session.eventCounter) {
-    const startIdx = Math.max(0, session.eventBuffer.length - (session.eventCounter - cursor));
-    const events = session.eventBuffer.slice(startIdx);
-    for (const event of events) {
-      cursor++;
-      send(ws, { type: "agent.event", session: sessionId, cursor, event });
+    if (cursor < session.eventCounter) {
+      const unpersisted = session.eventCounter - cursor;
+      const bufferSlice = session.eventBuffer.slice(-unpersisted);
+      for (const event of bufferSlice) {
+        cursor++;
+        send(ws, { type: "agent.event", session: sessionId, cursor, event });
+      }
     }
   } else {
-    cursor = session.eventCounter;
+    cursor = typeof msg.since === "number" && msg.since > 0 ? msg.since : session.eventCounter;
+    if (cursor < session.eventCounter) {
+      const startIdx = Math.max(0, session.eventBuffer.length - (session.eventCounter - cursor));
+      const events = session.eventBuffer.slice(startIdx);
+      for (const event of events) {
+        cursor++;
+        send(ws, { type: "agent.event", session: sessionId, cursor, event });
+      }
+    } else {
+      cursor = session.eventCounter;
+    }
   }
   const unsub = sm.onSessionEvent(sessionId, (eventCursor, event) => {
     send(ws, { type: "agent.event", session: sessionId, cursor: eventCursor, event });

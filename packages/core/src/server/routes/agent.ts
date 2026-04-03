@@ -222,8 +222,6 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     if (session.process?.alive) {
       session.process.kill();
     }
-    // Clear buffer but keep eventCounter — SSE cursors depend on monotonic IDs
-    session.eventBuffer.length = 0;
 
     const provider = getProvider(body.provider ?? "claude-code");
 

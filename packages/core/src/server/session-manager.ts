@@ -228,6 +228,21 @@ export class SessionManager {
     session.process = proc;
     session.lastActivityAt = Date.now();
 
+    // Sync eventCounter with DB history so live event cursors continue
+    // from where history left off. This ensures monotonically increasing
+    // cursors across restart/resume — clients using since=cursor won't
+    // see duplicates or gaps.
+    session.eventBuffer.length = 0;
+    try {
+      const db = getDb();
+      const row = db.prepare(
+        `SELECT COUNT(*) as c FROM chat_messages WHERE session_id = ?`
+      ).get(sessionId) as { c: number };
+      session.eventCounter = row.c;
+    } catch {
+      // DB not ready — keep existing counter
+    }
+
     proc.on("event", (e: AgentEvent) => {
       // Capture Claude Code's session ID from init event
       if (e.type === "init") {
@@ -468,7 +483,6 @@ export class SessionManager {
 
     // Kill existing
     if (session.process?.alive) session.process.kill();
-    session.eventBuffer.length = 0;
 
     // Spawn with merged config + --resume
     const proc = spawnFn(config);

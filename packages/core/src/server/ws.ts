@@ -325,7 +325,6 @@ function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): vo
   }
 
   if (session.process?.alive) session.process.kill();
-  session.eventBuffer.length = 0;
 
   const provider = getProvider((msg.provider as string) ?? "claude-code");
 
@@ -574,6 +573,7 @@ function handleAgentSubscribe(
   let cursor = 0;
 
   if (includeHistory) {
+    // Replay all persisted messages from DB
     try {
       const db = getDb();
       const rows = db.prepare(
@@ -606,20 +606,31 @@ function handleAgentSubscribe(
         });
       }
     } catch { /* DB not ready */ }
-  }
 
-  // Then replay in-memory buffer (for events not yet persisted or current-turn events)
-  const bufferStart = typeof msg.since === "number" && msg.since > 0 ? msg.since : session.eventCounter;
-  if (!includeHistory) cursor = bufferStart;
-  if (cursor < session.eventCounter) {
-    const startIdx = Math.max(0, session.eventBuffer.length - (session.eventCounter - cursor));
-    const events = session.eventBuffer.slice(startIdx);
-    for (const event of events) {
-      cursor++;
-      send(ws, { type: "agent.event", session: sessionId, cursor, event });
+    // Replay in-memory buffer events that haven't been persisted to DB yet.
+    // These are events emitted since the last DB write (current turn in-flight).
+    // Only include events whose counter exceeds the history cursor to avoid duplicates.
+    if (cursor < session.eventCounter) {
+      const unpersisted = session.eventCounter - cursor;
+      const bufferSlice = session.eventBuffer.slice(-unpersisted);
+      for (const event of bufferSlice) {
+        cursor++;
+        send(ws, { type: "agent.event", session: sessionId, cursor, event });
+      }
     }
   } else {
-    cursor = session.eventCounter;
+    // No history — replay from since or current counter
+    cursor = typeof msg.since === "number" && msg.since > 0 ? msg.since : session.eventCounter;
+    if (cursor < session.eventCounter) {
+      const startIdx = Math.max(0, session.eventBuffer.length - (session.eventCounter - cursor));
+      const events = session.eventBuffer.slice(startIdx);
+      for (const event of events) {
+        cursor++;
+        send(ws, { type: "agent.event", session: sessionId, cursor, event });
+      }
+    } else {
+      cursor = session.eventCounter;
+    }
   }
 
   // Subscribe to future events — pushed instantly, no polling
