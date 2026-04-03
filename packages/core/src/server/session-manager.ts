@@ -89,6 +89,7 @@ export class SessionManager {
   private lifecycleListeners = new Set<(event: SessionLifecycleEvent) => void>();
   private configChangedListeners = new Set<(event: SessionConfigChangedEvent) => void>();
   private stateChangedListeners = new Set<(event: { session: string; agentStatus: AgentStatus; state: SessionState }) => void>();
+  private metadataChangedListeners = new Set<(sessionId: string) => void>();
 
   constructor(options: SessionManagerOptions = {}) {
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
@@ -144,7 +145,7 @@ export class SessionManager {
     } catch { /* non-fatal */ }
   }
 
-  /** Create a new session. Throws if max sessions reached. */
+  /** Create a new session. Throws if session already exists or max sessions reached. */
   createSession(opts: {
     id?: string;
     label?: string;
@@ -154,13 +155,7 @@ export class SessionManager {
     const id = opts.id ?? crypto.randomUUID().slice(0, 8);
 
     if (this.sessions.has(id)) {
-      const existing = this.sessions.get(id)!;
-      let changed = false;
-      if (opts.cwd && opts.cwd !== existing.cwd) { existing.cwd = opts.cwd; changed = true; }
-      if (opts.label && opts.label !== existing.label) { existing.label = opts.label; changed = true; }
-      if (opts.meta !== undefined && opts.meta !== existing.meta) { existing.meta = opts.meta ?? null; changed = true; }
-      if (changed) this.persistSession(existing);
-      return existing;
+      throw new Error(`Session "${id}" already exists`);
     }
 
     const aliveCount = Array.from(this.sessions.values())
@@ -186,6 +181,23 @@ export class SessionManager {
 
     this.sessions.set(id, session);
     this.persistSession(session);
+    return session;
+  }
+
+  /** Update an existing session's metadata. Throws if session not found. */
+  updateSession(id: string, opts: {
+    label?: string;
+    meta?: Record<string, unknown> | null;
+    cwd?: string;
+  }): Session {
+    const session = this.sessions.get(id);
+    if (!session) throw new Error(`Session "${id}" not found`);
+
+    if (opts.label !== undefined) session.label = opts.label;
+    if (opts.meta !== undefined) session.meta = opts.meta;
+    if (opts.cwd !== undefined) session.cwd = opts.cwd;
+    this.persistSession(session);
+    this.emitMetadataChanged(id);
     return session;
   }
 
@@ -332,6 +344,17 @@ export class SessionManager {
 
   private emitConfigChanged(sessionId: string, config: StartConfig): void {
     for (const cb of this.configChangedListeners) cb({ session: sessionId, config });
+  }
+
+  // ── Session metadata change pub/sub ─────────────────────────────
+
+  onMetadataChanged(cb: (sessionId: string) => void): () => void {
+    this.metadataChangedListeners.add(cb);
+    return () => this.metadataChangedListeners.delete(cb);
+  }
+
+  private emitMetadataChanged(sessionId: string): void {
+    for (const cb of this.metadataChangedListeners) cb(sessionId);
   }
 
   // ── Agent status change pub/sub ────────────────────────────────

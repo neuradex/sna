@@ -73,17 +73,24 @@ declare class SessionManager {
     private lifecycleListeners;
     private configChangedListeners;
     private stateChangedListeners;
+    private metadataChangedListeners;
     constructor(options?: SessionManagerOptions);
     /** Restore session metadata from DB (cwd, label, meta). Process state is not restored. */
     private restoreFromDb;
     /** Persist session metadata to DB. */
     private persistSession;
-    /** Create a new session. Throws if max sessions reached. */
+    /** Create a new session. Throws if session already exists or max sessions reached. */
     createSession(opts?: {
         id?: string;
         label?: string;
         cwd?: string;
         meta?: Record<string, unknown> | null;
+    }): Session;
+    /** Update an existing session's metadata. Throws if session not found. */
+    updateSession(id: string, opts: {
+        label?: string;
+        meta?: Record<string, unknown> | null;
+        cwd?: string;
     }): Session;
     /** Get a session by ID. */
     getSession(id: string): Session | undefined;
@@ -110,6 +117,8 @@ declare class SessionManager {
     /** Subscribe to session config changes. Returns unsubscribe function. */
     onConfigChanged(cb: (event: SessionConfigChangedEvent) => void): () => void;
     private emitConfigChanged;
+    onMetadataChanged(cb: (sessionId: string) => void): () => void;
+    private emitMetadataChanged;
     onStateChanged(cb: (event: {
         session: string;
         agentStatus: AgentStatus;

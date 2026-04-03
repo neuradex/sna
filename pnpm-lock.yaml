@@ -8,13 +8,34 @@ importers:
 
   .: {}
 
+  packages/client:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.15
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(jiti@2.6.1)(postcss@8.5.8)(tsx@4.21.0)(typescript@5.9.3)
+      tsx:
+        specifier: ^4.0.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.0.0
+        version: 5.9.3
+      ws:
+        specifier: ^8.20.0
+        version: 8.20.0
+
   packages/core:
     dependencies:
       '@hono/node-server':
         specifier: ^1.19.11
         version: 1.19.11(hono@4.12.7)
       better-sqlite3:
-        specifier: ^12.6.2
+        specifier: '>=11.0.0'
         version: 12.6.2
       chalk:
         specifier: ^5.0.0
@@ -617,9 +638,6 @@ packages:
   '@types/node@22.19.15':
     resolution: {integrity: sha512-F0R/h2+dsy5wJAUe3tAU6oqa2qbWY5TpNfL/RGmo1y38hiyO1w3x2jPtt76wmuaJI4DQnOBu21cNXQ2STIUUWg==}
 
-  '@types/node@25.4.0':
-    resolution: {integrity: sha512-9wLpoeWuBlcbBpOY3XmzSTG3oscB6xjBEEtn+pYXTfhyXhIxC5FsBer2KTopBlvKEiW9l13po9fq+SJY/5lkhw==}
-
   '@types/react@19.2.14':
     resolution: {integrity: sha512-ilcTH/UniCkMdtexkoCN0bI7pMcJDvmQFPvuPvmEaYA/NSfFTAgdUSLAoVjaRJm7+6PvcM+q1zYOwS4wTYMF9w==}
 
@@ -1015,9 +1033,6 @@ packages:
 
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
-
-  undici-types@7.18.2:
-    resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
 
   util-deprecate@1.0.2:
     resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}
@@ -1415,7 +1430,7 @@ snapshots:
 
   '@types/better-sqlite3@7.6.13':
     dependencies:
-      '@types/node': 25.4.0
+      '@types/node': 22.19.15
 
   '@types/estree@1.0.8': {}
 
@@ -1424,10 +1439,6 @@ snapshots:
   '@types/node@22.19.15':
     dependencies:
       undici-types: 6.21.0
-
-  '@types/node@25.4.0':
-    dependencies:
-      undici-types: 7.18.2
 
   '@types/react@19.2.14':
     dependencies:
@@ -1842,8 +1853,6 @@ snapshots:
   ufo@1.6.3: {}
 
   undici-types@6.21.0: {}
-
-  undici-types@7.18.2: {}
 
   util-deprecate@1.0.2: {}
 

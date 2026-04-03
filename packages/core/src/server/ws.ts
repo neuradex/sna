@@ -8,6 +8,7 @@
  *   Server → Client:  { type: "sessions.list", rid: "1", sessions: [...] }
  *   Server → Client:  { type: "error", rid: "1", message: "..." }
  *   Server → Client:  { type: "agent.event", session: "abc", cursor: 42, event: {...} }  (push)
+ *   Server → Client:  { type: "sessions.snapshot", sessions: [...] }                   (auto-push on connect + state change)
  *   Server → Client:  { type: "session.lifecycle", session: "abc", state: "killed" }   (auto-push)
  *   Server → Client:  { type: "skill.event", data: {...} }  (push)
  *
@@ -69,6 +70,7 @@ interface ConnState {
   lifecycleUnsub: (() => void) | null;
   configChangedUnsub: (() => void) | null;
   stateChangedUnsub: (() => void) | null;
+  metadataChangedUnsub: (() => void) | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -112,11 +114,18 @@ export function attachWebSocket(
 
   wss.on("connection", (ws) => {
     logger.log("ws", "client connected");
-    const state: ConnState = { agentUnsubs: new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null, stateChangedUnsub: null };
+    const state: ConnState = { agentUnsubs: new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null, stateChangedUnsub: null, metadataChangedUnsub: null };
 
-    // Auto-push session lifecycle events to all clients (no subscribe needed)
+    // Helper: push full session snapshot to this client
+    const pushSnapshot = () => send(ws, { type: "sessions.snapshot", sessions: sessionManager.listSessions() });
+
+    // 1. Push snapshot immediately on connection
+    pushSnapshot();
+
+    // 2. Push snapshot on session lifecycle changes (started/killed/exited/crashed)
     state.lifecycleUnsub = sessionManager.onSessionLifecycle((event) => {
       send(ws, { type: "session.lifecycle", ...event });
+      pushSnapshot();
     });
 
     // Auto-push config changes to all clients (no subscribe needed)
@@ -124,9 +133,15 @@ export function attachWebSocket(
       send(ws, { type: "session.config-changed", ...event });
     });
 
-    // Auto-push agent status changes (idle/busy/disconnected)
+    // 3. Push snapshot on agent status changes (idle/busy/disconnected)
     state.stateChangedUnsub = sessionManager.onStateChanged((event) => {
       send(ws, { type: "session.state-changed", ...event });
+      pushSnapshot();
+    });
+
+    // 4. Push snapshot on session metadata changes (label/meta/cwd)
+    state.metadataChangedUnsub = sessionManager.onMetadataChanged(() => {
+      pushSnapshot();
     });
 
     ws.on("message", (raw) => {
@@ -162,6 +177,8 @@ export function attachWebSocket(
       state.configChangedUnsub = null;
       state.stateChangedUnsub?.();
       state.stateChangedUnsub = null;
+      state.metadataChangedUnsub?.();
+      state.metadataChangedUnsub = null;
     });
   });
 
@@ -182,6 +199,8 @@ function handleMessage(
       return handleSessionsCreate(ws, msg, sm);
     case "sessions.list":
       return wsReply(ws, msg, { sessions: sm.listSessions() });
+    case "sessions.update":
+      return handleSessionsUpdate(ws, msg, sm);
     case "sessions.remove":
       return handleSessionsRemove(ws, msg, sm);
 
@@ -263,6 +282,21 @@ function handleSessionsCreate(ws: WebSocket, msg: WsRequest, sm: SessionManager)
       meta: msg.meta as Record<string, unknown> | undefined,
     });
     wsReply(ws, msg, { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
+  } catch (e: any) {
+    replyError(ws, msg, e.message);
+  }
+}
+
+function handleSessionsUpdate(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
+  const id = msg.session as string;
+  if (!id) return replyError(ws, msg, "session is required");
+  try {
+    sm.updateSession(id, {
+      label: msg.label as string | undefined,
+      meta: msg.meta as Record<string, unknown> | undefined,
+      cwd: msg.cwd as string | undefined,
+    });
+    wsReply(ws, msg, { status: "updated", session: id });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }

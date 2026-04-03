@@ -31,15 +31,22 @@ function attachWebSocket(server, sessionManager) {
   });
   wss.on("connection", (ws) => {
     logger.log("ws", "client connected");
-    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null, stateChangedUnsub: null };
+    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null, stateChangedUnsub: null, metadataChangedUnsub: null };
+    const pushSnapshot = () => send(ws, { type: "sessions.snapshot", sessions: sessionManager.listSessions() });
+    pushSnapshot();
     state.lifecycleUnsub = sessionManager.onSessionLifecycle((event) => {
       send(ws, { type: "session.lifecycle", ...event });
+      pushSnapshot();
     });
     state.configChangedUnsub = sessionManager.onConfigChanged((event) => {
       send(ws, { type: "session.config-changed", ...event });
     });
     state.stateChangedUnsub = sessionManager.onStateChanged((event) => {
       send(ws, { type: "session.state-changed", ...event });
+      pushSnapshot();
+    });
+    state.metadataChangedUnsub = sessionManager.onMetadataChanged(() => {
+      pushSnapshot();
     });
     ws.on("message", (raw) => {
       let msg;
@@ -73,6 +80,8 @@ function attachWebSocket(server, sessionManager) {
       state.configChangedUnsub = null;
       state.stateChangedUnsub?.();
       state.stateChangedUnsub = null;
+      state.metadataChangedUnsub?.();
+      state.metadataChangedUnsub = null;
     });
   });
   return wss;
@@ -84,6 +93,8 @@ function handleMessage(ws, msg, sm, state) {
       return handleSessionsCreate(ws, msg, sm);
     case "sessions.list":
       return wsReply(ws, msg, { sessions: sm.listSessions() });
+    case "sessions.update":
+      return handleSessionsUpdate(ws, msg, sm);
     case "sessions.remove":
       return handleSessionsRemove(ws, msg, sm);
     // ── Agent lifecycle ───────────────────────────────
@@ -155,6 +166,20 @@ function handleSessionsCreate(ws, msg, sm) {
       meta: msg.meta
     });
     wsReply(ws, msg, { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
+  } catch (e) {
+    replyError(ws, msg, e.message);
+  }
+}
+function handleSessionsUpdate(ws, msg, sm) {
+  const id = msg.session;
+  if (!id) return replyError(ws, msg, "session is required");
+  try {
+    sm.updateSession(id, {
+      label: msg.label,
+      meta: msg.meta,
+      cwd: msg.cwd
+    });
+    wsReply(ws, msg, { status: "updated", session: id });
   } catch (e) {
     replyError(ws, msg, e.message);
   }

@@ -12,6 +12,7 @@ class SessionManager {
     this.lifecycleListeners = /* @__PURE__ */ new Set();
     this.configChangedListeners = /* @__PURE__ */ new Set();
     this.stateChangedListeners = /* @__PURE__ */ new Set();
+    this.metadataChangedListeners = /* @__PURE__ */ new Set();
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
     this.restoreFromDb();
   }
@@ -64,26 +65,11 @@ class SessionManager {
     } catch {
     }
   }
-  /** Create a new session. Throws if max sessions reached. */
+  /** Create a new session. Throws if session already exists or max sessions reached. */
   createSession(opts = {}) {
     const id = opts.id ?? crypto.randomUUID().slice(0, 8);
     if (this.sessions.has(id)) {
-      const existing = this.sessions.get(id);
-      let changed = false;
-      if (opts.cwd && opts.cwd !== existing.cwd) {
-        existing.cwd = opts.cwd;
-        changed = true;
-      }
-      if (opts.label && opts.label !== existing.label) {
-        existing.label = opts.label;
-        changed = true;
-      }
-      if (opts.meta !== void 0 && opts.meta !== existing.meta) {
-        existing.meta = opts.meta ?? null;
-        changed = true;
-      }
-      if (changed) this.persistSession(existing);
-      return existing;
+      throw new Error(`Session "${id}" already exists`);
     }
     const aliveCount = Array.from(this.sessions.values()).filter((s) => s.process?.alive).length;
     if (aliveCount >= this.maxSessions) {
@@ -105,6 +91,17 @@ class SessionManager {
     };
     this.sessions.set(id, session);
     this.persistSession(session);
+    return session;
+  }
+  /** Update an existing session's metadata. Throws if session not found. */
+  updateSession(id, opts) {
+    const session = this.sessions.get(id);
+    if (!session) throw new Error(`Session "${id}" not found`);
+    if (opts.label !== void 0) session.label = opts.label;
+    if (opts.meta !== void 0) session.meta = opts.meta;
+    if (opts.cwd !== void 0) session.cwd = opts.cwd;
+    this.persistSession(session);
+    this.emitMetadataChanged(id);
     return session;
   }
   /** Get a session by ID. */
@@ -222,6 +219,14 @@ class SessionManager {
   }
   emitConfigChanged(sessionId, config) {
     for (const cb of this.configChangedListeners) cb({ session: sessionId, config });
+  }
+  // ── Session metadata change pub/sub ─────────────────────────────
+  onMetadataChanged(cb) {
+    this.metadataChangedListeners.add(cb);
+    return () => this.metadataChangedListeners.delete(cb);
+  }
+  emitMetadataChanged(sessionId) {
+    for (const cb of this.metadataChangedListeners) cb(sessionId);
   }
   // ── Agent status change pub/sub ────────────────────────────────
   onStateChanged(cb) {

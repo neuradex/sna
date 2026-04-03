@@ -1381,6 +1381,7 @@ var SessionManager = class {
     this.lifecycleListeners = /* @__PURE__ */ new Set();
     this.configChangedListeners = /* @__PURE__ */ new Set();
     this.stateChangedListeners = /* @__PURE__ */ new Set();
+    this.metadataChangedListeners = /* @__PURE__ */ new Set();
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
     this.restoreFromDb();
   }
@@ -1433,26 +1434,11 @@ var SessionManager = class {
     } catch {
     }
   }
-  /** Create a new session. Throws if max sessions reached. */
+  /** Create a new session. Throws if session already exists or max sessions reached. */
   createSession(opts = {}) {
     const id = opts.id ?? crypto.randomUUID().slice(0, 8);
     if (this.sessions.has(id)) {
-      const existing = this.sessions.get(id);
-      let changed = false;
-      if (opts.cwd && opts.cwd !== existing.cwd) {
-        existing.cwd = opts.cwd;
-        changed = true;
-      }
-      if (opts.label && opts.label !== existing.label) {
-        existing.label = opts.label;
-        changed = true;
-      }
-      if (opts.meta !== void 0 && opts.meta !== existing.meta) {
-        existing.meta = opts.meta ?? null;
-        changed = true;
-      }
-      if (changed) this.persistSession(existing);
-      return existing;
+      throw new Error(`Session "${id}" already exists`);
     }
     const aliveCount = Array.from(this.sessions.values()).filter((s) => s.process?.alive).length;
     if (aliveCount >= this.maxSessions) {
@@ -1474,6 +1460,17 @@ var SessionManager = class {
     };
     this.sessions.set(id, session);
     this.persistSession(session);
+    return session;
+  }
+  /** Update an existing session's metadata. Throws if session not found. */
+  updateSession(id, opts) {
+    const session = this.sessions.get(id);
+    if (!session) throw new Error(`Session "${id}" not found`);
+    if (opts.label !== void 0) session.label = opts.label;
+    if (opts.meta !== void 0) session.meta = opts.meta;
+    if (opts.cwd !== void 0) session.cwd = opts.cwd;
+    this.persistSession(session);
+    this.emitMetadataChanged(id);
     return session;
   }
   /** Get a session by ID. */
@@ -1591,6 +1588,14 @@ var SessionManager = class {
   }
   emitConfigChanged(sessionId, config) {
     for (const cb of this.configChangedListeners) cb({ session: sessionId, config });
+  }
+  // ── Session metadata change pub/sub ─────────────────────────────
+  onMetadataChanged(cb) {
+    this.metadataChangedListeners.add(cb);
+    return () => this.metadataChangedListeners.delete(cb);
+  }
+  emitMetadataChanged(sessionId) {
+    for (const cb of this.metadataChangedListeners) cb(sessionId);
   }
   // ── Agent status change pub/sub ────────────────────────────────
   onStateChanged(cb) {
@@ -1849,15 +1854,22 @@ function attachWebSocket(server2, sessionManager2) {
   });
   wss.on("connection", (ws) => {
     logger.log("ws", "client connected");
-    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null, stateChangedUnsub: null };
+    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null, stateChangedUnsub: null, metadataChangedUnsub: null };
+    const pushSnapshot = () => send(ws, { type: "sessions.snapshot", sessions: sessionManager2.listSessions() });
+    pushSnapshot();
     state.lifecycleUnsub = sessionManager2.onSessionLifecycle((event) => {
       send(ws, { type: "session.lifecycle", ...event });
+      pushSnapshot();
     });
     state.configChangedUnsub = sessionManager2.onConfigChanged((event) => {
       send(ws, { type: "session.config-changed", ...event });
     });
     state.stateChangedUnsub = sessionManager2.onStateChanged((event) => {
       send(ws, { type: "session.state-changed", ...event });
+      pushSnapshot();
+    });
+    state.metadataChangedUnsub = sessionManager2.onMetadataChanged(() => {
+      pushSnapshot();
     });
     ws.on("message", (raw) => {
       let msg;
@@ -1891,6 +1903,8 @@ function attachWebSocket(server2, sessionManager2) {
       state.configChangedUnsub = null;
       state.stateChangedUnsub?.();
       state.stateChangedUnsub = null;
+      state.metadataChangedUnsub?.();
+      state.metadataChangedUnsub = null;
     });
   });
   return wss;
@@ -1902,6 +1916,8 @@ function handleMessage(ws, msg, sm, state) {
       return handleSessionsCreate(ws, msg, sm);
     case "sessions.list":
       return wsReply(ws, msg, { sessions: sm.listSessions() });
+    case "sessions.update":
+      return handleSessionsUpdate(ws, msg, sm);
     case "sessions.remove":
       return handleSessionsRemove(ws, msg, sm);
     // ── Agent lifecycle ───────────────────────────────
@@ -1973,6 +1989,20 @@ function handleSessionsCreate(ws, msg, sm) {
       meta: msg.meta
     });
     wsReply(ws, msg, { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
+  } catch (e) {
+    replyError(ws, msg, e.message);
+  }
+}
+function handleSessionsUpdate(ws, msg, sm) {
+  const id = msg.session;
+  if (!id) return replyError(ws, msg, "session is required");
+  try {
+    sm.updateSession(id, {
+      label: msg.label,
+      meta: msg.meta,
+      cwd: msg.cwd
+    });
+    wsReply(ws, msg, { status: "updated", session: id });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -2504,7 +2534,7 @@ root.use("*", async (c, next) => {
   await next();
 });
 var sessionManager = new SessionManager({ maxSessions });
-sessionManager.createSession({ id: "default", cwd: process.cwd() });
+sessionManager.getOrCreateSession("default", { cwd: process.cwd() });
 var provider = getProvider("claude-code");
 logger.log("sna", "spawning agent...");
 var agentProcess = provider.spawn({ cwd: process.cwd(), permissionMode, model: defaultModel });

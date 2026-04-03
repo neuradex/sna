@@ -64,7 +64,7 @@ root.use("*", async (c, next) => {
 
 // 1. Create session manager and main session
 const sessionManager = new SessionManager({ maxSessions });
-sessionManager.createSession({ id: "default", cwd: process.cwd() });
+sessionManager.getOrCreateSession("default", { cwd: process.cwd() });
 
 // 2. Spawn agent into main session
 const provider = getProvider("claude-code");

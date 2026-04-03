@@ -14,6 +14,10 @@ interface ApiResponses {
     "sessions.list": {
         sessions: SessionInfo[];
     };
+    "sessions.update": {
+        status: "updated";
+        session: string;
+    };
     "sessions.remove": {
         status: "removed";
     };
