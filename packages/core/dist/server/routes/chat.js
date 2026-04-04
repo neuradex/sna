@@ -23,11 +23,12 @@ function createChatRoutes() {
   app.post("/sessions", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const id = body.id ?? crypto.randomUUID().slice(0, 8);
+    const sessionType = body.type ?? body.chatType ?? "background";
     try {
       const db = getDb();
       db.prepare(
         `INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, ?, ?)`
-      ).run(id, body.label ?? id, body.type ?? "background", body.meta ? JSON.stringify(body.meta) : null);
+      ).run(id, body.label ?? id, sessionType, body.meta ? JSON.stringify(body.meta) : null);
       return httpJson(c, "chat.sessions.create", { status: "created", id, meta: body.meta ?? null });
     } catch (e) {
       return c.json({ status: "error", message: e.message }, 500);

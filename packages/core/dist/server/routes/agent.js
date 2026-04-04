@@ -97,6 +97,22 @@ function createAgentRoutes(sessionManager) {
     logger.log("route", `DELETE /sessions/${id} \u2192 removed`);
     return httpJson(c, "sessions.remove", { status: "removed" });
   });
+  app.patch("/sessions/:id", async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      sessionManager.updateSession(id, {
+        label: body.label,
+        meta: body.meta,
+        cwd: body.cwd
+      });
+      logger.log("route", `PATCH /sessions/${id} \u2192 updated`);
+      return httpJson(c, "sessions.update", { status: "updated", session: id });
+    } catch (e) {
+      logger.err("err", `PATCH /sessions/${id} \u2192 ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 404);
+    }
+  });
   app.post("/run-once", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     if (!body.message) {

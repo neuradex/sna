@@ -206,14 +206,16 @@ function wsReply(ws, msg, data) {
 function createEmitRoute(sessionManager2) {
   return async (c) => {
     const body = await c.req.json();
-    const { skill, type, message, data, session_id } = body;
+    const { skill, message, data } = body;
+    const type = body.type ?? body.eventType;
+    const session_id = c.req.query("session") ?? body.session_id ?? body.session ?? null;
     if (!skill || !type || !message) {
       return c.json({ error: "missing fields" }, 400);
     }
     const db = getDb();
     const result = db.prepare(
       `INSERT INTO skill_events (session_id, skill, type, message, data) VALUES (?, ?, ?, ?, ?)`
-    ).run(session_id ?? null, skill, type, message, data ?? null);
+    ).run(session_id, skill, type, message, data ?? null);
     const id = Number(result.lastInsertRowid);
     sessionManager2.broadcastSkillEvent({
       id,
@@ -997,6 +999,22 @@ function createAgentRoutes(sessionManager2) {
     logger.log("route", `DELETE /sessions/${id} \u2192 removed`);
     return httpJson(c, "sessions.remove", { status: "removed" });
   });
+  app.patch("/sessions/:id", async (c) => {
+    const id = c.req.param("id");
+    const body = await c.req.json().catch(() => ({}));
+    try {
+      sessionManager2.updateSession(id, {
+        label: body.label,
+        meta: body.meta,
+        cwd: body.cwd
+      });
+      logger.log("route", `PATCH /sessions/${id} \u2192 updated`);
+      return httpJson(c, "sessions.update", { status: "updated", session: id });
+    } catch (e) {
+      logger.err("err", `PATCH /sessions/${id} \u2192 ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 404);
+    }
+  });
   app.post("/run-once", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     if (!body.message) {
@@ -1357,11 +1375,12 @@ function createChatRoutes() {
   app.post("/sessions", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const id = body.id ?? crypto.randomUUID().slice(0, 8);
+    const sessionType = body.type ?? body.chatType ?? "background";
     try {
       const db = getDb();
       db.prepare(
         `INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, ?, ?)`
-      ).run(id, body.label ?? id, body.type ?? "background", body.meta ? JSON.stringify(body.meta) : null);
+      ).run(id, body.label ?? id, sessionType, body.meta ? JSON.stringify(body.meta) : null);
       return httpJson(c, "chat.sessions.create", { status: "created", id, meta: body.meta ?? null });
     } catch (e) {
       return c.json({ status: "error", message: e.message }, 500);

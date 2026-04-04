@@ -171,6 +171,28 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     return httpJson(c, "sessions.remove", { status: "removed" });
   });
 
+  // PATCH /sessions/:id — update session metadata (label, meta, cwd)
+  app.patch("/sessions/:id", async (c) => {
+    const id = c.req.param("id");
+    const body = (await c.req.json().catch(() => ({}))) as {
+      label?: string;
+      meta?: Record<string, unknown>;
+      cwd?: string;
+    };
+    try {
+      sessionManager.updateSession(id, {
+        label: body.label,
+        meta: body.meta,
+        cwd: body.cwd,
+      });
+      logger.log("route", `PATCH /sessions/${id} → updated`);
+      return httpJson(c, "sessions.update", { status: "updated", session: id });
+    } catch (e: any) {
+      logger.err("err", `PATCH /sessions/${id} → ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 404);
+    }
+  });
+
   // ── One-shot execution ─────────────────────────────────────────
 
   // POST /run-once — spawn → execute → return result → cleanup

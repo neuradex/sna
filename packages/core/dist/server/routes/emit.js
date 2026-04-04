@@ -3,14 +3,16 @@ import { httpJson } from "../api-types.js";
 function createEmitRoute(sessionManager) {
   return async (c) => {
     const body = await c.req.json();
-    const { skill, type, message, data, session_id } = body;
+    const { skill, message, data } = body;
+    const type = body.type ?? body.eventType;
+    const session_id = c.req.query("session") ?? body.session_id ?? body.session ?? null;
     if (!skill || !type || !message) {
       return c.json({ error: "missing fields" }, 400);
     }
     const db = getDb();
     const result = db.prepare(
       `INSERT INTO skill_events (session_id, skill, type, message, data) VALUES (?, ?, ?, ?, ?)`
-    ).run(session_id ?? null, skill, type, message, data ?? null);
+    ).run(session_id, skill, type, message, data ?? null);
     const id = Number(result.lastInsertRowid);
     sessionManager.broadcastSkillEvent({
       id,

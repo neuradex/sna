@@ -28,11 +28,14 @@ import '../core/providers/types.js';
  *   agent.status      { session? }
  *   agent.subscribe   { session?, since? }
  *   agent.unsubscribe { session? }
- *   agent.run-once    { message, model?, systemPrompt?, permissionMode?, timeout? }
+ *   agent.run-once    { message, model?, systemPrompt?, appendSystemPrompt?, permissionMode?, cwd?, timeout?, provider?, extraArgs? }
  *
  *   events.subscribe  { since? }
  *   events.unsubscribe {}
  *   emit              { skill, eventType, message, data?, session? }
+ *                     NOTE: WS uses `eventType` (not `type`) because `type` is reserved
+ *                     as the WS protocol routing field. HTTP POST /emit uses `type` instead.
+ *                     WS uses `session` (not `session_id`) consistent with all other WS ops.
  *
  *   permission.respond   { session?, approved }
  *   permission.pending   { session? }
@@ -41,6 +44,7 @@ import '../core/providers/types.js';
  *
  *   chat.sessions.list    {}
  *   chat.sessions.create  { id?, label?, chatType?, meta? }
+ *                         NOTE: WS uses `chatType` (not `type`) for the same reason as `eventType` above.
  *   chat.sessions.remove  { session }
  *   chat.messages.list    { session, since? }
  *   chat.messages.create  { session, role, content?, skill_name?, meta? }
