@@ -1,51 +1,90 @@
 /**
  * @module @sna-sdk/client
  *
- * Typed WebSocket client for the SNA (Skills-Native Application) API server.
+ * Dual-transport client for the SNA (Skills-Native Application) API server.
  *
- * This is the primary interface for browser and Node.js apps to communicate
- * with the SNA server. It handles:
+ * ## Transport model
  *
- * - **Connection lifecycle** — connect, disconnect, auto-reconnect
- * - **Request/response correlation** — every request gets a unique `rid`;
- *   the matching response resolves the returned Promise
- * - **Push message routing** — server-initiated messages are dispatched
- *   to registered handlers by message type
- * - **Auto re-subscription** — after a reconnect, active agent event
- *   subscriptions and permission subscriptions are automatically restored
+ * Configure both transports explicitly via `ws` and `http` boolean flags.
+ * Both URLs are derived from a single `baseUrl` — no need to specify them separately.
  *
- * All APIs are namespaced under {@link SnaClient.sessions} and
- * {@link SnaClient.agent} for discoverability.
+ * | Transport | Used for | Enabled by |
+ * |-----------|----------|------------|
+ * | **REST (HTTP)** | State-changing ops that need ordering guarantees | `http: true` |
+ * | **WebSocket** | Real-time push, event streaming, subscriptions | `ws: true` |
  *
- * @example Basic usage
+ * Given `baseUrl: "localhost:3099"`:
+ * - WS endpoint: `ws://localhost:3099/ws`
+ * - HTTP base: `http://localhost:3099`
+ *
+ * ## What HTTP guarantees (`http: true`)
+ *
+ * The following operations block until the server has **fully committed**
+ * the state change before the Promise resolves:
+ *
+ * - `sessions.create` — DB row exists; safe to `agent.start` immediately after
+ * - `sessions.update / remove` — change is committed before returning
+ * - `agent.start` — the process **has been spawned** (`process.alive === true`).
+ *   Note: the agent may not yet be in `"waiting"` state — the internal `init`
+ *   handshake fires asynchronously after spawn. Sending a message immediately
+ *   after is safe in practice (stdin queues the message), but if you need to
+ *   confirm `agentStatus === "idle"` first, poll `getStatus`.
+ * - `agent.send` — message written to stdin and persisted to DB before returning
+ * - `agent.kill / restart / resume / interrupt` — state transition complete
+ * - `agent.getStatus / setModel / setPermissionMode` — reflects current state
+ *
+ * ## What HTTP does NOT guarantee
+ *
+ * - **Agent `"waiting"` state after `start`** — process is alive but init is async.
+ * - **Push delivery order** — `onEvent`, `onSnapshot`, and permission pushes
+ *   arrive over WebSocket asynchronously with respect to HTTP responses.
+ * - **Cross-client ordering** — only within a single `SnaClient` instance.
+ *
+ * ## Operations that always use WebSocket (`ws: true`)
+ *
+ * Regardless of `http`, these always require a WS connection:
+ * - `agent.subscribe` / `unsubscribe` — server-side subscription state
+ * - `agent.onEvent` — real-time event push
+ * - `sessions.onSnapshot` / `onConfigChanged` — reactive session state push
+ * - `agent.subscribePermissions` / `onPermissionRequest` / `respondPermission`
+ *
+ * @example Standard setup (both transports)
  * ```ts
  * import { SnaClient } from "@sna-sdk/client";
  *
- * const sna = new SnaClient({ url: "ws://localhost:3099/ws" });
- *
- * // Monitor connection state
- * sna.onConnectionStatus((status) => console.log("SNA:", status));
- *
- * // Receive live session snapshots (pushed automatically)
- * sna.sessions.onSnapshot((sessions) => {
- *   console.log("Sessions:", sessions);
+ * const sna = new SnaClient({
+ *   baseUrl: "localhost:3099",
+ *   ws: true,
+ *   http: true,
  * });
  *
- * // Connect — snapshot arrives immediately
+ * sna.sessions.onSnapshot((sessions) => setSessions(sessions));
  * sna.connect();
  *
- * // Start an agent and subscribe to its events
- * await sna.agent.start("default", { prompt: "Hello!" });
- * sna.agent.onEvent(({ session, event }) => {
+ * // Safe to chain — each HTTP response confirms the op is committed
+ * const { sessionId } = await sna.sessions.create({ label: "my-task" });
+ * await sna.agent.start(sessionId, { model: "claude-sonnet-4-6" });
+ * await sna.agent.send(sessionId, "Hello!");
+ *
+ * // Event streaming always uses WS
+ * sna.agent.onEvent(({ event }) => {
  *   if (event.type === "assistant") console.log(event.message);
  * });
- * await sna.agent.subscribe("default", { since: 0 });
+ * await sna.agent.subscribe(sessionId);
+ * ```
+ *
+ * @example WS-only (no ordering guarantees)
+ * ```ts
+ * const sna = new SnaClient({
+ *   baseUrl: "localhost:3099",
+ *   ws: true,
+ *   http: false, // server ACKs immediately; async work may not be done
+ * });
  * ```
  *
  * @example Permission handling
  * ```ts
  * sna.agent.onPermissionRequest(({ session, request }) => {
- *   // Show UI to approve/deny
  *   showPermissionDialog(request, (approved) => {
  *     sna.agent.respondPermission(session, approved);
  *   });
@@ -70,14 +109,45 @@ export type ConnectionStatus = "connecting" | "connected" | "disconnected";
  */
 export interface SnaClientOptions {
   /**
-   * Full WebSocket URL of the SNA API server.
+   * Base URL of the SNA server.
    *
-   * @example "ws://localhost:3099/ws"
+   * Accepts a bare host or a full HTTP/HTTPS URL. The client derives
+   * the WebSocket and HTTP endpoints from this value:
+   * - `"localhost:3099"` → WS: `ws://localhost:3099/ws`, HTTP: `http://localhost:3099`
+   * - `"https://my-server.com"` → WS: `wss://my-server.com/ws`, HTTP: `https://my-server.com`
+   *
+   * @example "localhost:3099"
+   * @example "https://my-server.com"
    */
-  url: string;
+  baseUrl: string;
 
   /**
-   * Whether to automatically reconnect when the connection drops.
+   * Enable WebSocket transport.
+   *
+   * When `true`, the client connects to `ws(s)://<baseUrl>/ws` for
+   * real-time push operations (event streaming, session snapshots,
+   * permission notifications).
+   *
+   * When `false`, all WS-dependent operations will reject with an error.
+   * Use `false` only when building an HTTP-only integration.
+   */
+  ws: boolean;
+
+  /**
+   * Enable REST (HTTP) transport.
+   *
+   * When `true`, state-changing operations (`sessions.create/update/remove`,
+   * `agent.start/send/kill/restart/resume/interrupt`, `agent.getStatus`,
+   * `agent.setModel/setPermissionMode`) are routed through REST. The Promise
+   * resolves only after the server has fully committed the operation.
+   *
+   * When `false`, all operations fall back to WebSocket (the server ACKs
+   * immediately without waiting for async work to complete).
+   */
+  http: boolean;
+
+  /**
+   * Whether to automatically reconnect when the WebSocket connection drops.
    *
    * When `true`, the client will attempt to reconnect after
    * {@link reconnectDelay} ms, and restore all active subscriptions
@@ -103,21 +173,6 @@ export interface SnaClientOptions {
    * @default 0
    */
   maxReconnectAttempts?: number;
-
-  /**
-   * Base HTTP URL of the SNA API server.
-   *
-   * When provided, operations that require ordering guarantees
-   * (session CRUD, agent start/send/kill, etc.) are routed through
-   * REST instead of WebSocket. Push/streaming operations
-   * (event subscriptions, snapshots, permission notifications)
-   * always use WebSocket regardless of this setting.
-   *
-   * If omitted, all operations fall back to WebSocket.
-   *
-   * @example "http://localhost:3099"
-   */
-  httpUrl?: string;
 }
 
 /**
@@ -135,22 +190,56 @@ export interface WsMessage {
   [key: string]: unknown;
 }
 
+// ── Helpers ───────────────────────────────────────────────────────
+
+interface ResolvedTransports {
+  wsUrl: string | null;
+  httpBase: string | null;
+}
+
+/**
+ * Derive WS and HTTP URLs from `baseUrl`.
+ *
+ * - Bare host `"localhost:3099"` → normalized to `http://localhost:3099`
+ * - `http://...` → WS: `ws://...` + `/ws`, HTTP: as-is
+ * - `https://...` → WS: `wss://...` + `/ws`, HTTP: as-is
+ */
+function resolveTransports(options: SnaClientOptions): ResolvedTransports {
+  let base = options.baseUrl.trim().replace(/\/$/, "");
+  if (!/^https?:\/\//i.test(base)) {
+    base = "http://" + base;
+  }
+  const wsUrl = options.ws
+    ? base.replace(/^https:\/\//i, "wss://").replace(/^http:\/\//i, "ws://") + "/ws"
+    : null;
+  const httpBase = options.http ? base : null;
+
+  if (!wsUrl && !httpBase) {
+    console.warn("[SnaClient] Both ws and http are false — no transport is available.");
+  }
+
+  return { wsUrl, httpBase };
+}
+
 // ── Client ────────────────────────────────────────────────────────
 
 /**
- * Typed WebSocket client for the SNA API server.
+ * Dual-transport client for the SNA API server.
  *
- * Create one instance per app, call {@link connect} to open the WebSocket,
- * and use the namespaced APIs to interact with the server.
+ * Provide a single `baseUrl` and explicit `ws`/`http` flags.
+ * The client derives the WS and HTTP endpoints automatically.
  *
  * @example
  * ```ts
- * const sna = new SnaClient({ url: "ws://localhost:3099/ws" });
+ * const sna = new SnaClient({
+ *   baseUrl: "localhost:3099",
+ *   ws: true,   // real-time push, event streaming
+ *   http: true, // ordering-guaranteed state changes
+ * });
  * sna.connect();
  *
- * // Use namespaced APIs
- * await sna.sessions.create({ label: "my-session" });
- * await sna.agent.start("my-session", { prompt: "Hello" });
+ * const { sessionId } = await sna.sessions.create({ label: "my-session" });
+ * await sna.agent.start(sessionId, { prompt: "Hello" });
  * ```
  */
 export class SnaClient {
@@ -164,7 +253,7 @@ export class SnaClient {
   private reconnectAttempts = 0;
   private disposed = false;
 
-  private readonly url: string;
+  private readonly wsUrl: string | null;
   private readonly _reconnect: boolean;
   private readonly reconnectDelay: number;
   private readonly maxReconnectAttempts: number;
@@ -193,11 +282,12 @@ export class SnaClient {
   readonly agent: AgentApi;
 
   constructor(options: SnaClientOptions) {
-    this.url = options.url;
+    const { wsUrl, httpBase } = resolveTransports(options);
+    this.wsUrl = wsUrl;
+    this._httpUrl = httpBase ?? undefined;
     this._reconnect = options.reconnect ?? true;
     this.reconnectDelay = options.reconnectDelay ?? 2000;
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? 0;
-    this._httpUrl = options.httpUrl;
 
     this.sessions = new SessionsApi(this);
     this.agent = new AgentApi(this);
@@ -249,6 +339,10 @@ export class SnaClient {
    * ```
    */
   connect(): void {
+    if (!this.wsUrl) {
+      console.warn("[SnaClient] connect() called but ws is disabled (ws: false).");
+      return;
+    }
     if (this.ws && this._status !== "disconnected") return;
     this.disposed = false;
     this.doConnect();
@@ -404,7 +498,7 @@ export class SnaClient {
 
   private doConnect(): void {
     this.setStatus("connecting");
-    const ws = new WebSocket(this.url);
+    const ws = new WebSocket(this.wsUrl!);
 
     ws.onopen = () => {
       this.reconnectAttempts = 0;
@@ -538,20 +632,33 @@ export interface SessionInfo {
  *
  * Access via `sna.sessions`.
  *
- * The SNA server automatically pushes a full `sessions.snapshot` on
- * every WebSocket connection and whenever session state changes.
- * Use {@link onSnapshot} to receive these — no polling needed.
+ * ## Transport and ordering
+ *
+ * When `httpUrl` is configured on {@link SnaClient}, mutating operations
+ * (`create`, `update`, `remove`) are routed through REST. The Promise
+ * resolves only after the server has **fully committed** the change to the
+ * database, so it is safe to call `agent.start` immediately after `create`
+ * without any race condition.
+ *
+ * Without `httpUrl`, these operations go through WebSocket. The server
+ * acknowledges the request as soon as it is received — the async DB write
+ * may not yet be complete when the Promise resolves.
+ *
+ * Reactive operations (`onSnapshot`, `onConfigChanged`) always use
+ * WebSocket push and are unaffected by the `httpUrl` setting.
  *
  * @example
  * ```ts
- * // Listen for session snapshots (reactive, no polling)
+ * // Reactive snapshots (always WS)
  * sna.sessions.onSnapshot((sessions) => {
  *   const active = sessions.filter(s => s.alive);
  *   console.log(`${active.length} active sessions`);
  * });
  *
- * // Create a new session
+ * // Create — with httpUrl, DB write is committed before Promise resolves
  * const { sessionId } = await sna.sessions.create({ label: "my-task" });
+ * // Safe to start agent immediately
+ * await sna.agent.start(sessionId, { prompt: "Go!" });
  * ```
  */
 class SessionsApi {
@@ -564,6 +671,13 @@ class SessionsApi {
    *
    * The session is created in a stopped state — call
    * {@link AgentApi.start | sna.agent.start()} to spawn an agent in it.
+   *
+   * **Ordering guarantee (REST):** when `httpUrl` is configured, the Promise
+   * resolves only after the session row is committed to the database. It is
+   * safe to call `agent.start` on the returned `sessionId` immediately.
+   *
+   * **Without `httpUrl` (WS fallback):** the server ACKs on receipt; the DB
+   * write is async and may not be complete when the Promise resolves.
    *
    * @param opts - Session options.
    * @param opts.id - Explicit session ID. Auto-generated if omitted.
@@ -578,6 +692,7 @@ class SessionsApi {
    *   label: "form-fill",
    *   cwd: "/path/to/project",
    * });
+   * // With httpUrl: session is in DB — safe to start immediately
    * await sna.agent.start(sessionId, { prompt: "Fill the form" });
    * ```
    */
@@ -599,6 +714,9 @@ class SessionsApi {
    * The agent process (if running) is killed before removal.
    * The `"default"` session cannot be removed.
    *
+   * **Ordering guarantee (REST):** when `httpUrl` is configured, the session
+   * and its process are fully torn down before the Promise resolves.
+   *
    * @param session - The session ID to remove.
    *
    * @example
@@ -619,6 +737,9 @@ class SessionsApi {
    * Only the provided fields are patched — omitted fields remain unchanged.
    * After a successful update, the server pushes a `sessions.snapshot`
    * to all connected clients automatically.
+   *
+   * **Ordering guarantee (REST):** when `httpUrl` is configured, the metadata
+   * update is committed to the database before the Promise resolves.
    *
    * @param session - The session ID to update.
    * @param opts - Fields to update. All optional.
@@ -749,34 +870,45 @@ export interface AgentStartConfig {
  * 4. **Event streaming** — {@link subscribe}, {@link unsubscribe}, {@link onEvent}
  * 5. **Permissions** — {@link subscribePermissions}, {@link onPermissionRequest}, {@link respondPermission}
  *
- * @example Full lifecycle
+ * ## Transport and ordering
+ *
+ * When `httpUrl` is configured on {@link SnaClient}, lifecycle operations
+ * (`start`, `send`, `kill`, `restart`, `resume`, `interrupt`, `getStatus`,
+ * `setModel`, `setPermissionMode`) are routed through REST. Each call blocks
+ * until the server has fully applied the operation.
+ *
+ * **Important caveat for `start`:** the REST response confirms the agent
+ * process has been spawned (`process.alive === true`), but the agent's
+ * internal init handshake is asynchronous. The agent transitions to
+ * `"waiting"` state when its `init` event fires, which may be a few
+ * milliseconds after `start` resolves. Calling `send` immediately after
+ * `start` is safe in practice (the message queues in the process stdin),
+ * but if you need to confirm the agent is ready before sending, subscribe
+ * to events and wait for `agentStatus === "idle"` via `getStatus`.
+ *
+ * Event streaming operations (`subscribe`, `unsubscribe`, `onEvent`) and
+ * the permission flow always use WebSocket regardless of `httpUrl`.
+ *
+ * @example Full lifecycle (with httpUrl for ordering)
  * ```ts
- * // Start an agent
+ * // State-changing ops use REST → ordering guaranteed
  * await sna.agent.start("default", {
  *   prompt: "Analyze this codebase",
  *   model: "claude-sonnet-4-6",
  * });
  *
- * // Stream events in real-time
+ * // Event streaming always uses WS
  * sna.agent.onEvent(({ session, event }) => {
  *   switch (event.type) {
  *     case "thinking":   console.log("[thinking]", event.message); break;
  *     case "assistant":  console.log("[reply]", event.message);    break;
- *     case "tool_use":   console.log("[tool]", event.data);        break;
  *     case "complete":   console.log("Done!");                     break;
  *   }
  * });
  * await sna.agent.subscribe("default", { since: 0 });
  *
- * // Send follow-up messages
+ * // send is safe immediately after start (process is alive)
  * await sna.agent.send("default", "Now fix the bug you found");
- *
- * // Handle permission requests
- * sna.agent.onPermissionRequest(({ session, request }) => {
- *   console.log("Agent wants to:", request);
- *   sna.agent.respondPermission(session, true);
- * });
- * await sna.agent.subscribePermissions();
  * ```
  */
 class AgentApi {
@@ -791,6 +923,16 @@ class AgentApi {
    * If the session doesn't exist, it's auto-created.
    * If an agent is already running and `force` is not set,
    * returns `"already_running"` without spawning a new process.
+   *
+   * **Ordering guarantee (REST):** when `httpUrl` is configured, the Promise
+   * resolves after the agent process has been spawned (`process.alive === true`).
+   * It is safe to call `send` immediately after this.
+   *
+   * **Not guaranteed:** the agent may not yet be in `"waiting"` state when
+   * this resolves. The internal `init` handshake fires asynchronously after
+   * spawn. In practice `send` succeeds because the message queues in stdin,
+   * but if your code requires `agentStatus === "idle"` first, poll `getStatus`
+   * or subscribe to events and await the first non-processing state.
    *
    * @param session - Target session ID.
    * @param config - Agent configuration.
@@ -822,6 +964,13 @@ class AgentApi {
    *
    * The agent must already be started in this session.
    * Supports text messages and images.
+   *
+   * **Ordering guarantee (REST):** when `httpUrl` is configured, the message
+   * has been written to the process stdin and persisted to the database before
+   * the Promise resolves. The next `send` call will not interleave with this one.
+   *
+   * **Without `httpUrl` (WS fallback):** the server ACKs on receipt; the stdin
+   * write and DB insert are async.
    *
    * @param session - Target session ID.
    * @param message - The text message to send.
@@ -1039,6 +1188,7 @@ class AgentApi {
    * After subscribing, `agent.event` push messages are delivered
    * to handlers registered via {@link onEvent}.
    *
+   * **Always uses WebSocket**, regardless of whether `httpUrl` is configured.
    * Subscriptions survive reconnects — the client automatically
    * re-subscribes after a connection drop.
    *
@@ -1086,6 +1236,7 @@ class AgentApi {
    * Listen to agent events across all subscribed sessions.
    *
    * Events are delivered in real-time as the agent works.
+   * **Always uses WebSocket push**, regardless of `httpUrl`.
    * You must call {@link subscribe} first for the session(s) you
    * want to receive events from.
    *

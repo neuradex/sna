@@ -60,7 +60,7 @@ afterEach(async () => {
 describe("connection lifecycle", () => {
   it("connects and fires status callbacks", async () => {
     const statuses: string[] = [];
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.onConnectionStatus((s) => statuses.push(s));
 
     assert.equal(sna.status, "disconnected");
@@ -73,7 +73,7 @@ describe("connection lifecycle", () => {
 
   it("disconnect fires status callback and closes socket", async () => {
     const statuses: string[] = [];
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.onConnectionStatus((s) => statuses.push(s));
 
     sna.connect();
@@ -86,7 +86,7 @@ describe("connection lifecycle", () => {
 
   it("unsubscribe from status callback works", async () => {
     const statuses: string[] = [];
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     const unsub = sna.onConnectionStatus((s) => statuses.push(s));
 
     sna.connect();
@@ -103,7 +103,7 @@ describe("connection lifecycle", () => {
 
 describe("request/response", () => {
   it("correlates response by rid", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -116,7 +116,7 @@ describe("request/response", () => {
   });
 
   it("handles concurrent requests with independent rids", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -141,7 +141,7 @@ describe("request/response", () => {
 
 describe("error handling", () => {
   it("rejects promise on error response", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -156,7 +156,7 @@ describe("error handling", () => {
   });
 
   it("rejects all pending requests on disconnect", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -168,7 +168,7 @@ describe("error handling", () => {
   });
 
   it("rejects request when not connected", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
 
     await assert.rejects(
       () => sna.request("sessions.list"),
@@ -181,7 +181,7 @@ describe("error handling", () => {
 
 describe("push routing", () => {
   it("routes push messages to registered handlers", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -196,7 +196,7 @@ describe("push routing", () => {
   });
 
   it("unsubscribe from push works", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -211,7 +211,7 @@ describe("push routing", () => {
   });
 
   it("multiple handlers for same push type", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -232,7 +232,7 @@ describe("push routing", () => {
 
 describe("reconnect", () => {
   it("auto-reconnects after server closes connection", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: true, reconnectDelay: 100 });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: true, reconnectDelay: 100 });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -254,7 +254,7 @@ describe("reconnect", () => {
     // Close the server so reconnect always fails
     await mock.close();
 
-    sna = new SnaClient({ url: "ws://localhost:1", reconnect: true, reconnectDelay: 50, maxReconnectAttempts: 2 });
+    sna = new SnaClient({ baseUrl: "localhost:1", ws: true, http: false, reconnect: true, reconnectDelay: 50, maxReconnectAttempts: 2 });
     const statuses: string[] = [];
     sna.onConnectionStatus((s) => statuses.push(s));
 
@@ -267,7 +267,7 @@ describe("reconnect", () => {
   });
 
   it("does not reconnect after explicit disconnect()", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: true, reconnectDelay: 50 });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: true, reconnectDelay: 50 });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -282,7 +282,7 @@ describe("reconnect", () => {
 
 describe("re-subscribe on reconnect", () => {
   it("re-subscribes agent sessions after reconnect", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: true, reconnectDelay: 100 });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: true, reconnectDelay: 100 });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -309,7 +309,7 @@ describe("re-subscribe on reconnect", () => {
   });
 
   it("re-subscribes permissions after reconnect", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: true, reconnectDelay: 100 });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: true, reconnectDelay: 100 });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -338,7 +338,7 @@ describe("re-subscribe on reconnect", () => {
 
 describe("sessions API", () => {
   it("create returns sessionId", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -352,7 +352,7 @@ describe("sessions API", () => {
   });
 
   it("remove returns status", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -369,7 +369,7 @@ describe("sessions API", () => {
 
 describe("sessions.update", () => {
   it("update returns status and session id", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -383,7 +383,7 @@ describe("sessions.update", () => {
   });
 
   it("update with meta and cwd", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -406,7 +406,7 @@ describe("sessions.update", () => {
   });
 
   it("update rejects on nonexistent session", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -425,7 +425,7 @@ describe("sessions.update", () => {
 
 describe("sessions.onSnapshot", () => {
   it("receives snapshot pushes", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -443,7 +443,7 @@ describe("sessions.onSnapshot", () => {
   });
 
   it("unsubscribe stops receiving", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -462,7 +462,7 @@ describe("sessions.onSnapshot", () => {
 
 describe("agent lifecycle", () => {
   beforeEach(async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -513,7 +513,7 @@ describe("agent lifecycle", () => {
 
 describe("agent status & config", () => {
   beforeEach(async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -558,7 +558,7 @@ describe("agent status & config", () => {
 
 describe("agent event subscription", () => {
   it("subscribe + onEvent receives pushed events", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -584,7 +584,7 @@ describe("agent event subscription", () => {
   });
 
   it("unsubscribe removes from tracked sessions", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -601,7 +601,7 @@ describe("agent event subscription", () => {
   });
 
   it("history events marked with isHistory", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -628,7 +628,7 @@ describe("agent event subscription", () => {
 
 describe("agent permission", () => {
   it("onPermissionRequest receives push", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -652,7 +652,7 @@ describe("agent permission", () => {
   });
 
   it("respondPermission sends approve/deny", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -670,7 +670,7 @@ describe("agent permission", () => {
   });
 
   it("getPendingPermissions", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -686,7 +686,7 @@ describe("agent permission", () => {
   });
 
   it("getPendingPermissions without session filter", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -704,7 +704,7 @@ describe("agent permission", () => {
   });
 
   it("unsubscribePermissions clears subscription state", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: true, reconnectDelay: 100 });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: true, reconnectDelay: 100 });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -734,7 +734,7 @@ describe("agent permission", () => {
 
 describe("edge cases", () => {
   it("connect() is no-op when already connecting", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     sna.connect(); // should not throw or create second connection
     await waitFor(() => sna.connected);
@@ -742,7 +742,7 @@ describe("edge cases", () => {
   });
 
   it("connect() is no-op when already connected", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
     sna.connect(); // no-op
@@ -751,7 +751,7 @@ describe("edge cases", () => {
   });
 
   it("handles malformed JSON from server gracefully", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -765,7 +765,7 @@ describe("edge cases", () => {
   });
 
   it("handles push message with no matching handler", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -777,7 +777,7 @@ describe("edge cases", () => {
   });
 
   it("error response without message uses fallback", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -792,14 +792,14 @@ describe("edge cases", () => {
   });
 
   it("disconnect() is safe to call when already disconnected", () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.disconnect(); // should not throw
     sna.disconnect(); // double call also safe
     assert.equal(sna.status, "disconnected");
   });
 
   it("sessions.onSnapshot replaces previous subscription", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -820,7 +820,7 @@ describe("edge cases", () => {
   });
 
   it("agent.onEvent unsubscribe stops receiving", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -840,7 +840,7 @@ describe("edge cases", () => {
   });
 
   it("agent.onPermissionRequest unsubscribe stops receiving", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -855,7 +855,7 @@ describe("edge cases", () => {
   });
 
   it("sessions.onConfigChanged unsubscribe stops receiving", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -871,12 +871,12 @@ describe("edge cases", () => {
 
   it("constructor uses all default options", () => {
     // Covers ?? branches for reconnect, reconnectDelay, maxReconnectAttempts
-    sna = new SnaClient({ url: mock.url });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false });
     assert.equal(sna.status, "disconnected");
   });
 
   it("handles non-string ws.onmessage data", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -890,7 +890,7 @@ describe("edge cases", () => {
 
   it("setStatus is no-op when status unchanged", async () => {
     const statuses: string[] = [];
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.onConnectionStatus((s) => statuses.push(s));
     sna.connect();
     await waitFor(() => sna.connected);
@@ -900,7 +900,7 @@ describe("edge cases", () => {
   });
 
   it("agent.start with all default config", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -914,7 +914,7 @@ describe("edge cases", () => {
   });
 
   it("agent.send with images and meta", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -934,7 +934,7 @@ describe("edge cases", () => {
   });
 
   it("agent.restart with no config override", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -947,7 +947,7 @@ describe("edge cases", () => {
   });
 
   it("agent.resume with all options", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -966,7 +966,7 @@ describe("edge cases", () => {
   });
 
   it("agent.subscribe with no options", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -977,7 +977,7 @@ describe("edge cases", () => {
   });
 
   it("sessions.create with no options", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -990,7 +990,7 @@ describe("edge cases", () => {
   });
 
   it("re-subscribe silently ignores failures", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: true, reconnectDelay: 100 });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: true, reconnectDelay: 100 });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -1016,7 +1016,7 @@ describe("edge cases", () => {
   });
 
   it("request payload is spread correctly", async () => {
-    sna = new SnaClient({ url: mock.url, reconnect: false });
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
     sna.connect();
     await waitFor(() => sna.connected);
 
@@ -1030,5 +1030,360 @@ describe("edge cases", () => {
     assert.equal(captured[0].type, "test.op");
     assert.equal(captured[0].foo, "bar");
     assert.deepEqual(captured[0].nested, { a: 1 });
+  });
+});
+
+// ── HTTP transport ───────────────────────────────────────────────
+
+describe("HTTP transport (http: true)", () => {
+  // Helper: create an HTTP-enabled client (no WS needed for these tests)
+  function httpClient() {
+    return new SnaClient({ baseUrl: mock.host, ws: false, http: true, reconnect: false });
+  }
+
+  // ── sessions ────────────────────────────────────────────────
+
+  it("sessions.create — POST /sessions with opts body", async () => {
+    mock.queueHttpResponse(200, { status: "created", sessionId: "s1", label: "test", meta: null });
+    sna = httpClient();
+
+    const res = await sna.sessions.create({ label: "test", id: "s1" });
+    assert.equal(res.status, "created");
+    assert.equal(res.sessionId, "s1");
+
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/sessions");
+    assert.equal(req.body.label, "test");
+    assert.equal(req.body.id, "s1");
+  });
+
+  it("sessions.create — no opts sends empty body", async () => {
+    mock.queueHttpResponse(200, { status: "created", sessionId: "auto", label: "auto", meta: null });
+    sna = httpClient();
+
+    await sna.sessions.create();
+
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/sessions");
+  });
+
+  it("sessions.remove — DELETE /sessions/:id", async () => {
+    mock.queueHttpResponse(200, { status: "removed" });
+    sna = httpClient();
+
+    const res = await sna.sessions.remove("my-session");
+    assert.equal(res.status, "removed");
+
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "DELETE");
+    assert.equal(req.url, "/sessions/my-session");
+  });
+
+  it("sessions.remove — URL-encodes session id", async () => {
+    mock.queueHttpResponse(200, { status: "removed" });
+    sna = httpClient();
+
+    await sna.sessions.remove("session/with spaces");
+
+    const req = mock.httpRequests[0];
+    assert.equal(req.url, "/sessions/session%2Fwith%20spaces");
+  });
+
+  it("sessions.update — PATCH /sessions/:id with body", async () => {
+    mock.queueHttpResponse(200, { status: "updated", session: "s2" });
+    sna = httpClient();
+
+    const res = await sna.sessions.update("s2", { label: "New Name", meta: { x: 1 } });
+    assert.equal(res.status, "updated");
+    assert.equal(res.session, "s2");
+
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "PATCH");
+    assert.equal(req.url, "/sessions/s2");
+    assert.equal(req.body.label, "New Name");
+    assert.deepEqual(req.body.meta, { x: 1 });
+  });
+
+  // ── agent ────────────────────────────────────────────────────
+
+  it("agent.start — POST /start?session=<id> with config body", async () => {
+    mock.queueHttpResponse(200, { status: "started", provider: "claude-code", sessionId: "default" });
+    sna = httpClient();
+
+    const res = await sna.agent.start("default", { model: "claude-sonnet-4-6" });
+    assert.equal(res.status, "started");
+    assert.equal(res.sessionId, "default");
+
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/start?session=default");
+    assert.equal(req.body.model, "claude-sonnet-4-6");
+  });
+
+  it("agent.start — URL-encodes session id", async () => {
+    mock.queueHttpResponse(200, { status: "started", provider: "claude-code", sessionId: "a/b" });
+    sna = httpClient();
+
+    await sna.agent.start("a/b", {});
+
+    assert.equal(mock.httpRequests[0].url, "/start?session=a%2Fb");
+  });
+
+  it("agent.send — POST /send?session=<id> with message", async () => {
+    mock.queueHttpResponse(200, { status: "sent" });
+    sna = httpClient();
+
+    const res = await sna.agent.send("default", "hello world");
+    assert.equal(res.status, "sent");
+
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/send?session=default");
+    assert.equal(req.body.message, "hello world");
+  });
+
+  it("agent.send — includes images and meta in body", async () => {
+    mock.queueHttpResponse(200, { status: "sent" });
+    sna = httpClient();
+
+    await sna.agent.send("default", "look", {
+      images: [{ base64: "abc", mimeType: "image/png" }],
+      meta: { src: "test" },
+    });
+
+    const req = mock.httpRequests[0];
+    assert.deepEqual((req.body.images as any)[0], { base64: "abc", mimeType: "image/png" });
+    assert.deepEqual(req.body.meta, { src: "test" });
+  });
+
+  it("agent.kill — POST /kill?session=<id>", async () => {
+    mock.queueHttpResponse(200, { status: "killed" });
+    sna = httpClient();
+
+    const res = await sna.agent.kill("default");
+    assert.equal(res.status, "killed");
+
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/kill?session=default");
+  });
+
+  it("agent.restart — POST /restart?session=<id> with config body", async () => {
+    mock.queueHttpResponse(200, { status: "restarted", provider: "claude-code", sessionId: "default" });
+    sna = httpClient();
+
+    const res = await sna.agent.restart("default", { model: "claude-opus-4-6" });
+    assert.equal(res.status, "restarted");
+
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/restart?session=default");
+    assert.equal(req.body.model, "claude-opus-4-6");
+  });
+
+  it("agent.restart — no config sends empty body", async () => {
+    mock.queueHttpResponse(200, { status: "restarted", provider: "claude-code", sessionId: "default" });
+    sna = httpClient();
+
+    await sna.agent.restart("default");
+
+    const req = mock.httpRequests[0];
+    assert.equal(req.url, "/restart?session=default");
+  });
+
+  it("agent.resume — POST /resume?session=<id> with opts", async () => {
+    mock.queueHttpResponse(200, { status: "resumed", provider: "claude-code", sessionId: "default", historyCount: 3 });
+    sna = httpClient();
+
+    const res = await sna.agent.resume("default", {
+      model: "claude-sonnet-4-6",
+      permissionMode: "acceptEdits",
+      prompt: "continue",
+    });
+    assert.equal(res.historyCount, 3);
+
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/resume?session=default");
+    assert.equal(req.body.model, "claude-sonnet-4-6");
+    assert.equal(req.body.prompt, "continue");
+  });
+
+  it("agent.interrupt — POST /interrupt?session=<id>", async () => {
+    mock.queueHttpResponse(200, { status: "interrupted" });
+    sna = httpClient();
+
+    const res = await sna.agent.interrupt("default");
+    assert.equal(res.status, "interrupted");
+
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/interrupt?session=default");
+  });
+
+  it("agent.getStatus — GET /status?session=<id> (no body)", async () => {
+    mock.queueHttpResponse(200, {
+      alive: true,
+      agentStatus: "idle",
+      sessionId: "default",
+      ccSessionId: null,
+      eventCount: 0,
+      messageCount: 0,
+      lastMessage: null,
+      config: null,
+    });
+    sna = httpClient();
+
+    const res = await sna.agent.getStatus("default");
+    assert.equal(res.alive, true);
+    assert.equal(res.agentStatus, "idle");
+
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "GET");
+    assert.equal(req.url, "/status?session=default");
+  });
+
+  it("agent.setModel — POST /set-model?session=<id> with model body", async () => {
+    mock.queueHttpResponse(200, { status: "updated", model: "claude-opus-4-6" });
+    sna = httpClient();
+
+    const res = await sna.agent.setModel("default", "claude-opus-4-6");
+    assert.equal(res.model, "claude-opus-4-6");
+
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/set-model?session=default");
+    assert.equal(req.body.model, "claude-opus-4-6");
+  });
+
+  it("agent.setPermissionMode — POST /set-permission-mode?session=<id>", async () => {
+    mock.queueHttpResponse(200, { status: "updated", permissionMode: "bypassPermissions" });
+    sna = httpClient();
+
+    const res = await sna.agent.setPermissionMode("default", "bypassPermissions");
+    assert.equal(res.permissionMode, "bypassPermissions");
+
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/set-permission-mode?session=default");
+    assert.equal(req.body.permissionMode, "bypassPermissions");
+  });
+
+  // ── error handling ───────────────────────────────────────────
+
+  it("HTTP 4xx rejects with server message", async () => {
+    mock.queueHttpResponse(404, { message: "session not found" });
+    sna = httpClient();
+
+    await assert.rejects(
+      () => sna.sessions.remove("ghost"),
+      { message: "session not found" },
+    );
+  });
+
+  it("HTTP 5xx rejects with server message", async () => {
+    mock.queueHttpResponse(500, { message: "internal server error" });
+    sna = httpClient();
+
+    await assert.rejects(
+      () => sna.agent.kill("default"),
+      { message: "internal server error" },
+    );
+  });
+
+  it("HTTP error with no message falls back to 'HTTP <status>'", async () => {
+    mock.queueHttpResponse(503, {});
+    sna = httpClient();
+
+    await assert.rejects(
+      () => sna.agent.kill("default"),
+      { message: "HTTP 503" },
+    );
+  });
+
+  // ── transport isolation ──────────────────────────────────────
+
+  it("http: false uses WS even for mutating ops (no HTTP requests made)", async () => {
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
+    sna.connect();
+    await waitFor(() => sna.connected);
+
+    installAutoResponder({
+      "sessions.create": () => ({ status: "created", sessionId: "ws-only", label: "ws-only", meta: null }),
+    });
+
+    const res = await sna.sessions.create({ label: "ws-only" });
+    assert.equal(res.sessionId, "ws-only");
+    // No HTTP requests should have been made
+    assert.equal(mock.httpRequests.length, 0);
+  });
+
+  it("http: true, ws: true — mutating ops use HTTP, WS push still works", async () => {
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: true, reconnect: false });
+    sna.connect();
+    await waitFor(() => sna.connected);
+
+    // HTTP request for sessions.create
+    mock.queueHttpResponse(200, { status: "created", sessionId: "dual", label: "dual", meta: null });
+    const createRes = await sna.sessions.create({ label: "dual" });
+    assert.equal(createRes.sessionId, "dual");
+    assert.equal(mock.httpRequests.length, 1);
+
+    // WS push for sessions.onSnapshot
+    const snapshots: any[] = [];
+    sna.sessions.onSnapshot((s) => snapshots.push(s));
+    mock.broadcast({ type: "sessions.snapshot", sessions: [{ id: "dual" }] });
+    await waitFor(() => snapshots.length > 0);
+
+    assert.equal(snapshots[0][0].id, "dual");
+    // No extra HTTP requests from the push
+    assert.equal(mock.httpRequests.length, 1);
+  });
+
+  it("http: true — subscribe always uses WS, never HTTP", async () => {
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: true, reconnect: false });
+    sna.connect();
+    await waitFor(() => sna.connected);
+
+    installAutoResponder({ "agent.subscribe": () => ({ cursor: 0 }) });
+
+    await sna.agent.subscribe("default", { since: 0 });
+    // WS was used — no HTTP requests
+    assert.equal(mock.httpRequests.length, 0);
+  });
+
+  it("clearHttpRequests resets the recorded request log", async () => {
+    mock.queueHttpResponse(200, { status: "removed" });
+    mock.queueHttpResponse(200, { status: "removed" });
+    sna = httpClient();
+
+    await sna.sessions.remove("a");
+    assert.equal(mock.httpRequests.length, 1);
+
+    mock.clearHttpRequests();
+    assert.equal(mock.httpRequests.length, 0);
+
+    await sna.sessions.remove("b");
+    assert.equal(mock.httpRequests.length, 1);
+    assert.equal(mock.httpRequests[0].url, "/sessions/b");
+  });
+
+  it("multiple sequential HTTP calls are recorded in order", async () => {
+    mock.queueHttpResponse(200, { status: "created", sessionId: "s1", label: "s1", meta: null });
+    mock.queueHttpResponse(200, { status: "created", sessionId: "s2", label: "s2", meta: null });
+    mock.queueHttpResponse(200, { status: "removed" });
+    sna = httpClient();
+
+    await sna.sessions.create({ id: "s1" });
+    await sna.sessions.create({ id: "s2" });
+    await sna.sessions.remove("s1");
+
+    assert.equal(mock.httpRequests.length, 3);
+    assert.equal(mock.httpRequests[0].url, "/sessions");
+    assert.equal(mock.httpRequests[1].url, "/sessions");
+    assert.equal(mock.httpRequests[2].url, "/sessions/s1");
+    assert.equal(mock.httpRequests[2].method, "DELETE");
   });
 });

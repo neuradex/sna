@@ -10,9 +10,18 @@ if (!globalThis.WebSocket) {
   (globalThis as any).WebSocket = WsWebSocket;
 }
 
+export interface HttpRequest {
+  method: string;
+  url: string;
+  body: Record<string, unknown>;
+}
+
 export interface MockServer {
   port: number;
+  /** WS URL: `ws://localhost:<port>` */
   url: string;
+  /** Base URL for SnaClient: `localhost:<port>` */
+  host: string;
   wss: WebSocketServer;
   server: http.Server;
   /** All currently connected server-side sockets */
@@ -25,6 +34,12 @@ export interface MockServer {
   sendTo: (ws: WsType, data: Record<string, unknown>) => void;
   /** Register handler for incoming messages from clients */
   onMessage: (handler: (ws: WsType, msg: Record<string, unknown>) => void) => void;
+  /** All HTTP requests received since last clearHttpRequests() */
+  httpRequests: HttpRequest[];
+  /** Queue a response for the next incoming HTTP request */
+  queueHttpResponse: (status: number, body: Record<string, unknown>) => void;
+  /** Clear recorded HTTP requests */
+  clearHttpRequests: () => void;
   /** Shut down the server */
   close: () => Promise<void>;
 }
@@ -35,7 +50,35 @@ export interface MockServer {
  */
 export function startMockWsServer(): Promise<MockServer> {
   return new Promise((resolve) => {
-    const server = http.createServer();
+    const httpRequests: HttpRequest[] = [];
+    const httpResponseQueue: Array<{ status: number; body: Record<string, unknown> }> = [];
+
+    const server = http.createServer((req, res) => {
+      // Collect request body
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk) => chunks.push(chunk));
+      req.on("end", () => {
+        let body: Record<string, unknown> = {};
+        try {
+          const raw = Buffer.concat(chunks).toString();
+          if (raw) body = JSON.parse(raw);
+        } catch { /* no body or non-JSON */ }
+
+        httpRequests.push({
+          method: req.method ?? "GET",
+          url: req.url ?? "/",
+          body,
+        });
+
+        const queued = httpResponseQueue.shift();
+        const status = queued?.status ?? 200;
+        const responseBody = queued?.body ?? { status: "ok" };
+        const json = JSON.stringify(responseBody);
+        res.writeHead(status, { "Content-Type": "application/json" });
+        res.end(json);
+      });
+    });
+
     const wss = new WebSocketServer({ server });
     const clients = new Set<WsType>();
     const messageHandlers: Array<(ws: WsType, msg: Record<string, unknown>) => void> = [];
@@ -56,9 +99,13 @@ export function startMockWsServer(): Promise<MockServer> {
       resolve({
         port,
         url: `ws://localhost:${port}`,
+        host: `localhost:${port}`,
         wss,
         server,
         clients,
+        httpRequests,
+        queueHttpResponse: (status, body) => { httpResponseQueue.push({ status, body }); },
+        clearHttpRequests: () => { httpRequests.length = 0; },
         lastClient: () => {
           const arr = Array.from(clients);
           return arr[arr.length - 1];
