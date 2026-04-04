@@ -347,6 +347,7 @@ function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): vo
   const providerName = (msg.provider as string) ?? "claude-code";
   const model = (msg.model as string) ?? "claude-sonnet-4-6";
   const permissionMode = msg.permissionMode as string | undefined;
+  const configDir = msg.configDir as string | undefined;
   const extraArgs = msg.extraArgs as string[] | undefined;
 
   try {
@@ -355,12 +356,13 @@ function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): vo
       prompt: msg.prompt as string | undefined,
       model,
       permissionMode: permissionMode as any,
+      configDir,
       env: { SNA_SESSION_ID: sessionId },
       history: msg.history as any[] | undefined,
       extraArgs,
     });
     sm.setProcess(sessionId, proc);
-    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
+    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
     wsReply(ws, msg, { status: "started", provider: provider.name, sessionId: session.id });
   } catch (e: any) {
     replyError(ws, msg, e.message);
@@ -435,6 +437,7 @@ function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManager): v
   const providerName = (msg.provider as string) ?? session.lastStartConfig?.provider ?? "claude-code";
   const model = (msg.model as string) ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
   const permissionMode = (msg.permissionMode as string) ?? session.lastStartConfig?.permissionMode;
+  const configDir = (msg.configDir as string) ?? session.lastStartConfig?.configDir;
   const extraArgs = (msg.extraArgs as string[]) ?? session.lastStartConfig?.extraArgs;
   const provider = getProvider(providerName);
 
@@ -444,12 +447,13 @@ function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManager): v
       prompt: msg.prompt as string | undefined,
       model,
       permissionMode: permissionMode as any,
+      configDir,
       env: { SNA_SESSION_ID: sessionId },
       history: history.length > 0 ? history : undefined,
       extraArgs,
     });
     sm.setProcess(sessionId, proc, "resumed");
-    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
+    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
     wsReply(ws, msg, {
       status: "resumed",
       provider: providerName,
@@ -471,6 +475,7 @@ function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionManager): 
         provider: msg.provider as string | undefined,
         model: msg.model as string | undefined,
         permissionMode: msg.permissionMode as string | undefined,
+        configDir: msg.configDir as string | undefined,
         extraArgs: msg.extraArgs as string[] | undefined,
       },
       (cfg) => {
@@ -480,6 +485,7 @@ function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionManager): 
           cwd: sm.getSession(sessionId)!.cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode as any,
+          configDir: cfg.configDir,
           env: { SNA_SESSION_ID: sessionId },
           extraArgs: [...(cfg.extraArgs ?? []), ...resumeArgs],
         });

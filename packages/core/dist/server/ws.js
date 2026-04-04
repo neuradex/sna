@@ -218,6 +218,7 @@ function handleAgentStart(ws, msg, sm) {
   const providerName = msg.provider ?? "claude-code";
   const model = msg.model ?? "claude-sonnet-4-6";
   const permissionMode = msg.permissionMode;
+  const configDir = msg.configDir;
   const extraArgs = msg.extraArgs;
   try {
     const proc = provider.spawn({
@@ -225,12 +226,13 @@ function handleAgentStart(ws, msg, sm) {
       prompt: msg.prompt,
       model,
       permissionMode,
+      configDir,
       env: { SNA_SESSION_ID: sessionId },
       history: msg.history,
       extraArgs
     });
     sm.setProcess(sessionId, proc);
-    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
+    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
     wsReply(ws, msg, { status: "started", provider: provider.name, sessionId: session.id });
   } catch (e) {
     replyError(ws, msg, e.message);
@@ -293,6 +295,7 @@ function handleAgentResume(ws, msg, sm) {
   const providerName = msg.provider ?? session.lastStartConfig?.provider ?? "claude-code";
   const model = msg.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
   const permissionMode = msg.permissionMode ?? session.lastStartConfig?.permissionMode;
+  const configDir = msg.configDir ?? session.lastStartConfig?.configDir;
   const extraArgs = msg.extraArgs ?? session.lastStartConfig?.extraArgs;
   const provider = getProvider(providerName);
   try {
@@ -301,12 +304,13 @@ function handleAgentResume(ws, msg, sm) {
       prompt: msg.prompt,
       model,
       permissionMode,
+      configDir,
       env: { SNA_SESSION_ID: sessionId },
       history: history.length > 0 ? history : void 0,
       extraArgs
     });
     sm.setProcess(sessionId, proc, "resumed");
-    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
+    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
     wsReply(ws, msg, {
       status: "resumed",
       provider: providerName,
@@ -327,6 +331,7 @@ function handleAgentRestart(ws, msg, sm) {
         provider: msg.provider,
         model: msg.model,
         permissionMode: msg.permissionMode,
+        configDir: msg.configDir,
         extraArgs: msg.extraArgs
       },
       (cfg) => {
@@ -336,6 +341,7 @@ function handleAgentRestart(ws, msg, sm) {
           cwd: sm.getSession(sessionId).cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode,
+          configDir: cfg.configDir,
           env: { SNA_SESSION_ID: sessionId },
           extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
         });

@@ -663,6 +663,12 @@ export interface AgentStartConfig {
   model?: string;
   /** Permission mode: `"acceptEdits"`, `"bypassPermissions"`, etc. */
   permissionMode?: string;
+  /**
+   * Override CLAUDE_CONFIG_DIR for this session.
+   * Isolates Claude config (permissions, theme, API keys, etc.) per agent.
+   * Useful for running multiple agents with different permission profiles.
+   */
+  configDir?: string;
   /** If `true`, kill the existing agent and start fresh. */
   force?: boolean;
   /** Arbitrary metadata to attach to the agent invocation. */

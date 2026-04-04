@@ -401,6 +401,9 @@ class ClaudeCodeProvider {
       args.push(...extraArgsClean);
     }
     const cleanEnv = { ...process.env, ...options.env };
+    if (options.configDir) {
+      cleanEnv.CLAUDE_CONFIG_DIR = options.configDir;
+    }
     delete cleanEnv.CLAUDECODE;
     delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
     delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;

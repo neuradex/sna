@@ -143,6 +143,7 @@ function createAgentRoutes(sessionManager) {
     const providerName = body.provider ?? "claude-code";
     const model = body.model ?? "claude-sonnet-4-6";
     const permissionMode = body.permissionMode;
+    const configDir = body.configDir;
     const extraArgs = body.extraArgs;
     try {
       const proc = provider.spawn({
@@ -150,12 +151,13 @@ function createAgentRoutes(sessionManager) {
         prompt: body.prompt,
         model,
         permissionMode,
+        configDir,
         env: { SNA_SESSION_ID: sessionId },
         history: body.history,
         extraArgs
       });
       sessionManager.setProcess(sessionId, proc);
-      sessionManager.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
+      sessionManager.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
       logger.log("route", `POST /start?session=${sessionId} \u2192 started`);
       return httpJson(c, "agent.start", {
         status: "started",
@@ -294,6 +296,7 @@ function createAgentRoutes(sessionManager) {
           cwd: sessionManager.getSession(sessionId).cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode,
+          configDir: cfg.configDir,
           env: { SNA_SESSION_ID: sessionId },
           extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
         });
@@ -323,6 +326,7 @@ function createAgentRoutes(sessionManager) {
     const providerName = body.provider ?? "claude-code";
     const model = body.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
     const permissionMode = body.permissionMode ?? session.lastStartConfig?.permissionMode;
+    const configDir = body.configDir ?? session.lastStartConfig?.configDir;
     const extraArgs = body.extraArgs ?? session.lastStartConfig?.extraArgs;
     const provider = getProvider(providerName);
     try {
@@ -331,12 +335,13 @@ function createAgentRoutes(sessionManager) {
         prompt: body.prompt,
         model,
         permissionMode,
+        configDir,
         env: { SNA_SESSION_ID: sessionId },
         history: history.length > 0 ? history : void 0,
         extraArgs
       });
       sessionManager.setProcess(sessionId, proc, "resumed");
-      sessionManager.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
+      sessionManager.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
       logger.log("route", `POST /resume?session=${sessionId} \u2192 resumed (${history.length} history msgs)`);
       return httpJson(c, "agent.resume", {
         status: "resumed",

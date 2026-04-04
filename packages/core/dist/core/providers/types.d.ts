@@ -62,6 +62,12 @@ interface SpawnOptions {
     permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan";
     env?: Record<string, string>;
     /**
+     * Override CLAUDE_CONFIG_DIR for this session.
+     * Isolates Claude config (permissions, theme, API keys, etc.) per session.
+     * If omitted, inherits the process-level CLAUDE_CONFIG_DIR or default (~/).
+     */
+    configDir?: string;
+    /**
      * Conversation history to inject before the first prompt.
      * Written to stdin as NDJSON — Claude Code treats these as prior conversation turns.
      * Must alternate user→assistant. Assistant content is auto-wrapped in array format.

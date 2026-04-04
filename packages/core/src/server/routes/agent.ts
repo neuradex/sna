@@ -196,6 +196,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       prompt?: string;
       model?: string;
       permissionMode?: string;
+      configDir?: string;
       force?: boolean;
       meta?: Record<string, unknown>;
       extraArgs?: string[];
@@ -245,6 +246,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     const providerName = body.provider ?? "claude-code";
     const model = body.model ?? "claude-sonnet-4-6";
     const permissionMode = body.permissionMode;
+    const configDir = body.configDir;
     const extraArgs = body.extraArgs;
 
     try {
@@ -253,13 +255,14 @@ export function createAgentRoutes(sessionManager: SessionManager) {
         prompt: body.prompt,
         model,
         permissionMode: permissionMode as any,
+        configDir,
         env: { SNA_SESSION_ID: sessionId },
         history: body.history,
         extraArgs,
       });
 
       sessionManager.setProcess(sessionId, proc);
-      sessionManager.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
+      sessionManager.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
       logger.log("route", `POST /start?session=${sessionId} → started`);
 
       return httpJson(c, "agent.start", {
@@ -421,6 +424,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       provider?: string;
       model?: string;
       permissionMode?: string;
+      configDir?: string;
       extraArgs?: string[];
     };
 
@@ -433,6 +437,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
           cwd: sessionManager.getSession(sessionId)!.cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode as any,
+          configDir: cfg.configDir,
           env: { SNA_SESSION_ID: sessionId },
           extraArgs: [...(cfg.extraArgs ?? []), ...resumeArgs],
         });
@@ -456,6 +461,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       prompt?: string;
       model?: string;
       permissionMode?: string;
+      configDir?: string;
       provider?: string;
       extraArgs?: string[];
     };
@@ -473,6 +479,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     const providerName = body.provider ?? "claude-code";
     const model = body.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
     const permissionMode = body.permissionMode ?? session.lastStartConfig?.permissionMode;
+    const configDir = body.configDir ?? session.lastStartConfig?.configDir;
     const extraArgs = body.extraArgs ?? session.lastStartConfig?.extraArgs;
     const provider = getProvider(providerName);
 
@@ -482,12 +489,13 @@ export function createAgentRoutes(sessionManager: SessionManager) {
         prompt: body.prompt,
         model,
         permissionMode: permissionMode as any,
+        configDir,
         env: { SNA_SESSION_ID: sessionId },
         history: history.length > 0 ? history : undefined,
         extraArgs,
       });
       sessionManager.setProcess(sessionId, proc, "resumed");
-      sessionManager.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, extraArgs });
+      sessionManager.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
       logger.log("route", `POST /resume?session=${sessionId} → resumed (${history.length} history msgs)`);
       return httpJson(c, "agent.resume", {
         status: "resumed",

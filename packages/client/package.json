@@ -1,6 +1,6 @@
 {
   "name": "@sna-sdk/client",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Typed WebSocket client for the SNA API server",
   "type": "module",
   "files": [

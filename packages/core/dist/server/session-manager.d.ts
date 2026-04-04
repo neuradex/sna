@@ -12,6 +12,7 @@ interface StartConfig {
     provider: string;
     model: string;
     permissionMode?: string;
+    configDir?: string;
     extraArgs?: string[];
 }
 interface Session {

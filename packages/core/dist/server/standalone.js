@@ -776,6 +776,9 @@ var ClaudeCodeProvider = class {
       args.push(...extraArgsClean);
     }
     const cleanEnv = { ...process.env, ...options.env };
+    if (options.configDir) {
+      cleanEnv.CLAUDE_CONFIG_DIR = options.configDir;
+    }
     delete cleanEnv.CLAUDECODE;
     delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
     delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
@@ -1005,6 +1008,7 @@ function createAgentRoutes(sessionManager2) {
     const providerName = body.provider ?? "claude-code";
     const model = body.model ?? "claude-sonnet-4-6";
     const permissionMode2 = body.permissionMode;
+    const configDir = body.configDir;
     const extraArgs = body.extraArgs;
     try {
       const proc = provider2.spawn({
@@ -1012,12 +1016,13 @@ function createAgentRoutes(sessionManager2) {
         prompt: body.prompt,
         model,
         permissionMode: permissionMode2,
+        configDir,
         env: { SNA_SESSION_ID: sessionId },
         history: body.history,
         extraArgs
       });
       sessionManager2.setProcess(sessionId, proc);
-      sessionManager2.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, extraArgs });
+      sessionManager2.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, configDir, extraArgs });
       logger.log("route", `POST /start?session=${sessionId} \u2192 started`);
       return httpJson(c, "agent.start", {
         status: "started",
@@ -1156,6 +1161,7 @@ function createAgentRoutes(sessionManager2) {
           cwd: sessionManager2.getSession(sessionId).cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode,
+          configDir: cfg.configDir,
           env: { SNA_SESSION_ID: sessionId },
           extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
         });
@@ -1185,6 +1191,7 @@ function createAgentRoutes(sessionManager2) {
     const providerName = body.provider ?? "claude-code";
     const model = body.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
     const permissionMode2 = body.permissionMode ?? session.lastStartConfig?.permissionMode;
+    const configDir = body.configDir ?? session.lastStartConfig?.configDir;
     const extraArgs = body.extraArgs ?? session.lastStartConfig?.extraArgs;
     const provider2 = getProvider(providerName);
     try {
@@ -1193,12 +1200,13 @@ function createAgentRoutes(sessionManager2) {
         prompt: body.prompt,
         model,
         permissionMode: permissionMode2,
+        configDir,
         env: { SNA_SESSION_ID: sessionId },
         history: history.length > 0 ? history : void 0,
         extraArgs
       });
       sessionManager2.setProcess(sessionId, proc, "resumed");
-      sessionManager2.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, extraArgs });
+      sessionManager2.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, configDir, extraArgs });
       logger.log("route", `POST /resume?session=${sessionId} \u2192 resumed (${history.length} history msgs)`);
       return httpJson(c, "agent.resume", {
         status: "resumed",
@@ -2106,6 +2114,7 @@ function handleAgentStart(ws, msg, sm) {
   const providerName = msg.provider ?? "claude-code";
   const model = msg.model ?? "claude-sonnet-4-6";
   const permissionMode2 = msg.permissionMode;
+  const configDir = msg.configDir;
   const extraArgs = msg.extraArgs;
   try {
     const proc = provider2.spawn({
@@ -2113,12 +2122,13 @@ function handleAgentStart(ws, msg, sm) {
       prompt: msg.prompt,
       model,
       permissionMode: permissionMode2,
+      configDir,
       env: { SNA_SESSION_ID: sessionId },
       history: msg.history,
       extraArgs
     });
     sm.setProcess(sessionId, proc);
-    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, extraArgs });
+    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, configDir, extraArgs });
     wsReply(ws, msg, { status: "started", provider: provider2.name, sessionId: session.id });
   } catch (e) {
     replyError(ws, msg, e.message);
@@ -2181,6 +2191,7 @@ function handleAgentResume(ws, msg, sm) {
   const providerName = msg.provider ?? session.lastStartConfig?.provider ?? "claude-code";
   const model = msg.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
   const permissionMode2 = msg.permissionMode ?? session.lastStartConfig?.permissionMode;
+  const configDir = msg.configDir ?? session.lastStartConfig?.configDir;
   const extraArgs = msg.extraArgs ?? session.lastStartConfig?.extraArgs;
   const provider2 = getProvider(providerName);
   try {
@@ -2189,12 +2200,13 @@ function handleAgentResume(ws, msg, sm) {
       prompt: msg.prompt,
       model,
       permissionMode: permissionMode2,
+      configDir,
       env: { SNA_SESSION_ID: sessionId },
       history: history.length > 0 ? history : void 0,
       extraArgs
     });
     sm.setProcess(sessionId, proc, "resumed");
-    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, extraArgs });
+    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, configDir, extraArgs });
     wsReply(ws, msg, {
       status: "resumed",
       provider: providerName,
@@ -2215,6 +2227,7 @@ function handleAgentRestart(ws, msg, sm) {
         provider: msg.provider,
         model: msg.model,
         permissionMode: msg.permissionMode,
+        configDir: msg.configDir,
         extraArgs: msg.extraArgs
       },
       (cfg) => {
@@ -2224,6 +2237,7 @@ function handleAgentRestart(ws, msg, sm) {
           cwd: sm.getSession(sessionId).cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode,
+          configDir: cfg.configDir,
           env: { SNA_SESSION_ID: sessionId },
           extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
         });
