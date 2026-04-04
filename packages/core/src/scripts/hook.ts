@@ -33,24 +33,27 @@ process.stdin.on("end", async () => {
       tool_input?: Record<string, unknown>;
     };
 
-    const toolName = input.tool_name ?? "unknown";
-
-    // Auto-allow safe tools without asking
-    const safeTools = ["Read", "Glob", "Grep", "Agent", "TodoRead", "TodoWrite"];
-    if (safeTools.includes(toolName)) { allow(); return; }
-
-    // Resolve SNA API port
-    const portFile = path.join(process.cwd(), ".sna/sna-api.port");
-    let port: string;
-    try {
-      port = fs.readFileSync(portFile, "utf8").trim();
-    } catch {
-      allow(); return; // No SNA API — allow by default
+    // Resolve SNA API URL: env var → port file → give up
+    let apiUrl: string;
+    if (process.env.SNA_API_URL) {
+      apiUrl = process.env.SNA_API_URL;
+    } else {
+      const portFile = path.join(process.cwd(), ".sna/sna-api.port");
+      try {
+        const port = fs.readFileSync(portFile, "utf8").trim();
+        apiUrl = `http://localhost:${port}`;
+      } catch {
+        const snaPort = process.env.SNA_PORT;
+        if (snaPort) {
+          apiUrl = `http://localhost:${snaPort}`;
+        } else {
+          allow(); return; // No SNA API — allow by default
+        }
+      }
     }
 
     const sessionId = process.argv.find(a => a.startsWith("--session="))?.slice(10)
       ?? process.env.SNA_SESSION_ID ?? "default";
-    const apiUrl = `http://localhost:${port}`;
 
     // Submit permission request and wait for UI response
     const res = await fetch(`${apiUrl}/agent/permission-request?session=${encodeURIComponent(sessionId)}`, {

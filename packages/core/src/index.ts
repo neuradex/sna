@@ -5,6 +5,9 @@
  * No React dependency.
  */
 
+export { getConfig, setConfig, resetConfig } from "./config.js";
+export type { SnaConfig } from "./config.js";
+
 export const DEFAULT_SNA_PORT = 3099;
 export const DEFAULT_SNA_URL = `http://localhost:${DEFAULT_SNA_PORT}`;
 

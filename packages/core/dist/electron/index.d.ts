@@ -55,6 +55,11 @@ interface SnaServerOptions {
     /** Claude model to use. Default: SDK default (claude-sonnet-4-6) */
     model?: string;
     /**
+     * Permission request timeout (ms). 0 = no timeout (app controls).
+     * Default: 0 (app is responsible for responding or timing out)
+     */
+    permissionTimeoutMs?: number;
+    /**
      * Explicit path to the better-sqlite3 native .node binding.
      *
      * When omitted, the launcher auto-detects from:

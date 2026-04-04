@@ -44,6 +44,7 @@ async function startSnaServer(options) {
     ...options.maxSessions != null ? { SNA_MAX_SESSIONS: String(options.maxSessions) } : {},
     ...options.permissionMode ? { SNA_PERMISSION_MODE: options.permissionMode } : {},
     ...options.model ? { SNA_MODEL: options.model } : {},
+    ...options.permissionTimeoutMs != null ? { SNA_PERMISSION_TIMEOUT_MS: String(options.permissionTimeoutMs) } : {},
     ...options.nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: options.nativeBinding } : {},
     ...consumerModules ? { SNA_MODULES_PATH: consumerModules } : {},
     ...nodePath ? { NODE_PATH: nodePath } : {},

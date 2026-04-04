@@ -111,9 +111,38 @@ function initSchema(db) {
   `);
 }
 
+// src/config.ts
+var defaults = {
+  port: 3099,
+  model: "claude-sonnet-4-6",
+  defaultProvider: "claude-code",
+  defaultPermissionMode: "default",
+  maxSessions: 5,
+  maxEventBuffer: 500,
+  permissionTimeoutMs: 0,
+  // app controls — no SDK-side timeout
+  runOnceTimeoutMs: 12e4,
+  pollIntervalMs: 500,
+  keepaliveIntervalMs: 15e3,
+  skillPollMs: 2e3,
+  dbPath: "data/sna.db"
+};
+function fromEnv() {
+  const env = {};
+  if (process.env.SNA_PORT) env.port = parseInt(process.env.SNA_PORT, 10);
+  if (process.env.SNA_MODEL) env.model = process.env.SNA_MODEL;
+  if (process.env.SNA_PERMISSION_MODE) env.defaultPermissionMode = process.env.SNA_PERMISSION_MODE;
+  if (process.env.SNA_MAX_SESSIONS) env.maxSessions = parseInt(process.env.SNA_MAX_SESSIONS, 10);
+  if (process.env.SNA_DB_PATH) env.dbPath = process.env.SNA_DB_PATH;
+  if (process.env.SNA_PERMISSION_TIMEOUT_MS) env.permissionTimeoutMs = parseInt(process.env.SNA_PERMISSION_TIMEOUT_MS, 10);
+  return env;
+}
+var current = { ...defaults, ...fromEnv() };
+function getConfig() {
+  return current;
+}
+
 // src/server/routes/events.ts
-var POLL_INTERVAL_MS = 500;
-var KEEPALIVE_INTERVAL_MS = 15e3;
 function eventsRoute(c) {
   const sinceParam = c.req.query("since");
   let lastId = sinceParam ? parseInt(sinceParam) : -1;
@@ -138,7 +167,7 @@ function eventsRoute(c) {
         closed = true;
         clearInterval(keepaliveTimer);
       }
-    }, KEEPALIVE_INTERVAL_MS);
+    }, getConfig().keepaliveIntervalMs);
     while (!closed) {
       try {
         const db = getDb();
@@ -156,7 +185,7 @@ function eventsRoute(c) {
         }
       } catch {
       }
-      await stream.sleep(POLL_INTERVAL_MS);
+      await stream.sleep(getConfig().pollIntervalMs);
     }
     clearInterval(keepaliveTimer);
   });
@@ -258,6 +287,7 @@ import { spawn as spawn2, execSync } from "child_process";
 import { EventEmitter } from "events";
 import fs4 from "fs";
 import path4 from "path";
+import { fileURLToPath } from "url";
 
 // src/core/providers/cc-history-adapter.ts
 import fs2 from "fs";
@@ -715,7 +745,13 @@ var ClaudeCodeProvider = class {
     const claudeParts = claudeCommand.split(/\s+/);
     const claudePath = claudeParts[0];
     const claudePrefix = claudeParts.slice(1);
-    const hookScript = new URL("../../scripts/hook.js", import.meta.url).pathname;
+    let pkgRoot = path4.dirname(fileURLToPath(import.meta.url));
+    while (!fs4.existsSync(path4.join(pkgRoot, "package.json"))) {
+      const parent = path4.dirname(pkgRoot);
+      if (parent === pkgRoot) break;
+      pkgRoot = parent;
+    }
+    const hookScript = path4.join(pkgRoot, "dist", "scripts", "hook.js");
     const sessionId = options.env?.SNA_SESSION_ID ?? "default";
     const sdkSettings = {};
     if (options.permissionMode !== "bypassPermissions") {
@@ -876,24 +912,24 @@ function resolveImagePath(sessionId, filename) {
 function getSessionId(c) {
   return c.req.query("session") ?? "default";
 }
-var DEFAULT_RUN_ONCE_TIMEOUT = 12e4;
 async function runOnce(sessionManager2, opts) {
   const sessionId = `run-once-${crypto.randomUUID().slice(0, 8)}`;
-  const timeout = opts.timeout ?? DEFAULT_RUN_ONCE_TIMEOUT;
+  const timeout = opts.timeout ?? getConfig().runOnceTimeoutMs;
   const session = sessionManager2.createSession({
     id: sessionId,
     label: "run-once",
     cwd: opts.cwd ?? process.cwd()
   });
-  const provider2 = getProvider(opts.provider ?? "claude-code");
+  const cfg = getConfig();
+  const provider2 = getProvider(opts.provider ?? cfg.defaultProvider);
   const extraArgs = opts.extraArgs ? [...opts.extraArgs] : [];
   if (opts.systemPrompt) extraArgs.push("--system-prompt", opts.systemPrompt);
   if (opts.appendSystemPrompt) extraArgs.push("--append-system-prompt", opts.appendSystemPrompt);
   const proc = provider2.spawn({
     cwd: session.cwd,
     prompt: opts.message,
-    model: opts.model ?? "claude-sonnet-4-6",
-    permissionMode: opts.permissionMode ?? "bypassPermissions",
+    model: opts.model ?? cfg.model,
+    permissionMode: opts.permissionMode ?? cfg.defaultPermissionMode,
     env: { SNA_SESSION_ID: sessionId },
     extraArgs
   });
@@ -983,14 +1019,14 @@ function createAgentRoutes(sessionManager2) {
       logger.log("route", `POST /start?session=${sessionId} \u2192 already_running`);
       return httpJson(c, "agent.start", {
         status: "already_running",
-        provider: "claude-code",
+        provider: getConfig().defaultProvider,
         sessionId: session.process.sessionId ?? session.id
       });
     }
     if (session.process?.alive) {
       session.process.kill();
     }
-    const provider2 = getProvider(body.provider ?? "claude-code");
+    const provider2 = getProvider(body.provider ?? getConfig().defaultProvider);
     try {
       const db = getDb();
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
@@ -1005,8 +1041,8 @@ function createAgentRoutes(sessionManager2) {
       }
     } catch {
     }
-    const providerName = body.provider ?? "claude-code";
-    const model = body.model ?? "claude-sonnet-4-6";
+    const providerName = body.provider ?? getConfig().defaultProvider;
+    const model = body.model ?? getConfig().model;
     const permissionMode2 = body.permissionMode;
     const configDir = body.configDir;
     const extraArgs = body.extraArgs;
@@ -1091,7 +1127,7 @@ function createAgentRoutes(sessionManager2) {
     const sinceParam = c.req.query("since");
     const sinceCursor = sinceParam ? parseInt(sinceParam, 10) : session.eventCounter;
     return streamSSE3(c, async (stream) => {
-      const KEEPALIVE_MS = 15e3;
+      const KEEPALIVE_MS = getConfig().keepaliveIntervalMs;
       const signal = c.req.raw.signal;
       const queue = [];
       let wakeUp = null;
@@ -1188,8 +1224,8 @@ function createAgentRoutes(sessionManager2) {
     if (history.length === 0 && !body.prompt) {
       return c.json({ status: "error", message: "No history in DB \u2014 nothing to resume." }, 400);
     }
-    const providerName = body.provider ?? "claude-code";
-    const model = body.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
+    const providerName = body.provider ?? getConfig().defaultProvider;
+    const model = body.model ?? session.lastStartConfig?.model ?? getConfig().model;
     const permissionMode2 = body.permissionMode ?? session.lastStartConfig?.permissionMode;
     const configDir = body.configDir ?? session.lastStartConfig?.configDir;
     const extraArgs = body.extraArgs ?? session.lastStartConfig?.extraArgs;
@@ -1412,9 +1448,6 @@ function createChatRoutes() {
 }
 
 // src/server/session-manager.ts
-var DEFAULT_MAX_SESSIONS = 5;
-var MAX_EVENT_BUFFER = 500;
-var PERMISSION_TIMEOUT_MS = 3e5;
 var SessionManager = class {
   constructor(options = {}) {
     this.sessions = /* @__PURE__ */ new Map();
@@ -1426,7 +1459,7 @@ var SessionManager = class {
     this.configChangedListeners = /* @__PURE__ */ new Set();
     this.stateChangedListeners = /* @__PURE__ */ new Set();
     this.metadataChangedListeners = /* @__PURE__ */ new Set();
-    this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
+    this.maxSessions = options.maxSessions ?? getConfig().maxSessions;
     this.restoreFromDb();
   }
   /** Restore session metadata from DB (cwd, label, meta). Process state is not restored. */
@@ -1565,8 +1598,8 @@ var SessionManager = class {
       if (persisted) {
         session.eventCounter++;
         session.eventBuffer.push(e);
-        if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
-          session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
+        if (session.eventBuffer.length > getConfig().maxEventBuffer) {
+          session.eventBuffer.splice(0, session.eventBuffer.length - getConfig().maxEventBuffer);
         }
         const listeners = this.eventListeners.get(sessionId);
         if (listeners) {
@@ -1625,8 +1658,8 @@ var SessionManager = class {
     if (!session) return;
     session.eventCounter++;
     session.eventBuffer.push(event);
-    if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
-      session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
+    if (session.eventBuffer.length > getConfig().maxEventBuffer) {
+      session.eventBuffer.splice(0, session.eventBuffer.length - getConfig().maxEventBuffer);
     }
     const listeners = this.eventListeners.get(sessionId);
     if (listeners) {
@@ -1685,19 +1718,22 @@ var SessionManager = class {
   }
   // ── Permission management ─────────────────────────────────────
   /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
-  createPendingPermission(sessionId, request) {
+  createPendingPermission(sessionId, request, opts) {
     const session = this.sessions.get(sessionId);
     if (session) this.setSessionState(sessionId, session, "permission");
     return new Promise((resolve) => {
       const createdAt = Date.now();
       this.pendingPermissions.set(sessionId, { resolve, request, createdAt });
       for (const cb of this.permissionRequestListeners) cb(sessionId, request, createdAt);
-      setTimeout(() => {
-        if (this.pendingPermissions.has(sessionId)) {
-          this.pendingPermissions.delete(sessionId);
-          resolve(false);
-        }
-      }, PERMISSION_TIMEOUT_MS);
+      const timeout = opts?.timeoutMs ?? getConfig().permissionTimeoutMs;
+      if (timeout > 0) {
+        setTimeout(() => {
+          if (this.pendingPermissions.has(sessionId)) {
+            this.pendingPermissions.delete(sessionId);
+            resolve(false);
+          }
+        }, timeout);
+      }
     });
   }
   /** Resolve a pending permission request. Returns false if no pending request. */
@@ -1769,7 +1805,7 @@ var SessionManager = class {
     if (session.lastStartConfig) {
       session.lastStartConfig.model = model;
     } else {
-      session.lastStartConfig = { provider: "claude-code", model, permissionMode: "acceptEdits" };
+      session.lastStartConfig = { provider: getConfig().defaultProvider, model, permissionMode: getConfig().defaultPermissionMode };
     }
     this.persistSession(session);
     this.emitConfigChanged(id, session.lastStartConfig);
@@ -1783,7 +1819,7 @@ var SessionManager = class {
     if (session.lastStartConfig) {
       session.lastStartConfig.permissionMode = mode;
     } else {
-      session.lastStartConfig = { provider: "claude-code", model: "claude-sonnet-4-6", permissionMode: mode };
+      session.lastStartConfig = { provider: getConfig().defaultProvider, model: getConfig().model, permissionMode: mode };
     }
     this.persistSession(session);
     this.emitConfigChanged(id, session.lastStartConfig);
@@ -2094,11 +2130,11 @@ function handleAgentStart(ws, msg, sm) {
     cwd: msg.cwd
   });
   if (session.process?.alive && !msg.force) {
-    wsReply(ws, msg, { status: "already_running", provider: "claude-code", sessionId: session.id });
+    wsReply(ws, msg, { status: "already_running", provider: getConfig().defaultProvider, sessionId: session.id });
     return;
   }
   if (session.process?.alive) session.process.kill();
-  const provider2 = getProvider(msg.provider ?? "claude-code");
+  const provider2 = getProvider(msg.provider ?? getConfig().defaultProvider);
   try {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
@@ -2111,8 +2147,9 @@ function handleAgentStart(ws, msg, sm) {
     }
   } catch {
   }
-  const providerName = msg.provider ?? "claude-code";
-  const model = msg.model ?? "claude-sonnet-4-6";
+  const cfg = getConfig();
+  const providerName = msg.provider ?? cfg.defaultProvider;
+  const model = msg.model ?? cfg.model;
   const permissionMode2 = msg.permissionMode;
   const configDir = msg.configDir;
   const extraArgs = msg.extraArgs;
@@ -2188,8 +2225,8 @@ function handleAgentResume(ws, msg, sm) {
   if (history.length === 0 && !msg.prompt) {
     return replyError(ws, msg, "No history in DB \u2014 nothing to resume.");
   }
-  const providerName = msg.provider ?? session.lastStartConfig?.provider ?? "claude-code";
-  const model = msg.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
+  const providerName = msg.provider ?? session.lastStartConfig?.provider ?? getConfig().defaultProvider;
+  const model = msg.model ?? session.lastStartConfig?.model ?? getConfig().model;
   const permissionMode2 = msg.permissionMode ?? session.lastStartConfig?.permissionMode;
   const configDir = msg.configDir ?? session.lastStartConfig?.configDir;
   const extraArgs = msg.extraArgs ?? session.lastStartConfig?.extraArgs;
@@ -2376,7 +2413,6 @@ function handleAgentUnsubscribe(ws, msg, state) {
   state.agentUnsubs.delete(sessionId);
   reply(ws, msg, {});
 }
-var SKILL_POLL_MS = 2e3;
 function handleEventsSubscribe(ws, msg, sm, state) {
   state.skillEventUnsub?.();
   state.skillEventUnsub = null;
@@ -2416,7 +2452,7 @@ function handleEventsSubscribe(ws, msg, sm, state) {
       }
     } catch {
     }
-  }, SKILL_POLL_MS);
+  }, getConfig().skillPollMs);
   reply(ws, msg, { lastId });
 }
 function handleEventsUnsubscribe(ws, msg, state) {
@@ -2600,10 +2636,7 @@ try {
   }
   process.exit(1);
 }
-var port = parseInt(process.env.SNA_PORT ?? "3099", 10);
-var permissionMode = process.env.SNA_PERMISSION_MODE;
-var defaultModel = process.env.SNA_MODEL ?? "claude-sonnet-4-6";
-var maxSessions = parseInt(process.env.SNA_MAX_SESSIONS ?? "5", 10);
+var { port, defaultPermissionMode: permissionMode, model: defaultModel, maxSessions } = getConfig();
 var root = new Hono4();
 root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "DELETE", "OPTIONS"] }));
 root.onError((err2, c) => {

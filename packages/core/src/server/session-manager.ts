@@ -7,6 +7,7 @@
 
 import type { AgentProcess, AgentEvent } from "../core/providers/types.js";
 import { getDb } from "../db/schema.js";
+import { getConfig } from "../config.js";
 
 export type SessionState = "idle" | "processing" | "waiting" | "permission";
 
@@ -76,10 +77,6 @@ export interface SessionConfigChangedEvent {
   config: StartConfig;
 }
 
-const DEFAULT_MAX_SESSIONS = 5;
-const MAX_EVENT_BUFFER = 500;
-const PERMISSION_TIMEOUT_MS = 300_000; // 5 minutes
-
 export class SessionManager {
   private sessions = new Map<string, Session>();
   private maxSessions: number;
@@ -93,7 +90,7 @@ export class SessionManager {
   private metadataChangedListeners = new Set<(sessionId: string) => void>();
 
   constructor(options: SessionManagerOptions = {}) {
-    this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
+    this.maxSessions = options.maxSessions ?? getConfig().maxSessions;
     this.restoreFromDb();
   }
 
@@ -272,8 +269,8 @@ export class SessionManager {
       if (persisted) {
         session.eventCounter++;
         session.eventBuffer.push(e);
-        if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
-          session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
+        if (session.eventBuffer.length > getConfig().maxEventBuffer) {
+          session.eventBuffer.splice(0, session.eventBuffer.length - getConfig().maxEventBuffer);
         }
         // Notify real-time listeners (WebSocket subscribers)
         const listeners = this.eventListeners.get(sessionId);
@@ -344,8 +341,8 @@ export class SessionManager {
     if (!session) return;
     session.eventCounter++;
     session.eventBuffer.push(event);
-    if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
-      session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
+    if (session.eventBuffer.length > getConfig().maxEventBuffer) {
+      session.eventBuffer.splice(0, session.eventBuffer.length - getConfig().maxEventBuffer);
     }
     const listeners = this.eventListeners.get(sessionId);
     if (listeners) {
@@ -421,7 +418,7 @@ export class SessionManager {
   // ── Permission management ─────────────────────────────────────
 
   /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
-  createPendingPermission(sessionId: string, request: Record<string, unknown>): Promise<boolean> {
+  createPendingPermission(sessionId: string, request: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<boolean> {
     const session = this.sessions.get(sessionId);
     if (session) this.setSessionState(sessionId, session, "permission");
 
@@ -430,13 +427,16 @@ export class SessionManager {
       this.pendingPermissions.set(sessionId, { resolve, request, createdAt });
       // Notify permission subscribers (WS push)
       for (const cb of this.permissionRequestListeners) cb(sessionId, request, createdAt);
-      // Auto-deny after timeout
-      setTimeout(() => {
-        if (this.pendingPermissions.has(sessionId)) {
-          this.pendingPermissions.delete(sessionId);
-          resolve(false);
-        }
-      }, PERMISSION_TIMEOUT_MS);
+      // Auto-deny after timeout (0 = no timeout, app controls)
+      const timeout = opts?.timeoutMs ?? getConfig().permissionTimeoutMs;
+      if (timeout > 0) {
+        setTimeout(() => {
+          if (this.pendingPermissions.has(sessionId)) {
+            this.pendingPermissions.delete(sessionId);
+            resolve(false);
+          }
+        }, timeout);
+      }
     });
   }
 
@@ -528,7 +528,7 @@ export class SessionManager {
     if (session.lastStartConfig) {
       session.lastStartConfig.model = model;
     } else {
-      session.lastStartConfig = { provider: "claude-code", model, permissionMode: "acceptEdits" };
+      session.lastStartConfig = { provider: getConfig().defaultProvider, model, permissionMode: getConfig().defaultPermissionMode };
     }
     this.persistSession(session);
     this.emitConfigChanged(id, session.lastStartConfig);
@@ -543,7 +543,7 @@ export class SessionManager {
     if (session.lastStartConfig) {
       session.lastStartConfig.permissionMode = mode;
     } else {
-      session.lastStartConfig = { provider: "claude-code", model: "claude-sonnet-4-6", permissionMode: mode };
+      session.lastStartConfig = { provider: getConfig().defaultProvider, model: getConfig().model, permissionMode: mode };
     }
     this.persistSession(session);
     this.emitConfigChanged(id, session.lastStartConfig);

@@ -2,6 +2,7 @@ import { spawn, execSync } from "child_process";
 import { EventEmitter } from "events";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import { writeHistoryJsonl, buildRecalledConversation } from "./cc-history-adapter.js";
 import { logger } from "../../lib/logger.js";
 const SHELL = process.env.SHELL || "/bin/zsh";
@@ -340,7 +341,13 @@ class ClaudeCodeProvider {
     const claudeParts = claudeCommand.split(/\s+/);
     const claudePath = claudeParts[0];
     const claudePrefix = claudeParts.slice(1);
-    const hookScript = new URL("../../scripts/hook.js", import.meta.url).pathname;
+    let pkgRoot = path.dirname(fileURLToPath(import.meta.url));
+    while (!fs.existsSync(path.join(pkgRoot, "package.json"))) {
+      const parent = path.dirname(pkgRoot);
+      if (parent === pkgRoot) break;
+      pkgRoot = parent;
+    }
+    const hookScript = path.join(pkgRoot, "dist", "scripts", "hook.js");
     const sessionId = options.env?.SNA_SESSION_ID ?? "default";
     const sdkSettings = {};
     if (options.permissionMode !== "bypassPermissions") {

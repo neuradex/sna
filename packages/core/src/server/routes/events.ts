@@ -8,9 +8,7 @@
 import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { getDb } from "../../db/schema.js";
-
-const POLL_INTERVAL_MS = 500;
-const KEEPALIVE_INTERVAL_MS = 15_000;
+import { getConfig } from "../../config.js";
 
 export function eventsRoute(c: Context) {
   const sinceParam = c.req.query("since");
@@ -38,7 +36,7 @@ export function eventsRoute(c: Context) {
         closed = true;
         clearInterval(keepaliveTimer);
       }
-    }, KEEPALIVE_INTERVAL_MS);
+    }, getConfig().keepaliveIntervalMs);
 
     // Poll loop
     while (!closed) {
@@ -64,7 +62,7 @@ export function eventsRoute(c: Context) {
         // DB might not be ready yet
       }
 
-      await stream.sleep(POLL_INTERVAL_MS);
+      await stream.sleep(getConfig().pollIntervalMs);
     }
 
     clearInterval(keepaliveTimer);

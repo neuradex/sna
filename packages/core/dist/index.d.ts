@@ -1,3 +1,4 @@
+export { SnaConfig, getConfig, resetConfig, setConfig } from './config.js';
 export { ChatMessage, ChatSession, SkillEvent } from './db/schema.js';
 export { AgentEvent, AgentProcess, AgentProvider, ContentBlock, HistoryMessage, SpawnOptions } from './core/providers/types.js';
 export { Session, SessionInfo, SessionManagerOptions, SessionState } from './server/session-manager.js';
@@ -10,6 +11,7 @@ import 'better-sqlite3';
  * Server, providers, session management, database, and CLI.
  * No React dependency.
  */
+
 declare const DEFAULT_SNA_PORT = 3099;
 declare const DEFAULT_SNA_URL = "http://localhost:3099";
 

@@ -2,6 +2,7 @@ import { spawn, execSync, type ChildProcess } from "child_process";
 import { EventEmitter } from "events";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import type { AgentProvider, AgentProcess, AgentEvent, SpawnOptions } from "./types.js";
 import { writeHistoryJsonl, buildRecalledConversation } from "./cc-history-adapter.js";
 import { logger } from "../../lib/logger.js";
@@ -399,8 +400,16 @@ export class ClaudeCodeProvider implements AgentProvider {
 
     // Build merged settings: SDK's PreToolUse hook + app's settings from extraArgs.
     // Skip hook injection when bypassPermissions is set — all tools are auto-allowed.
-    // Resolve hook script relative to this file (works with pnpm link / monorepo setups).
-    const hookScript = new URL("../../scripts/hook.js", import.meta.url).pathname;
+    // Resolve hook script by walking up to the package root (where package.json lives).
+    // import.meta.url varies depending on whether this code runs from the bundled
+    // standalone (dist/server/standalone.js) or individual file (dist/core/providers/claude-code.js).
+    let pkgRoot = path.dirname(fileURLToPath(import.meta.url));
+    while (!fs.existsSync(path.join(pkgRoot, "package.json"))) {
+      const parent = path.dirname(pkgRoot);
+      if (parent === pkgRoot) break;
+      pkgRoot = parent;
+    }
+    const hookScript = path.join(pkgRoot, "dist", "scripts", "hook.js");
     const sessionId = options.env?.SNA_SESSION_ID ?? "default";
     const sdkSettings: Record<string, unknown> = {};
 

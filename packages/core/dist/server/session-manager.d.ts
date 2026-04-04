@@ -135,7 +135,9 @@ declare class SessionManager {
     updateSessionState(sessionId: string, newState: SessionState): void;
     private setSessionState;
     /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
-    createPendingPermission(sessionId: string, request: Record<string, unknown>): Promise<boolean>;
+    createPendingPermission(sessionId: string, request: Record<string, unknown>, opts?: {
+        timeoutMs?: number;
+    }): Promise<boolean>;
     /** Resolve a pending permission request. Returns false if no pending request. */
     resolvePendingPermission(sessionId: string, approved: boolean): boolean;
     /** Get a pending permission for a specific session. */

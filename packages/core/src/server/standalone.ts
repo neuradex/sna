@@ -17,6 +17,7 @@ import { SessionManager } from "./session-manager.js";
 import { attachWebSocket } from "./ws.js";
 import { getProvider } from "../core/providers/index.js";
 import { logger } from "../lib/logger.js";
+import { getConfig } from "../config.js";
 
 // Pre-flight: verify native modules are compatible before starting
 import { getDb } from "../db/schema.js";
@@ -33,10 +34,8 @@ try {
   process.exit(1);
 }
 
-const port = parseInt(process.env.SNA_PORT ?? "3099", 10);
-const permissionMode = process.env.SNA_PERMISSION_MODE as string | undefined;
-const defaultModel = process.env.SNA_MODEL ?? "claude-sonnet-4-6";
-const maxSessions = parseInt(process.env.SNA_MAX_SESSIONS ?? "5", 10);
+// All env parsing is done by config.ts — just read the resolved values
+const { port, defaultPermissionMode: permissionMode, model: defaultModel, maxSessions } = getConfig();
 
 const root = new Hono();
 root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "DELETE", "OPTIONS"] }));

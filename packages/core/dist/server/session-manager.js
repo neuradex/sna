@@ -1,7 +1,5 @@
 import { getDb } from "../db/schema.js";
-const DEFAULT_MAX_SESSIONS = 5;
-const MAX_EVENT_BUFFER = 500;
-const PERMISSION_TIMEOUT_MS = 3e5;
+import { getConfig } from "../config.js";
 class SessionManager {
   constructor(options = {}) {
     this.sessions = /* @__PURE__ */ new Map();
@@ -13,7 +11,7 @@ class SessionManager {
     this.configChangedListeners = /* @__PURE__ */ new Set();
     this.stateChangedListeners = /* @__PURE__ */ new Set();
     this.metadataChangedListeners = /* @__PURE__ */ new Set();
-    this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
+    this.maxSessions = options.maxSessions ?? getConfig().maxSessions;
     this.restoreFromDb();
   }
   /** Restore session metadata from DB (cwd, label, meta). Process state is not restored. */
@@ -152,8 +150,8 @@ class SessionManager {
       if (persisted) {
         session.eventCounter++;
         session.eventBuffer.push(e);
-        if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
-          session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
+        if (session.eventBuffer.length > getConfig().maxEventBuffer) {
+          session.eventBuffer.splice(0, session.eventBuffer.length - getConfig().maxEventBuffer);
         }
         const listeners = this.eventListeners.get(sessionId);
         if (listeners) {
@@ -212,8 +210,8 @@ class SessionManager {
     if (!session) return;
     session.eventCounter++;
     session.eventBuffer.push(event);
-    if (session.eventBuffer.length > MAX_EVENT_BUFFER) {
-      session.eventBuffer.splice(0, session.eventBuffer.length - MAX_EVENT_BUFFER);
+    if (session.eventBuffer.length > getConfig().maxEventBuffer) {
+      session.eventBuffer.splice(0, session.eventBuffer.length - getConfig().maxEventBuffer);
     }
     const listeners = this.eventListeners.get(sessionId);
     if (listeners) {
@@ -272,19 +270,22 @@ class SessionManager {
   }
   // ── Permission management ─────────────────────────────────────
   /** Create a pending permission request. Returns a promise that resolves when approved/denied. */
-  createPendingPermission(sessionId, request) {
+  createPendingPermission(sessionId, request, opts) {
     const session = this.sessions.get(sessionId);
     if (session) this.setSessionState(sessionId, session, "permission");
     return new Promise((resolve) => {
       const createdAt = Date.now();
       this.pendingPermissions.set(sessionId, { resolve, request, createdAt });
       for (const cb of this.permissionRequestListeners) cb(sessionId, request, createdAt);
-      setTimeout(() => {
-        if (this.pendingPermissions.has(sessionId)) {
-          this.pendingPermissions.delete(sessionId);
-          resolve(false);
-        }
-      }, PERMISSION_TIMEOUT_MS);
+      const timeout = opts?.timeoutMs ?? getConfig().permissionTimeoutMs;
+      if (timeout > 0) {
+        setTimeout(() => {
+          if (this.pendingPermissions.has(sessionId)) {
+            this.pendingPermissions.delete(sessionId);
+            resolve(false);
+          }
+        }, timeout);
+      }
     });
   }
   /** Resolve a pending permission request. Returns false if no pending request. */
@@ -356,7 +357,7 @@ class SessionManager {
     if (session.lastStartConfig) {
       session.lastStartConfig.model = model;
     } else {
-      session.lastStartConfig = { provider: "claude-code", model, permissionMode: "acceptEdits" };
+      session.lastStartConfig = { provider: getConfig().defaultProvider, model, permissionMode: getConfig().defaultPermissionMode };
     }
     this.persistSession(session);
     this.emitConfigChanged(id, session.lastStartConfig);
@@ -370,7 +371,7 @@ class SessionManager {
     if (session.lastStartConfig) {
       session.lastStartConfig.permissionMode = mode;
     } else {
-      session.lastStartConfig = { provider: "claude-code", model: "claude-sonnet-4-6", permissionMode: mode };
+      session.lastStartConfig = { provider: getConfig().defaultProvider, model: getConfig().model, permissionMode: mode };
     }
     this.persistSession(session);
     this.emitConfigChanged(id, session.lastStartConfig);

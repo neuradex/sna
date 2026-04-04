@@ -27,6 +27,7 @@ import { SessionManager } from "../session-manager.js";
 import { buildHistoryFromDb } from "../history-builder.js";
 import { httpJson } from "../api-types.js";
 import { saveImages } from "../image-store.js";
+import { getConfig } from "../../config.js";
 
 /** Helper: read session ID from query string, default "default". */
 function getSessionId(c: { req: { query: (k: string) => string | undefined } }): string {
@@ -34,8 +35,6 @@ function getSessionId(c: { req: { query: (k: string) => string | undefined } }):
 }
 
 // ── run-once shared logic ─────────────────────────────────────────
-
-const DEFAULT_RUN_ONCE_TIMEOUT = 120_000; // 2 minutes
 
 export interface RunOnceOptions {
   message: string;
@@ -63,7 +62,7 @@ export async function runOnce(
   opts: RunOnceOptions,
 ): Promise<RunOnceResult> {
   const sessionId = `run-once-${crypto.randomUUID().slice(0, 8)}`;
-  const timeout = opts.timeout ?? DEFAULT_RUN_ONCE_TIMEOUT;
+  const timeout = opts.timeout ?? getConfig().runOnceTimeoutMs;
 
   const session = sessionManager.createSession({
     id: sessionId,
@@ -71,7 +70,8 @@ export async function runOnce(
     cwd: opts.cwd ?? process.cwd(),
   });
 
-  const provider = getProvider(opts.provider ?? "claude-code");
+  const cfg = getConfig();
+  const provider = getProvider(opts.provider ?? cfg.defaultProvider);
 
   const extraArgs: string[] = opts.extraArgs ? [...opts.extraArgs] : [];
   if (opts.systemPrompt) extraArgs.push("--system-prompt", opts.systemPrompt);
@@ -80,8 +80,8 @@ export async function runOnce(
   const proc = provider.spawn({
     cwd: session.cwd,
     prompt: opts.message,
-    model: opts.model ?? "claude-sonnet-4-6",
-    permissionMode: (opts.permissionMode as any) ?? "bypassPermissions",
+    model: opts.model ?? cfg.model,
+    permissionMode: (opts.permissionMode as any) ?? cfg.defaultPermissionMode,
     env: { SNA_SESSION_ID: sessionId },
     extraArgs,
   });
@@ -214,7 +214,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       logger.log("route", `POST /start?session=${sessionId} → already_running`);
       return httpJson(c, "agent.start", {
         status: "already_running",
-        provider: "claude-code",
+        provider: getConfig().defaultProvider,
         sessionId: session.process.sessionId ?? session.id,
       });
     }
@@ -224,7 +224,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       session.process.kill();
     }
 
-    const provider = getProvider(body.provider ?? "claude-code");
+    const provider = getProvider(body.provider ?? getConfig().defaultProvider);
 
     // Persist initial prompt as user message + record invoked event
     try {
@@ -243,8 +243,8 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       }
     } catch { /* DB not ready — non-fatal */ }
 
-    const providerName = body.provider ?? "claude-code";
-    const model = body.model ?? "claude-sonnet-4-6";
+    const providerName = body.provider ?? getConfig().defaultProvider;
+    const model = body.model ?? getConfig().model;
     const permissionMode = body.permissionMode;
     const configDir = body.configDir;
     const extraArgs = body.extraArgs;
@@ -352,7 +352,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     const sinceCursor = sinceParam ? parseInt(sinceParam, 10) : session.eventCounter;
 
     return streamSSE(c, async (stream) => {
-      const KEEPALIVE_MS = 15_000;
+      const KEEPALIVE_MS = getConfig().keepaliveIntervalMs;
       const signal = c.req.raw.signal;
 
       // Queue bridges sync event callbacks → async SSE writes
@@ -476,8 +476,8 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       return c.json({ status: "error", message: "No history in DB — nothing to resume." }, 400);
     }
 
-    const providerName = body.provider ?? "claude-code";
-    const model = body.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
+    const providerName = body.provider ?? getConfig().defaultProvider;
+    const model = body.model ?? session.lastStartConfig?.model ?? getConfig().model;
     const permissionMode = body.permissionMode ?? session.lastStartConfig?.permissionMode;
     const configDir = body.configDir ?? session.lastStartConfig?.configDir;
     const extraArgs = body.extraArgs ?? session.lastStartConfig?.extraArgs;

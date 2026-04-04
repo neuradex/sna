@@ -52,6 +52,7 @@ import { runOnce, type RunOnceOptions } from "./routes/agent.js";
 import { wsReply } from "./api-types.js";
 import { buildHistoryFromDb } from "./history-builder.js";
 import { saveImages } from "./image-store.js";
+import { getConfig } from "../config.js";
 import type { SessionManager } from "./session-manager.js";
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -320,13 +321,13 @@ function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): vo
   });
 
   if (session.process?.alive && !msg.force) {
-    wsReply(ws, msg, { status: "already_running", provider: "claude-code", sessionId: session.id });
+    wsReply(ws, msg, { status: "already_running", provider: getConfig().defaultProvider, sessionId: session.id });
     return;
   }
 
   if (session.process?.alive) session.process.kill();
 
-  const provider = getProvider((msg.provider as string) ?? "claude-code");
+  const provider = getProvider((msg.provider as string) ?? getConfig().defaultProvider);
 
   // Persist
   try {
@@ -344,8 +345,9 @@ function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): vo
     }
   } catch { /* non-fatal */ }
 
-  const providerName = (msg.provider as string) ?? "claude-code";
-  const model = (msg.model as string) ?? "claude-sonnet-4-6";
+  const cfg = getConfig();
+  const providerName = (msg.provider as string) ?? cfg.defaultProvider;
+  const model = (msg.model as string) ?? cfg.model;
   const permissionMode = msg.permissionMode as string | undefined;
   const configDir = msg.configDir as string | undefined;
   const extraArgs = msg.extraArgs as string[] | undefined;
@@ -434,8 +436,8 @@ function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManager): v
     return replyError(ws, msg, "No history in DB — nothing to resume.");
   }
 
-  const providerName = (msg.provider as string) ?? session.lastStartConfig?.provider ?? "claude-code";
-  const model = (msg.model as string) ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
+  const providerName = (msg.provider as string) ?? session.lastStartConfig?.provider ?? getConfig().defaultProvider;
+  const model = (msg.model as string) ?? session.lastStartConfig?.model ?? getConfig().model;
   const permissionMode = (msg.permissionMode as string) ?? session.lastStartConfig?.permissionMode;
   const configDir = (msg.configDir as string) ?? session.lastStartConfig?.configDir;
   const extraArgs = (msg.extraArgs as string[]) ?? session.lastStartConfig?.extraArgs;
@@ -663,7 +665,6 @@ function handleAgentUnsubscribe(ws: WebSocket, msg: WsRequest, state: ConnState)
 // ── Skill event handlers ──────────────────────────────────────────
 
 // Slower poll interval — only catches events from external sources (CLI, HTTP from other processes)
-const SKILL_POLL_MS = 2000;
 
 function handleEventsSubscribe(ws: WebSocket, msg: WsRequest, sm: SessionManager, state: ConnState): void {
   // Cleanup existing subscription
@@ -709,7 +710,7 @@ function handleEventsSubscribe(ws: WebSocket, msg: WsRequest, sm: SessionManager
         }
       }
     } catch { /* DB not ready */ }
-  }, SKILL_POLL_MS);
+  }, getConfig().skillPollMs);
 
   reply(ws, msg, { lastId });
 }

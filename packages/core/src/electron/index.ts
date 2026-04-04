@@ -66,6 +66,12 @@ export interface SnaServerOptions {
   model?: string;
 
   /**
+   * Permission request timeout (ms). 0 = no timeout (app controls).
+   * Default: 0 (app is responsible for responding or timing out)
+   */
+  permissionTimeoutMs?: number;
+
+  /**
    * Explicit path to the better-sqlite3 native .node binding.
    *
    * When omitted, the launcher auto-detects from:
@@ -184,6 +190,7 @@ export async function startSnaServer(options: SnaServerOptions): Promise<SnaServ
     ...(options.maxSessions != null ? { SNA_MAX_SESSIONS: String(options.maxSessions) } : {}),
     ...(options.permissionMode ? { SNA_PERMISSION_MODE: options.permissionMode } : {}),
     ...(options.model ? { SNA_MODEL: options.model } : {}),
+    ...(options.permissionTimeoutMs != null ? { SNA_PERMISSION_TIMEOUT_MS: String(options.permissionTimeoutMs) } : {}),
     ...(options.nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: options.nativeBinding } : {}),
     ...(consumerModules ? { SNA_MODULES_PATH: consumerModules } : {}),
     ...(nodePath ? { NODE_PATH: nodePath } : {}),

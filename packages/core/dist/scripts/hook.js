@@ -10,22 +10,25 @@ process.stdin.on("end", async () => {
       return;
     }
     const input = JSON.parse(raw);
-    const toolName = input.tool_name ?? "unknown";
-    const safeTools = ["Read", "Glob", "Grep", "Agent", "TodoRead", "TodoWrite"];
-    if (safeTools.includes(toolName)) {
-      allow();
-      return;
-    }
-    const portFile = path.join(process.cwd(), ".sna/sna-api.port");
-    let port;
-    try {
-      port = fs.readFileSync(portFile, "utf8").trim();
-    } catch {
-      allow();
-      return;
+    let apiUrl;
+    if (process.env.SNA_API_URL) {
+      apiUrl = process.env.SNA_API_URL;
+    } else {
+      const portFile = path.join(process.cwd(), ".sna/sna-api.port");
+      try {
+        const port = fs.readFileSync(portFile, "utf8").trim();
+        apiUrl = `http://localhost:${port}`;
+      } catch {
+        const snaPort = process.env.SNA_PORT;
+        if (snaPort) {
+          apiUrl = `http://localhost:${snaPort}`;
+        } else {
+          allow();
+          return;
+        }
+      }
     }
     const sessionId = process.argv.find((a) => a.startsWith("--session="))?.slice(10) ?? process.env.SNA_SESSION_ID ?? "default";
-    const apiUrl = `http://localhost:${port}`;
     const res = await fetch(`${apiUrl}/agent/permission-request?session=${encodeURIComponent(sessionId)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

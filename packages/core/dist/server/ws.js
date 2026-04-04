@@ -6,6 +6,7 @@ import { runOnce } from "./routes/agent.js";
 import { wsReply } from "./api-types.js";
 import { buildHistoryFromDb } from "./history-builder.js";
 import { saveImages } from "./image-store.js";
+import { getConfig } from "../config.js";
 function send(ws, data) {
   if (ws.readyState === ws.OPEN) {
     ws.send(JSON.stringify(data));
@@ -198,11 +199,11 @@ function handleAgentStart(ws, msg, sm) {
     cwd: msg.cwd
   });
   if (session.process?.alive && !msg.force) {
-    wsReply(ws, msg, { status: "already_running", provider: "claude-code", sessionId: session.id });
+    wsReply(ws, msg, { status: "already_running", provider: getConfig().defaultProvider, sessionId: session.id });
     return;
   }
   if (session.process?.alive) session.process.kill();
-  const provider = getProvider(msg.provider ?? "claude-code");
+  const provider = getProvider(msg.provider ?? getConfig().defaultProvider);
   try {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
@@ -215,8 +216,9 @@ function handleAgentStart(ws, msg, sm) {
     }
   } catch {
   }
-  const providerName = msg.provider ?? "claude-code";
-  const model = msg.model ?? "claude-sonnet-4-6";
+  const cfg = getConfig();
+  const providerName = msg.provider ?? cfg.defaultProvider;
+  const model = msg.model ?? cfg.model;
   const permissionMode = msg.permissionMode;
   const configDir = msg.configDir;
   const extraArgs = msg.extraArgs;
@@ -292,8 +294,8 @@ function handleAgentResume(ws, msg, sm) {
   if (history.length === 0 && !msg.prompt) {
     return replyError(ws, msg, "No history in DB \u2014 nothing to resume.");
   }
-  const providerName = msg.provider ?? session.lastStartConfig?.provider ?? "claude-code";
-  const model = msg.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
+  const providerName = msg.provider ?? session.lastStartConfig?.provider ?? getConfig().defaultProvider;
+  const model = msg.model ?? session.lastStartConfig?.model ?? getConfig().model;
   const permissionMode = msg.permissionMode ?? session.lastStartConfig?.permissionMode;
   const configDir = msg.configDir ?? session.lastStartConfig?.configDir;
   const extraArgs = msg.extraArgs ?? session.lastStartConfig?.extraArgs;
@@ -480,7 +482,6 @@ function handleAgentUnsubscribe(ws, msg, state) {
   state.agentUnsubs.delete(sessionId);
   reply(ws, msg, {});
 }
-const SKILL_POLL_MS = 2e3;
 function handleEventsSubscribe(ws, msg, sm, state) {
   state.skillEventUnsub?.();
   state.skillEventUnsub = null;
@@ -520,7 +521,7 @@ function handleEventsSubscribe(ws, msg, sm, state) {
       }
     } catch {
     }
-  }, SKILL_POLL_MS);
+  }, getConfig().skillPollMs);
   reply(ws, msg, { lastId });
 }
 function handleEventsUnsubscribe(ws, msg, state) {

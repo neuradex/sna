@@ -1,7 +1,6 @@
 import { streamSSE } from "hono/streaming";
 import { getDb } from "../../db/schema.js";
-const POLL_INTERVAL_MS = 500;
-const KEEPALIVE_INTERVAL_MS = 15e3;
+import { getConfig } from "../../config.js";
 function eventsRoute(c) {
   const sinceParam = c.req.query("since");
   let lastId = sinceParam ? parseInt(sinceParam) : -1;
@@ -26,7 +25,7 @@ function eventsRoute(c) {
         closed = true;
         clearInterval(keepaliveTimer);
       }
-    }, KEEPALIVE_INTERVAL_MS);
+    }, getConfig().keepaliveIntervalMs);
     while (!closed) {
       try {
         const db = getDb();
@@ -44,7 +43,7 @@ function eventsRoute(c) {
         }
       } catch {
       }
-      await stream.sleep(POLL_INTERVAL_MS);
+      await stream.sleep(getConfig().pollIntervalMs);
     }
     clearInterval(keepaliveTimer);
   });
