@@ -103,6 +103,21 @@ export interface SnaClientOptions {
    * @default 0
    */
   maxReconnectAttempts?: number;
+
+  /**
+   * Base HTTP URL of the SNA API server.
+   *
+   * When provided, operations that require ordering guarantees
+   * (session CRUD, agent start/send/kill, etc.) are routed through
+   * REST instead of WebSocket. Push/streaming operations
+   * (event subscriptions, snapshots, permission notifications)
+   * always use WebSocket regardless of this setting.
+   *
+   * If omitted, all operations fall back to WebSocket.
+   *
+   * @example "http://localhost:3099"
+   */
+  httpUrl?: string;
 }
 
 /**
@@ -154,6 +169,9 @@ export class SnaClient {
   private readonly reconnectDelay: number;
   private readonly maxReconnectAttempts: number;
 
+  /** @internal Used by SessionsApi and AgentApi within this module. */
+  readonly _httpUrl: string | undefined;
+
   /**
    * Session management APIs.
    *
@@ -179,6 +197,7 @@ export class SnaClient {
     this._reconnect = options.reconnect ?? true;
     this.reconnectDelay = options.reconnectDelay ?? 2000;
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? 0;
+    this._httpUrl = options.httpUrl;
 
     this.sessions = new SessionsApi(this);
     this.agent = new AgentApi(this);
@@ -351,6 +370,34 @@ export class SnaClient {
     }
     set.add(handler);
     return () => { set!.delete(handler); };
+  }
+
+  // ── HTTP transport (internal) ─────────────────────────────────
+
+  /**
+   * Perform a REST request against the SNA HTTP server.
+   *
+   * Used internally by {@link SessionsApi} and {@link AgentApi} when
+   * {@link SnaClientOptions.httpUrl} is configured. Falls back to WS
+   * if `httpUrl` is not set.
+   *
+   * @internal
+   */
+  async _httpFetch<T = Record<string, unknown>>(
+    method: string,
+    path: string,
+    body?: Record<string, unknown>,
+  ): Promise<T> {
+    const base = (this._httpUrl as string).replace(/\/$/, "");
+    const hasBody = body !== undefined && method !== "GET" && method !== "DELETE";
+    const res = await fetch(base + path, {
+      method,
+      headers: hasBody ? { "Content-Type": "application/json" } : undefined,
+      body: hasBody ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json() as Record<string, unknown>;
+    if (!res.ok) throw new Error((data.message as string) ?? `HTTP ${res.status}`);
+    return data as T;
   }
 
   // ── Internal ──────────────────────────────────────────────────
@@ -540,6 +587,9 @@ class SessionsApi {
     label: string;
     meta: Record<string, unknown> | null;
   }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("POST", "/sessions", opts);
+    }
     return this.client.request("sessions.create", opts);
   }
 
@@ -557,6 +607,9 @@ class SessionsApi {
    * ```
    */
   async remove(session: string): Promise<{ status: "removed" }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("DELETE", `/sessions/${encodeURIComponent(session)}`);
+    }
     return this.client.request("sessions.remove", { session });
   }
 
@@ -588,6 +641,9 @@ class SessionsApi {
     meta?: Record<string, unknown>;
     cwd?: string;
   }): Promise<{ status: "updated"; session: string }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("PATCH", `/sessions/${encodeURIComponent(session)}`, opts);
+    }
     return this.client.request("sessions.update", { session, ...opts });
   }
 
@@ -755,6 +811,9 @@ class AgentApi {
     provider: string;
     sessionId: string;
   }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("POST", `/start?session=${encodeURIComponent(session)}`, config as Record<string, unknown>);
+    }
     return this.client.request("agent.start", { session, ...config });
   }
 
@@ -784,6 +843,9 @@ class AgentApi {
     /** Arbitrary metadata attached to this message. */
     meta?: Record<string, unknown>;
   }): Promise<{ status: "sent" }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("POST", `/send?session=${encodeURIComponent(session)}`, { message, ...opts });
+    }
     return this.client.request("agent.send", { session, message, ...opts });
   }
 
@@ -801,6 +863,9 @@ class AgentApi {
    * ```
    */
   async kill(session: string): Promise<{ status: "killed" | "no_session" }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("POST", `/kill?session=${encodeURIComponent(session)}`);
+    }
     return this.client.request("agent.kill", { session });
   }
 
@@ -825,6 +890,9 @@ class AgentApi {
     provider: string;
     sessionId: string;
   }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("POST", `/restart?session=${encodeURIComponent(session)}`, (config ?? {}) as Record<string, unknown>);
+    }
     return this.client.request("agent.restart", { session, ...config });
   }
 
@@ -845,6 +913,9 @@ class AgentApi {
    * ```
    */
   async interrupt(session: string): Promise<{ status: "interrupted" | "no_session" }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("POST", `/interrupt?session=${encodeURIComponent(session)}`);
+    }
     return this.client.request("agent.interrupt", { session });
   }
 
@@ -878,6 +949,9 @@ class AgentApi {
     sessionId: string;
     historyCount: number;
   }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("POST", `/resume?session=${encodeURIComponent(session)}`, (opts ?? {}) as Record<string, unknown>);
+    }
     return this.client.request("agent.resume", { session, ...opts });
   }
 
@@ -915,6 +989,9 @@ class AgentApi {
     /** Last start configuration, or `null` if never started. */
     config: { provider: string; model: string; permissionMode: string; extraArgs?: string[] } | null;
   }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("GET", `/status?session=${encodeURIComponent(session)}`);
+    }
     return this.client.request("agent.status", { session });
   }
 
@@ -932,6 +1009,9 @@ class AgentApi {
    * ```
    */
   async setModel(session: string, model: string): Promise<{ status: "updated" | "no_session"; model: string }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("POST", `/set-model?session=${encodeURIComponent(session)}`, { model });
+    }
     return this.client.request("agent.set-model", { session, model });
   }
 
@@ -947,6 +1027,9 @@ class AgentApi {
    * ```
    */
   async setPermissionMode(session: string, permissionMode: string): Promise<{ status: "updated" | "no_session"; permissionMode: string }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("POST", `/set-permission-mode?session=${encodeURIComponent(session)}`, { permissionMode });
+    }
     return this.client.request("agent.set-permission-mode", { session, permissionMode });
   }
 
