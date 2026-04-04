@@ -124,6 +124,7 @@ async function cmdClaude(args: string[]) {
   const meta: InstanceMeta = {
     name,
     mode: args.includes("-p") || args.includes("--print") ? "oneshot" : "interactive",
+    command: `sna-test claude ${args.join(" ")}`.trim(),
     createdAt: new Date().toISOString(),
     status: "running",
   };
@@ -189,6 +190,9 @@ function cmdLs() {
     const date = inst.createdAt.slice(0, 19).replace("T", " ");
     const exit = inst.exitCode != null ? `  exit=${inst.exitCode}` : "";
     console.log(`  ${chalk.cyan(inst.name.padEnd(20))} ${inst.mode.padEnd(12)} ${chalk.dim(date)}  ${status}${exit}`);
+    if (inst.command) {
+      console.log(`  ${" ".repeat(20)} ${chalk.dim(inst.command)}`);
+    }
   }
   console.log();
 }

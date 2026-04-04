@@ -65,6 +65,7 @@ declare function getInstanceDir(name: string): string;
 interface InstanceMeta {
     name: string;
     mode: "oneshot" | "interactive";
+    command: string;
     createdAt: string;
     pid?: number;
     mockPort?: number;

@@ -400,6 +400,7 @@ async function cmdClaude(args2) {
   const meta = {
     name,
     mode: args2.includes("-p") || args2.includes("--print") ? "oneshot" : "interactive",
+    command: `sna-test claude ${args2.join(" ")}`.trim(),
     createdAt: (/* @__PURE__ */ new Date()).toISOString(),
     status: "running"
   };
@@ -450,6 +451,9 @@ function cmdLs() {
     const date = inst.createdAt.slice(0, 19).replace("T", " ");
     const exit = inst.exitCode != null ? `  exit=${inst.exitCode}` : "";
     console.log(`  ${chalk.cyan(inst.name.padEnd(20))} ${inst.mode.padEnd(12)} ${chalk.dim(date)}  ${status}${exit}`);
+    if (inst.command) {
+      console.log(`  ${" ".repeat(20)} ${chalk.dim(inst.command)}`);
+    }
   }
   console.log();
 }
