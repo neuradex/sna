@@ -281,6 +281,26 @@ export class SnaClient {
    */
   readonly agent: AgentApi;
 
+  /**
+   * Skill event streaming and emission APIs.
+   *
+   * Use this namespace to subscribe to skill events, emit events,
+   * and stream events via SSE.
+   *
+   * @see {@link EventsApi}
+   */
+  readonly events: EventsApi;
+
+  /**
+   * Chat session and message persistence APIs.
+   *
+   * Use this namespace to manage chat sessions and messages
+   * stored in the SNA database.
+   *
+   * @see {@link ChatApi}
+   */
+  readonly chat: ChatApi;
+
   constructor(options: SnaClientOptions) {
     const { wsUrl, httpBase } = resolveTransports(options);
     this.wsUrl = wsUrl;
@@ -291,6 +311,8 @@ export class SnaClient {
 
     this.sessions = new SessionsApi(this);
     this.agent = new AgentApi(this);
+    this.events = new EventsApi(this);
+    this.chat = new ChatApi(this);
   }
 
   // ── Connection lifecycle ──────────────────────────────────────
@@ -494,6 +516,36 @@ export class SnaClient {
     return data as T;
   }
 
+  /**
+   * Parse an SSE response as an AsyncGenerator.
+   * Yields parsed JSON objects from `data:` lines.
+   * @internal
+   */
+  static async *_parseSse(response: Response): AsyncGenerator<Record<string, unknown>> {
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const data = line.slice(6).trim();
+            if (data) {
+              try { yield JSON.parse(data) as Record<string, unknown>; } catch { /* skip */ }
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
   // ── Internal ──────────────────────────────────────────────────
 
   private doConnect(): void {
@@ -627,6 +679,57 @@ export interface SessionInfo {
   lastActivityAt: number;
 }
 
+/** Options for a one-shot agent execution. */
+export interface RunOnceOptions {
+  message: string;
+  model?: string;
+  systemPrompt?: string;
+  appendSystemPrompt?: string;
+  permissionMode?: string;
+  cwd?: string;
+  timeout?: number;
+  provider?: string;
+  extraArgs?: string[];
+}
+
+/** Result of a one-shot agent execution. */
+export interface RunOnceResult {
+  result: string;
+  usage: Record<string, unknown> | null;
+}
+
+/** A skill event row from the database. */
+export interface SkillEvent {
+  id: number;
+  session_id: string | null;
+  skill: string;
+  type: string;
+  message: string;
+  data: string | null;
+  created_at: string;
+}
+
+/** A chat session row from the database. */
+export interface ChatSession {
+  id: string;
+  label: string;
+  type: string;
+  meta: Record<string, unknown> | null;
+  cwd: string | null;
+  created_at: string;
+}
+
+/** A chat message row from the database. */
+export interface ChatMessage {
+  id: number;
+  session_id: string;
+  role: string;
+  content: string;
+  skill_name: string | null;
+  meta: Record<string, unknown> | null;
+  created_at: string;
+}
+
 /**
  * Session management APIs.
  *
@@ -667,6 +770,25 @@ class SessionsApi {
   constructor(private client: SnaClient) {}
 
   /**
+   * List all sessions on the server.
+   *
+   * Returns a point-in-time snapshot of all sessions. For live
+   * updates, use {@link onSnapshot} instead.
+   *
+   * @example
+   * ```ts
+   * const { sessions } = await sna.sessions.list();
+   * console.log(sessions.map(s => s.id));
+   * ```
+   */
+  async list(): Promise<{ sessions: SessionInfo[] }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("GET", "/agent/sessions");
+    }
+    return this.client.request("sessions.list");
+  }
+
+  /**
    * Create a new agent session on the server.
    *
    * The session is created in a stopped state — call
@@ -703,7 +825,7 @@ class SessionsApi {
     meta: Record<string, unknown> | null;
   }> {
     if (this.client._httpUrl) {
-      return this.client._httpFetch("POST", "/sessions", opts);
+      return this.client._httpFetch("POST", "/agent/sessions", opts);
     }
     return this.client.request("sessions.create", opts);
   }
@@ -726,7 +848,7 @@ class SessionsApi {
    */
   async remove(session: string): Promise<{ status: "removed" }> {
     if (this.client._httpUrl) {
-      return this.client._httpFetch("DELETE", `/sessions/${encodeURIComponent(session)}`);
+      return this.client._httpFetch("DELETE", `/agent/sessions/${encodeURIComponent(session)}`);
     }
     return this.client.request("sessions.remove", { session });
   }
@@ -763,7 +885,7 @@ class SessionsApi {
     cwd?: string;
   }): Promise<{ status: "updated"; session: string }> {
     if (this.client._httpUrl) {
-      return this.client._httpFetch("PATCH", `/sessions/${encodeURIComponent(session)}`, opts);
+      return this.client._httpFetch("PATCH", `/agent/sessions/${encodeURIComponent(session)}`, opts);
     }
     return this.client.request("sessions.update", { session, ...opts });
   }
@@ -954,7 +1076,7 @@ class AgentApi {
     sessionId: string;
   }> {
     if (this.client._httpUrl) {
-      return this.client._httpFetch("POST", `/start?session=${encodeURIComponent(session)}`, config as Record<string, unknown>);
+      return this.client._httpFetch("POST", `/agent/start?session=${encodeURIComponent(session)}`, config as Record<string, unknown>);
     }
     return this.client.request("agent.start", { session, ...config });
   }
@@ -993,7 +1115,7 @@ class AgentApi {
     meta?: Record<string, unknown>;
   }): Promise<{ status: "sent" }> {
     if (this.client._httpUrl) {
-      return this.client._httpFetch("POST", `/send?session=${encodeURIComponent(session)}`, { message, ...opts });
+      return this.client._httpFetch("POST", `/agent/send?session=${encodeURIComponent(session)}`, { message, ...opts });
     }
     return this.client.request("agent.send", { session, message, ...opts });
   }
@@ -1013,7 +1135,7 @@ class AgentApi {
    */
   async kill(session: string): Promise<{ status: "killed" | "no_session" }> {
     if (this.client._httpUrl) {
-      return this.client._httpFetch("POST", `/kill?session=${encodeURIComponent(session)}`);
+      return this.client._httpFetch("POST", `/agent/kill?session=${encodeURIComponent(session)}`);
     }
     return this.client.request("agent.kill", { session });
   }
@@ -1040,7 +1162,7 @@ class AgentApi {
     sessionId: string;
   }> {
     if (this.client._httpUrl) {
-      return this.client._httpFetch("POST", `/restart?session=${encodeURIComponent(session)}`, (config ?? {}) as Record<string, unknown>);
+      return this.client._httpFetch("POST", `/agent/restart?session=${encodeURIComponent(session)}`, (config ?? {}) as Record<string, unknown>);
     }
     return this.client.request("agent.restart", { session, ...config });
   }
@@ -1063,7 +1185,7 @@ class AgentApi {
    */
   async interrupt(session: string): Promise<{ status: "interrupted" | "no_session" }> {
     if (this.client._httpUrl) {
-      return this.client._httpFetch("POST", `/interrupt?session=${encodeURIComponent(session)}`);
+      return this.client._httpFetch("POST", `/agent/interrupt?session=${encodeURIComponent(session)}`);
     }
     return this.client.request("agent.interrupt", { session });
   }
@@ -1099,7 +1221,7 @@ class AgentApi {
     historyCount: number;
   }> {
     if (this.client._httpUrl) {
-      return this.client._httpFetch("POST", `/resume?session=${encodeURIComponent(session)}`, (opts ?? {}) as Record<string, unknown>);
+      return this.client._httpFetch("POST", `/agent/resume?session=${encodeURIComponent(session)}`, (opts ?? {}) as Record<string, unknown>);
     }
     return this.client.request("agent.resume", { session, ...opts });
   }
@@ -1139,9 +1261,74 @@ class AgentApi {
     config: { provider: string; model: string; permissionMode: string; extraArgs?: string[] } | null;
   }> {
     if (this.client._httpUrl) {
-      return this.client._httpFetch("GET", `/status?session=${encodeURIComponent(session)}`);
+      return this.client._httpFetch("GET", `/agent/status?session=${encodeURIComponent(session)}`);
     }
     return this.client.request("agent.status", { session });
+  }
+
+  /**
+   * Run a one-shot agent task and return the result.
+   *
+   * Creates a temporary session, spawns an agent, waits for it to
+   * complete, then cleans up. The session is deleted after execution.
+   *
+   * **Always synchronous from the caller's perspective** — the Promise
+   * resolves only when the agent emits a `complete` event or the
+   * `timeout` is reached.
+   *
+   * @param opts - One-shot execution options.
+   * @param opts.message - The prompt to send to the agent.
+   * @param opts.timeout - Max wait time in ms. Server default if omitted.
+   * @returns The agent's final text response and token usage.
+   *
+   * @example
+   * ```ts
+   * const { result } = await sna.agent.runOnce({
+   *   message: "What is 2 + 2?",
+   *   model: "claude-haiku-4-5-20251001",
+   *   timeout: 30000,
+   * });
+   * console.log(result); // "4"
+   * ```
+   */
+  async runOnce(opts: RunOnceOptions): Promise<RunOnceResult> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("POST", "/agent/run-once", opts as unknown as Record<string, unknown>);
+    }
+    return this.client.request("agent.run-once", opts as unknown as Record<string, unknown>);
+  }
+
+  /**
+   * Stream agent events for a session via SSE (HTTP-only).
+   *
+   * Returns an `AsyncIterable` of agent events. The stream stays
+   * open until the caller breaks the loop or the connection is closed.
+   *
+   * **Requires `http: true`** — this method uses the HTTP SSE endpoint
+   * (`GET /agent/events`), not WebSocket. For WS-based streaming, use
+   * {@link subscribe} + {@link onEvent} instead.
+   *
+   * @param session - Session to stream events for.
+   * @param since - Start from this event cursor. Defaults to current cursor.
+   * @returns An `AsyncIterable` of agent event objects.
+   * @throws If `http` transport is not enabled.
+   *
+   * @example
+   * ```ts
+   * for await (const event of sna.agent.streamEvents("default")) {
+   *   if (event.type === "complete") break;
+   *   console.log(event.type, event.message);
+   * }
+   * ```
+   */
+  async *streamEvents(session: string, since?: number): AsyncGenerator<Record<string, unknown>> {
+    if (!this.client._httpUrl) throw new Error("streamEvents requires http: true");
+    const base = this.client._httpUrl.replace(/\/$/, "");
+    const params = new URLSearchParams({ session });
+    if (since !== undefined) params.set("since", String(since));
+    const res = await fetch(`${base}/agent/events?${params}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    yield* SnaClient._parseSse(res);
   }
 
   /**
@@ -1159,7 +1346,7 @@ class AgentApi {
    */
   async setModel(session: string, model: string): Promise<{ status: "updated" | "no_session"; model: string }> {
     if (this.client._httpUrl) {
-      return this.client._httpFetch("POST", `/set-model?session=${encodeURIComponent(session)}`, { model });
+      return this.client._httpFetch("POST", `/agent/set-model?session=${encodeURIComponent(session)}`, { model });
     }
     return this.client.request("agent.set-model", { session, model });
   }
@@ -1177,7 +1364,7 @@ class AgentApi {
    */
   async setPermissionMode(session: string, permissionMode: string): Promise<{ status: "updated" | "no_session"; permissionMode: string }> {
     if (this.client._httpUrl) {
-      return this.client._httpFetch("POST", `/set-permission-mode?session=${encodeURIComponent(session)}`, { permissionMode });
+      return this.client._httpFetch("POST", `/agent/set-permission-mode?session=${encodeURIComponent(session)}`, { permissionMode });
     }
     return this.client.request("agent.set-permission-mode", { session, permissionMode });
   }
@@ -1445,5 +1632,304 @@ class AgentApi {
     if (this.permissionSubscribed) {
       this.client.request("permission.subscribe").catch(() => {});
     }
+  }
+}
+
+// ── Events API (Skill events) ───────────────────────────────────
+
+/**
+ * Skill event streaming and emission APIs.
+ *
+ * Access via `sna.events`.
+ *
+ * Skill events are lightweight records written to the `skill_events`
+ * SQLite table by skills (via `emit.js`) or by calling {@link emit}.
+ * They are separate from agent events (which are model output events).
+ *
+ * @example
+ * ```ts
+ * // Subscribe to real-time skill events via WebSocket
+ * sna.events.onSkillEvent(({ skill, type, message }) => {
+ *   console.log(`[${skill}/${type}] ${message}`);
+ * });
+ * await sna.events.subscribe();
+ * ```
+ */
+class EventsApi {
+  constructor(private client: SnaClient) {}
+
+  /**
+   * Subscribe to skill event pushes via WebSocket.
+   *
+   * After subscribing, `skill.event` push messages are delivered
+   * to handlers registered via {@link onSkillEvent}.
+   *
+   * @param opts.since - Start from this event ID. Defaults to the latest.
+   * @returns The last event ID at subscription time.
+   *
+   * @example
+   * ```ts
+   * sna.events.onSkillEvent((e) => console.log(e));
+   * const { lastId } = await sna.events.subscribe({ since: 0 });
+   * ```
+   */
+  async subscribe(opts?: { since?: number }): Promise<{ lastId: number }> {
+    return this.client.request("events.subscribe", opts ?? {});
+  }
+
+  /**
+   * Unsubscribe from skill event pushes.
+   *
+   * @example
+   * ```ts
+   * await sna.events.unsubscribe();
+   * ```
+   */
+  async unsubscribe(): Promise<void> {
+    await this.client.request("events.unsubscribe", {});
+  }
+
+  /**
+   * Emit a skill event.
+   *
+   * Writes the event to the `skill_events` table and broadcasts it
+   * to all connected WS subscribers.
+   *
+   * **Transport note:** WS uses `eventType` (not `type`) for this call
+   * because `type` is reserved as the WS protocol routing field.
+   * The client handles this automatically.
+   *
+   * @returns The assigned event row ID.
+   *
+   * @example
+   * ```ts
+   * await sna.events.emit({
+   *   skill: "my-skill",
+   *   eventType: "milestone",
+   *   message: "Step 1 complete",
+   *   session: "default",
+   * });
+   * ```
+   */
+  async emit(opts: {
+    skill: string;
+    eventType: string;
+    message: string;
+    data?: string;
+    session?: string;
+  }): Promise<{ id: number }> {
+    if (this.client._httpUrl) {
+      // HTTP uses `type` (not `eventType`)
+      const { eventType, ...rest } = opts;
+      return this.client._httpFetch("POST", "/emit", { ...rest, type: eventType });
+    }
+    // WS uses `eventType` (not `type` — reserved for routing)
+    return this.client.request("emit", opts as Record<string, unknown>);
+  }
+
+  /**
+   * Listen for skill event pushes.
+   *
+   * Fires when any skill event is pushed to this connection after
+   * calling {@link subscribe}.
+   *
+   * @param cb - Called for each skill event.
+   * @returns An unsubscribe function.
+   *
+   * @example
+   * ```ts
+   * const unsub = sna.events.onSkillEvent(({ skill, type, message }) => {
+   *   if (type === "complete") markDone(skill);
+   * });
+   * ```
+   */
+  onSkillEvent(cb: (event: SkillEvent) => void): () => void {
+    return this.client.onPush("skill.event", (msg) => {
+      cb(msg.data as SkillEvent);
+    });
+  }
+
+  /**
+   * Stream skill events via SSE (HTTP-only).
+   *
+   * Returns an `AsyncIterable` of {@link SkillEvent} rows.
+   * Requires `http: true`. For WS streaming, use
+   * {@link subscribe} + {@link onSkillEvent}.
+   *
+   * @param since - Start from this event ID.
+   *
+   * @example
+   * ```ts
+   * for await (const event of sna.events.stream()) {
+   *   if (event.type === "complete") break;
+   *   console.log(event.skill, event.message);
+   * }
+   * ```
+   */
+  async *stream(since?: number): AsyncGenerator<SkillEvent> {
+    if (!this.client._httpUrl) throw new Error("events.stream() requires http: true");
+    const base = this.client._httpUrl.replace(/\/$/, "");
+    const params = since !== undefined ? `?since=${since}` : "";
+    const res = await fetch(`${base}/events${params}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    for await (const data of SnaClient._parseSse(res)) {
+      yield data as unknown as SkillEvent;
+    }
+  }
+}
+
+// ── Chat API ────────────────────────────────────────────────────
+
+/**
+ * Chat session and message persistence APIs.
+ *
+ * Access via `sna.chat`.
+ *
+ * Chat sessions and messages are stored in the `chat_sessions` and
+ * `chat_messages` SQLite tables. These are separate from agent sessions
+ * (which run processes) — chat sessions are lightweight records for
+ * persisting conversation history.
+ *
+ * @example
+ * ```ts
+ * const { id } = await sna.chat.createSession({ label: "My chat" });
+ * await sna.chat.createMessage(id, { role: "user", content: "Hello" });
+ * const { messages } = await sna.chat.listMessages(id);
+ * ```
+ */
+class ChatApi {
+  constructor(private client: SnaClient) {}
+
+  // ── Chat sessions ─────────────────────────────────────────────
+
+  /**
+   * List all chat sessions.
+   *
+   * @example
+   * ```ts
+   * const { sessions } = await sna.chat.listSessions();
+   * ```
+   */
+  async listSessions(): Promise<{ sessions: ChatSession[] }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("GET", "/chat/sessions");
+    }
+    return this.client.request("chat.sessions.list");
+  }
+
+  /**
+   * Create a chat session.
+   *
+   * @param opts.id - Explicit ID. Auto-generated if omitted.
+   * @param opts.label - Human-readable label.
+   * @param opts.type - Session type. Defaults to `"background"`.
+   * @param opts.meta - Arbitrary metadata.
+   *
+   * @example
+   * ```ts
+   * const { id } = await sna.chat.createSession({ label: "thread-1" });
+   * ```
+   */
+  async createSession(opts?: {
+    id?: string;
+    label?: string;
+    type?: string;
+    meta?: Record<string, unknown>;
+  }): Promise<{ status: "created"; id: string; meta: Record<string, unknown> | null }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("POST", "/chat/sessions", opts ?? {});
+    }
+    // WS cannot use `type` in body (reserved for routing) — use `chatType`
+    const { type: chatType, ...rest } = opts ?? {};
+    return this.client.request("chat.sessions.create", { ...rest, ...(chatType ? { chatType } : {}) });
+  }
+
+  /**
+   * Delete a chat session and all its messages.
+   *
+   * @param session - The session ID to delete.
+   *
+   * @example
+   * ```ts
+   * await sna.chat.removeSession("thread-1");
+   * ```
+   */
+  async removeSession(session: string): Promise<{ status: "deleted" }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("DELETE", `/chat/sessions/${encodeURIComponent(session)}`);
+    }
+    return this.client.request("chat.sessions.remove", { session });
+  }
+
+  // ── Chat messages ─────────────────────────────────────────────
+
+  /**
+   * List messages for a chat session.
+   *
+   * @param session - The session ID.
+   * @param opts.since - Only return messages with `id > since`.
+   *
+   * @example
+   * ```ts
+   * const { messages } = await sna.chat.listMessages("thread-1");
+   * const newOnly = await sna.chat.listMessages("thread-1", { since: lastId });
+   * ```
+   */
+  async listMessages(session: string, opts?: { since?: number }): Promise<{ messages: ChatMessage[] }> {
+    if (this.client._httpUrl) {
+      const base = `/chat/sessions/${encodeURIComponent(session)}/messages`;
+      const path = opts?.since !== undefined ? `${base}?since=${opts.since}` : base;
+      return this.client._httpFetch("GET", path);
+    }
+    return this.client.request("chat.messages.list", { session, ...opts });
+  }
+
+  /**
+   * Add a message to a chat session.
+   *
+   * The session is auto-created with type `"main"` if it doesn't exist.
+   *
+   * @param session - The session ID.
+   * @param opts.role - Message role: `"user"`, `"assistant"`, `"thinking"`, etc.
+   * @param opts.content - Message text.
+   * @param opts.skill_name - Skill that generated this message, if any.
+   * @param opts.meta - Arbitrary metadata.
+   * @returns The assigned message row ID.
+   *
+   * @example
+   * ```ts
+   * const { id } = await sna.chat.createMessage("thread-1", {
+   *   role: "user",
+   *   content: "What is the capital of France?",
+   * });
+   * ```
+   */
+  async createMessage(session: string, opts: {
+    role: string;
+    content?: string;
+    skill_name?: string;
+    meta?: Record<string, unknown>;
+  }): Promise<{ status: "created"; id: number }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("POST", `/chat/sessions/${encodeURIComponent(session)}/messages`, opts as Record<string, unknown>);
+    }
+    return this.client.request("chat.messages.create", { session, ...opts });
+  }
+
+  /**
+   * Clear all messages for a chat session.
+   *
+   * @param session - The session ID.
+   *
+   * @example
+   * ```ts
+   * await sna.chat.clearMessages("thread-1");
+   * ```
+   */
+  async clearMessages(session: string): Promise<{ status: "cleared" }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("DELETE", `/chat/sessions/${encodeURIComponent(session)}/messages`);
+    }
+    return this.client.request("chat.messages.clear", { session });
   }
 }

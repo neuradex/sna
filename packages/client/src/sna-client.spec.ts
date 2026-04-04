@@ -1053,7 +1053,7 @@ describe("HTTP transport (http: true)", () => {
 
     const req = mock.httpRequests[0];
     assert.equal(req.method, "POST");
-    assert.equal(req.url, "/sessions");
+    assert.equal(req.url, "/agent/sessions");
     assert.equal(req.body.label, "test");
     assert.equal(req.body.id, "s1");
   });
@@ -1066,7 +1066,7 @@ describe("HTTP transport (http: true)", () => {
 
     const req = mock.httpRequests[0];
     assert.equal(req.method, "POST");
-    assert.equal(req.url, "/sessions");
+    assert.equal(req.url, "/agent/sessions");
   });
 
   it("sessions.remove — DELETE /sessions/:id", async () => {
@@ -1078,7 +1078,7 @@ describe("HTTP transport (http: true)", () => {
 
     const req = mock.httpRequests[0];
     assert.equal(req.method, "DELETE");
-    assert.equal(req.url, "/sessions/my-session");
+    assert.equal(req.url, "/agent/sessions/my-session");
   });
 
   it("sessions.remove — URL-encodes session id", async () => {
@@ -1088,7 +1088,7 @@ describe("HTTP transport (http: true)", () => {
     await sna.sessions.remove("session/with spaces");
 
     const req = mock.httpRequests[0];
-    assert.equal(req.url, "/sessions/session%2Fwith%20spaces");
+    assert.equal(req.url, "/agent/sessions/session%2Fwith%20spaces");
   });
 
   it("sessions.update — PATCH /sessions/:id with body", async () => {
@@ -1101,7 +1101,7 @@ describe("HTTP transport (http: true)", () => {
 
     const req = mock.httpRequests[0];
     assert.equal(req.method, "PATCH");
-    assert.equal(req.url, "/sessions/s2");
+    assert.equal(req.url, "/agent/sessions/s2");
     assert.equal(req.body.label, "New Name");
     assert.deepEqual(req.body.meta, { x: 1 });
   });
@@ -1118,7 +1118,7 @@ describe("HTTP transport (http: true)", () => {
 
     const req = mock.httpRequests[0];
     assert.equal(req.method, "POST");
-    assert.equal(req.url, "/start?session=default");
+    assert.equal(req.url, "/agent/start?session=default");
     assert.equal(req.body.model, "claude-sonnet-4-6");
   });
 
@@ -1128,7 +1128,7 @@ describe("HTTP transport (http: true)", () => {
 
     await sna.agent.start("a/b", {});
 
-    assert.equal(mock.httpRequests[0].url, "/start?session=a%2Fb");
+    assert.equal(mock.httpRequests[0].url, "/agent/start?session=a%2Fb");
   });
 
   it("agent.send — POST /send?session=<id> with message", async () => {
@@ -1140,7 +1140,7 @@ describe("HTTP transport (http: true)", () => {
 
     const req = mock.httpRequests[0];
     assert.equal(req.method, "POST");
-    assert.equal(req.url, "/send?session=default");
+    assert.equal(req.url, "/agent/send?session=default");
     assert.equal(req.body.message, "hello world");
   });
 
@@ -1167,7 +1167,7 @@ describe("HTTP transport (http: true)", () => {
 
     const req = mock.httpRequests[0];
     assert.equal(req.method, "POST");
-    assert.equal(req.url, "/kill?session=default");
+    assert.equal(req.url, "/agent/kill?session=default");
   });
 
   it("agent.restart — POST /restart?session=<id> with config body", async () => {
@@ -1179,7 +1179,7 @@ describe("HTTP transport (http: true)", () => {
 
     const req = mock.httpRequests[0];
     assert.equal(req.method, "POST");
-    assert.equal(req.url, "/restart?session=default");
+    assert.equal(req.url, "/agent/restart?session=default");
     assert.equal(req.body.model, "claude-opus-4-6");
   });
 
@@ -1190,7 +1190,7 @@ describe("HTTP transport (http: true)", () => {
     await sna.agent.restart("default");
 
     const req = mock.httpRequests[0];
-    assert.equal(req.url, "/restart?session=default");
+    assert.equal(req.url, "/agent/restart?session=default");
   });
 
   it("agent.resume — POST /resume?session=<id> with opts", async () => {
@@ -1206,7 +1206,7 @@ describe("HTTP transport (http: true)", () => {
 
     const req = mock.httpRequests[0];
     assert.equal(req.method, "POST");
-    assert.equal(req.url, "/resume?session=default");
+    assert.equal(req.url, "/agent/resume?session=default");
     assert.equal(req.body.model, "claude-sonnet-4-6");
     assert.equal(req.body.prompt, "continue");
   });
@@ -1220,7 +1220,7 @@ describe("HTTP transport (http: true)", () => {
 
     const req = mock.httpRequests[0];
     assert.equal(req.method, "POST");
-    assert.equal(req.url, "/interrupt?session=default");
+    assert.equal(req.url, "/agent/interrupt?session=default");
   });
 
   it("agent.getStatus — GET /status?session=<id> (no body)", async () => {
@@ -1242,7 +1242,7 @@ describe("HTTP transport (http: true)", () => {
 
     const req = mock.httpRequests[0];
     assert.equal(req.method, "GET");
-    assert.equal(req.url, "/status?session=default");
+    assert.equal(req.url, "/agent/status?session=default");
   });
 
   it("agent.setModel — POST /set-model?session=<id> with model body", async () => {
@@ -1254,7 +1254,7 @@ describe("HTTP transport (http: true)", () => {
 
     const req = mock.httpRequests[0];
     assert.equal(req.method, "POST");
-    assert.equal(req.url, "/set-model?session=default");
+    assert.equal(req.url, "/agent/set-model?session=default");
     assert.equal(req.body.model, "claude-opus-4-6");
   });
 
@@ -1267,7 +1267,7 @@ describe("HTTP transport (http: true)", () => {
 
     const req = mock.httpRequests[0];
     assert.equal(req.method, "POST");
-    assert.equal(req.url, "/set-permission-mode?session=default");
+    assert.equal(req.url, "/agent/set-permission-mode?session=default");
     assert.equal(req.body.permissionMode, "bypassPermissions");
   });
 
@@ -1367,7 +1367,7 @@ describe("HTTP transport (http: true)", () => {
 
     await sna.sessions.remove("b");
     assert.equal(mock.httpRequests.length, 1);
-    assert.equal(mock.httpRequests[0].url, "/sessions/b");
+    assert.equal(mock.httpRequests[0].url, "/agent/sessions/b");
   });
 
   it("multiple sequential HTTP calls are recorded in order", async () => {
@@ -1381,9 +1381,378 @@ describe("HTTP transport (http: true)", () => {
     await sna.sessions.remove("s1");
 
     assert.equal(mock.httpRequests.length, 3);
-    assert.equal(mock.httpRequests[0].url, "/sessions");
-    assert.equal(mock.httpRequests[1].url, "/sessions");
-    assert.equal(mock.httpRequests[2].url, "/sessions/s1");
+    assert.equal(mock.httpRequests[0].url, "/agent/sessions");
+    assert.equal(mock.httpRequests[1].url, "/agent/sessions");
+    assert.equal(mock.httpRequests[2].url, "/agent/sessions/s1");
     assert.equal(mock.httpRequests[2].method, "DELETE");
+  });
+});
+
+// ── sessions.list ────────────────────────────────────────────────
+
+describe("sessions.list (WS)", () => {
+  it("returns full sessions array", async () => {
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
+    sna.connect();
+    await waitFor(() => sna.connected);
+
+    installAutoResponder({
+      "sessions.list": () => ({
+        sessions: [
+          { id: "default", label: "default", alive: true },
+          { id: "other", label: "other", alive: false },
+        ],
+      }),
+    });
+
+    const res = await sna.sessions.list();
+    assert.equal(res.sessions.length, 2);
+    assert.equal(res.sessions[0].id, "default");
+    assert.equal(res.sessions[1].id, "other");
+  });
+});
+
+// ── agent.runOnce ────────────────────────────────────────────────
+
+describe("agent.runOnce (WS)", () => {
+  it("sends agent.run-once and returns result", async () => {
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
+    sna.connect();
+    await waitFor(() => sna.connected);
+
+    const captured: any[] = [];
+    mock.onMessage((ws, msg) => {
+      captured.push(msg);
+      mock.sendTo(ws, { type: msg.type, rid: msg.rid, result: "The answer is 42", usage: null });
+    });
+
+    const res = await sna.agent.runOnce({ message: "What is 6 * 7?" });
+    assert.equal(res.result, "The answer is 42");
+    assert.equal(res.usage, null);
+    assert.equal(captured[0].type, "agent.run-once");
+    assert.equal(captured[0].message, "What is 6 * 7?");
+  });
+
+  it("passes all opts as payload", async () => {
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
+    sna.connect();
+    await waitFor(() => sna.connected);
+
+    const captured: any[] = [];
+    mock.onMessage((ws, msg) => {
+      captured.push(msg);
+      mock.sendTo(ws, { type: msg.type, rid: msg.rid, result: "done", usage: { input: 10, output: 20 } });
+    });
+
+    await sna.agent.runOnce({
+      message: "do something",
+      model: "claude-haiku-4-5-20251001",
+      timeout: 5000,
+      cwd: "/tmp",
+    });
+    assert.equal(captured[0].model, "claude-haiku-4-5-20251001");
+    assert.equal(captured[0].timeout, 5000);
+    assert.equal(captured[0].cwd, "/tmp");
+  });
+});
+
+// ── EventsApi (WS) ────────────────────────────────────────────────
+
+describe("events API (WS)", () => {
+  it("subscribe sends events.subscribe and returns lastId", async () => {
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
+    sna.connect();
+    await waitFor(() => sna.connected);
+
+    installAutoResponder({ "events.subscribe": () => ({ lastId: 42 }) });
+
+    const res = await sna.events.subscribe({ since: 10 });
+    assert.equal(res.lastId, 42);
+  });
+
+  it("subscribe with no opts sends empty payload", async () => {
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
+    sna.connect();
+    await waitFor(() => sna.connected);
+
+    installAutoResponder({ "events.subscribe": () => ({ lastId: 0 }) });
+    const res = await sna.events.subscribe();
+    assert.equal(res.lastId, 0);
+  });
+
+  it("unsubscribe sends events.unsubscribe", async () => {
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
+    sna.connect();
+    await waitFor(() => sna.connected);
+
+    const captured: any[] = [];
+    mock.onMessage((ws, msg) => {
+      captured.push(msg);
+      mock.sendTo(ws, { type: msg.type, rid: msg.rid });
+    });
+
+    await sna.events.unsubscribe();
+    assert.equal(captured[0].type, "events.unsubscribe");
+  });
+
+  it("emit sends WS emit with eventType field (not type)", async () => {
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
+    sna.connect();
+    await waitFor(() => sna.connected);
+
+    const captured: any[] = [];
+    mock.onMessage((ws, msg) => {
+      captured.push(msg);
+      mock.sendTo(ws, { type: msg.type, rid: msg.rid, id: 99 });
+    });
+
+    const res = await sna.events.emit({
+      skill: "my-skill",
+      eventType: "milestone",
+      message: "Step done",
+      session: "default",
+    });
+    assert.equal(res.id, 99);
+    assert.equal(captured[0].type, "emit");
+    assert.equal(captured[0].skill, "my-skill");
+    assert.equal(captured[0].eventType, "milestone"); // WS uses eventType
+    assert.equal(captured[0].message, "Step done");
+    assert.equal(captured[0].session, "default");
+    // `type` field should NOT be present in the body (only as routing field)
+    assert.ok(!("type_field" in captured[0]) || captured[0].type === "emit");
+  });
+
+  it("onSkillEvent receives skill.event push", async () => {
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
+    sna.connect();
+    await waitFor(() => sna.connected);
+
+    const events: any[] = [];
+    sna.events.onSkillEvent((e) => events.push(e));
+
+    mock.broadcast({
+      type: "skill.event",
+      data: { id: 1, session_id: "default", skill: "form-fill", type: "complete", message: "Done", data: null, created_at: "2026-01-01" },
+    });
+
+    await waitFor(() => events.length > 0);
+    assert.equal(events[0].skill, "form-fill");
+    assert.equal(events[0].type, "complete");
+    assert.equal(events[0].message, "Done");
+  });
+
+  it("onSkillEvent unsubscribe stops receiving", async () => {
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
+    sna.connect();
+    await waitFor(() => sna.connected);
+
+    const events: any[] = [];
+    const unsub = sna.events.onSkillEvent((e) => events.push(e));
+    unsub();
+
+    mock.broadcast({ type: "skill.event", data: { skill: "x", type: "start", message: "hi" } });
+    await sleep(100);
+    assert.equal(events.length, 0);
+  });
+});
+
+// ── ChatApi (WS) ─────────────────────────────────────────────────
+
+describe("chat API (WS)", () => {
+  beforeEach(async () => {
+    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
+    sna.connect();
+    await waitFor(() => sna.connected);
+  });
+
+  it("listSessions returns sessions array", async () => {
+    installAutoResponder({
+      "chat.sessions.list": () => ({
+        sessions: [{ id: "s1", label: "Thread 1", type: "main", meta: null, cwd: null, created_at: "2026-01-01" }],
+      }),
+    });
+    const res = await sna.chat.listSessions();
+    assert.equal(res.sessions.length, 1);
+    assert.equal(res.sessions[0].id, "s1");
+  });
+
+  it("createSession sends chat.sessions.create with chatType", async () => {
+    const captured: any[] = [];
+    mock.onMessage((ws, msg) => {
+      captured.push(msg);
+      mock.sendTo(ws, { type: msg.type, rid: msg.rid, status: "created", id: "new-1", meta: null });
+    });
+
+    const res = await sna.chat.createSession({ label: "thread", type: "background" });
+    assert.equal(res.status, "created");
+    assert.equal(captured[0].type, "chat.sessions.create");
+    assert.equal(captured[0].chatType, "background"); // WS uses chatType
+    assert.ok(!("_type" in captured[0]) || captured[0].type === "chat.sessions.create");
+  });
+
+  it("createSession with no opts", async () => {
+    installAutoResponder({ "chat.sessions.create": () => ({ status: "created", id: "auto", meta: null }) });
+    const res = await sna.chat.createSession();
+    assert.equal(res.status, "created");
+  });
+
+  it("removeSession sends chat.sessions.remove", async () => {
+    installAutoResponder({ "chat.sessions.remove": () => ({ status: "deleted" }) });
+    const res = await sna.chat.removeSession("s1");
+    assert.equal(res.status, "deleted");
+  });
+
+  it("listMessages sends chat.messages.list with session", async () => {
+    const captured: any[] = [];
+    mock.onMessage((ws, msg) => {
+      captured.push(msg);
+      mock.sendTo(ws, { type: msg.type, rid: msg.rid, messages: [{ id: 1, role: "user", content: "hi" }] });
+    });
+    const res = await sna.chat.listMessages("s1");
+    assert.equal(res.messages.length, 1);
+    assert.equal(captured[0].session, "s1");
+  });
+
+  it("listMessages with since", async () => {
+    const captured: any[] = [];
+    mock.onMessage((ws, msg) => {
+      captured.push(msg);
+      mock.sendTo(ws, { type: msg.type, rid: msg.rid, messages: [] });
+    });
+    await sna.chat.listMessages("s1", { since: 10 });
+    assert.equal(captured[0].since, 10);
+  });
+
+  it("createMessage sends chat.messages.create", async () => {
+    const captured: any[] = [];
+    mock.onMessage((ws, msg) => {
+      captured.push(msg);
+      mock.sendTo(ws, { type: msg.type, rid: msg.rid, status: "created", id: 42 });
+    });
+    const res = await sna.chat.createMessage("s1", { role: "user", content: "Hello" });
+    assert.equal(res.status, "created");
+    assert.equal(res.id, 42);
+    assert.equal(captured[0].session, "s1");
+    assert.equal(captured[0].role, "user");
+    assert.equal(captured[0].content, "Hello");
+  });
+
+  it("clearMessages sends chat.messages.clear", async () => {
+    installAutoResponder({ "chat.messages.clear": () => ({ status: "cleared" }) });
+    const res = await sna.chat.clearMessages("s1");
+    assert.equal(res.status, "cleared");
+  });
+});
+
+// ── New HTTP transport tests ──────────────────────────────────────
+
+describe("HTTP transport — new operations", () => {
+  function httpClient() {
+    return new SnaClient({ baseUrl: mock.host, ws: false, http: true, reconnect: false });
+  }
+
+  it("sessions.list — GET /agent/sessions", async () => {
+    mock.queueHttpResponse(200, { sessions: [{ id: "default" }] });
+    sna = httpClient();
+    const res = await sna.sessions.list();
+    assert.equal(res.sessions.length, 1);
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "GET");
+    assert.equal(req.url, "/agent/sessions");
+  });
+
+  it("agent.runOnce — POST /agent/run-once with body", async () => {
+    mock.queueHttpResponse(200, { result: "42", usage: null });
+    sna = httpClient();
+    const res = await sna.agent.runOnce({ message: "6 * 7", timeout: 5000 });
+    assert.equal(res.result, "42");
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/agent/run-once");
+    assert.equal(req.body.message, "6 * 7");
+    assert.equal(req.body.timeout, 5000);
+  });
+
+  it("events.emit — POST /emit with type field (not eventType)", async () => {
+    mock.queueHttpResponse(200, { id: 77 });
+    sna = httpClient();
+    const res = await sna.events.emit({ skill: "s", eventType: "complete", message: "done" });
+    assert.equal(res.id, 77);
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/emit");
+    assert.equal(req.body.type, "complete"); // HTTP uses `type`
+    assert.equal(req.body.skill, "s");
+    assert.ok(!("eventType" in req.body)); // `eventType` must NOT appear in HTTP body
+  });
+
+  it("chat.listSessions — GET /chat/sessions", async () => {
+    mock.queueHttpResponse(200, { sessions: [] });
+    sna = httpClient();
+    await sna.chat.listSessions();
+    assert.equal(mock.httpRequests[0].method, "GET");
+    assert.equal(mock.httpRequests[0].url, "/chat/sessions");
+  });
+
+  it("chat.createSession — POST /chat/sessions with type (not chatType)", async () => {
+    mock.queueHttpResponse(200, { status: "created", id: "new-1", meta: null });
+    sna = httpClient();
+    await sna.chat.createSession({ label: "thread", type: "background" });
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/chat/sessions");
+    assert.equal(req.body.label, "thread");
+    assert.equal(req.body.type, "background"); // HTTP uses `type`
+    assert.ok(!("chatType" in req.body)); // `chatType` must NOT appear in HTTP body
+  });
+
+  it("chat.removeSession — DELETE /chat/sessions/:id", async () => {
+    mock.queueHttpResponse(200, { status: "deleted" });
+    sna = httpClient();
+    await sna.chat.removeSession("s1");
+    assert.equal(mock.httpRequests[0].method, "DELETE");
+    assert.equal(mock.httpRequests[0].url, "/chat/sessions/s1");
+  });
+
+  it("chat.removeSession — URL-encodes session id", async () => {
+    mock.queueHttpResponse(200, { status: "deleted" });
+    sna = httpClient();
+    await sna.chat.removeSession("a/b");
+    assert.equal(mock.httpRequests[0].url, "/chat/sessions/a%2Fb");
+  });
+
+  it("chat.listMessages — GET /chat/sessions/:id/messages", async () => {
+    mock.queueHttpResponse(200, { messages: [] });
+    sna = httpClient();
+    await sna.chat.listMessages("s1");
+    assert.equal(mock.httpRequests[0].method, "GET");
+    assert.equal(mock.httpRequests[0].url, "/chat/sessions/s1/messages");
+  });
+
+  it("chat.listMessages — with since query param", async () => {
+    mock.queueHttpResponse(200, { messages: [] });
+    sna = httpClient();
+    await sna.chat.listMessages("s1", { since: 99 });
+    assert.equal(mock.httpRequests[0].url, "/chat/sessions/s1/messages?since=99");
+  });
+
+  it("chat.createMessage — POST /chat/sessions/:id/messages", async () => {
+    mock.queueHttpResponse(200, { status: "created", id: 5 });
+    sna = httpClient();
+    const res = await sna.chat.createMessage("s1", { role: "user", content: "hello" });
+    assert.equal(res.id, 5);
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/chat/sessions/s1/messages");
+    assert.equal(req.body.role, "user");
+    assert.equal(req.body.content, "hello");
+  });
+
+  it("chat.clearMessages — DELETE /chat/sessions/:id/messages", async () => {
+    mock.queueHttpResponse(200, { status: "cleared" });
+    sna = httpClient();
+    await sna.chat.clearMessages("s1");
+    assert.equal(mock.httpRequests[0].method, "DELETE");
+    assert.equal(mock.httpRequests[0].url, "/chat/sessions/s1/messages");
   });
 });
