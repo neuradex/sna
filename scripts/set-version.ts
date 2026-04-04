@@ -76,6 +76,8 @@ console.log(`Setting version: ${currentVersion} → ${version}\n`);
 // npm packages
 updateJson("packages/core/package.json", (j) => { j.version = version; });
 updateJson("packages/react/package.json", (j) => { j.version = version; });
+updateJson("packages/client/package.json", (j) => { j.version = version; });
+updateJson("packages/testing/package.json", (j) => { j.version = version; });
 
 // plugin
 updateJson("plugins/sna-builder/.claude-plugin/plugin.json", (j) => { j.version = version; });

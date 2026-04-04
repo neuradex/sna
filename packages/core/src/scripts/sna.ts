@@ -1127,7 +1127,11 @@ Run "sna help submit" for data submission patterns.`);
     case "api:up":      cmdApiUp();      break;
     case "api:down":    cmdApiDown();    break;
     case "api:restart": cmdApiDown(); cmdApiUp(); break;
-    case "tu":          cmdTu(args);    break;
+    case "tu":
+      console.log('  "sna tu" has moved to @sna-sdk/testing.');
+      console.log('  Install it and use "sna-test" instead.');
+      console.log('  e.g. sna-test api:up, sna-test claude "hello"');
+      break;
     case "restart":
       cmdDown();
       console.log();

@@ -1,0 +1,51 @@
+{
+  "name": "@sna-sdk/testing",
+  "version": "0.1.0",
+  "description": "Testing utilities for SNA — mock Anthropic API, oneshot runner, and sna-test CLI",
+  "type": "module",
+  "bin": {
+    "sna-test": "bin/sna-test.js"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "prepublishOnly": "pnpm build"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "homepage": "https://skills-native.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/neuradex/sna",
+    "directory": "packages/testing"
+  },
+  "license": "MIT",
+  "keywords": [
+    "sna",
+    "skills-native",
+    "testing",
+    "mock"
+  ],
+  "dependencies": {
+    "chalk": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}

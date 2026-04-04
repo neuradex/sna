@@ -40,9 +40,17 @@ jobs:
         run: |
           pnpm --filter @sna-sdk/core build
           pnpm --filter @sna-sdk/react build
+          pnpm --filter @sna-sdk/client build
+          pnpm --filter @sna-sdk/testing build
 
       - name: Publish @sna-sdk/core
         run: pnpm --filter @sna-sdk/core publish --access public --provenance --no-git-checks
 
       - name: Publish @sna-sdk/react
         run: pnpm --filter @sna-sdk/react publish --access public --provenance --no-git-checks
+
+      - name: Publish @sna-sdk/client
+        run: pnpm --filter @sna-sdk/client publish --access public --provenance --no-git-checks
+
+      - name: Publish @sna-sdk/testing
+        run: pnpm --filter @sna-sdk/testing publish --access public --provenance --no-git-checks
