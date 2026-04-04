@@ -11,7 +11,7 @@ type SessionState = "idle" | "processing" | "waiting" | "permission";
 interface StartConfig {
     provider: string;
     model: string;
-    permissionMode: string;
+    permissionMode?: string;
     extraArgs?: string[];
 }
 interface Session {

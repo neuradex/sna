@@ -125,7 +125,7 @@ export function SnaChatUI({
   // Auto-start agent
   useEffect(() => {
     if (typeof window === "undefined" || !apiUrl) return;
-    const permissionMode = dangerouslySkipPermissions ? "bypassPermissions" : "acceptEdits";
+    const permissionMode = dangerouslySkipPermissions ? "bypassPermissions" : undefined;
     fetch(`${apiUrl}/agent/start?session=${encodeURIComponent(sessionId)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

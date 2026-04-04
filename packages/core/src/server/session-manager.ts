@@ -13,7 +13,7 @@ export type SessionState = "idle" | "processing" | "waiting" | "permission";
 export interface StartConfig {
   provider: string;
   model: string;
-  permissionMode: string;
+  permissionMode?: string;
   extraArgs?: string[];
 }
 

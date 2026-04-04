@@ -34,7 +34,7 @@ try {
 }
 
 const port = parseInt(process.env.SNA_PORT ?? "3099", 10);
-const permissionMode = (process.env.SNA_PERMISSION_MODE ?? "acceptEdits") as "acceptEdits" | "bypassPermissions";
+const permissionMode = process.env.SNA_PERMISSION_MODE as string | undefined;
 const defaultModel = process.env.SNA_MODEL ?? "claude-sonnet-4-6";
 const maxSessions = parseInt(process.env.SNA_MAX_SESSIONS ?? "5", 10);
 

@@ -11,7 +11,7 @@ interface UseSnaOptions {
     maxEvents?: number;
     /** Agent provider name. Defaults to "claude-code" */
     provider?: string;
-    /** Permission mode for background sessions. Defaults to "acceptEdits" */
+    /** Permission mode for the agent. If omitted, uses Claude Code's default (interactive approval). */
     permissionMode?: string;
     onEvent?: SkillEventHandler;
     onCalled?: SkillEventHandler;

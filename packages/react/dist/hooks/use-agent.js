@@ -7,7 +7,7 @@ function useAgent(options = {}) {
     sessionId = ctx.sessionId,
     baseUrl = `${ctx.apiUrl}/agent`,
     provider = "claude-code",
-    permissionMode = "acceptEdits"
+    permissionMode
   } = options;
   const sessionParam = `session=${encodeURIComponent(sessionId)}`;
   const [connected, setConnected] = useState(false);

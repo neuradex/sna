@@ -37,7 +37,7 @@ export function useAgent(options: UseAgentOptions = {}) {
     sessionId = ctx.sessionId,
     baseUrl = `${ctx.apiUrl}/agent`,
     provider = "claude-code",
-    permissionMode = "acceptEdits",
+    permissionMode,
   } = options;
 
   const sessionParam = `session=${encodeURIComponent(sessionId)}`;

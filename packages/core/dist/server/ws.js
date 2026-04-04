@@ -217,7 +217,7 @@ function handleAgentStart(ws, msg, sm) {
   }
   const providerName = msg.provider ?? "claude-code";
   const model = msg.model ?? "claude-sonnet-4-6";
-  const permissionMode = msg.permissionMode ?? "acceptEdits";
+  const permissionMode = msg.permissionMode;
   const extraArgs = msg.extraArgs;
   try {
     const proc = provider.spawn({
@@ -292,7 +292,7 @@ function handleAgentResume(ws, msg, sm) {
   }
   const providerName = msg.provider ?? session.lastStartConfig?.provider ?? "claude-code";
   const model = msg.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
-  const permissionMode = msg.permissionMode ?? session.lastStartConfig?.permissionMode ?? "acceptEdits";
+  const permissionMode = msg.permissionMode ?? session.lastStartConfig?.permissionMode;
   const extraArgs = msg.extraArgs ?? session.lastStartConfig?.extraArgs;
   const provider = getProvider(providerName);
   try {

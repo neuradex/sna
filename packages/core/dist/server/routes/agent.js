@@ -142,7 +142,7 @@ function createAgentRoutes(sessionManager) {
     }
     const providerName = body.provider ?? "claude-code";
     const model = body.model ?? "claude-sonnet-4-6";
-    const permissionMode = body.permissionMode ?? "acceptEdits";
+    const permissionMode = body.permissionMode;
     const extraArgs = body.extraArgs;
     try {
       const proc = provider.spawn({
@@ -322,7 +322,7 @@ function createAgentRoutes(sessionManager) {
     }
     const providerName = body.provider ?? "claude-code";
     const model = body.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
-    const permissionMode = body.permissionMode ?? session.lastStartConfig?.permissionMode ?? "acceptEdits";
+    const permissionMode = body.permissionMode ?? session.lastStartConfig?.permissionMode;
     const extraArgs = body.extraArgs ?? session.lastStartConfig?.extraArgs;
     const provider = getProvider(providerName);
     try {

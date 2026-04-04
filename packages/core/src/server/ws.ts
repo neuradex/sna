@@ -346,7 +346,7 @@ function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): vo
 
   const providerName = (msg.provider as string) ?? "claude-code";
   const model = (msg.model as string) ?? "claude-sonnet-4-6";
-  const permissionMode = (msg.permissionMode as string) ?? "acceptEdits";
+  const permissionMode = msg.permissionMode as string | undefined;
   const extraArgs = msg.extraArgs as string[] | undefined;
 
   try {
@@ -434,7 +434,7 @@ function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManager): v
 
   const providerName = (msg.provider as string) ?? session.lastStartConfig?.provider ?? "claude-code";
   const model = (msg.model as string) ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
-  const permissionMode = (msg.permissionMode as string) ?? session.lastStartConfig?.permissionMode ?? "acceptEdits";
+  const permissionMode = (msg.permissionMode as string) ?? session.lastStartConfig?.permissionMode;
   const extraArgs = (msg.extraArgs as string[]) ?? session.lastStartConfig?.extraArgs;
   const provider = getProvider(providerName);
 

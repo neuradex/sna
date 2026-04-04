@@ -1004,7 +1004,7 @@ function createAgentRoutes(sessionManager2) {
     }
     const providerName = body.provider ?? "claude-code";
     const model = body.model ?? "claude-sonnet-4-6";
-    const permissionMode2 = body.permissionMode ?? "acceptEdits";
+    const permissionMode2 = body.permissionMode;
     const extraArgs = body.extraArgs;
     try {
       const proc = provider2.spawn({
@@ -1184,7 +1184,7 @@ function createAgentRoutes(sessionManager2) {
     }
     const providerName = body.provider ?? "claude-code";
     const model = body.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
-    const permissionMode2 = body.permissionMode ?? session.lastStartConfig?.permissionMode ?? "acceptEdits";
+    const permissionMode2 = body.permissionMode ?? session.lastStartConfig?.permissionMode;
     const extraArgs = body.extraArgs ?? session.lastStartConfig?.extraArgs;
     const provider2 = getProvider(providerName);
     try {
@@ -2105,7 +2105,7 @@ function handleAgentStart(ws, msg, sm) {
   }
   const providerName = msg.provider ?? "claude-code";
   const model = msg.model ?? "claude-sonnet-4-6";
-  const permissionMode2 = msg.permissionMode ?? "acceptEdits";
+  const permissionMode2 = msg.permissionMode;
   const extraArgs = msg.extraArgs;
   try {
     const proc = provider2.spawn({
@@ -2180,7 +2180,7 @@ function handleAgentResume(ws, msg, sm) {
   }
   const providerName = msg.provider ?? session.lastStartConfig?.provider ?? "claude-code";
   const model = msg.model ?? session.lastStartConfig?.model ?? "claude-sonnet-4-6";
-  const permissionMode2 = msg.permissionMode ?? session.lastStartConfig?.permissionMode ?? "acceptEdits";
+  const permissionMode2 = msg.permissionMode ?? session.lastStartConfig?.permissionMode;
   const extraArgs = msg.extraArgs ?? session.lastStartConfig?.extraArgs;
   const provider2 = getProvider(providerName);
   try {
@@ -2587,7 +2587,7 @@ try {
   process.exit(1);
 }
 var port = parseInt(process.env.SNA_PORT ?? "3099", 10);
-var permissionMode = process.env.SNA_PERMISSION_MODE ?? "acceptEdits";
+var permissionMode = process.env.SNA_PERMISSION_MODE;
 var defaultModel = process.env.SNA_MODEL ?? "claude-sonnet-4-6";
 var maxSessions = parseInt(process.env.SNA_MAX_SESSIONS ?? "5", 10);
 var root = new Hono4();

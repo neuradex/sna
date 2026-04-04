@@ -18,7 +18,7 @@ function useSna(options = {}) {
     onProgress,
     onMilestone,
     provider = "claude-code",
-    permissionMode = "acceptEdits",
+    permissionMode,
     onTextDelta,
     onComplete
   } = options;

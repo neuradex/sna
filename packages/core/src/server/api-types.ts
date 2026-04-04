@@ -66,7 +66,7 @@ export interface ApiResponses {
   };
   "agent.set-permission-mode": {
     status: "updated" | "no_session";
-    permissionMode: string;
+    permissionMode?: string;
   };
   "agent.kill": {
     status: "killed" | "no_session";
@@ -79,7 +79,7 @@ export interface ApiResponses {
     eventCount: number;
     messageCount: number;
     lastMessage: { role: string; content: string; created_at: string } | null;
-    config: { provider: string; model: string; permissionMode: string; extraArgs?: string[] } | null;
+    config: { provider: string; model: string; permissionMode?: string; extraArgs?: string[] } | null;
   };
   "agent.run-once": {
     result: string;

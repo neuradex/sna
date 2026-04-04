@@ -109,7 +109,7 @@ function SnaChatUI({
   const { mode } = useResponsiveChat();
   useEffect(() => {
     if (typeof window === "undefined" || !apiUrl) return;
-    const permissionMode = dangerouslySkipPermissions ? "bypassPermissions" : "acceptEdits";
+    const permissionMode = dangerouslySkipPermissions ? "bypassPermissions" : void 0;
     fetch(`${apiUrl}/agent/start?session=${encodeURIComponent(sessionId)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
