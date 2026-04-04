@@ -278,6 +278,7 @@ function handleMessage(
 function handleSessionsCreate(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
   try {
     const session = sm.createSession({
+      id: msg.id as string | undefined,
       label: msg.label as string | undefined,
       cwd: msg.cwd as string | undefined,
       meta: msg.meta as Record<string, unknown> | undefined,

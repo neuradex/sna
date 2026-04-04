@@ -130,6 +130,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
   // POST /sessions — create a new session
   app.post("/sessions", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as {
+      id?: string;
       label?: string;
       cwd?: string;
       meta?: Record<string, unknown>;
@@ -137,6 +138,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
 
     try {
       const session = sessionManager.createSession({
+        id: body.id,
         label: body.label,
         cwd: body.cwd,
         meta: body.meta,

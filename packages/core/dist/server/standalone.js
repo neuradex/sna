@@ -970,6 +970,7 @@ function createAgentRoutes(sessionManager2) {
     const body = await c.req.json().catch(() => ({}));
     try {
       const session = sessionManager2.createSession({
+        id: body.id,
         label: body.label,
         cwd: body.cwd,
         meta: body.meta
@@ -2093,6 +2094,7 @@ function handleMessage(ws, msg, sm, state) {
 function handleSessionsCreate(ws, msg, sm) {
   try {
     const session = sm.createSession({
+      id: msg.id,
       label: msg.label,
       cwd: msg.cwd,
       meta: msg.meta

@@ -17,7 +17,7 @@ interface SnaConfig {
     /** Default agent provider. */
     defaultProvider: string;
     /** Default permission mode for agent operations. env: SNA_PERMISSION_MODE */
-    defaultPermissionMode: string;
+    defaultPermissionMode: "default" | "acceptEdits" | "bypassPermissions" | "plan";
     /** Max concurrent sessions. env: SNA_MAX_SESSIONS */
     maxSessions: number;
     /** Max events buffered in memory per session. */

@@ -114,7 +114,7 @@ server = serve({ fetch: root.fetch, port }, () => {
 });
 
 // 4. Attach WebSocket on the same HTTP server
-attachWebSocket(server, sessionManager);
+attachWebSocket(server as unknown as import("http").Server, sessionManager);
 
 agentProcess.on("event", (e) => {
   if (e.type === "init") {

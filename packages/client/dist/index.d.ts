@@ -700,6 +700,7 @@ declare class AgentApi {
         provider?: string;
         model?: string;
         permissionMode?: string;
+        configDir?: string;
         prompt?: string;
         extraArgs?: string[];
     }): Promise<{

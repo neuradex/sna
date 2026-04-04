@@ -162,6 +162,7 @@ function handleMessage(ws, msg, sm, state) {
 function handleSessionsCreate(ws, msg, sm) {
   try {
     const session = sm.createSession({
+      id: msg.id,
       label: msg.label,
       cwd: msg.cwd,
       meta: msg.meta

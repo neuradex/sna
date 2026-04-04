@@ -70,6 +70,7 @@ function createAgentRoutes(sessionManager) {
     const body = await c.req.json().catch(() => ({}));
     try {
       const session = sessionManager.createSession({
+        id: body.id,
         label: body.label,
         cwd: body.cwd,
         meta: body.meta
