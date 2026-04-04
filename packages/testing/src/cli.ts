@@ -164,6 +164,8 @@ async function cmdClaude(args: string[]) {
     console.log(`  ${chalk.dim("─".repeat(50))}`);
     console.log(`  ${chalk.bold("instance:")}  ${chalk.cyan(name)}  ${meta.status === "done" ? chalk.green("done") : chalk.red(`error (exit ${code})`)}`);
     console.log(`  ${chalk.dim("requests:")}  ${mock.requests.length}`);
+    console.log(`  ${chalk.dim("logs:")}      sna-test logs ${name}`);
+    console.log(`  ${chalk.dim("api logs:")}  sna-test logs ${name} --api`);
     console.log(`  ${chalk.dim("cleanup:")}   sna-test rm ${name}`);
 
     mock.close();

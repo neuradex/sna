@@ -180,11 +180,22 @@ async function startMockAnthropicServer() {
       });
       const messageId = `msg_mock_${Date.now()}`;
       const toolUseId = `toolu_mock_${Date.now()}`;
-      const toolMatch = userText.match(/\[tool:(\w+)\]\s*(.*)/s);
-      const hasToolResult = body.messages?.some(
-        (m) => m.role === "user" && Array.isArray(m.content) && m.content.some((b) => b.type === "tool_result")
-      );
-      const shouldToolUse = toolMatch && !hasToolResult;
+      let toolMatch = null;
+      if (Array.isArray(lastUser?.content)) {
+        for (const block of lastUser.content) {
+          if (block.type === "text") {
+            const m = block.text.match(/\[tool:(\w+)\]\s*(.*)/s);
+            if (m) {
+              toolMatch = m;
+              break;
+            }
+          }
+        }
+      } else if (typeof lastUser?.content === "string") {
+        toolMatch = lastUser.content.match(/\[tool:(\w+)\]\s*(.*)/s);
+      }
+      const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
+      const shouldToolUse = Boolean(toolMatch) && hasTools;
       const toolName = toolMatch?.[1] ?? "";
       const toolArg = toolMatch?.[2]?.trim() ?? "";
       const replyText = shouldToolUse ? "" : [...userText].reverse().join("");
@@ -420,6 +431,8 @@ async function cmdClaude(args2) {
     console.log(`  ${chalk.dim("\u2500".repeat(50))}`);
     console.log(`  ${chalk.bold("instance:")}  ${chalk.cyan(name)}  ${meta.status === "done" ? chalk.green("done") : chalk.red(`error (exit ${code})`)}`);
     console.log(`  ${chalk.dim("requests:")}  ${mock.requests.length}`);
+    console.log(`  ${chalk.dim("logs:")}      sna-test logs ${name}`);
+    console.log(`  ${chalk.dim("api logs:")}  sna-test logs ${name} --api`);
     console.log(`  ${chalk.dim("cleanup:")}   sna-test rm ${name}`);
     mock.close();
     process.exit(code ?? 0);

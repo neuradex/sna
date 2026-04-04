@@ -109,20 +109,29 @@ export async function startMockAnthropicServer(): Promise<MockServer> {
       const messageId = `msg_mock_${Date.now()}`;
       const toolUseId = `toolu_mock_${Date.now()}`;
 
-      // Detect [tool:ToolName] trigger in user text → respond with tool_use
-      const toolMatch = userText.match(/\[tool:(\w+)\]\s*(.*)/s);
+      // Scan ALL text blocks in the last user message for [tool:X] trigger.
+      // Using userText alone misses triggers when multiple text blocks exist
+      // (e.g. after rejection: [tool_result, "Request interrupted...", "[tool:Write] ..."])
+      let toolMatch: RegExpMatchArray | null = null;
+      if (Array.isArray(lastUser?.content)) {
+        for (const block of lastUser.content) {
+          if (block.type === "text") {
+            const m = (block.text as string).match(/\[tool:(\w+)\]\s*(.*)/s);
+            if (m) { toolMatch = m; break; }
+          }
+        }
+      } else if (typeof lastUser?.content === "string") {
+        toolMatch = lastUser.content.match(/\[tool:(\w+)\]\s*(.*)/s);
+      }
 
-      // Check if this is a follow-up after tool_result (second turn)
-      const hasToolResult = body.messages?.some((m: any) =>
-        m.role === "user" && Array.isArray(m.content) &&
-        m.content.some((b: any) => b.type === "tool_result")
-      );
-
-      // Determine response mode:
-      // 1. Has tool trigger AND no tool_result yet → tool_use response
-      // 2. Has tool_result (follow-up turn) → final text response
-      // 3. No trigger → normal text response
-      const shouldToolUse = toolMatch && !hasToolResult;
+      // Determine response by reading conversation state like the real API:
+      // 1. No tools defined (title gen, suggestions) → always text
+      // 2. Last assistant was tool_use AND no tool_result after it → shouldn't happen
+      //    (Claude Code always sends tool_result before next request)
+      // 3. Trigger found in user text → tool_use
+      // 4. Otherwise → text
+      const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
+      const shouldToolUse = Boolean(toolMatch) && hasTools;
       const toolName = toolMatch?.[1] ?? "";
       const toolArg = toolMatch?.[2]?.trim() ?? "";
       const replyText = shouldToolUse ? "" : [...userText].reverse().join("");
