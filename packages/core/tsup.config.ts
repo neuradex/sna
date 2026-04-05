@@ -33,6 +33,7 @@ export default defineConfig([
   },
   // Electron / Node.js launcher — bundled CJS for require() compat in main processes
   // shims: true injects import.meta.url polyfill so path resolution works in CJS
+  // external: native modules + deps that must be resolved at runtime (in-process mode)
   {
     bundle: true,
     entry: {
@@ -43,6 +44,13 @@ export default defineConfig([
     shims: true,
     dts: false,
     outDir: "dist",
+    external: [
+      "better-sqlite3",
+      "hono",
+      "hono/cors",
+      "@hono/node-server",
+      "ws",
+    ],
     esbuildOptions(options) {
       options.platform = "node";
     },

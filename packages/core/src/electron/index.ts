@@ -36,11 +36,22 @@
 import { fork, type ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
 import fs from "fs";
+import http from "http";
 
 // Re-export Claude CLI resolution utilities for consumer apps (e.g., Loom preflight)
 export { resolveClaudeCli, validateClaudePath, cacheClaudePath, parseCommandVOutput } from "../core/providers/claude-code.js";
 export type { ResolveResult } from "../core/providers/claude-code.js";
 import path from "path";
+
+// In-process mode imports
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { serve } from "@hono/node-server";
+import { createSnaApp } from "../server/index.js";
+import { SessionManager } from "../server/session-manager.js";
+import { attachWebSocket } from "../server/ws.js";
+import { setConfig, getConfig } from "../config.js";
+import { getDb } from "../db/schema.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -264,6 +275,141 @@ export async function startSnaServer(options: SnaServerOptions): Promise<SnaServ
     port,
     stop() {
       proc.kill("SIGTERM");
+    },
+  };
+}
+
+// ── In-process mode ──────────────────────────────────────────────────────────
+
+export interface InProcessSnaServerHandle {
+  /** No child process — the server runs in the calling process. */
+  process: null;
+
+  /** The port the server is listening on. */
+  port: number;
+
+  /** The session manager instance. */
+  sessionManager: SessionManager;
+
+  /** The underlying HTTP server. */
+  httpServer: http.Server;
+
+  /** Graceful shutdown: kill all sessions and close the HTTP server. */
+  stop(): Promise<void>;
+}
+
+/**
+ * Launch the SNA API server **in-process** (no fork).
+ *
+ * Designed for Electron main processes where fork() causes problems:
+ * - asar module resolution failures
+ * - PATH / env propagation issues
+ * - orphaned child processes on crash
+ *
+ * The server runs on the same Node.js event loop as the caller. Use `stop()`
+ * to tear down cleanly (e.g., in Electron's `before-quit` handler).
+ *
+ * Unlike fork mode, this does **not** spawn a default agent — the consumer
+ * controls session/agent lifecycle via the returned `sessionManager` or via
+ * the WebSocket / HTTP API.
+ */
+export async function startSnaServerInProcess(
+  options: SnaServerOptions,
+): Promise<InProcessSnaServerHandle> {
+  const port = options.port ?? 3099;
+  const cwd = options.cwd ?? path.dirname(options.dbPath);
+
+  // Configure SNA SDK before any module reads config
+  setConfig({
+    port,
+    dbPath: options.dbPath,
+    ...(options.maxSessions != null ? { maxSessions: options.maxSessions } : {}),
+    ...(options.permissionMode ? { defaultPermissionMode: options.permissionMode } : {}),
+    ...(options.model ? { model: options.model } : {}),
+    ...(options.permissionTimeoutMs != null ? { permissionTimeoutMs: options.permissionTimeoutMs } : {}),
+  });
+
+  // Also set env vars so any module reading process.env directly works
+  process.env.SNA_PORT = String(port);
+  process.env.SNA_DB_PATH = options.dbPath;
+  if (options.maxSessions != null) process.env.SNA_MAX_SESSIONS = String(options.maxSessions);
+  if (options.permissionMode) process.env.SNA_PERMISSION_MODE = options.permissionMode;
+  if (options.model) process.env.SNA_MODEL = options.model;
+  if (options.permissionTimeoutMs != null) process.env.SNA_PERMISSION_TIMEOUT_MS = String(options.permissionTimeoutMs);
+  if (options.nativeBinding) process.env.SNA_SQLITE_NATIVE_BINDING = options.nativeBinding;
+
+  // Resolve consumer's node_modules for better-sqlite3.
+  // In-process mode: the consumer's Electron-rebuilt native module must be used
+  // (not .sna/native/ which is compiled for system Node.js).
+  if (!process.env.SNA_MODULES_PATH) {
+    try {
+      const bsPkg = require.resolve("better-sqlite3/package.json", { paths: [process.cwd()] });
+      process.env.SNA_MODULES_PATH = path.resolve(bsPkg, "../..");
+    } catch { /* peer dep will resolve normally */ }
+  }
+
+  // Set CWD for the server context
+  const originalCwd = process.cwd();
+  try {
+    process.chdir(cwd);
+  } catch {
+    // cwd may not exist yet — that's fine, DB will create it
+  }
+
+  // Initialize DB (validates native module compatibility)
+  try {
+    getDb();
+  } catch (err: any) {
+    process.chdir(originalCwd);
+    throw new Error(`SNA in-process: database init failed: ${err.message}`);
+  }
+
+  const config = getConfig();
+
+  const root = new Hono();
+  root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] }));
+
+  // Global error handler
+  root.onError((err, c) => {
+    const pathname = new URL(c.req.url).pathname;
+    if (options.onLog) options.onLog(`ERR ${c.req.method} ${pathname} → ${err.message}`);
+    return c.json({ status: "error", message: err.message, stack: err.stack }, 500);
+  });
+
+  // Request logger
+  root.use("*", async (c, next) => {
+    const m = c.req.method;
+    const pathname = new URL(c.req.url).pathname;
+    if (options.onLog) options.onLog(`${m.padEnd(6)} ${pathname}`);
+    await next();
+  });
+
+  // Create session manager (no default agent spawn)
+  const sessionManager = new SessionManager({ maxSessions: config.maxSessions });
+
+  root.route("/", createSnaApp({ sessionManager }));
+
+  // Start HTTP server
+  const httpServer = serve({ fetch: root.fetch, port }, () => {
+    if (options.onLog) options.onLog(`API server ready → http://localhost:${port}`);
+    if (options.onLog) options.onLog(`WebSocket endpoint → ws://localhost:${port}/ws`);
+  }) as unknown as http.Server;
+
+  // Attach WebSocket on the same HTTP server
+  attachWebSocket(httpServer, sessionManager);
+
+  return {
+    process: null,
+    port,
+    sessionManager,
+    httpServer,
+    async stop() {
+      sessionManager.killAll();
+      await new Promise<void>((resolve) => {
+        httpServer.close(() => resolve());
+        // Force-close after 3 seconds if connections linger
+        setTimeout(() => resolve(), 3000).unref();
+      });
     },
   };
 }
