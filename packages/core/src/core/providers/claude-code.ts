@@ -54,6 +54,8 @@ class ClaudeCodeProcess implements AgentProcess {
   private _sessionId: string | null = null;
   private _initEmitted = false;
   private buffer = "";
+  /** True once we receive a real text_delta stream_event this turn */
+  private _receivedStreamEvents = false;
 
   /**
    * FIFO event queue — ALL events (deltas, assistant, complete, etc.) go through
@@ -262,7 +264,36 @@ class ClaudeCodeProcess implements AgentProcess {
         return null;
       }
 
+      case "stream_event": {
+        const inner = msg.event;
+        if (!inner) return null;
+        if (inner.type === "content_block_delta") {
+          const delta = inner.delta;
+          if (delta?.type === "text_delta" && delta.text) {
+            this._receivedStreamEvents = true;
+            return {
+              type: "assistant_delta",
+              delta: delta.text,
+              index: inner.index ?? 0,
+              timestamp: Date.now(),
+            } satisfies AgentEvent;
+          }
+          if (delta?.type === "thinking_delta" && delta.thinking) {
+            return {
+              type: "thinking",
+              message: delta.thinking,
+              timestamp: Date.now(),
+            } satisfies AgentEvent;
+          }
+        }
+        return null;
+      }
+
       case "assistant": {
+        // With --include-partial-messages, intermediate snapshots have stop_reason: null.
+        // Skip them — real deltas already came via stream_event above.
+        if (this._receivedStreamEvents && msg.message?.stop_reason === null) return null;
+
         const content = msg.message?.content;
         if (!Array.isArray(content)) return null;
 
@@ -297,7 +328,8 @@ class ClaudeCodeProcess implements AgentProcess {
             this.enqueue(e);
           }
           for (const text of textBlocks) {
-            this.enqueueTextAsDeltas(text);
+            // this.enqueueTextAsDeltas(text); // synthetic delta fallback — disabled in favour of --include-partial-messages
+            this.enqueue({ type: "assistant", message: text, timestamp: Date.now() } satisfies AgentEvent);
           }
         }
         return null;
@@ -324,6 +356,15 @@ class ClaudeCodeProcess implements AgentProcess {
 
       case "result": {
         if (msg.subtype === "success") {
+          // If we were in streaming mode, emit the full assistant text before complete
+          if (this._receivedStreamEvents && msg.result) {
+            this.enqueue({
+              type: "assistant",
+              message: msg.result,
+              timestamp: Date.now(),
+            } satisfies AgentEvent);
+            this._receivedStreamEvents = false;
+          }
           // Per-turn usage — represents actual context size for this turn
           const u = msg.usage ?? {};
           const mu = msg.modelUsage ?? {};
@@ -452,6 +493,7 @@ export class ClaudeCodeProvider implements AgentProvider {
       "--output-format", "stream-json",
       "--input-format", "stream-json",
       "--verbose",
+      "--include-partial-messages",
       "--settings", JSON.stringify(sdkSettings),
     ];
 

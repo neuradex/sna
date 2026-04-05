@@ -449,6 +449,8 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
     this._sessionId = null;
     this._initEmitted = false;
     this.buffer = "";
+    /** True once we receive a real text_delta stream_event this turn */
+    this._receivedStreamEvents = false;
     /**
      * FIFO event queue — ALL events (deltas, assistant, complete, etc.) go through
      * this queue. A fixed-interval timer drains one item at a time, guaranteeing
@@ -627,7 +629,32 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
         }
         return null;
       }
+      case "stream_event": {
+        const inner = msg.event;
+        if (!inner) return null;
+        if (inner.type === "content_block_delta") {
+          const delta = inner.delta;
+          if (delta?.type === "text_delta" && delta.text) {
+            this._receivedStreamEvents = true;
+            return {
+              type: "assistant_delta",
+              delta: delta.text,
+              index: inner.index ?? 0,
+              timestamp: Date.now()
+            };
+          }
+          if (delta?.type === "thinking_delta" && delta.thinking) {
+            return {
+              type: "thinking",
+              message: delta.thinking,
+              timestamp: Date.now()
+            };
+          }
+        }
+        return null;
+      }
       case "assistant": {
+        if (this._receivedStreamEvents && msg.message?.stop_reason === null) return null;
         const content = msg.message?.content;
         if (!Array.isArray(content)) return null;
         const events = [];
@@ -658,7 +685,7 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
             this.enqueue(e);
           }
           for (const text of textBlocks) {
-            this.enqueueTextAsDeltas(text);
+            this.enqueue({ type: "assistant", message: text, timestamp: Date.now() });
           }
         }
         return null;
@@ -680,6 +707,14 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
       }
       case "result": {
         if (msg.subtype === "success") {
+          if (this._receivedStreamEvents && msg.result) {
+            this.enqueue({
+              type: "assistant",
+              message: msg.result,
+              timestamp: Date.now()
+            });
+            this._receivedStreamEvents = false;
+          }
           const u = msg.usage ?? {};
           const mu = msg.modelUsage ?? {};
           const modelKey = Object.keys(mu)[0] ?? "";
@@ -793,6 +828,7 @@ var ClaudeCodeProvider = class {
       "--input-format",
       "stream-json",
       "--verbose",
+      "--include-partial-messages",
       "--settings",
       JSON.stringify(sdkSettings)
     ];
@@ -2659,7 +2695,7 @@ try {
 }
 var { port, defaultPermissionMode: permissionMode, model: defaultModel, maxSessions } = getConfig();
 var root = new Hono4();
-root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "DELETE", "OPTIONS"] }));
+root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] }));
 root.onError((err2, c) => {
   logger.err("err", `${c.req.method} ${new URL(c.req.url).pathname} \u2192 ${err2.message}`);
   return c.json({ status: "error", message: err2.message, stack: err2.stack }, 500);
