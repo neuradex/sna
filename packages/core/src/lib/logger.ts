@@ -1,9 +1,9 @@
 import fs from "fs";
 import path from "path";
 
-const LOG_PATH = path.join(process.cwd(), ".dev.log");
+const LOG_PATH = process.env.SNA_LOG_PATH ?? path.join(process.cwd(), ".dev.log");
 
-// Truncate on startup
+// Truncate on startup (skip if path is not writable, e.g. Electron prod with cwd=/)
 try { fs.writeFileSync(LOG_PATH, ""); } catch { /* ok */ }
 
 function ts(): string {
