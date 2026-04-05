@@ -1,6 +1,6 @@
 {
   "name": "@sna-sdk/core",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "description": "Skills-Native Application runtime — server, providers, session management, database, and CLI",
   "type": "module",
   "bin": {

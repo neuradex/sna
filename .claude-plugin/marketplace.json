@@ -11,7 +11,7 @@
       "name": "sna-builder",
       "source": "./plugins/sna-builder",
       "description": "SNA SDK development assistant — ensures correct architecture, DB separation, event pipeline usage, and skill authoring patterns",
-      "version": "0.8.2",
+      "version": "0.9.7",
       "keywords": [
         "sna",
         "skills-native",
