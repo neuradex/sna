@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-const LOG_PATH = path.join(process.cwd(), ".dev.log");
+const LOG_PATH = process.env.SNA_LOG_PATH ?? path.join(process.cwd(), ".dev.log");
 try {
   fs.writeFileSync(LOG_PATH, "");
 } catch {

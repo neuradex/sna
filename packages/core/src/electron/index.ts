@@ -364,6 +364,10 @@ export async function startSnaServerInProcess(
     throw new Error(`SNA in-process: database init failed: ${err.message}`);
   }
 
+  // Restore cwd — chdir was only needed for DB init (better-sqlite3 native binding resolution).
+  // Leaving cwd at data/db/ breaks child process spawns (ENOTDIR) for session dirs.
+  process.chdir(originalCwd);
+
   const config = getConfig();
 
   const root = new Hono();

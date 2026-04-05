@@ -1,4 +1,8 @@
 import { ChildProcess } from 'child_process';
+import http from 'http';
+export { ResolveResult, cacheClaudePath, parseCommandVOutput, resolveClaudeCli, validateClaudePath } from '../core/providers/claude-code.js';
+import { SessionManager } from '../server/session-manager.js';
+import '../core/providers/types.js';
 
 /**
  * @sna-sdk/core/electron — Electron launcher API
@@ -100,5 +104,33 @@ interface SnaServerHandle {
  * Throws if the server fails to start within `options.readyTimeout`.
  */
 declare function startSnaServer(options: SnaServerOptions): Promise<SnaServerHandle>;
+interface InProcessSnaServerHandle {
+    /** No child process — the server runs in the calling process. */
+    process: null;
+    /** The port the server is listening on. */
+    port: number;
+    /** The session manager instance. */
+    sessionManager: SessionManager;
+    /** The underlying HTTP server. */
+    httpServer: http.Server;
+    /** Graceful shutdown: kill all sessions and close the HTTP server. */
+    stop(): Promise<void>;
+}
+/**
+ * Launch the SNA API server **in-process** (no fork).
+ *
+ * Designed for Electron main processes where fork() causes problems:
+ * - asar module resolution failures
+ * - PATH / env propagation issues
+ * - orphaned child processes on crash
+ *
+ * The server runs on the same Node.js event loop as the caller. Use `stop()`
+ * to tear down cleanly (e.g., in Electron's `before-quit` handler).
+ *
+ * Unlike fork mode, this does **not** spawn a default agent — the consumer
+ * controls session/agent lifecycle via the returned `sessionManager` or via
+ * the WebSocket / HTTP API.
+ */
+declare function startSnaServerInProcess(options: SnaServerOptions): Promise<InProcessSnaServerHandle>;
 
-export { type SnaServerHandle, type SnaServerOptions, startSnaServer };
+export { type InProcessSnaServerHandle, type SnaServerHandle, type SnaServerOptions, startSnaServer, startSnaServerInProcess };

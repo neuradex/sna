@@ -13,7 +13,9 @@ import { streamSSE } from "hono/streaming";
 import { createRequire } from "module";
 import fs from "fs";
 import path from "path";
-var DB_PATH = process.env.SNA_DB_PATH ?? path.join(process.cwd(), "data/sna.db");
+function getDbPath() {
+  return process.env.SNA_DB_PATH ?? path.join(process.cwd(), "data/sna.db");
+}
 var NATIVE_DIR = path.join(process.cwd(), ".sna/native");
 var _db = null;
 function loadBetterSqlite3() {
@@ -36,10 +38,10 @@ function loadBetterSqlite3() {
 function getDb() {
   if (!_db) {
     const BetterSqlite3 = loadBetterSqlite3();
-    const dir = path.dirname(DB_PATH);
+    const dir = path.dirname(getDbPath());
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const nativeBinding = process.env.SNA_SQLITE_NATIVE_BINDING || void 0;
-    _db = nativeBinding ? new BetterSqlite3(DB_PATH, { nativeBinding }) : new BetterSqlite3(DB_PATH);
+    _db = nativeBinding ? new BetterSqlite3(getDbPath(), { nativeBinding }) : new BetterSqlite3(getDbPath());
     _db.pragma("journal_mode = WAL");
     initSchema(_db);
   }
@@ -361,7 +363,7 @@ ${xml}
 // src/lib/logger.ts
 import fs3 from "fs";
 import path3 from "path";
-var LOG_PATH = path3.join(process.cwd(), ".dev.log");
+var LOG_PATH = process.env.SNA_LOG_PATH ?? path3.join(process.cwd(), ".dev.log");
 try {
   fs3.writeFileSync(LOG_PATH, "");
 } catch {
@@ -397,35 +399,80 @@ var logger = { log, err };
 
 // src/core/providers/claude-code.ts
 var SHELL = process.env.SHELL || "/bin/zsh";
-function resolveClaudePath(cwd) {
-  if (process.env.SNA_CLAUDE_COMMAND) return process.env.SNA_CLAUDE_COMMAND;
-  const cached = path4.join(cwd, ".sna/claude-path");
-  if (fs4.existsSync(cached)) {
-    const p = fs4.readFileSync(cached, "utf8").trim();
-    if (p) {
-      try {
-        execSync(`test -x "${p}"`, { stdio: "pipe" });
-        return p;
-      } catch {
-      }
-    }
+function parseCommandVOutput(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed) return "claude";
+  const aliasMatch = trimmed.match(/=\s*['"]?([^'"]+?)['"]?\s*$/);
+  if (aliasMatch) return aliasMatch[1];
+  const pathMatch = trimmed.match(/^(\/\S+)/m);
+  if (pathMatch) return pathMatch[1];
+  return trimmed;
+}
+function validateClaudePath(claudePath) {
+  try {
+    const claudeDir = path4.dirname(claudePath);
+    const env = { ...process.env, PATH: `${claudeDir}:${process.env.PATH ?? ""}` };
+    const out = execSync(`"${claudePath}" --version`, { encoding: "utf8", stdio: "pipe", timeout: 1e4, env }).trim();
+    return { ok: true, version: out.split("\n")[0].slice(0, 30) };
+  } catch {
+    return { ok: false };
   }
-  for (const p of [
+}
+function cacheClaudePath(claudePath, cacheDir) {
+  const dir = cacheDir ?? path4.join(process.cwd(), ".sna");
+  try {
+    if (!fs4.existsSync(dir)) fs4.mkdirSync(dir, { recursive: true });
+    fs4.writeFileSync(path4.join(dir, "claude-path"), claudePath);
+  } catch {
+  }
+}
+function resolveClaudeCli(opts) {
+  const cacheDir = opts?.cacheDir;
+  if (process.env.SNA_CLAUDE_COMMAND) {
+    const v = validateClaudePath(process.env.SNA_CLAUDE_COMMAND);
+    return { path: process.env.SNA_CLAUDE_COMMAND, version: v.version, source: "env" };
+  }
+  const cacheFile = cacheDir ? path4.join(cacheDir, "claude-path") : path4.join(process.cwd(), ".sna/claude-path");
+  try {
+    const cached = fs4.readFileSync(cacheFile, "utf8").trim();
+    if (cached) {
+      const v = validateClaudePath(cached);
+      if (v.ok) return { path: cached, version: v.version, source: "cache" };
+    }
+  } catch {
+  }
+  const staticPaths = [
     "/opt/homebrew/bin/claude",
     "/usr/local/bin/claude",
-    `${process.env.HOME}/.local/bin/claude`
-  ]) {
-    try {
-      execSync(`test -x "${p}"`, { stdio: "pipe" });
-      return p;
-    } catch {
+    `${process.env.HOME}/.local/bin/claude`,
+    `${process.env.HOME}/.claude/bin/claude`,
+    `${process.env.HOME}/.volta/bin/claude`
+  ];
+  for (const p of staticPaths) {
+    const v = validateClaudePath(p);
+    if (v.ok) {
+      cacheClaudePath(p, cacheDir);
+      return { path: p, version: v.version, source: "static" };
     }
   }
   try {
-    return execSync(`${SHELL} -l -c "which claude"`, { encoding: "utf8" }).trim();
+    const raw = execSync(`${SHELL} -i -l -c "command -v claude" 2>/dev/null`, { encoding: "utf8", timeout: 5e3 }).trim();
+    const resolved = parseCommandVOutput(raw);
+    if (resolved && resolved !== "claude") {
+      const v = validateClaudePath(resolved);
+      if (v.ok) {
+        cacheClaudePath(resolved, cacheDir);
+        return { path: resolved, version: v.version, source: "shell" };
+      }
+    }
   } catch {
-    return "claude";
   }
+  return { path: "claude", source: "fallback" };
+}
+function resolveClaudePath(cwd) {
+  const result = resolveClaudeCli({ cacheDir: path4.join(cwd, ".sna") });
+  logger.log("agent", `claude path: ${result.source}=${result.path}${result.version ? ` (${result.version})` : ""}`);
+  return result.path;
 }
 var _ClaudeCodeProcess = class _ClaudeCodeProcess {
   constructor(proc, options) {
@@ -861,6 +908,10 @@ var ClaudeCodeProvider = class {
     delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
     delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
     delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
+    const claudeDir = path4.dirname(claudePath);
+    if (claudeDir && claudeDir !== ".") {
+      cleanEnv.PATH = `${claudeDir}:${cleanEnv.PATH ?? ""}`;
+    }
     const proc = spawn2(claudePath, [...claudePrefix, ...args], {
       cwd: options.cwd,
       env: cleanEnv,

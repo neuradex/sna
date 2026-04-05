@@ -1,7 +1,16 @@
 import { fork } from "child_process";
 import { fileURLToPath } from "url";
 import fs from "fs";
+import { resolveClaudeCli, validateClaudePath, cacheClaudePath, parseCommandVOutput } from "../core/providers/claude-code.js";
 import path from "path";
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { serve } from "@hono/node-server";
+import { createSnaApp } from "../server/index.js";
+import { SessionManager } from "../server/session-manager.js";
+import { attachWebSocket } from "../server/ws.js";
+import { setConfig, getConfig } from "../config.js";
+import { getDb } from "../db/schema.js";
 function resolveStandaloneScript() {
   const selfPath = fileURLToPath(import.meta.url);
   let script = path.resolve(path.dirname(selfPath), "../server/standalone.js");
@@ -106,6 +115,83 @@ async function startSnaServer(options) {
     }
   };
 }
+async function startSnaServerInProcess(options) {
+  const port = options.port ?? 3099;
+  const cwd = options.cwd ?? path.dirname(options.dbPath);
+  setConfig({
+    port,
+    dbPath: options.dbPath,
+    ...options.maxSessions != null ? { maxSessions: options.maxSessions } : {},
+    ...options.permissionMode ? { defaultPermissionMode: options.permissionMode } : {},
+    ...options.model ? { model: options.model } : {},
+    ...options.permissionTimeoutMs != null ? { permissionTimeoutMs: options.permissionTimeoutMs } : {}
+  });
+  process.env.SNA_PORT = String(port);
+  process.env.SNA_DB_PATH = options.dbPath;
+  if (options.maxSessions != null) process.env.SNA_MAX_SESSIONS = String(options.maxSessions);
+  if (options.permissionMode) process.env.SNA_PERMISSION_MODE = options.permissionMode;
+  if (options.model) process.env.SNA_MODEL = options.model;
+  if (options.permissionTimeoutMs != null) process.env.SNA_PERMISSION_TIMEOUT_MS = String(options.permissionTimeoutMs);
+  if (options.nativeBinding) process.env.SNA_SQLITE_NATIVE_BINDING = options.nativeBinding;
+  if (!process.env.SNA_MODULES_PATH) {
+    try {
+      const bsPkg = require.resolve("better-sqlite3/package.json", { paths: [process.cwd()] });
+      process.env.SNA_MODULES_PATH = path.resolve(bsPkg, "../..");
+    } catch {
+    }
+  }
+  const originalCwd = process.cwd();
+  try {
+    process.chdir(cwd);
+  } catch {
+  }
+  try {
+    getDb();
+  } catch (err) {
+    process.chdir(originalCwd);
+    throw new Error(`SNA in-process: database init failed: ${err.message}`);
+  }
+  process.chdir(originalCwd);
+  const config = getConfig();
+  const root = new Hono();
+  root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] }));
+  root.onError((err, c) => {
+    const pathname = new URL(c.req.url).pathname;
+    if (options.onLog) options.onLog(`ERR ${c.req.method} ${pathname} \u2192 ${err.message}`);
+    return c.json({ status: "error", message: err.message, stack: err.stack }, 500);
+  });
+  root.use("*", async (c, next) => {
+    const m = c.req.method;
+    const pathname = new URL(c.req.url).pathname;
+    if (options.onLog) options.onLog(`${m.padEnd(6)} ${pathname}`);
+    await next();
+  });
+  const sessionManager = new SessionManager({ maxSessions: config.maxSessions });
+  root.route("/", createSnaApp({ sessionManager }));
+  const httpServer = serve({ fetch: root.fetch, port }, () => {
+    if (options.onLog) options.onLog(`API server ready \u2192 http://localhost:${port}`);
+    if (options.onLog) options.onLog(`WebSocket endpoint \u2192 ws://localhost:${port}/ws`);
+  });
+  attachWebSocket(httpServer, sessionManager);
+  return {
+    process: null,
+    port,
+    sessionManager,
+    httpServer,
+    async stop() {
+      sessionManager.killAll();
+      await new Promise((resolve) => {
+        httpServer.close(() => resolve());
+        setTimeout(() => resolve(), 3e3).unref();
+      });
+    }
+  };
+}
 export {
-  startSnaServer
+  cacheClaudePath,
+  parseCommandVOutput,
+  resolveClaudeCli,
+  startSnaServer,
+  startSnaServerInProcess,
+  validateClaudePath
 };

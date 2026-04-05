@@ -6,35 +6,80 @@ import { fileURLToPath } from "url";
 import { writeHistoryJsonl, buildRecalledConversation } from "./cc-history-adapter.js";
 import { logger } from "../../lib/logger.js";
 const SHELL = process.env.SHELL || "/bin/zsh";
-function resolveClaudePath(cwd) {
-  if (process.env.SNA_CLAUDE_COMMAND) return process.env.SNA_CLAUDE_COMMAND;
-  const cached = path.join(cwd, ".sna/claude-path");
-  if (fs.existsSync(cached)) {
-    const p = fs.readFileSync(cached, "utf8").trim();
-    if (p) {
-      try {
-        execSync(`test -x "${p}"`, { stdio: "pipe" });
-        return p;
-      } catch {
-      }
-    }
+function parseCommandVOutput(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed) return "claude";
+  const aliasMatch = trimmed.match(/=\s*['"]?([^'"]+?)['"]?\s*$/);
+  if (aliasMatch) return aliasMatch[1];
+  const pathMatch = trimmed.match(/^(\/\S+)/m);
+  if (pathMatch) return pathMatch[1];
+  return trimmed;
+}
+function validateClaudePath(claudePath) {
+  try {
+    const claudeDir = path.dirname(claudePath);
+    const env = { ...process.env, PATH: `${claudeDir}:${process.env.PATH ?? ""}` };
+    const out = execSync(`"${claudePath}" --version`, { encoding: "utf8", stdio: "pipe", timeout: 1e4, env }).trim();
+    return { ok: true, version: out.split("\n")[0].slice(0, 30) };
+  } catch {
+    return { ok: false };
   }
-  for (const p of [
+}
+function cacheClaudePath(claudePath, cacheDir) {
+  const dir = cacheDir ?? path.join(process.cwd(), ".sna");
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "claude-path"), claudePath);
+  } catch {
+  }
+}
+function resolveClaudeCli(opts) {
+  const cacheDir = opts?.cacheDir;
+  if (process.env.SNA_CLAUDE_COMMAND) {
+    const v = validateClaudePath(process.env.SNA_CLAUDE_COMMAND);
+    return { path: process.env.SNA_CLAUDE_COMMAND, version: v.version, source: "env" };
+  }
+  const cacheFile = cacheDir ? path.join(cacheDir, "claude-path") : path.join(process.cwd(), ".sna/claude-path");
+  try {
+    const cached = fs.readFileSync(cacheFile, "utf8").trim();
+    if (cached) {
+      const v = validateClaudePath(cached);
+      if (v.ok) return { path: cached, version: v.version, source: "cache" };
+    }
+  } catch {
+  }
+  const staticPaths = [
     "/opt/homebrew/bin/claude",
     "/usr/local/bin/claude",
-    `${process.env.HOME}/.local/bin/claude`
-  ]) {
-    try {
-      execSync(`test -x "${p}"`, { stdio: "pipe" });
-      return p;
-    } catch {
+    `${process.env.HOME}/.local/bin/claude`,
+    `${process.env.HOME}/.claude/bin/claude`,
+    `${process.env.HOME}/.volta/bin/claude`
+  ];
+  for (const p of staticPaths) {
+    const v = validateClaudePath(p);
+    if (v.ok) {
+      cacheClaudePath(p, cacheDir);
+      return { path: p, version: v.version, source: "static" };
     }
   }
   try {
-    return execSync(`${SHELL} -l -c "which claude"`, { encoding: "utf8" }).trim();
+    const raw = execSync(`${SHELL} -i -l -c "command -v claude" 2>/dev/null`, { encoding: "utf8", timeout: 5e3 }).trim();
+    const resolved = parseCommandVOutput(raw);
+    if (resolved && resolved !== "claude") {
+      const v = validateClaudePath(resolved);
+      if (v.ok) {
+        cacheClaudePath(resolved, cacheDir);
+        return { path: resolved, version: v.version, source: "shell" };
+      }
+    }
   } catch {
-    return "claude";
   }
+  return { path: "claude", source: "fallback" };
+}
+function resolveClaudePath(cwd) {
+  const result = resolveClaudeCli({ cacheDir: path.join(cwd, ".sna") });
+  logger.log("agent", `claude path: ${result.source}=${result.path}${result.version ? ` (${result.version})` : ""}`);
+  return result.path;
 }
 const _ClaudeCodeProcess = class _ClaudeCodeProcess {
   constructor(proc, options) {
@@ -470,6 +515,10 @@ class ClaudeCodeProvider {
     delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
     delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
     delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
+    const claudeDir = path.dirname(claudePath);
+    if (claudeDir && claudeDir !== ".") {
+      cleanEnv.PATH = `${claudeDir}:${cleanEnv.PATH ?? ""}`;
+    }
     const proc = spawn(claudePath, [...claudePrefix, ...args], {
       cwd: options.cwd,
       env: cleanEnv,
@@ -480,5 +529,9 @@ class ClaudeCodeProvider {
   }
 }
 export {
-  ClaudeCodeProvider
+  ClaudeCodeProvider,
+  cacheClaudePath,
+  parseCommandVOutput,
+  resolveClaudeCli,
+  validateClaudePath
 };

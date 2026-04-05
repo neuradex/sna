@@ -1,7 +1,6 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import chalk from "chalk";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(__dirname, "..");
 const [, , command] = process.argv;
@@ -14,9 +13,9 @@ switch (command) {
     break;
   default:
     console.log(`
-${chalk.bold("sna")} \u2014 Skills-Native Application core primitives
+sna \u2014 Skills-Native Application core primitives
 
-${chalk.bold("Usage:")}
+Usage:
   sna link      Create/update .claude/skills symlinks
   sna install   Add sna to package.json and link skills
 `);
@@ -27,11 +26,11 @@ function cmdLink() {
   const skillsDir = path.join(claudeDir, "skills");
   if (!fs.existsSync(skillsDir)) {
     fs.mkdirSync(skillsDir, { recursive: true });
-    console.log(chalk.gray(`  created  .claude/skills/`));
+    console.log(`  created  .claude/skills/`);
   }
   const coreSkillsDir = path.join(PACKAGE_ROOT, "skills");
   if (!fs.existsSync(coreSkillsDir)) {
-    console.error(chalk.red(`  \u2717  sna skills directory not found: ${coreSkillsDir}`));
+    console.error(`  \u2717  sna skills directory not found: ${coreSkillsDir}`);
     process.exit(1);
   }
   const skills = fs.readdirSync(coreSkillsDir).filter(
@@ -57,33 +56,33 @@ function cmdLink() {
         }
         fs.unlinkSync(linkPath);
         fs.symlinkSync(target, linkPath);
-        console.log(chalk.cyan(`  updated  .claude/skills/${skill}/ \u2192 ${target}`));
+        console.log(`  updated  .claude/skills/${skill}/ \u2192 ${target}`);
         updated++;
       } else {
-        console.log(chalk.yellow(`  skipped  .claude/skills/${skill}/  (not a symlink \u2014 won't overwrite)`));
+        console.log(`  skipped  .claude/skills/${skill}/  (not a symlink \u2014 won't overwrite)`);
         skipped++;
       }
     } else {
       fs.symlinkSync(target, linkPath);
-      console.log(chalk.green(`  linked   .claude/skills/${skill}/ \u2192 ${target}`));
+      console.log(`  linked   .claude/skills/${skill}/ \u2192 ${target}`);
       linked++;
     }
   }
   console.log();
   if (linked + updated > 0) {
-    console.log(chalk.green(`\u2713  ${linked + updated} skill(s) linked`));
+    console.log(`\u2713  ${linked + updated} skill(s) linked`);
   } else {
-    console.log(chalk.gray(`\u2713  Skills already up to date`));
+    console.log(`\u2713  Skills already up to date`);
   }
   if (skipped > 0 && linked + updated > 0) {
-    console.log(chalk.gray(`   (${skipped} unchanged)`));
+    console.log(`   (${skipped} unchanged)`);
   }
 }
 function cmdInstall() {
   const cwd = process.cwd();
   const pkgPath = path.join(cwd, "package.json");
   if (!fs.existsSync(pkgPath)) {
-    console.error(chalk.red("  \u2717  No package.json found in current directory"));
+    console.error(`  \u2717  No package.json found in current directory`);
     process.exit(1);
   }
   const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
@@ -94,10 +93,10 @@ function cmdInstall() {
     pkg.dependencies = pkg.dependencies ?? {};
     pkg.dependencies["sna"] = `^${version}`;
     fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
-    console.log(chalk.green(`  added    "sna": "^${version}" to dependencies`));
-    console.log(chalk.gray(`  run      pnpm install  to install`));
+    console.log(`  added    "sna": "^${version}" to dependencies`);
+    console.log(`  run      pnpm install  to install`);
   } else {
-    console.log(chalk.gray(`  sna already in package.json`));
+    console.log(`  sna already in package.json`);
   }
   console.log();
   cmdLink();
