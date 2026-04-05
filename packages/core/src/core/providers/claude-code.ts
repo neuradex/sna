@@ -34,21 +34,65 @@ export function parseCommandVOutput(raw: string): string {
   return trimmed;
 }
 
-function resolveClaudePath(cwd: string): string {
-  // SNA_CLAUDE_COMMAND overrides everything (e.g., "sna tu claude" for testing)
+/**
+ * Validate a Claude CLI path by running `<path> --version`.
+ * Adds the binary's directory to PATH so shebang resolution works (nvm/fnm).
+ */
+export function validateClaudePath(claudePath: string): { ok: boolean; version?: string } {
+  try {
+    const claudeDir = path.dirname(claudePath);
+    const env = { ...process.env, PATH: `${claudeDir}:${process.env.PATH ?? ""}` };
+    const out = execSync(`"${claudePath}" --version`, { encoding: "utf8", stdio: "pipe", timeout: 10_000, env }).trim();
+    return { ok: true, version: out.split("\n")[0].slice(0, 30) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
+ * Save a validated Claude path to cache for faster startup next time.
+ */
+export function cacheClaudePath(claudePath: string, cacheDir?: string): void {
+  const dir = cacheDir ?? path.join(process.cwd(), ".sna");
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "claude-path"), claudePath);
+  } catch { /* best effort */ }
+}
+
+export interface ResolveResult {
+  path: string;
+  version?: string;
+  source: "env" | "cache" | "static" | "shell" | "fallback";
+}
+
+/**
+ * Resolve Claude CLI path. Tries: env override → cache → static paths → shell detection.
+ * All candidates are validated with `--version` before returning.
+ * Consumer apps should call this and handle the `fallback` source (= not found).
+ */
+export function resolveClaudeCli(opts?: { cacheDir?: string }): ResolveResult {
+  const cacheDir = opts?.cacheDir;
+
+  // 1. Env override
   if (process.env.SNA_CLAUDE_COMMAND) {
-    logger.log("agent", `claude path: SNA_CLAUDE_COMMAND=${process.env.SNA_CLAUDE_COMMAND}`);
-    return process.env.SNA_CLAUDE_COMMAND;
+    const v = validateClaudePath(process.env.SNA_CLAUDE_COMMAND);
+    return { path: process.env.SNA_CLAUDE_COMMAND, version: v.version, source: "env" };
   }
 
-  const cached = path.join(cwd, ".sna/claude-path");
-  if (fs.existsSync(cached)) {
-    const p = fs.readFileSync(cached, "utf8").trim();
-    if (p) {
-      try { execSync(`test -x "${p}"`, { stdio: "pipe" }); logger.log("agent", `claude path: cached=${p}`); return p; } catch { /* stale */ }
+  // 2. Cache
+  const cacheFile = cacheDir
+    ? path.join(cacheDir, "claude-path")
+    : path.join(process.cwd(), ".sna/claude-path");
+  try {
+    const cached = fs.readFileSync(cacheFile, "utf8").trim();
+    if (cached) {
+      const v = validateClaudePath(cached);
+      if (v.ok) return { path: cached, version: v.version, source: "cache" };
     }
-  }
+  } catch { /* no cache */ }
 
+  // 3. Static paths
   const staticPaths = [
     "/opt/homebrew/bin/claude",
     "/usr/local/bin/claude",
@@ -57,20 +101,35 @@ function resolveClaudePath(cwd: string): string {
     `${process.env.HOME}/.volta/bin/claude`,
   ];
   for (const p of staticPaths) {
-    try { execSync(`test -x "${p}"`, { stdio: "pipe" }); logger.log("agent", `claude path: static=${p}`); return p; } catch { /* next */ }
+    const v = validateClaudePath(p);
+    if (v.ok) {
+      cacheClaudePath(p, cacheDir);
+      return { path: p, version: v.version, source: "static" };
+    }
   }
 
-  // Try login shell to pick up nvm/fnm/asdf managed paths
+  // 4. Shell detection (nvm/fnm/asdf)
   try {
     const raw = execSync(`${SHELL} -i -l -c "command -v claude" 2>/dev/null`, { encoding: "utf8", timeout: 5000 }).trim();
     const resolved = parseCommandVOutput(raw);
-    logger.log("agent", `claude path: shell raw="${raw}" → resolved="${resolved}"`);
-    return resolved;
-  } catch (err: any) {
-    logger.err("agent", `claude path: all methods failed (SHELL=${SHELL}, HOME=${process.env.HOME}, err=${err.message})`);
-    logger.err("agent", `claude path: tried static=[${staticPaths.join(", ")}]`);
-    return "claude";
-  }
+    if (resolved && resolved !== "claude") {
+      const v = validateClaudePath(resolved);
+      if (v.ok) {
+        cacheClaudePath(resolved, cacheDir);
+        return { path: resolved, version: v.version, source: "shell" };
+      }
+    }
+  } catch { /* shell detection failed */ }
+
+  // 5. Not found
+  return { path: "claude", source: "fallback" };
+}
+
+/** Internal wrapper — delegates to resolveClaudeCli and logs. */
+function resolveClaudePath(cwd: string): string {
+  const result = resolveClaudeCli({ cacheDir: path.join(cwd, ".sna") });
+  logger.log("agent", `claude path: ${result.source}=${result.path}${result.version ? ` (${result.version})` : ""}`);
+  return result.path;
 }
 
 // ── ClaudeCodeProcess ────────────────────────────────────────────────────────

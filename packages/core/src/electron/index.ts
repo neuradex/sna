@@ -36,6 +36,10 @@
 import { fork, type ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
 import fs from "fs";
+
+// Re-export Claude CLI resolution utilities for consumer apps (e.g., Loom preflight)
+export { resolveClaudeCli, validateClaudePath, cacheClaudePath, parseCommandVOutput } from "../core/providers/claude-code.js";
+export type { ResolveResult } from "../core/providers/claude-code.js";
 import path from "path";
 
 // ── Types ────────────────────────────────────────────────────────────────────
