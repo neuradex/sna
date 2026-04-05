@@ -13,19 +13,16 @@ process.stdin.on("end", async () => {
     let apiUrl;
     if (process.env.SNA_API_URL) {
       apiUrl = process.env.SNA_API_URL;
+    } else if (process.env.SNA_PORT) {
+      apiUrl = `http://localhost:${process.env.SNA_PORT}`;
     } else {
       const portFile = path.join(process.cwd(), ".sna/sna-api.port");
       try {
         const port = fs.readFileSync(portFile, "utf8").trim();
         apiUrl = `http://localhost:${port}`;
       } catch {
-        const snaPort = process.env.SNA_PORT;
-        if (snaPort) {
-          apiUrl = `http://localhost:${snaPort}`;
-        } else {
-          allow();
-          return;
-        }
+        allow();
+        return;
       }
     }
     const sessionId = process.argv.find((a) => a.startsWith("--session="))?.slice(10) ?? process.env.SNA_SESSION_ID ?? "default";
@@ -59,6 +56,12 @@ function allow() {
   process.exit(0);
 }
 function deny(reason) {
-  process.stderr.write(reason);
-  process.exit(2);
+  console.log(JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: reason
+    }
+  }));
+  process.exit(0);
 }

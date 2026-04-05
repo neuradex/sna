@@ -1,51 +1,90 @@
 /**
  * @module @sna-sdk/client
  *
- * Typed WebSocket client for the SNA (Skills-Native Application) API server.
+ * Dual-transport client for the SNA (Skills-Native Application) API server.
  *
- * This is the primary interface for browser and Node.js apps to communicate
- * with the SNA server. It handles:
+ * ## Transport model
  *
- * - **Connection lifecycle** — connect, disconnect, auto-reconnect
- * - **Request/response correlation** — every request gets a unique `rid`;
- *   the matching response resolves the returned Promise
- * - **Push message routing** — server-initiated messages are dispatched
- *   to registered handlers by message type
- * - **Auto re-subscription** — after a reconnect, active agent event
- *   subscriptions and permission subscriptions are automatically restored
+ * Configure both transports explicitly via `ws` and `http` boolean flags.
+ * Both URLs are derived from a single `baseUrl` — no need to specify them separately.
  *
- * All APIs are namespaced under {@link SnaClient.sessions} and
- * {@link SnaClient.agent} for discoverability.
+ * | Transport | Used for | Enabled by |
+ * |-----------|----------|------------|
+ * | **REST (HTTP)** | State-changing ops that need ordering guarantees | `http: true` |
+ * | **WebSocket** | Real-time push, event streaming, subscriptions | `ws: true` |
  *
- * @example Basic usage
+ * Given `baseUrl: "localhost:3099"`:
+ * - WS endpoint: `ws://localhost:3099/ws`
+ * - HTTP base: `http://localhost:3099`
+ *
+ * ## What HTTP guarantees (`http: true`)
+ *
+ * The following operations block until the server has **fully committed**
+ * the state change before the Promise resolves:
+ *
+ * - `sessions.create` — DB row exists; safe to `agent.start` immediately after
+ * - `sessions.update / remove` — change is committed before returning
+ * - `agent.start` — the process **has been spawned** (`process.alive === true`).
+ *   Note: the agent may not yet be in `"waiting"` state — the internal `init`
+ *   handshake fires asynchronously after spawn. Sending a message immediately
+ *   after is safe in practice (stdin queues the message), but if you need to
+ *   confirm `agentStatus === "idle"` first, poll `getStatus`.
+ * - `agent.send` — message written to stdin and persisted to DB before returning
+ * - `agent.kill / restart / resume / interrupt` — state transition complete
+ * - `agent.getStatus / setModel / setPermissionMode` — reflects current state
+ *
+ * ## What HTTP does NOT guarantee
+ *
+ * - **Agent `"waiting"` state after `start`** — process is alive but init is async.
+ * - **Push delivery order** — `onEvent`, `onSnapshot`, and permission pushes
+ *   arrive over WebSocket asynchronously with respect to HTTP responses.
+ * - **Cross-client ordering** — only within a single `SnaClient` instance.
+ *
+ * ## Operations that always use WebSocket (`ws: true`)
+ *
+ * Regardless of `http`, these always require a WS connection:
+ * - `agent.subscribe` / `unsubscribe` — server-side subscription state
+ * - `agent.onEvent` — real-time event push
+ * - `sessions.onSnapshot` / `onConfigChanged` — reactive session state push
+ * - `agent.subscribePermissions` / `onPermissionRequest` / `respondPermission`
+ *
+ * @example Standard setup (both transports)
  * ```ts
  * import { SnaClient } from "@sna-sdk/client";
  *
- * const sna = new SnaClient({ url: "ws://localhost:3099/ws" });
- *
- * // Monitor connection state
- * sna.onConnectionStatus((status) => console.log("SNA:", status));
- *
- * // Receive live session snapshots (pushed automatically)
- * sna.sessions.onSnapshot((sessions) => {
- *   console.log("Sessions:", sessions);
+ * const sna = new SnaClient({
+ *   baseUrl: "localhost:3099",
+ *   ws: true,
+ *   http: true,
  * });
  *
- * // Connect — snapshot arrives immediately
+ * sna.sessions.onSnapshot((sessions) => setSessions(sessions));
  * sna.connect();
  *
- * // Start an agent and subscribe to its events
- * await sna.agent.start("default", { prompt: "Hello!" });
- * sna.agent.onEvent(({ session, event }) => {
+ * // Safe to chain — each HTTP response confirms the op is committed
+ * const { sessionId } = await sna.sessions.create({ label: "my-task" });
+ * await sna.agent.start(sessionId, { model: "claude-sonnet-4-6" });
+ * await sna.agent.send(sessionId, "Hello!");
+ *
+ * // Event streaming always uses WS
+ * sna.agent.onEvent(({ event }) => {
  *   if (event.type === "assistant") console.log(event.message);
  * });
- * await sna.agent.subscribe("default", { since: 0 });
+ * await sna.agent.subscribe(sessionId);
+ * ```
+ *
+ * @example WS-only (no ordering guarantees)
+ * ```ts
+ * const sna = new SnaClient({
+ *   baseUrl: "localhost:3099",
+ *   ws: true,
+ *   http: false, // server ACKs immediately; async work may not be done
+ * });
  * ```
  *
  * @example Permission handling
  * ```ts
  * sna.agent.onPermissionRequest(({ session, request }) => {
- *   // Show UI to approve/deny
  *   showPermissionDialog(request, (approved) => {
  *     sna.agent.respondPermission(session, approved);
  *   });
@@ -66,13 +105,42 @@ type ConnectionStatus = "connecting" | "connected" | "disconnected";
  */
 interface SnaClientOptions {
     /**
-     * Full WebSocket URL of the SNA API server.
+     * Base URL of the SNA server.
      *
-     * @example "ws://localhost:3099/ws"
+     * Accepts a bare host or a full HTTP/HTTPS URL. The client derives
+     * the WebSocket and HTTP endpoints from this value:
+     * - `"localhost:3099"` → WS: `ws://localhost:3099/ws`, HTTP: `http://localhost:3099`
+     * - `"https://my-server.com"` → WS: `wss://my-server.com/ws`, HTTP: `https://my-server.com`
+     *
+     * @example "localhost:3099"
+     * @example "https://my-server.com"
      */
-    url: string;
+    baseUrl: string;
     /**
-     * Whether to automatically reconnect when the connection drops.
+     * Enable WebSocket transport.
+     *
+     * When `true`, the client connects to `ws(s)://<baseUrl>/ws` for
+     * real-time push operations (event streaming, session snapshots,
+     * permission notifications).
+     *
+     * When `false`, all WS-dependent operations will reject with an error.
+     * Use `false` only when building an HTTP-only integration.
+     */
+    ws: boolean;
+    /**
+     * Enable REST (HTTP) transport.
+     *
+     * When `true`, state-changing operations (`sessions.create/update/remove`,
+     * `agent.start/send/kill/restart/resume/interrupt`, `agent.getStatus`,
+     * `agent.setModel/setPermissionMode`) are routed through REST. The Promise
+     * resolves only after the server has fully committed the operation.
+     *
+     * When `false`, all operations fall back to WebSocket (the server ACKs
+     * immediately without waiting for async work to complete).
+     */
+    http: boolean;
+    /**
+     * Whether to automatically reconnect when the WebSocket connection drops.
      *
      * When `true`, the client will attempt to reconnect after
      * {@link reconnectDelay} ms, and restore all active subscriptions
@@ -112,19 +180,22 @@ interface WsMessage {
     [key: string]: unknown;
 }
 /**
- * Typed WebSocket client for the SNA API server.
+ * Dual-transport client for the SNA API server.
  *
- * Create one instance per app, call {@link connect} to open the WebSocket,
- * and use the namespaced APIs to interact with the server.
+ * Provide a single `baseUrl` and explicit `ws`/`http` flags.
+ * The client derives the WS and HTTP endpoints automatically.
  *
  * @example
  * ```ts
- * const sna = new SnaClient({ url: "ws://localhost:3099/ws" });
+ * const sna = new SnaClient({
+ *   baseUrl: "localhost:3099",
+ *   ws: true,   // real-time push, event streaming
+ *   http: true, // ordering-guaranteed state changes
+ * });
  * sna.connect();
  *
- * // Use namespaced APIs
- * await sna.sessions.create({ label: "my-session" });
- * await sna.agent.start("my-session", { prompt: "Hello" });
+ * const { sessionId } = await sna.sessions.create({ label: "my-session" });
+ * await sna.agent.start(sessionId, { prompt: "Hello" });
  * ```
  */
 declare class SnaClient {
@@ -137,10 +208,12 @@ declare class SnaClient {
     private reconnectTimer;
     private reconnectAttempts;
     private disposed;
-    private readonly url;
+    private readonly wsUrl;
     private readonly _reconnect;
     private readonly reconnectDelay;
     private readonly maxReconnectAttempts;
+    /** @internal Used by SessionsApi and AgentApi within this module. */
+    readonly _httpUrl: string | undefined;
     /**
      * Session management APIs.
      *
@@ -159,6 +232,24 @@ declare class SnaClient {
      * @see {@link AgentApi}
      */
     readonly agent: AgentApi;
+    /**
+     * Skill event streaming and emission APIs.
+     *
+     * Use this namespace to subscribe to skill events, emit events,
+     * and stream events via SSE.
+     *
+     * @see {@link EventsApi}
+     */
+    readonly events: EventsApi;
+    /**
+     * Chat session and message persistence APIs.
+     *
+     * Use this namespace to manage chat sessions and messages
+     * stored in the SNA database.
+     *
+     * @see {@link ChatApi}
+     */
+    readonly chat: ChatApi;
     constructor(options: SnaClientOptions);
     /**
      * Current connection status.
@@ -280,6 +371,22 @@ declare class SnaClient {
      * ```
      */
     onPush(type: string, handler: (msg: WsMessage) => void): () => void;
+    /**
+     * Perform a REST request against the SNA HTTP server.
+     *
+     * Used internally by {@link SessionsApi} and {@link AgentApi} when
+     * {@link SnaClientOptions.httpUrl} is configured. Falls back to WS
+     * if `httpUrl` is not set.
+     *
+     * @internal
+     */
+    _httpFetch<T = Record<string, unknown>>(method: string, path: string, body?: Record<string, unknown>): Promise<T>;
+    /**
+     * Parse an SSE response as an AsyncGenerator.
+     * Yields parsed JSON objects from `data:` lines.
+     * @internal
+     */
+    static _parseSse(response: Response): AsyncGenerator<Record<string, unknown>>;
     private doConnect;
     private setStatus;
     private rejectAllPending;
@@ -339,25 +446,84 @@ interface SessionInfo {
     /** Unix timestamp (ms) of the last activity (message sent/received). */
     lastActivityAt: number;
 }
+/** Options for a one-shot agent execution. */
+interface RunOnceOptions {
+    message: string;
+    model?: string;
+    systemPrompt?: string;
+    appendSystemPrompt?: string;
+    permissionMode?: string;
+    cwd?: string;
+    timeout?: number;
+    provider?: string;
+    extraArgs?: string[];
+}
+/** Result of a one-shot agent execution. */
+interface RunOnceResult {
+    result: string;
+    usage: Record<string, unknown> | null;
+}
+/** A skill event row from the database. */
+interface SkillEvent {
+    id: number;
+    session_id: string | null;
+    skill: string;
+    type: string;
+    message: string;
+    data: string | null;
+    created_at: string;
+}
+/** A chat session row from the database. */
+interface ChatSession {
+    id: string;
+    label: string;
+    type: string;
+    meta: Record<string, unknown> | null;
+    cwd: string | null;
+    created_at: string;
+}
+/** A chat message row from the database. */
+interface ChatMessage {
+    id: number;
+    session_id: string;
+    role: string;
+    content: string;
+    skill_name: string | null;
+    meta: Record<string, unknown> | null;
+    created_at: string;
+}
 /**
  * Session management APIs.
  *
  * Access via `sna.sessions`.
  *
- * The SNA server automatically pushes a full `sessions.snapshot` on
- * every WebSocket connection and whenever session state changes.
- * Use {@link onSnapshot} to receive these — no polling needed.
+ * ## Transport and ordering
+ *
+ * When `httpUrl` is configured on {@link SnaClient}, mutating operations
+ * (`create`, `update`, `remove`) are routed through REST. The Promise
+ * resolves only after the server has **fully committed** the change to the
+ * database, so it is safe to call `agent.start` immediately after `create`
+ * without any race condition.
+ *
+ * Without `httpUrl`, these operations go through WebSocket. The server
+ * acknowledges the request as soon as it is received — the async DB write
+ * may not yet be complete when the Promise resolves.
+ *
+ * Reactive operations (`onSnapshot`, `onConfigChanged`) always use
+ * WebSocket push and are unaffected by the `httpUrl` setting.
  *
  * @example
  * ```ts
- * // Listen for session snapshots (reactive, no polling)
+ * // Reactive snapshots (always WS)
  * sna.sessions.onSnapshot((sessions) => {
  *   const active = sessions.filter(s => s.alive);
  *   console.log(`${active.length} active sessions`);
  * });
  *
- * // Create a new session
+ * // Create — with httpUrl, DB write is committed before Promise resolves
  * const { sessionId } = await sna.sessions.create({ label: "my-task" });
+ * // Safe to start agent immediately
+ * await sna.agent.start(sessionId, { prompt: "Go!" });
  * ```
  */
 declare class SessionsApi {
@@ -365,10 +531,32 @@ declare class SessionsApi {
     private snapshotUnsub;
     constructor(client: SnaClient);
     /**
+     * List all sessions on the server.
+     *
+     * Returns a point-in-time snapshot of all sessions. For live
+     * updates, use {@link onSnapshot} instead.
+     *
+     * @example
+     * ```ts
+     * const { sessions } = await sna.sessions.list();
+     * console.log(sessions.map(s => s.id));
+     * ```
+     */
+    list(): Promise<{
+        sessions: SessionInfo[];
+    }>;
+    /**
      * Create a new agent session on the server.
      *
      * The session is created in a stopped state — call
      * {@link AgentApi.start | sna.agent.start()} to spawn an agent in it.
+     *
+     * **Ordering guarantee (REST):** when `httpUrl` is configured, the Promise
+     * resolves only after the session row is committed to the database. It is
+     * safe to call `agent.start` on the returned `sessionId` immediately.
+     *
+     * **Without `httpUrl` (WS fallback):** the server ACKs on receipt; the DB
+     * write is async and may not be complete when the Promise resolves.
      *
      * @param opts - Session options.
      * @param opts.id - Explicit session ID. Auto-generated if omitted.
@@ -383,6 +571,7 @@ declare class SessionsApi {
      *   label: "form-fill",
      *   cwd: "/path/to/project",
      * });
+     * // With httpUrl: session is in DB — safe to start immediately
      * await sna.agent.start(sessionId, { prompt: "Fill the form" });
      * ```
      */
@@ -403,6 +592,9 @@ declare class SessionsApi {
      * The agent process (if running) is killed before removal.
      * The `"default"` session cannot be removed.
      *
+     * **Ordering guarantee (REST):** when `httpUrl` is configured, the session
+     * and its process are fully torn down before the Promise resolves.
+     *
      * @param session - The session ID to remove.
      *
      * @example
@@ -419,6 +611,9 @@ declare class SessionsApi {
      * Only the provided fields are patched — omitted fields remain unchanged.
      * After a successful update, the server pushes a `sessions.snapshot`
      * to all connected clients automatically.
+     *
+     * **Ordering guarantee (REST):** when `httpUrl` is configured, the metadata
+     * update is committed to the database before the Promise resolves.
      *
      * @param session - The session ID to update.
      * @param opts - Fields to update. All optional.
@@ -531,34 +726,45 @@ interface AgentStartConfig {
  * 4. **Event streaming** — {@link subscribe}, {@link unsubscribe}, {@link onEvent}
  * 5. **Permissions** — {@link subscribePermissions}, {@link onPermissionRequest}, {@link respondPermission}
  *
- * @example Full lifecycle
+ * ## Transport and ordering
+ *
+ * When `httpUrl` is configured on {@link SnaClient}, lifecycle operations
+ * (`start`, `send`, `kill`, `restart`, `resume`, `interrupt`, `getStatus`,
+ * `setModel`, `setPermissionMode`) are routed through REST. Each call blocks
+ * until the server has fully applied the operation.
+ *
+ * **Important caveat for `start`:** the REST response confirms the agent
+ * process has been spawned (`process.alive === true`), but the agent's
+ * internal init handshake is asynchronous. The agent transitions to
+ * `"waiting"` state when its `init` event fires, which may be a few
+ * milliseconds after `start` resolves. Calling `send` immediately after
+ * `start` is safe in practice (the message queues in the process stdin),
+ * but if you need to confirm the agent is ready before sending, subscribe
+ * to events and wait for `agentStatus === "idle"` via `getStatus`.
+ *
+ * Event streaming operations (`subscribe`, `unsubscribe`, `onEvent`) and
+ * the permission flow always use WebSocket regardless of `httpUrl`.
+ *
+ * @example Full lifecycle (with httpUrl for ordering)
  * ```ts
- * // Start an agent
+ * // State-changing ops use REST → ordering guaranteed
  * await sna.agent.start("default", {
  *   prompt: "Analyze this codebase",
  *   model: "claude-sonnet-4-6",
  * });
  *
- * // Stream events in real-time
+ * // Event streaming always uses WS
  * sna.agent.onEvent(({ session, event }) => {
  *   switch (event.type) {
  *     case "thinking":   console.log("[thinking]", event.message); break;
  *     case "assistant":  console.log("[reply]", event.message);    break;
- *     case "tool_use":   console.log("[tool]", event.data);        break;
  *     case "complete":   console.log("Done!");                     break;
  *   }
  * });
  * await sna.agent.subscribe("default", { since: 0 });
  *
- * // Send follow-up messages
+ * // send is safe immediately after start (process is alive)
  * await sna.agent.send("default", "Now fix the bug you found");
- *
- * // Handle permission requests
- * sna.agent.onPermissionRequest(({ session, request }) => {
- *   console.log("Agent wants to:", request);
- *   sna.agent.respondPermission(session, true);
- * });
- * await sna.agent.subscribePermissions();
  * ```
  */
 declare class AgentApi {
@@ -572,6 +778,16 @@ declare class AgentApi {
      * If the session doesn't exist, it's auto-created.
      * If an agent is already running and `force` is not set,
      * returns `"already_running"` without spawning a new process.
+     *
+     * **Ordering guarantee (REST):** when `httpUrl` is configured, the Promise
+     * resolves after the agent process has been spawned (`process.alive === true`).
+     * It is safe to call `send` immediately after this.
+     *
+     * **Not guaranteed:** the agent may not yet be in `"waiting"` state when
+     * this resolves. The internal `init` handshake fires asynchronously after
+     * spawn. In practice `send` succeeds because the message queues in stdin,
+     * but if your code requires `agentStatus === "idle"` first, poll `getStatus`
+     * or subscribe to events and await the first non-processing state.
      *
      * @param session - Target session ID.
      * @param config - Agent configuration.
@@ -597,6 +813,13 @@ declare class AgentApi {
      *
      * The agent must already be started in this session.
      * Supports text messages and images.
+     *
+     * **Ordering guarantee (REST):** when `httpUrl` is configured, the message
+     * has been written to the process stdin and persisted to the database before
+     * the Promise resolves. The next `send` call will not interleave with this one.
+     *
+     * **Without `httpUrl` (WS fallback):** the server ACKs on receipt; the stdin
+     * write and DB insert are async.
      *
      * @param session - Target session ID.
      * @param message - The text message to send.
@@ -753,6 +976,56 @@ declare class AgentApi {
         } | null;
     }>;
     /**
+     * Run a one-shot agent task and return the result.
+     *
+     * Creates a temporary session, spawns an agent, waits for it to
+     * complete, then cleans up. The session is deleted after execution.
+     *
+     * **Always synchronous from the caller's perspective** — the Promise
+     * resolves only when the agent emits a `complete` event or the
+     * `timeout` is reached.
+     *
+     * @param opts - One-shot execution options.
+     * @param opts.message - The prompt to send to the agent.
+     * @param opts.timeout - Max wait time in ms. Server default if omitted.
+     * @returns The agent's final text response and token usage.
+     *
+     * @example
+     * ```ts
+     * const { result } = await sna.agent.runOnce({
+     *   message: "What is 2 + 2?",
+     *   model: "claude-haiku-4-5-20251001",
+     *   timeout: 30000,
+     * });
+     * console.log(result); // "4"
+     * ```
+     */
+    runOnce(opts: RunOnceOptions): Promise<RunOnceResult>;
+    /**
+     * Stream agent events for a session via SSE (HTTP-only).
+     *
+     * Returns an `AsyncIterable` of agent events. The stream stays
+     * open until the caller breaks the loop or the connection is closed.
+     *
+     * **Requires `http: true`** — this method uses the HTTP SSE endpoint
+     * (`GET /agent/events`), not WebSocket. For WS-based streaming, use
+     * {@link subscribe} + {@link onEvent} instead.
+     *
+     * @param session - Session to stream events for.
+     * @param since - Start from this event cursor. Defaults to current cursor.
+     * @returns An `AsyncIterable` of agent event objects.
+     * @throws If `http` transport is not enabled.
+     *
+     * @example
+     * ```ts
+     * for await (const event of sna.agent.streamEvents("default")) {
+     *   if (event.type === "complete") break;
+     *   console.log(event.type, event.message);
+     * }
+     * ```
+     */
+    streamEvents(session: string, since?: number): AsyncGenerator<Record<string, unknown>>;
+    /**
      * Change the model for a running agent session.
      *
      * Takes effect on the next agent invocation within the session.
@@ -790,6 +1063,7 @@ declare class AgentApi {
      * After subscribing, `agent.event` push messages are delivered
      * to handlers registered via {@link onEvent}.
      *
+     * **Always uses WebSocket**, regardless of whether `httpUrl` is configured.
      * Subscriptions survive reconnects — the client automatically
      * re-subscribes after a connection drop.
      *
@@ -834,6 +1108,7 @@ declare class AgentApi {
      * Listen to agent events across all subscribed sessions.
      *
      * Events are delivered in real-time as the agent works.
+     * **Always uses WebSocket push**, regardless of `httpUrl`.
      * You must call {@link subscribe} first for the session(s) you
      * want to receive events from.
      *
@@ -1004,6 +1279,250 @@ declare class AgentApi {
     }) => void): () => void;
     /** @internal Re-subscribe after reconnect — called automatically by SnaClient. */
     _resubscribe(): void;
+}
+/**
+ * Skill event streaming and emission APIs.
+ *
+ * Access via `sna.events`.
+ *
+ * Skill events are lightweight records written to the `skill_events`
+ * SQLite table by skills (via `emit.js`) or by calling {@link emit}.
+ * They are separate from agent events (which are model output events).
+ *
+ * @example
+ * ```ts
+ * // Subscribe to real-time skill events via WebSocket
+ * sna.events.onSkillEvent(({ skill, type, message }) => {
+ *   console.log(`[${skill}/${type}] ${message}`);
+ * });
+ * await sna.events.subscribe();
+ * ```
+ */
+declare class EventsApi {
+    private client;
+    constructor(client: SnaClient);
+    /**
+     * Subscribe to skill event pushes via WebSocket.
+     *
+     * After subscribing, `skill.event` push messages are delivered
+     * to handlers registered via {@link onSkillEvent}.
+     *
+     * @param opts.since - Start from this event ID. Defaults to the latest.
+     * @returns The last event ID at subscription time.
+     *
+     * @example
+     * ```ts
+     * sna.events.onSkillEvent((e) => console.log(e));
+     * const { lastId } = await sna.events.subscribe({ since: 0 });
+     * ```
+     */
+    subscribe(opts?: {
+        since?: number;
+    }): Promise<{
+        lastId: number;
+    }>;
+    /**
+     * Unsubscribe from skill event pushes.
+     *
+     * @example
+     * ```ts
+     * await sna.events.unsubscribe();
+     * ```
+     */
+    unsubscribe(): Promise<void>;
+    /**
+     * Emit a skill event.
+     *
+     * Writes the event to the `skill_events` table and broadcasts it
+     * to all connected WS subscribers.
+     *
+     * **Transport note:** WS uses `eventType` (not `type`) for this call
+     * because `type` is reserved as the WS protocol routing field.
+     * The client handles this automatically.
+     *
+     * @returns The assigned event row ID.
+     *
+     * @example
+     * ```ts
+     * await sna.events.emit({
+     *   skill: "my-skill",
+     *   eventType: "milestone",
+     *   message: "Step 1 complete",
+     *   session: "default",
+     * });
+     * ```
+     */
+    emit(opts: {
+        skill: string;
+        eventType: string;
+        message: string;
+        data?: string;
+        session?: string;
+    }): Promise<{
+        id: number;
+    }>;
+    /**
+     * Listen for skill event pushes.
+     *
+     * Fires when any skill event is pushed to this connection after
+     * calling {@link subscribe}.
+     *
+     * @param cb - Called for each skill event.
+     * @returns An unsubscribe function.
+     *
+     * @example
+     * ```ts
+     * const unsub = sna.events.onSkillEvent(({ skill, type, message }) => {
+     *   if (type === "complete") markDone(skill);
+     * });
+     * ```
+     */
+    onSkillEvent(cb: (event: SkillEvent) => void): () => void;
+    /**
+     * Stream skill events via SSE (HTTP-only).
+     *
+     * Returns an `AsyncIterable` of {@link SkillEvent} rows.
+     * Requires `http: true`. For WS streaming, use
+     * {@link subscribe} + {@link onSkillEvent}.
+     *
+     * @param since - Start from this event ID.
+     *
+     * @example
+     * ```ts
+     * for await (const event of sna.events.stream()) {
+     *   if (event.type === "complete") break;
+     *   console.log(event.skill, event.message);
+     * }
+     * ```
+     */
+    stream(since?: number): AsyncGenerator<SkillEvent>;
+}
+/**
+ * Chat session and message persistence APIs.
+ *
+ * Access via `sna.chat`.
+ *
+ * Chat sessions and messages are stored in the `chat_sessions` and
+ * `chat_messages` SQLite tables. These are separate from agent sessions
+ * (which run processes) — chat sessions are lightweight records for
+ * persisting conversation history.
+ *
+ * @example
+ * ```ts
+ * const { id } = await sna.chat.createSession({ label: "My chat" });
+ * await sna.chat.createMessage(id, { role: "user", content: "Hello" });
+ * const { messages } = await sna.chat.listMessages(id);
+ * ```
+ */
+declare class ChatApi {
+    private client;
+    constructor(client: SnaClient);
+    /**
+     * List all chat sessions.
+     *
+     * @example
+     * ```ts
+     * const { sessions } = await sna.chat.listSessions();
+     * ```
+     */
+    listSessions(): Promise<{
+        sessions: ChatSession[];
+    }>;
+    /**
+     * Create a chat session.
+     *
+     * @param opts.id - Explicit ID. Auto-generated if omitted.
+     * @param opts.label - Human-readable label.
+     * @param opts.type - Session type. Defaults to `"background"`.
+     * @param opts.meta - Arbitrary metadata.
+     *
+     * @example
+     * ```ts
+     * const { id } = await sna.chat.createSession({ label: "thread-1" });
+     * ```
+     */
+    createSession(opts?: {
+        id?: string;
+        label?: string;
+        type?: string;
+        meta?: Record<string, unknown>;
+    }): Promise<{
+        status: "created";
+        id: string;
+        meta: Record<string, unknown> | null;
+    }>;
+    /**
+     * Delete a chat session and all its messages.
+     *
+     * @param session - The session ID to delete.
+     *
+     * @example
+     * ```ts
+     * await sna.chat.removeSession("thread-1");
+     * ```
+     */
+    removeSession(session: string): Promise<{
+        status: "deleted";
+    }>;
+    /**
+     * List messages for a chat session.
+     *
+     * @param session - The session ID.
+     * @param opts.since - Only return messages with `id > since`.
+     *
+     * @example
+     * ```ts
+     * const { messages } = await sna.chat.listMessages("thread-1");
+     * const newOnly = await sna.chat.listMessages("thread-1", { since: lastId });
+     * ```
+     */
+    listMessages(session: string, opts?: {
+        since?: number;
+    }): Promise<{
+        messages: ChatMessage[];
+    }>;
+    /**
+     * Add a message to a chat session.
+     *
+     * The session is auto-created with type `"main"` if it doesn't exist.
+     *
+     * @param session - The session ID.
+     * @param opts.role - Message role: `"user"`, `"assistant"`, `"thinking"`, etc.
+     * @param opts.content - Message text.
+     * @param opts.skill_name - Skill that generated this message, if any.
+     * @param opts.meta - Arbitrary metadata.
+     * @returns The assigned message row ID.
+     *
+     * @example
+     * ```ts
+     * const { id } = await sna.chat.createMessage("thread-1", {
+     *   role: "user",
+     *   content: "What is the capital of France?",
+     * });
+     * ```
+     */
+    createMessage(session: string, opts: {
+        role: string;
+        content?: string;
+        skill_name?: string;
+        meta?: Record<string, unknown>;
+    }): Promise<{
+        status: "created";
+        id: number;
+    }>;
+    /**
+     * Clear all messages for a chat session.
+     *
+     * @param session - The session ID.
+     *
+     * @example
+     * ```ts
+     * await sna.chat.clearMessages("thread-1");
+     * ```
+     */
+    clearMessages(session: string): Promise<{
+        status: "cleared";
+    }>;
 }
 
 export { type AgentStartConfig, type ConnectionStatus, type SessionInfo, SnaClient, type SnaClientOptions, type WsMessage };

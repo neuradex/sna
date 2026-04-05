@@ -11,7 +11,6 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import chalk from "chalk";
 import { createSnaApp } from "./index.js";
 import { SessionManager } from "./session-manager.js";
 import { attachWebSocket } from "./ws.js";
@@ -46,18 +45,11 @@ root.onError((err, c) => {
   return c.json({ status: "error", message: err.message, stack: err.stack }, 500);
 });
 
-// Request logger with method coloring
-const methodColor: Record<string, (s: string) => string> = {
-  GET: chalk.green,
-  POST: chalk.yellow,
-  DELETE: chalk.red,
-  OPTIONS: chalk.gray,
-};
+// Request logger
 root.use("*", async (c, next) => {
   const m = c.req.method;
-  const colorFn = methodColor[m] ?? chalk.white;
   const path = new URL(c.req.url).pathname;
-  logger.log("req", `${colorFn(m.padEnd(6))} ${path}`);
+  logger.log("req", `${m.padEnd(6)} ${path}`);
   await next();
 });
 
@@ -80,17 +72,17 @@ function shutdown(signal: string) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log("");
-  logger.log("sna", chalk.dim("stopping all sessions..."));
+  logger.log("sna", "stopping all sessions...");
   sessionManager.killAll();
   if (server) {
     server.close(() => {
-      logger.log("sna", chalk.green("clean shutdown") + chalk.dim(" — see you next time"));
+      logger.log("sna", "clean shutdown — see you next time");
       console.log("");
       process.exit(0);
     });
   }
   setTimeout(() => {
-    logger.log("sna", chalk.green("shutdown complete"));
+    logger.log("sna", "shutdown complete");
     console.log("");
     process.exit(0);
   }, 3000).unref();
@@ -108,8 +100,8 @@ process.on("uncaughtException", (err) => {
 // 3. Start listening immediately — agent receives messages when ready
 server = serve({ fetch: root.fetch, port }, () => {
   console.log("");
-  logger.log("sna", chalk.green.bold(`API server ready → http://localhost:${port}`));
-  logger.log("sna", chalk.dim(`WebSocket endpoint → ws://localhost:${port}/ws`));
+  logger.log("sna", `API server ready → http://localhost:${port}`);
+  logger.log("sna", `WebSocket endpoint → ws://localhost:${port}/ws`);
   console.log("");
 });
 
@@ -118,6 +110,6 @@ attachWebSocket(server as unknown as import("http").Server, sessionManager);
 
 agentProcess.on("event", (e) => {
   if (e.type === "init") {
-    logger.log("agent", chalk.green(`agent ready (session=${e.data?.sessionId ?? "?"})`));
+    logger.log("agent", `agent ready (session=${e.data?.sessionId ?? "?"})`);
   }
 });

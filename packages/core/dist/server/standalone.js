@@ -2,7 +2,6 @@
 import { serve } from "@hono/node-server";
 import { Hono as Hono4 } from "hono";
 import { cors } from "hono/cors";
-import chalk2 from "chalk";
 
 // src/server/index.ts
 import { Hono as Hono3 } from "hono";
@@ -360,7 +359,6 @@ ${xml}
 }
 
 // src/lib/logger.ts
-import chalk from "chalk";
 import fs3 from "fs";
 import path3 from "path";
 var LOG_PATH = path3.join(process.cwd(), ".dev.log");
@@ -368,23 +366,10 @@ try {
   fs3.writeFileSync(LOG_PATH, "");
 } catch {
 }
-function tsPlain() {
+function ts() {
   return (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
-function tsColored() {
-  return chalk.gray(tsPlain());
-}
 var tags = {
-  sna: chalk.bold.magenta(" SNA "),
-  req: chalk.bold.blue(" REQ "),
-  agent: chalk.bold.cyan(" AGT "),
-  stdin: chalk.bold.green(" IN  "),
-  stdout: chalk.bold.yellow(" OUT "),
-  route: chalk.bold.blue(" API "),
-  ws: chalk.bold.green(" WS  "),
-  err: chalk.bold.red(" ERR ")
-};
-var tagPlain = {
   sna: " SNA ",
   req: " REQ ",
   agent: " AGT ",
@@ -395,18 +380,18 @@ var tagPlain = {
   err: " ERR "
 };
 function appendFile(tag, args) {
-  const line = `${tsPlain()} ${tag} ${args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}
+  const line = `${ts()} ${tag} ${args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}
 `;
   fs3.appendFile(LOG_PATH, line, () => {
   });
 }
 function log(tag, ...args) {
-  console.log(`${tsColored()} ${tags[tag]}`, ...args);
-  appendFile(tagPlain[tag], args);
+  console.log(`${ts()} ${tags[tag] ?? tag}`, ...args);
+  appendFile(tags[tag] ?? tag, args);
 }
 function err(tag, ...args) {
-  console.error(`${tsColored()} ${tags[tag]}`, ...args);
-  appendFile(tagPlain[tag], args);
+  console.error(`${ts()} ${tags[tag] ?? tag}`, ...args);
+  appendFile(tags[tag] ?? tag, args);
 }
 var logger = { log, err };
 
@@ -451,6 +436,8 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
     this.buffer = "";
     /** True once we receive a real text_delta stream_event this turn */
     this._receivedStreamEvents = false;
+    /** tool_use IDs already emitted via stream_event (to update instead of re-create in assistant block) */
+    this._streamedToolUseIds = /* @__PURE__ */ new Set();
     /**
      * FIFO event queue — ALL events (deltas, assistant, complete, etc.) go through
      * this queue. A fixed-interval timer drains one item at a time, guaranteeing
@@ -561,6 +548,9 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
   get alive() {
     return this._alive;
   }
+  get pid() {
+    return this.proc.pid ?? null;
+  }
   get sessionId() {
     return this._sessionId;
   }
@@ -632,6 +622,17 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
       case "stream_event": {
         const inner = msg.event;
         if (!inner) return null;
+        if (inner.type === "content_block_start" && inner.content_block?.type === "tool_use") {
+          const block = inner.content_block;
+          this._receivedStreamEvents = true;
+          this._streamedToolUseIds.add(block.id);
+          return {
+            type: "tool_use",
+            message: block.name,
+            data: { toolName: block.name, id: block.id, input: null, streaming: true },
+            timestamp: Date.now()
+          };
+        }
         if (inner.type === "content_block_delta") {
           const delta = inner.delta;
           if (delta?.type === "text_delta" && delta.text) {
@@ -645,7 +646,7 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
           }
           if (delta?.type === "thinking_delta" && delta.thinking) {
             return {
-              type: "thinking",
+              type: "thinking_delta",
               message: delta.thinking,
               timestamp: Date.now()
             };
@@ -667,10 +668,12 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
               timestamp: Date.now()
             });
           } else if (block.type === "tool_use") {
+            const alreadyStreamed = this._streamedToolUseIds.has(block.id);
+            if (alreadyStreamed) this._streamedToolUseIds.delete(block.id);
             events.push({
               type: "tool_use",
               message: block.name,
-              data: { toolName: block.name, input: block.input, id: block.id },
+              data: { toolName: block.name, input: block.input, id: block.id, update: alreadyStreamed },
               timestamp: Date.now()
             });
           } else if (block.type === "text") {
@@ -714,6 +717,7 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
               timestamp: Date.now()
             });
             this._receivedStreamEvents = false;
+            this._streamedToolUseIds.clear();
           }
           const u = msg.usage ?? {};
           const mu = msg.modelUsage ?? {};
@@ -1981,10 +1985,23 @@ var SessionManager = class {
   }
   /** Kill all sessions. Used during shutdown. */
   killAll() {
+    const pids = [];
     for (const session of this.sessions.values()) {
       if (session.process?.alive) {
+        const pid = session.process.pid;
         session.process.kill();
+        if (pid) pids.push(pid);
       }
+    }
+    if (pids.length > 0) {
+      setTimeout(() => {
+        for (const pid of pids) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+          }
+        }
+      }, 1e3);
     }
   }
   get size() {
@@ -2700,17 +2717,10 @@ root.onError((err2, c) => {
   logger.err("err", `${c.req.method} ${new URL(c.req.url).pathname} \u2192 ${err2.message}`);
   return c.json({ status: "error", message: err2.message, stack: err2.stack }, 500);
 });
-var methodColor = {
-  GET: chalk2.green,
-  POST: chalk2.yellow,
-  DELETE: chalk2.red,
-  OPTIONS: chalk2.gray
-};
 root.use("*", async (c, next) => {
   const m = c.req.method;
-  const colorFn = methodColor[m] ?? chalk2.white;
   const path6 = new URL(c.req.url).pathname;
-  logger.log("req", `${colorFn(m.padEnd(6))} ${path6}`);
+  logger.log("req", `${m.padEnd(6)} ${path6}`);
   await next();
 });
 var sessionManager = new SessionManager({ maxSessions });
@@ -2726,17 +2736,17 @@ function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log("");
-  logger.log("sna", chalk2.dim("stopping all sessions..."));
+  logger.log("sna", "stopping all sessions...");
   sessionManager.killAll();
   if (server) {
     server.close(() => {
-      logger.log("sna", chalk2.green("clean shutdown") + chalk2.dim(" \u2014 see you next time"));
+      logger.log("sna", "clean shutdown \u2014 see you next time");
       console.log("");
       process.exit(0);
     });
   }
   setTimeout(() => {
-    logger.log("sna", chalk2.green("shutdown complete"));
+    logger.log("sna", "shutdown complete");
     console.log("");
     process.exit(0);
   }, 3e3).unref();
@@ -2750,13 +2760,13 @@ process.on("uncaughtException", (err2) => {
 });
 server = serve({ fetch: root.fetch, port }, () => {
   console.log("");
-  logger.log("sna", chalk2.green.bold(`API server ready \u2192 http://localhost:${port}`));
-  logger.log("sna", chalk2.dim(`WebSocket endpoint \u2192 ws://localhost:${port}/ws`));
+  logger.log("sna", `API server ready \u2192 http://localhost:${port}`);
+  logger.log("sna", `WebSocket endpoint \u2192 ws://localhost:${port}/ws`);
   console.log("");
 });
 attachWebSocket(server, sessionManager);
 agentProcess.on("event", (e) => {
   if (e.type === "init") {
-    logger.log("agent", chalk2.green(`agent ready (session=${e.data?.sessionId ?? "?"})`));
+    logger.log("agent", `agent ready (session=${e.data?.sessionId ?? "?"})`);
   }
 });

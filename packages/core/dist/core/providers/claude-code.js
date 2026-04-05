@@ -43,6 +43,10 @@ const _ClaudeCodeProcess = class _ClaudeCodeProcess {
     this._sessionId = null;
     this._initEmitted = false;
     this.buffer = "";
+    /** True once we receive a real text_delta stream_event this turn */
+    this._receivedStreamEvents = false;
+    /** tool_use IDs already emitted via stream_event (to update instead of re-create in assistant block) */
+    this._streamedToolUseIds = /* @__PURE__ */ new Set();
     /**
      * FIFO event queue — ALL events (deltas, assistant, complete, etc.) go through
      * this queue. A fixed-interval timer drains one item at a time, guaranteeing
@@ -153,6 +157,9 @@ const _ClaudeCodeProcess = class _ClaudeCodeProcess {
   get alive() {
     return this._alive;
   }
+  get pid() {
+    return this.proc.pid ?? null;
+  }
   get sessionId() {
     return this._sessionId;
   }
@@ -221,7 +228,43 @@ const _ClaudeCodeProcess = class _ClaudeCodeProcess {
         }
         return null;
       }
+      case "stream_event": {
+        const inner = msg.event;
+        if (!inner) return null;
+        if (inner.type === "content_block_start" && inner.content_block?.type === "tool_use") {
+          const block = inner.content_block;
+          this._receivedStreamEvents = true;
+          this._streamedToolUseIds.add(block.id);
+          return {
+            type: "tool_use",
+            message: block.name,
+            data: { toolName: block.name, id: block.id, input: null, streaming: true },
+            timestamp: Date.now()
+          };
+        }
+        if (inner.type === "content_block_delta") {
+          const delta = inner.delta;
+          if (delta?.type === "text_delta" && delta.text) {
+            this._receivedStreamEvents = true;
+            return {
+              type: "assistant_delta",
+              delta: delta.text,
+              index: inner.index ?? 0,
+              timestamp: Date.now()
+            };
+          }
+          if (delta?.type === "thinking_delta" && delta.thinking) {
+            return {
+              type: "thinking_delta",
+              message: delta.thinking,
+              timestamp: Date.now()
+            };
+          }
+        }
+        return null;
+      }
       case "assistant": {
+        if (this._receivedStreamEvents && msg.message?.stop_reason === null) return null;
         const content = msg.message?.content;
         if (!Array.isArray(content)) return null;
         const events = [];
@@ -234,10 +277,12 @@ const _ClaudeCodeProcess = class _ClaudeCodeProcess {
               timestamp: Date.now()
             });
           } else if (block.type === "tool_use") {
+            const alreadyStreamed = this._streamedToolUseIds.has(block.id);
+            if (alreadyStreamed) this._streamedToolUseIds.delete(block.id);
             events.push({
               type: "tool_use",
               message: block.name,
-              data: { toolName: block.name, input: block.input, id: block.id },
+              data: { toolName: block.name, input: block.input, id: block.id, update: alreadyStreamed },
               timestamp: Date.now()
             });
           } else if (block.type === "text") {
@@ -252,7 +297,7 @@ const _ClaudeCodeProcess = class _ClaudeCodeProcess {
             this.enqueue(e);
           }
           for (const text of textBlocks) {
-            this.enqueueTextAsDeltas(text);
+            this.enqueue({ type: "assistant", message: text, timestamp: Date.now() });
           }
         }
         return null;
@@ -274,6 +319,15 @@ const _ClaudeCodeProcess = class _ClaudeCodeProcess {
       }
       case "result": {
         if (msg.subtype === "success") {
+          if (this._receivedStreamEvents && msg.result) {
+            this.enqueue({
+              type: "assistant",
+              message: msg.result,
+              timestamp: Date.now()
+            });
+            this._receivedStreamEvents = false;
+            this._streamedToolUseIds.clear();
+          }
           const u = msg.usage ?? {};
           const mu = msg.modelUsage ?? {};
           const modelKey = Object.keys(mu)[0] ?? "";
@@ -387,6 +441,7 @@ class ClaudeCodeProvider {
       "--input-format",
       "stream-json",
       "--verbose",
+      "--include-partial-messages",
       "--settings",
       JSON.stringify(sdkSettings)
     ];

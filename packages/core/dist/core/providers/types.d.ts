@@ -5,7 +5,7 @@
  * Codex JSONL, etc.) into these common types.
  */
 interface AgentEvent {
-    type: "init" | "thinking" | "text_delta" | "assistant_delta" | "assistant" | "tool_use" | "tool_result" | "permission_needed" | "milestone" | "user_message" | "interrupted" | "error" | "complete";
+    type: "init" | "thinking" | "thinking_delta" | "text_delta" | "assistant_delta" | "assistant" | "tool_use" | "tool_result" | "permission_needed" | "milestone" | "user_message" | "interrupted" | "error" | "complete";
     message?: string;
     data?: Record<string, unknown>;
     /** Streaming text delta (for assistant_delta events only) */
@@ -30,6 +30,8 @@ interface AgentProcess {
     kill(): void;
     /** Whether the process is still running. */
     readonly alive: boolean;
+    /** OS process ID. */
+    readonly pid: number | null;
     /** Session ID assigned by the provider. */
     readonly sessionId: string | null;
     on(event: "event", handler: (e: AgentEvent) => void): void;

@@ -1,4 +1,3 @@
-import chalk from "chalk";
 import fs from "fs";
 import path from "path";
 const LOG_PATH = path.join(process.cwd(), ".dev.log");
@@ -6,23 +5,10 @@ try {
   fs.writeFileSync(LOG_PATH, "");
 } catch {
 }
-function tsPlain() {
+function ts() {
   return (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
-function tsColored() {
-  return chalk.gray(tsPlain());
-}
 const tags = {
-  sna: chalk.bold.magenta(" SNA "),
-  req: chalk.bold.blue(" REQ "),
-  agent: chalk.bold.cyan(" AGT "),
-  stdin: chalk.bold.green(" IN  "),
-  stdout: chalk.bold.yellow(" OUT "),
-  route: chalk.bold.blue(" API "),
-  ws: chalk.bold.green(" WS  "),
-  err: chalk.bold.red(" ERR ")
-};
-const tagPlain = {
   sna: " SNA ",
   req: " REQ ",
   agent: " AGT ",
@@ -33,18 +19,18 @@ const tagPlain = {
   err: " ERR "
 };
 function appendFile(tag, args) {
-  const line = `${tsPlain()} ${tag} ${args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}
+  const line = `${ts()} ${tag} ${args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}
 `;
   fs.appendFile(LOG_PATH, line, () => {
   });
 }
 function log(tag, ...args) {
-  console.log(`${tsColored()} ${tags[tag]}`, ...args);
-  appendFile(tagPlain[tag], args);
+  console.log(`${ts()} ${tags[tag] ?? tag}`, ...args);
+  appendFile(tags[tag] ?? tag, args);
 }
 function err(tag, ...args) {
-  console.error(`${tsColored()} ${tags[tag]}`, ...args);
-  appendFile(tagPlain[tag], args);
+  console.error(`${ts()} ${tags[tag] ?? tag}`, ...args);
+  appendFile(tags[tag] ?? tag, args);
 }
 const logger = { log, err };
 export {

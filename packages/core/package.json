@@ -1,6 +1,6 @@
 {
   "name": "@sna-sdk/core",
-  "version": "0.9.5",
+  "version": "0.9.6",
   "description": "Skills-Native Application runtime — server, providers, session management, database, and CLI",
   "type": "module",
   "bin": {
@@ -108,7 +108,6 @@
   ],
   "dependencies": {
     "@hono/node-server": "^1.19.11",
-    "chalk": "^5.0.0",
     "hono": "^4.12.7",
     "js-yaml": "^4.1.0",
     "ws": "^8.20.0"
