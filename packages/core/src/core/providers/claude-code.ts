@@ -11,6 +11,29 @@ const SHELL = process.env.SHELL || "/bin/zsh";
 
 // ── Claude binary resolution ─────────────────────────────────────────────────
 
+/**
+ * Parse `command -v claude` output to extract the executable path.
+ * Handles: direct paths, alias with/without quotes, bare command names.
+ * @internal Exported for testing only.
+ */
+export function parseCommandVOutput(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "claude";
+
+  // "alias claude=/opt/homebrew/bin/claude"
+  // "alias claude='/opt/homebrew/bin/claude'"
+  // "alias claude=\"/opt/homebrew/bin/claude\""
+  const aliasMatch = trimmed.match(/=\s*['"]?([^'"]+?)['"]?\s*$/);
+  if (aliasMatch) return aliasMatch[1];
+
+  // "/Users/.../bin/claude" — direct absolute path
+  const pathMatch = trimmed.match(/^(\/\S+)/m);
+  if (pathMatch) return pathMatch[1];
+
+  // Bare "claude" or unrecognized format
+  return trimmed;
+}
+
 function resolveClaudePath(cwd: string): string {
   // SNA_CLAUDE_COMMAND overrides everything (e.g., "sna tu claude" for testing)
   if (process.env.SNA_CLAUDE_COMMAND) return process.env.SNA_CLAUDE_COMMAND;
@@ -27,16 +50,14 @@ function resolveClaudePath(cwd: string): string {
     "/usr/local/bin/claude",
     `${process.env.HOME}/.local/bin/claude`,
     `${process.env.HOME}/.claude/bin/claude`,
+    `${process.env.HOME}/.volta/bin/claude`,
   ]) {
     try { execSync(`test -x "${p}"`, { stdio: "pipe" }); return p; } catch { /* next */ }
   }
   // Try login shell to pick up nvm/fnm/asdf managed paths
   try {
     const raw = execSync(`${SHELL} -i -l -c "command -v claude" 2>/dev/null`, { encoding: "utf8", timeout: 5000 }).trim();
-    // "alias claude=/opt/homebrew/bin/claude" → extract path after =
-    // "/Users/.../bin/claude" → use as-is
-    const match = raw.match(/=(.+)/) ?? raw.match(/^(\/\S+)/m);
-    return match ? match[1] : raw;
+    return parseCommandVOutput(raw);
   } catch {
     return "claude";
   }
