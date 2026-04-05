@@ -56,6 +56,8 @@ class ClaudeCodeProcess implements AgentProcess {
   private buffer = "";
   /** True once we receive a real text_delta stream_event this turn */
   private _receivedStreamEvents = false;
+  /** tool_use IDs already emitted via stream_event (to update instead of re-create in assistant block) */
+  private _streamedToolUseIds = new Set<string>();
 
   /**
    * FIFO event queue — ALL events (deltas, assistant, complete, etc.) go through
@@ -123,6 +125,7 @@ class ClaudeCodeProcess implements AgentProcess {
   }
 
   get alive() { return this._alive; }
+  get pid() { return this.proc.pid ?? null; }
   get sessionId() { return this._sessionId; }
 
   constructor(proc: ChildProcess, options: SpawnOptions) {
@@ -267,6 +270,17 @@ class ClaudeCodeProcess implements AgentProcess {
       case "stream_event": {
         const inner = msg.event;
         if (!inner) return null;
+        if (inner.type === "content_block_start" && inner.content_block?.type === "tool_use") {
+          const block = inner.content_block;
+          this._receivedStreamEvents = true;
+          this._streamedToolUseIds.add(block.id);
+          return {
+            type: "tool_use",
+            message: block.name,
+            data: { toolName: block.name, id: block.id, input: null, streaming: true },
+            timestamp: Date.now(),
+          } satisfies AgentEvent;
+        }
         if (inner.type === "content_block_delta") {
           const delta = inner.delta;
           if (delta?.type === "text_delta" && delta.text) {
@@ -280,7 +294,7 @@ class ClaudeCodeProcess implements AgentProcess {
           }
           if (delta?.type === "thinking_delta" && delta.thinking) {
             return {
-              type: "thinking",
+              type: "thinking_delta",
               message: delta.thinking,
               timestamp: Date.now(),
             } satisfies AgentEvent;
@@ -308,10 +322,12 @@ class ClaudeCodeProcess implements AgentProcess {
               timestamp: Date.now(),
             });
           } else if (block.type === "tool_use") {
+            const alreadyStreamed = this._streamedToolUseIds.has(block.id);
+            if (alreadyStreamed) this._streamedToolUseIds.delete(block.id);
             events.push({
               type: "tool_use",
               message: block.name,
-              data: { toolName: block.name, input: block.input, id: block.id },
+              data: { toolName: block.name, input: block.input, id: block.id, update: alreadyStreamed },
               timestamp: Date.now(),
             });
           } else if (block.type === "text") {
@@ -364,6 +380,7 @@ class ClaudeCodeProcess implements AgentProcess {
               timestamp: Date.now(),
             } satisfies AgentEvent);
             this._receivedStreamEvents = false;
+            this._streamedToolUseIds.clear();
           }
           // Per-turn usage — represents actual context size for this turn
           const u = msg.usage ?? {};
