@@ -582,6 +582,13 @@ export class ClaudeCodeProvider implements AgentProvider {
     delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
     delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
 
+    // Ensure the Claude binary's directory is in PATH so its shebang (#!/usr/bin/env node) works.
+    // Critical for nvm/fnm/asdf installs where node isn't in Electron's default PATH.
+    const claudeDir = path.dirname(claudePath);
+    if (claudeDir && claudeDir !== ".") {
+      cleanEnv.PATH = `${claudeDir}:${cleanEnv.PATH ?? ""}`;
+    }
+
     const proc = spawn(claudePath, [...claudePrefix, ...args], {
       cwd: options.cwd,
       env: cleanEnv,
