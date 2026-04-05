@@ -26,11 +26,17 @@ function resolveClaudePath(cwd: string): string {
     "/opt/homebrew/bin/claude",
     "/usr/local/bin/claude",
     `${process.env.HOME}/.local/bin/claude`,
+    `${process.env.HOME}/.claude/bin/claude`,
   ]) {
     try { execSync(`test -x "${p}"`, { stdio: "pipe" }); return p; } catch { /* next */ }
   }
+  // Try login shell to pick up nvm/fnm/asdf managed paths
   try {
-    return execSync(`${SHELL} -l -c "which claude"`, { encoding: "utf8" }).trim();
+    const raw = execSync(`${SHELL} -i -l -c "command -v claude" 2>/dev/null`, { encoding: "utf8", timeout: 5000 }).trim();
+    // "alias claude=/opt/homebrew/bin/claude" → extract path after =
+    // "/Users/.../bin/claude" → use as-is
+    const match = raw.match(/=(.+)/) ?? raw.match(/^(\/\S+)/m);
+    return match ? match[1] : raw;
   } catch {
     return "claude";
   }
