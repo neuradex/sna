@@ -7,7 +7,8 @@
 export interface AgentEvent {
   type:
     | "init"            // session initialized
-    | "thinking"        // model is reasoning (extended thinking block)
+    | "thinking"        // model is reasoning (extended thinking block, complete)
+    | "thinking_delta"  // streaming thinking chunk (partial, before final thinking event)
     | "text_delta"      // streaming text from assistant (legacy alias)
     | "assistant_delta" // streaming text delta (real-time, before final assistant event)
     | "assistant"       // full assistant message (complete, backward-compatible)
@@ -44,6 +45,8 @@ export interface AgentProcess {
   kill(): void;
   /** Whether the process is still running. */
   readonly alive: boolean;
+  /** OS process ID. */
+  readonly pid: number | null;
   /** Session ID assigned by the provider. */
   readonly sessionId: string | null;
 
