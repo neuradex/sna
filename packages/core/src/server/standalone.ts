@@ -38,7 +38,7 @@ try {
 const { port, defaultPermissionMode: permissionMode, model: defaultModel, maxSessions } = getConfig();
 
 const root = new Hono();
-root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "DELETE", "OPTIONS"] }));
+root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] }));
 
 // Global error handler — always return JSON with error details
 root.onError((err, c) => {

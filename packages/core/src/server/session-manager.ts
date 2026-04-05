@@ -661,10 +661,21 @@ export class SessionManager {
 
   /** Kill all sessions. Used during shutdown. */
   killAll(): void {
+    const pids: number[] = [];
     for (const session of this.sessions.values()) {
       if (session.process?.alive) {
+        const pid = session.process.pid;
         session.process.kill();
+        if (pid) pids.push(pid);
       }
+    }
+    // Force-kill any survivors after a brief grace period
+    if (pids.length > 0) {
+      setTimeout(() => {
+        for (const pid of pids) {
+          try { process.kill(pid, "SIGKILL"); } catch { /* already dead */ }
+        }
+      }, 1000);
     }
   }
 
