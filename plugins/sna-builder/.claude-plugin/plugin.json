@@ -1,7 +1,7 @@
 {
   "name": "sna-builder",
   "description": "SNA SDK development assistant — ensures correct architecture, DB separation, event pipeline usage, and skill authoring patterns",
-  "version": "0.9.9",
+  "version": "0.9.10",
   "author": {
     "name": "Neuradex"
   },
