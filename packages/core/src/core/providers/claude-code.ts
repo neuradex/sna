@@ -36,29 +36,39 @@ export function parseCommandVOutput(raw: string): string {
 
 function resolveClaudePath(cwd: string): string {
   // SNA_CLAUDE_COMMAND overrides everything (e.g., "sna tu claude" for testing)
-  if (process.env.SNA_CLAUDE_COMMAND) return process.env.SNA_CLAUDE_COMMAND;
+  if (process.env.SNA_CLAUDE_COMMAND) {
+    logger.log("agent", `claude path: SNA_CLAUDE_COMMAND=${process.env.SNA_CLAUDE_COMMAND}`);
+    return process.env.SNA_CLAUDE_COMMAND;
+  }
 
   const cached = path.join(cwd, ".sna/claude-path");
   if (fs.existsSync(cached)) {
     const p = fs.readFileSync(cached, "utf8").trim();
     if (p) {
-      try { execSync(`test -x "${p}"`, { stdio: "pipe" }); return p; } catch { /* stale */ }
+      try { execSync(`test -x "${p}"`, { stdio: "pipe" }); logger.log("agent", `claude path: cached=${p}`); return p; } catch { /* stale */ }
     }
   }
-  for (const p of [
+
+  const staticPaths = [
     "/opt/homebrew/bin/claude",
     "/usr/local/bin/claude",
     `${process.env.HOME}/.local/bin/claude`,
     `${process.env.HOME}/.claude/bin/claude`,
     `${process.env.HOME}/.volta/bin/claude`,
-  ]) {
-    try { execSync(`test -x "${p}"`, { stdio: "pipe" }); return p; } catch { /* next */ }
+  ];
+  for (const p of staticPaths) {
+    try { execSync(`test -x "${p}"`, { stdio: "pipe" }); logger.log("agent", `claude path: static=${p}`); return p; } catch { /* next */ }
   }
+
   // Try login shell to pick up nvm/fnm/asdf managed paths
   try {
     const raw = execSync(`${SHELL} -i -l -c "command -v claude" 2>/dev/null`, { encoding: "utf8", timeout: 5000 }).trim();
-    return parseCommandVOutput(raw);
-  } catch {
+    const resolved = parseCommandVOutput(raw);
+    logger.log("agent", `claude path: shell raw="${raw}" → resolved="${resolved}"`);
+    return resolved;
+  } catch (err: any) {
+    logger.err("agent", `claude path: all methods failed (SHELL=${SHELL}, HOME=${process.env.HOME}, err=${err.message})`);
+    logger.err("agent", `claude path: tried static=[${staticPaths.join(", ")}]`);
     return "claude";
   }
 }
