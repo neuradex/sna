@@ -3,7 +3,9 @@ import { createRequire } from "node:module";
 import fs from "fs";
 import path from "path";
 
-const DB_PATH = process.env.SNA_DB_PATH ?? path.join(process.cwd(), "data/sna.db");
+function getDbPath(): string {
+  return process.env.SNA_DB_PATH ?? path.join(process.cwd(), "data/sna.db");
+}
 
 /**
  * Directory for isolated native dependencies.
@@ -45,10 +47,10 @@ function loadBetterSqlite3(): typeof Database {
 export function getDb(): Database.Database {
   if (!_db) {
     const BetterSqlite3 = loadBetterSqlite3();
-    const dir = path.dirname(DB_PATH);
+    const dir = path.dirname(getDbPath());
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const nativeBinding = process.env.SNA_SQLITE_NATIVE_BINDING || undefined;
-    _db = nativeBinding ? new BetterSqlite3(DB_PATH, { nativeBinding }) : new BetterSqlite3(DB_PATH);
+    _db = nativeBinding ? new BetterSqlite3(getDbPath(), { nativeBinding }) : new BetterSqlite3(getDbPath());
     _db.pragma("journal_mode = WAL");
     initSchema(_db);
   }
