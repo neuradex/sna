@@ -47,6 +47,12 @@ interface SnaConfig {
         secretKey: string;
         baseUrl?: string;
     };
+    /**
+     * API proxy port for system prompt capture.
+     * Set automatically by langfuse-tracer when debug mode is active.
+     * When set, claude-code provider injects ANTHROPIC_BASE_URL into agent env.
+     */
+    apiProxyPort?: number;
 }
 /** Get current config. Returns a frozen copy. */
 declare function getConfig(): Readonly<SnaConfig>;

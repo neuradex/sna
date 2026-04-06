@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import type { AgentProvider, AgentProcess, AgentEvent, SpawnOptions } from "./types.js";
 import { writeHistoryJsonl, buildRecalledConversation } from "./cc-history-adapter.js";
 import { logger } from "../../lib/logger.js";
+import { getConfig } from "../../config.js";
 
 const SHELL = process.env.SHELL || "/bin/zsh";
 
@@ -636,6 +637,13 @@ export class ClaudeCodeProvider implements AgentProvider {
     if (options.configDir) {
       cleanEnv.CLAUDE_CONFIG_DIR = options.configDir;
     }
+
+    // Route through API proxy when debug tracing is active
+    const proxyPort = getConfig().apiProxyPort;
+    if (proxyPort) {
+      cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
+    }
+
     delete cleanEnv.CLAUDECODE;
     delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
     delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;

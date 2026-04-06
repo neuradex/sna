@@ -1,3 +1,4 @@
+import { setConfig } from "../config.js";
 let langfuseClient = null;
 const sessions = /* @__PURE__ */ new Map();
 let lifecycleUnsub = null;
@@ -5,6 +6,7 @@ let sm = null;
 let _onLog = null;
 let _userId;
 let _userEmail;
+let _apiProxy = null;
 function setTracerUser(userId, userEmail) {
   _userId = userId;
   _userEmail = userEmail;
@@ -40,6 +42,59 @@ async function initTracer(config, sessionManager, onLog) {
     logError(`import/init failed: ${err}`);
     return;
   }
+  try {
+    const { startApiProxy } = await import("./api-proxy.js");
+    _apiProxy = await startApiProxy({
+      onRequest: (info) => {
+        log(`proxy \u2192 ${info.model} stream=${info.stream} messages=${info.messageCount}`);
+        const sysText = typeof info.system === "string" ? info.system : "";
+        const sysArr = Array.isArray(info.system) ? info.system : [];
+        const fullSysText = sysText || sysArr.map((b) => b.text ?? "").join("\n");
+        if (fullSysText.includes("title generator")) {
+          log("skipped title generation request");
+          return;
+        }
+        const input = [];
+        if (fullSysText) {
+          input.push({ role: "system", content: fullSysText });
+        }
+        if (Array.isArray(info.messages)) {
+          for (const m of info.messages) {
+            const role = m.role ?? "user";
+            let content = "";
+            if (typeof m.content === "string") {
+              content = m.content;
+            } else if (Array.isArray(m.content)) {
+              content = m.content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n");
+            }
+            input.push({ role, content });
+          }
+        }
+        for (const [, ss] of sessions) {
+          if (ss.currentTurn) {
+            try {
+              if (ss.currentTurn.llmGeneration) {
+                ss.currentTurn.llmGeneration.end();
+              }
+              ss.currentTurn.llmGeneration = ss.currentTurn.trace.generation({
+                name: "llm-call",
+                model: info.model,
+                input
+              });
+              log(`llm-call generation created for turn ${ss.turnCounter} [${ss.sessionId}]`);
+            } catch (err) {
+              logError(`failed to create llm-call generation: ${err}`);
+            }
+            break;
+          }
+        }
+      }
+    });
+    setConfig({ apiProxyPort: _apiProxy.port });
+    log(`api proxy started on port ${_apiProxy.port}`);
+  } catch (err) {
+    logError(`api proxy start failed: ${err}`);
+  }
   lifecycleUnsub = sessionManager.onSessionLifecycle((event) => {
     try {
       handleLifecycle(event);
@@ -63,6 +118,12 @@ async function shutdownTracer() {
     ss.eventUnsub?.();
   }
   sessions.clear();
+  if (_apiProxy) {
+    _apiProxy.close();
+    setConfig({ apiProxyPort: void 0 });
+    log("api proxy stopped");
+    _apiProxy = null;
+  }
   if (langfuseClient) {
     try {
       await langfuseClient.shutdownAsync();
@@ -147,7 +208,8 @@ function startTurn(ss, userMessage) {
     input: userMessage,
     output: "",
     pendingToolSpans: /* @__PURE__ */ new Map(),
-    turnIndex: ss.turnCounter
+    turnIndex: ss.turnCounter,
+    llmGeneration: null
   };
   log(`turn ${ss.turnCounter} STARTED [${ss.sessionId}] input="${userMessage.slice(0, 60)}..."`);
 }
@@ -156,6 +218,11 @@ function endCurrentTurn(ss, reason) {
   if (!turn) return;
   try {
     endOrphanedSpans(turn);
+    if (turn.llmGeneration) {
+      turn.llmGeneration.update({ output: `(ended: ${reason})`, level: reason === "complete" ? "DEFAULT" : "WARNING" });
+      turn.llmGeneration.end();
+      turn.llmGeneration = null;
+    }
     turn.trace.update({
       output: turn.output || "(no response)"
     });
@@ -223,7 +290,13 @@ function handleEvent(ss, event) {
       const turn = ss.currentTurn;
       if (!turn || !event.message) break;
       turn.output = event.message;
-      turn.trace.generation({ name: "assistant", output: event.message }).end();
+      if (turn.llmGeneration) {
+        turn.llmGeneration.update({ output: event.message });
+        turn.llmGeneration.end();
+        turn.llmGeneration = null;
+      } else {
+        turn.trace.generation({ name: "assistant", output: event.message }).end();
+      }
       break;
     }
     case "complete": {

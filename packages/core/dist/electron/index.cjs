@@ -40,6 +40,135 @@ var init_cjs_shims = __esm({
   }
 });
 
+// src/config.ts
+function fromEnv() {
+  const env = {};
+  if (process.env.SNA_PORT) env.port = parseInt(process.env.SNA_PORT, 10);
+  if (process.env.SNA_MODEL) env.model = process.env.SNA_MODEL;
+  if (process.env.SNA_PERMISSION_MODE) env.defaultPermissionMode = process.env.SNA_PERMISSION_MODE;
+  if (process.env.SNA_MAX_SESSIONS) env.maxSessions = parseInt(process.env.SNA_MAX_SESSIONS, 10);
+  if (process.env.SNA_DB_PATH) env.dbPath = process.env.SNA_DB_PATH;
+  if (process.env.SNA_PERMISSION_TIMEOUT_MS) env.permissionTimeoutMs = parseInt(process.env.SNA_PERMISSION_TIMEOUT_MS, 10);
+  return env;
+}
+function getConfig() {
+  return current;
+}
+function setConfig(overrides) {
+  current = { ...current, ...overrides };
+}
+var defaults, current;
+var init_config = __esm({
+  "src/config.ts"() {
+    "use strict";
+    init_cjs_shims();
+    defaults = {
+      port: 3099,
+      model: "claude-sonnet-4-6",
+      defaultProvider: "claude-code",
+      defaultPermissionMode: "default",
+      maxSessions: 5,
+      maxEventBuffer: 500,
+      permissionTimeoutMs: 0,
+      // app controls — no SDK-side timeout
+      runOnceTimeoutMs: 12e4,
+      pollIntervalMs: 500,
+      keepaliveIntervalMs: 15e3,
+      skillPollMs: 2e3,
+      dbPath: "data/sna.db"
+    };
+    current = { ...defaults, ...fromEnv() };
+  }
+});
+
+// src/lib/api-proxy.ts
+var api_proxy_exports = {};
+__export(api_proxy_exports, {
+  startApiProxy: () => startApiProxy
+});
+async function startApiProxy(opts = {}) {
+  const targetBase = opts.targetBaseUrl ?? "https://api.anthropic.com";
+  let systemPrompt = null;
+  const server = import_http.default.createServer(async (req, res) => {
+    if (req.method === "OPTIONS") {
+      res.writeHead(200, {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS"
+      });
+      res.end();
+      return;
+    }
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const rawBody = Buffer.concat(chunks);
+    if (req.method === "POST" && req.url?.startsWith("/v1/messages")) {
+      try {
+        const body = JSON.parse(rawBody.toString());
+        if (body.system) systemPrompt = body.system;
+        opts.onRequest?.({
+          model: body.model ?? "unknown",
+          stream: !!body.stream,
+          system: body.system ?? null,
+          messages: body.messages ?? null,
+          messageCount: body.messages?.length ?? 0
+        });
+      } catch {
+      }
+    }
+    const target = new import_url2.URL(req.url ?? "/", targetBase);
+    const isHttps = target.protocol === "https:";
+    const transport = isHttps ? import_https.default : import_http.default;
+    const headers = {};
+    for (const [key, val] of Object.entries(req.headers)) {
+      if (key.toLowerCase() === "host") continue;
+      if (val) headers[key] = Array.isArray(val) ? val.join(", ") : val;
+    }
+    headers["host"] = target.host;
+    const proxyReq = transport.request(
+      {
+        hostname: target.hostname,
+        port: target.port || (isHttps ? 443 : 80),
+        path: target.pathname + target.search,
+        method: req.method,
+        headers
+      },
+      (proxyRes) => {
+        res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
+        proxyRes.pipe(res);
+      }
+    );
+    proxyReq.on("error", (err2) => {
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: `proxy error: ${err2.message}` }));
+    });
+    proxyReq.end(rawBody);
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const port = server.address().port;
+      resolve({
+        port,
+        server,
+        close: () => server.close(),
+        get systemPrompt() {
+          return systemPrompt;
+        }
+      });
+    });
+  });
+}
+var import_http, import_https, import_url2;
+var init_api_proxy = __esm({
+  "src/lib/api-proxy.ts"() {
+    "use strict";
+    init_cjs_shims();
+    import_http = __toESM(require("http"), 1);
+    import_https = __toESM(require("https"), 1);
+    import_url2 = require("url");
+  }
+});
+
 // src/lib/langfuse-tracer.ts
 var langfuse_tracer_exports = {};
 __export(langfuse_tracer_exports, {
@@ -82,6 +211,59 @@ async function initTracer(config, sessionManager, onLog) {
     logError(`import/init failed: ${err2}`);
     return;
   }
+  try {
+    const { startApiProxy: startApiProxy2 } = await Promise.resolve().then(() => (init_api_proxy(), api_proxy_exports));
+    _apiProxy = await startApiProxy2({
+      onRequest: (info) => {
+        log2(`proxy \u2192 ${info.model} stream=${info.stream} messages=${info.messageCount}`);
+        const sysText = typeof info.system === "string" ? info.system : "";
+        const sysArr = Array.isArray(info.system) ? info.system : [];
+        const fullSysText = sysText || sysArr.map((b) => b.text ?? "").join("\n");
+        if (fullSysText.includes("title generator")) {
+          log2("skipped title generation request");
+          return;
+        }
+        const input = [];
+        if (fullSysText) {
+          input.push({ role: "system", content: fullSysText });
+        }
+        if (Array.isArray(info.messages)) {
+          for (const m of info.messages) {
+            const role = m.role ?? "user";
+            let content = "";
+            if (typeof m.content === "string") {
+              content = m.content;
+            } else if (Array.isArray(m.content)) {
+              content = m.content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n");
+            }
+            input.push({ role, content });
+          }
+        }
+        for (const [, ss] of sessions) {
+          if (ss.currentTurn) {
+            try {
+              if (ss.currentTurn.llmGeneration) {
+                ss.currentTurn.llmGeneration.end();
+              }
+              ss.currentTurn.llmGeneration = ss.currentTurn.trace.generation({
+                name: "llm-call",
+                model: info.model,
+                input
+              });
+              log2(`llm-call generation created for turn ${ss.turnCounter} [${ss.sessionId}]`);
+            } catch (err2) {
+              logError(`failed to create llm-call generation: ${err2}`);
+            }
+            break;
+          }
+        }
+      }
+    });
+    setConfig({ apiProxyPort: _apiProxy.port });
+    log2(`api proxy started on port ${_apiProxy.port}`);
+  } catch (err2) {
+    logError(`api proxy start failed: ${err2}`);
+  }
   lifecycleUnsub = sessionManager.onSessionLifecycle((event) => {
     try {
       handleLifecycle(event);
@@ -105,6 +287,12 @@ async function shutdownTracer() {
     ss.eventUnsub?.();
   }
   sessions.clear();
+  if (_apiProxy) {
+    _apiProxy.close();
+    setConfig({ apiProxyPort: void 0 });
+    log2("api proxy stopped");
+    _apiProxy = null;
+  }
   if (langfuseClient) {
     try {
       await langfuseClient.shutdownAsync();
@@ -189,7 +377,8 @@ function startTurn(ss, userMessage) {
     input: userMessage,
     output: "",
     pendingToolSpans: /* @__PURE__ */ new Map(),
-    turnIndex: ss.turnCounter
+    turnIndex: ss.turnCounter,
+    llmGeneration: null
   };
   log2(`turn ${ss.turnCounter} STARTED [${ss.sessionId}] input="${userMessage.slice(0, 60)}..."`);
 }
@@ -198,6 +387,11 @@ function endCurrentTurn(ss, reason) {
   if (!turn) return;
   try {
     endOrphanedSpans(turn);
+    if (turn.llmGeneration) {
+      turn.llmGeneration.update({ output: `(ended: ${reason})`, level: reason === "complete" ? "DEFAULT" : "WARNING" });
+      turn.llmGeneration.end();
+      turn.llmGeneration = null;
+    }
     turn.trace.update({
       output: turn.output || "(no response)"
     });
@@ -265,7 +459,13 @@ function handleEvent(ss, event) {
       const turn = ss.currentTurn;
       if (!turn || !event.message) break;
       turn.output = event.message;
-      turn.trace.generation({ name: "assistant", output: event.message }).end();
+      if (turn.llmGeneration) {
+        turn.llmGeneration.update({ output: event.message });
+        turn.llmGeneration.end();
+        turn.llmGeneration = null;
+      } else {
+        turn.trace.generation({ name: "assistant", output: event.message }).end();
+      }
       break;
     }
     case "complete": {
@@ -310,16 +510,18 @@ function endOrphanedSpans(turn) {
   }
   turn.pendingToolSpans.clear();
 }
-var langfuseClient, sessions, lifecycleUnsub, sm, _onLog, _userId, _userEmail;
+var langfuseClient, sessions, lifecycleUnsub, sm, _onLog, _userId, _userEmail, _apiProxy;
 var init_langfuse_tracer = __esm({
   "src/lib/langfuse-tracer.ts"() {
     "use strict";
     init_cjs_shims();
+    init_config();
     langfuseClient = null;
     sessions = /* @__PURE__ */ new Map();
     lifecycleUnsub = null;
     sm = null;
     _onLog = null;
+    _apiProxy = null;
   }
 });
 
@@ -336,7 +538,7 @@ __export(electron_exports, {
 module.exports = __toCommonJS(electron_exports);
 init_cjs_shims();
 var import_child_process3 = require("child_process");
-var import_url2 = require("url");
+var import_url3 = require("url");
 var import_fs7 = __toESM(require("fs"), 1);
 
 // src/core/providers/claude-code.ts
@@ -455,6 +657,7 @@ function err(tag, ...args) {
 var logger = { log, err };
 
 // src/core/providers/claude-code.ts
+init_config();
 var SHELL = process.env.SHELL || "/bin/zsh";
 function parseCommandVOutput(raw) {
   const trimmed = raw.trim();
@@ -961,6 +1164,10 @@ var ClaudeCodeProvider = class {
     if (options.configDir) {
       cleanEnv.CLAUDE_CONFIG_DIR = options.configDir;
     }
+    const proxyPort = getConfig().apiProxyPort;
+    if (proxyPort) {
+      cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
+    }
     delete cleanEnv.CLAUDECODE;
     delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
     delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
@@ -1097,42 +1304,8 @@ function initSchema(db) {
   `);
 }
 
-// src/config.ts
-init_cjs_shims();
-var defaults = {
-  port: 3099,
-  model: "claude-sonnet-4-6",
-  defaultProvider: "claude-code",
-  defaultPermissionMode: "default",
-  maxSessions: 5,
-  maxEventBuffer: 500,
-  permissionTimeoutMs: 0,
-  // app controls — no SDK-side timeout
-  runOnceTimeoutMs: 12e4,
-  pollIntervalMs: 500,
-  keepaliveIntervalMs: 15e3,
-  skillPollMs: 2e3,
-  dbPath: "data/sna.db"
-};
-function fromEnv() {
-  const env = {};
-  if (process.env.SNA_PORT) env.port = parseInt(process.env.SNA_PORT, 10);
-  if (process.env.SNA_MODEL) env.model = process.env.SNA_MODEL;
-  if (process.env.SNA_PERMISSION_MODE) env.defaultPermissionMode = process.env.SNA_PERMISSION_MODE;
-  if (process.env.SNA_MAX_SESSIONS) env.maxSessions = parseInt(process.env.SNA_MAX_SESSIONS, 10);
-  if (process.env.SNA_DB_PATH) env.dbPath = process.env.SNA_DB_PATH;
-  if (process.env.SNA_PERMISSION_TIMEOUT_MS) env.permissionTimeoutMs = parseInt(process.env.SNA_PERMISSION_TIMEOUT_MS, 10);
-  return env;
-}
-var current = { ...defaults, ...fromEnv() };
-function getConfig() {
-  return current;
-}
-function setConfig(overrides) {
-  current = { ...current, ...overrides };
-}
-
 // src/server/routes/events.ts
+init_config();
 function eventsRoute(c) {
   const sinceParam = c.req.query("since");
   let lastId = sinceParam ? parseInt(sinceParam) : -1;
@@ -1366,6 +1539,7 @@ function resolveImagePath(sessionId, filename) {
 }
 
 // src/server/routes/agent.ts
+init_config();
 function getSessionId(c) {
   return c.req.query("session") ?? "default";
 }
@@ -1925,6 +2099,7 @@ function createChatRoutes() {
 
 // src/server/session-manager.ts
 init_cjs_shims();
+init_config();
 var SessionManager = class {
   constructor(options = {}) {
     this.sessions = /* @__PURE__ */ new Map();
@@ -2429,6 +2604,7 @@ var SessionManager = class {
 // src/server/ws.ts
 init_cjs_shims();
 var import_ws = require("ws");
+init_config();
 function send(ws, data) {
   if (ws.readyState === ws.OPEN) {
     ws.send(JSON.stringify(data));
@@ -3112,8 +3288,9 @@ function createSnaApp(options = {}) {
 }
 
 // src/electron/index.ts
+init_config();
 function resolveStandaloneScript() {
-  const selfPath = (0, import_url2.fileURLToPath)(importMetaUrl);
+  const selfPath = (0, import_url3.fileURLToPath)(importMetaUrl);
   let script = import_path6.default.resolve(import_path6.default.dirname(selfPath), "../server/standalone.js");
   if (script.includes(".asar") && !script.includes(".asar.unpacked")) {
     script = script.replace(/(\.asar)([/\\])/, ".asar.unpacked$2");

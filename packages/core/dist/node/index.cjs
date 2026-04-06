@@ -40,6 +40,44 @@ var init_cjs_shims = __esm({
   }
 });
 
+// src/config.ts
+function fromEnv() {
+  const env = {};
+  if (process.env.SNA_PORT) env.port = parseInt(process.env.SNA_PORT, 10);
+  if (process.env.SNA_MODEL) env.model = process.env.SNA_MODEL;
+  if (process.env.SNA_PERMISSION_MODE) env.defaultPermissionMode = process.env.SNA_PERMISSION_MODE;
+  if (process.env.SNA_MAX_SESSIONS) env.maxSessions = parseInt(process.env.SNA_MAX_SESSIONS, 10);
+  if (process.env.SNA_DB_PATH) env.dbPath = process.env.SNA_DB_PATH;
+  if (process.env.SNA_PERMISSION_TIMEOUT_MS) env.permissionTimeoutMs = parseInt(process.env.SNA_PERMISSION_TIMEOUT_MS, 10);
+  return env;
+}
+function getConfig() {
+  return current;
+}
+var defaults, current;
+var init_config = __esm({
+  "src/config.ts"() {
+    "use strict";
+    init_cjs_shims();
+    defaults = {
+      port: 3099,
+      model: "claude-sonnet-4-6",
+      defaultProvider: "claude-code",
+      defaultPermissionMode: "default",
+      maxSessions: 5,
+      maxEventBuffer: 500,
+      permissionTimeoutMs: 0,
+      // app controls — no SDK-side timeout
+      runOnceTimeoutMs: 12e4,
+      pollIntervalMs: 500,
+      keepaliveIntervalMs: 15e3,
+      skillPollMs: 2e3,
+      dbPath: "data/sna.db"
+    };
+    current = { ...defaults, ...fromEnv() };
+  }
+});
+
 // src/node/index.ts
 var node_exports = {};
 __export(node_exports, {
@@ -170,6 +208,7 @@ function err(tag, ...args) {
 var logger = { log, err };
 
 // src/core/providers/claude-code.ts
+init_config();
 var SHELL = process.env.SHELL || "/bin/zsh";
 function parseCommandVOutput(raw) {
   const trimmed = raw.trim();
@@ -676,6 +715,10 @@ var ClaudeCodeProvider = class {
     if (options.configDir) {
       cleanEnv.CLAUDE_CONFIG_DIR = options.configDir;
     }
+    const proxyPort = getConfig().apiProxyPort;
+    if (proxyPort) {
+      cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
+    }
     delete cleanEnv.CLAUDECODE;
     delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
     delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
@@ -714,34 +757,8 @@ var import_node_module = require("module");
 var import_path4 = __toESM(require("path"), 1);
 var NATIVE_DIR = import_path4.default.join(process.cwd(), ".sna/native");
 
-// src/config.ts
-init_cjs_shims();
-var defaults = {
-  port: 3099,
-  model: "claude-sonnet-4-6",
-  defaultProvider: "claude-code",
-  defaultPermissionMode: "default",
-  maxSessions: 5,
-  maxEventBuffer: 500,
-  permissionTimeoutMs: 0,
-  // app controls — no SDK-side timeout
-  runOnceTimeoutMs: 12e4,
-  pollIntervalMs: 500,
-  keepaliveIntervalMs: 15e3,
-  skillPollMs: 2e3,
-  dbPath: "data/sna.db"
-};
-function fromEnv() {
-  const env = {};
-  if (process.env.SNA_PORT) env.port = parseInt(process.env.SNA_PORT, 10);
-  if (process.env.SNA_MODEL) env.model = process.env.SNA_MODEL;
-  if (process.env.SNA_PERMISSION_MODE) env.defaultPermissionMode = process.env.SNA_PERMISSION_MODE;
-  if (process.env.SNA_MAX_SESSIONS) env.maxSessions = parseInt(process.env.SNA_MAX_SESSIONS, 10);
-  if (process.env.SNA_DB_PATH) env.dbPath = process.env.SNA_DB_PATH;
-  if (process.env.SNA_PERMISSION_TIMEOUT_MS) env.permissionTimeoutMs = parseInt(process.env.SNA_PERMISSION_TIMEOUT_MS, 10);
-  return env;
-}
-var current = { ...defaults, ...fromEnv() };
+// src/server/routes/events.ts
+init_config();
 
 // src/server/routes/emit.ts
 init_cjs_shims();
@@ -790,18 +807,24 @@ init_cjs_shims();
 var import_path5 = __toESM(require("path"), 1);
 var IMAGE_DIR = import_path5.default.join(process.cwd(), "data/images");
 
+// src/server/routes/agent.ts
+init_config();
+
 // src/server/routes/chat.ts
 init_cjs_shims();
 var import_hono2 = require("hono");
 
 // src/server/session-manager.ts
 init_cjs_shims();
+init_config();
 
 // src/server/ws.ts
 init_cjs_shims();
 var import_ws = require("ws");
+init_config();
 
 // src/electron/index.ts
+init_config();
 function resolveStandaloneScript() {
   const selfPath = (0, import_url2.fileURLToPath)(importMetaUrl);
   let script = import_path6.default.resolve(import_path6.default.dirname(selfPath), "../server/standalone.js");

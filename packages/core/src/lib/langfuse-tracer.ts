@@ -17,6 +17,7 @@
 
 import type { AgentEvent } from "../core/providers/types.js";
 import type { SessionManager, SessionLifecycleEvent } from "../server/session-manager.js";
+import { setConfig } from "../config.js";
 
 // ── Internal state ──────────────────────────────────────────────────────────
 
@@ -32,6 +33,9 @@ interface TurnTrace {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   pendingToolSpans: Map<string, any>;
   turnIndex: number;
+  /** Active LLM call generation (created by proxy, ended on assistant/complete) */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  llmGeneration: any | null;
 }
 
 /** Per-session state */
@@ -49,6 +53,7 @@ let sm: SessionManager | null = null;
 let _onLog: ((msg: string) => void) | null = null;
 let _userId: string | undefined;
 let _userEmail: string | undefined;
+let _apiProxy: { port: number; close: () => void } | null = null;
 
 /** Set the current user info for Langfuse traces. */
 export function setTracerUser(userId?: string, userEmail?: string): void {
@@ -92,6 +97,71 @@ export async function initTracer(
     return;
   }
 
+  // Start API proxy to capture system prompts
+  try {
+    const { startApiProxy } = await import("./api-proxy.js");
+    _apiProxy = await startApiProxy({
+      onRequest: (info) => {
+        log(`proxy → ${info.model} stream=${info.stream} messages=${info.messageCount}`);
+
+        // Skip title generation requests (haiku model, short system prompt)
+        const sysText = typeof info.system === "string" ? info.system : "";
+        const sysArr = Array.isArray(info.system) ? info.system as Array<{ text?: string }> : [];
+        const fullSysText = sysText || sysArr.map((b) => b.text ?? "").join("\n");
+        if (fullSysText.includes("title generator")) {
+          log("skipped title generation request");
+          return;
+        }
+
+        // Build OpenAI-style messages: system + user/assistant messages
+        const input: Array<{ role: string; content: string }> = [];
+        if (fullSysText) {
+          input.push({ role: "system", content: fullSysText });
+        }
+        if (Array.isArray(info.messages)) {
+          for (const m of info.messages as Array<{ role?: string; content?: unknown }>) {
+            const role = m.role ?? "user";
+            let content = "";
+            if (typeof m.content === "string") {
+              content = m.content;
+            } else if (Array.isArray(m.content)) {
+              content = (m.content as Array<{ type?: string; text?: string }>)
+                .filter((b) => b.type === "text")
+                .map((b) => b.text ?? "")
+                .join("\n");
+            }
+            input.push({ role, content });
+          }
+        }
+
+        // Find active turn and create LLM generation
+        for (const [, ss] of sessions) {
+          if (ss.currentTurn) {
+            try {
+              // End previous llm generation if still open (multi-turn within same turn)
+              if (ss.currentTurn.llmGeneration) {
+                ss.currentTurn.llmGeneration.end();
+              }
+              ss.currentTurn.llmGeneration = ss.currentTurn.trace.generation({
+                name: "llm-call",
+                model: info.model,
+                input,
+              });
+              log(`llm-call generation created for turn ${ss.turnCounter} [${ss.sessionId}]`);
+            } catch (err) {
+              logError(`failed to create llm-call generation: ${err}`);
+            }
+            break;
+          }
+        }
+      },
+    });
+    setConfig({ apiProxyPort: _apiProxy.port });
+    log(`api proxy started on port ${_apiProxy.port}`);
+  } catch (err) {
+    logError(`api proxy start failed: ${err}`);
+  }
+
   lifecycleUnsub = sessionManager.onSessionLifecycle((event) => {
     try { handleLifecycle(event); } catch (err) { logError(`lifecycle error: ${err}`); }
   });
@@ -115,6 +185,14 @@ export async function shutdownTracer(): Promise<void> {
     ss.eventUnsub?.();
   }
   sessions.clear();
+
+  // Stop API proxy
+  if (_apiProxy) {
+    _apiProxy.close();
+    setConfig({ apiProxyPort: undefined });
+    log("api proxy stopped");
+    _apiProxy = null;
+  }
 
   if (langfuseClient) {
     try {
@@ -213,6 +291,7 @@ function startTurn(ss: SessionState, userMessage: string): void {
     output: "",
     pendingToolSpans: new Map(),
     turnIndex: ss.turnCounter,
+    llmGeneration: null,
   };
 
   log(`turn ${ss.turnCounter} STARTED [${ss.sessionId}] input="${userMessage.slice(0, 60)}..."`);
@@ -224,6 +303,12 @@ function endCurrentTurn(ss: SessionState, reason: string): void {
 
   try {
     endOrphanedSpans(turn);
+    // End llm generation if still open (error/interrupted before assistant response)
+    if (turn.llmGeneration) {
+      turn.llmGeneration.update({ output: `(ended: ${reason})`, level: reason === "complete" ? "DEFAULT" : "WARNING" });
+      turn.llmGeneration.end();
+      turn.llmGeneration = null;
+    }
     turn.trace.update({
       output: turn.output || "(no response)",
     });
@@ -300,7 +385,15 @@ function handleEvent(ss: SessionState, event: AgentEvent): void {
       const turn = ss.currentTurn;
       if (!turn || !event.message) break;
       turn.output = event.message;
-      turn.trace.generation({ name: "assistant", output: event.message }).end();
+      // Update the llm-call generation with output and end it
+      if (turn.llmGeneration) {
+        turn.llmGeneration.update({ output: event.message });
+        turn.llmGeneration.end();
+        turn.llmGeneration = null;
+      } else {
+        // Fallback: no proxy generation, create standalone
+        turn.trace.generation({ name: "assistant", output: event.message }).end();
+      }
       break;
     }
 

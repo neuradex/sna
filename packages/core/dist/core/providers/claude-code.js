@@ -5,6 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { writeHistoryJsonl, buildRecalledConversation } from "./cc-history-adapter.js";
 import { logger } from "../../lib/logger.js";
+import { getConfig } from "../../config.js";
 const SHELL = process.env.SHELL || "/bin/zsh";
 function parseCommandVOutput(raw) {
   const trimmed = raw.trim();
@@ -510,6 +511,10 @@ class ClaudeCodeProvider {
     const cleanEnv = { ...process.env, ...options.env };
     if (options.configDir) {
       cleanEnv.CLAUDE_CONFIG_DIR = options.configDir;
+    }
+    const proxyPort = getConfig().apiProxyPort;
+    if (proxyPort) {
+      cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
     }
     delete cleanEnv.CLAUDECODE;
     delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;

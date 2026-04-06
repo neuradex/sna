@@ -904,6 +904,10 @@ var ClaudeCodeProvider = class {
     if (options.configDir) {
       cleanEnv.CLAUDE_CONFIG_DIR = options.configDir;
     }
+    const proxyPort = getConfig().apiProxyPort;
+    if (proxyPort) {
+      cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
+    }
     delete cleanEnv.CLAUDECODE;
     delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
     delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
