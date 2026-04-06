@@ -37,6 +37,16 @@ interface SnaConfig {
     skillPollMs: number;
     /** SQLite database path. env: SNA_DB_PATH */
     dbPath: string;
+    /**
+     * Optional Langfuse tracing config.
+     * When present, sessions with `meta.langfuseTrace: true` are traced.
+     * When absent, tracing is fully disabled (zero overhead).
+     */
+    langfuse?: {
+        publicKey: string;
+        secretKey: string;
+        baseUrl?: string;
+    };
 }
 /** Get current config. Returns a frozen copy. */
 declare function getConfig(): Readonly<SnaConfig>;

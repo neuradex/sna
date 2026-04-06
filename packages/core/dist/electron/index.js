@@ -173,12 +173,42 @@ async function startSnaServerInProcess(options) {
     if (options.onLog) options.onLog(`WebSocket endpoint \u2192 ws://localhost:${port}/ws`);
   });
   attachWebSocket(httpServer, sessionManager);
+  if (options.langfuse) {
+    setConfig({ langfuse: options.langfuse });
+    try {
+      const { initTracer } = await import("../lib/langfuse-tracer.js");
+      await initTracer(options.langfuse, sessionManager, options.onLog);
+    } catch (err) {
+      if (options.onLog) options.onLog(`Langfuse tracer init skipped: ${err.message}`);
+    }
+  }
   return {
     process: null,
     port,
     sessionManager,
     httpServer,
+    async initLangfuse(config2) {
+      setConfig({ langfuse: config2 });
+      try {
+        const { initTracer } = await import("../lib/langfuse-tracer.js");
+        await initTracer(config2, sessionManager, options.onLog);
+      } catch (err) {
+        if (options.onLog) options.onLog(`Langfuse tracer init skipped: ${err.message}`);
+      }
+    },
+    async setTracerUser(userId, userEmail) {
+      try {
+        const { setTracerUser: _setUser } = await import("../lib/langfuse-tracer.js");
+        _setUser(userId, userEmail);
+      } catch {
+      }
+    },
     async stop() {
+      try {
+        const { shutdownTracer } = await import("../lib/langfuse-tracer.js");
+        await shutdownTracer();
+      } catch {
+      }
       sessionManager.killAll();
       await new Promise((resolve) => {
         httpServer.close(() => resolve());

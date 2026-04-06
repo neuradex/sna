@@ -5,6 +5,9 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
@@ -27,23 +30,32 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
+// ../../node_modules/.pnpm/tsup@8.5.1_jiti@2.6.1_postcss@8.5.8_tsx@4.21.0_typescript@5.9.3/node_modules/tsup/assets/cjs_shims.js
+var getImportMetaUrl, importMetaUrl;
+var init_cjs_shims = __esm({
+  "../../node_modules/.pnpm/tsup@8.5.1_jiti@2.6.1_postcss@8.5.8_tsx@4.21.0_typescript@5.9.3/node_modules/tsup/assets/cjs_shims.js"() {
+    "use strict";
+    getImportMetaUrl = () => typeof document === "undefined" ? new URL(`file:${__filename}`).href : document.currentScript && document.currentScript.tagName.toUpperCase() === "SCRIPT" ? document.currentScript.src : new URL("main.js", document.baseURI).href;
+    importMetaUrl = /* @__PURE__ */ getImportMetaUrl();
+  }
+});
+
 // src/node/index.ts
 var node_exports = {};
 __export(node_exports, {
   startSnaServer: () => startSnaServer
 });
 module.exports = __toCommonJS(node_exports);
-
-// ../../node_modules/.pnpm/tsup@8.5.1_jiti@2.6.1_postcss@8.5.8_tsx@4.21.0_typescript@5.9.3/node_modules/tsup/assets/cjs_shims.js
-var getImportMetaUrl = () => typeof document === "undefined" ? new URL(`file:${__filename}`).href : document.currentScript && document.currentScript.tagName.toUpperCase() === "SCRIPT" ? document.currentScript.src : new URL("main.js", document.baseURI).href;
-var importMetaUrl = /* @__PURE__ */ getImportMetaUrl();
+init_cjs_shims();
 
 // src/electron/index.ts
+init_cjs_shims();
 var import_child_process2 = require("child_process");
 var import_url2 = require("url");
 var import_fs4 = __toESM(require("fs"), 1);
 
 // src/core/providers/claude-code.ts
+init_cjs_shims();
 var import_child_process = require("child_process");
 var import_events = require("events");
 var import_fs3 = __toESM(require("fs"), 1);
@@ -51,6 +63,7 @@ var import_path3 = __toESM(require("path"), 1);
 var import_url = require("url");
 
 // src/core/providers/cc-history-adapter.ts
+init_cjs_shims();
 var import_fs = __toESM(require("fs"), 1);
 var import_path = __toESM(require("path"), 1);
 function writeHistoryJsonl(history, opts) {
@@ -119,6 +132,7 @@ ${xml}
 }
 
 // src/lib/logger.ts
+init_cjs_shims();
 var import_fs2 = __toESM(require("fs"), 1);
 var import_path2 = __toESM(require("path"), 1);
 var LOG_PATH = process.env.SNA_LOG_PATH ?? import_path2.default.join(process.cwd(), ".dev.log");
@@ -687,17 +701,21 @@ var import_cors = require("hono/cors");
 var import_node_server = require("@hono/node-server");
 
 // src/server/index.ts
+init_cjs_shims();
 var import_hono3 = require("hono");
 
 // src/server/routes/events.ts
+init_cjs_shims();
 var import_streaming = require("hono/streaming");
 
 // src/db/schema.ts
+init_cjs_shims();
 var import_node_module = require("module");
 var import_path4 = __toESM(require("path"), 1);
 var NATIVE_DIR = import_path4.default.join(process.cwd(), ".sna/native");
 
 // src/config.ts
+init_cjs_shims();
 var defaults = {
   port: 3099,
   model: "claude-sonnet-4-6",
@@ -725,15 +743,27 @@ function fromEnv() {
 }
 var current = { ...defaults, ...fromEnv() };
 
+// src/server/routes/emit.ts
+init_cjs_shims();
+
+// src/server/api-types.ts
+init_cjs_shims();
+
 // src/server/routes/run.ts
+init_cjs_shims();
 var import_streaming2 = require("hono/streaming");
 var ROOT = process.cwd();
 
 // src/server/routes/agent.ts
+init_cjs_shims();
 var import_hono = require("hono");
 var import_streaming3 = require("hono/streaming");
 
+// src/core/providers/index.ts
+init_cjs_shims();
+
 // src/core/providers/codex.ts
+init_cjs_shims();
 var CodexProvider = class {
   constructor() {
     this.name = "codex";
@@ -752,14 +782,23 @@ var providers = {
   "codex": new CodexProvider()
 };
 
+// src/server/history-builder.ts
+init_cjs_shims();
+
 // src/server/image-store.ts
+init_cjs_shims();
 var import_path5 = __toESM(require("path"), 1);
 var IMAGE_DIR = import_path5.default.join(process.cwd(), "data/images");
 
 // src/server/routes/chat.ts
+init_cjs_shims();
 var import_hono2 = require("hono");
 
+// src/server/session-manager.ts
+init_cjs_shims();
+
 // src/server/ws.ts
+init_cjs_shims();
 var import_ws = require("ws");
 
 // src/electron/index.ts

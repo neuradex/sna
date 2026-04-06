@@ -88,6 +88,16 @@ interface SnaServerOptions {
      * Useful for forwarding to your app's logger.
      */
     onLog?: (line: string) => void;
+    /**
+     * Optional Langfuse tracing config.
+     * When present, sessions with `meta.langfuseTrace: true` emit Langfuse traces.
+     * Requires `langfuse` npm package installed.
+     */
+    langfuse?: {
+        publicKey: string;
+        secretKey: string;
+        baseUrl?: string;
+    };
 }
 interface SnaServerHandle {
     /** The forked child process. */
@@ -113,6 +123,14 @@ interface InProcessSnaServerHandle {
     sessionManager: SessionManager;
     /** The underlying HTTP server. */
     httpServer: http.Server;
+    /** Initialize Langfuse tracer after startup (e.g., when config arrives via IPC). */
+    initLangfuse(config: {
+        publicKey: string;
+        secretKey: string;
+        baseUrl?: string;
+    }): Promise<void>;
+    /** Set user info for Langfuse traces. */
+    setTracerUser(userId?: string, userEmail?: string): void;
     /** Graceful shutdown: kill all sessions and close the HTTP server. */
     stop(): Promise<void>;
 }

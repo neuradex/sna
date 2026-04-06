@@ -5,6 +5,9 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
@@ -27,6 +30,299 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
+// ../../node_modules/.pnpm/tsup@8.5.1_jiti@2.6.1_postcss@8.5.8_tsx@4.21.0_typescript@5.9.3/node_modules/tsup/assets/cjs_shims.js
+var getImportMetaUrl, importMetaUrl;
+var init_cjs_shims = __esm({
+  "../../node_modules/.pnpm/tsup@8.5.1_jiti@2.6.1_postcss@8.5.8_tsx@4.21.0_typescript@5.9.3/node_modules/tsup/assets/cjs_shims.js"() {
+    "use strict";
+    getImportMetaUrl = () => typeof document === "undefined" ? new URL(`file:${__filename}`).href : document.currentScript && document.currentScript.tagName.toUpperCase() === "SCRIPT" ? document.currentScript.src : new URL("main.js", document.baseURI).href;
+    importMetaUrl = /* @__PURE__ */ getImportMetaUrl();
+  }
+});
+
+// src/lib/langfuse-tracer.ts
+var langfuse_tracer_exports = {};
+__export(langfuse_tracer_exports, {
+  initTracer: () => initTracer,
+  setTracerUser: () => setTracerUser,
+  shutdownTracer: () => shutdownTracer
+});
+function setTracerUser(userId, userEmail) {
+  _userId = userId;
+  _userEmail = userEmail;
+}
+function log2(msg) {
+  if (_onLog) _onLog(`[langfuse] ${msg}`);
+  else try {
+    console.log(`[langfuse] ${msg}`);
+  } catch {
+  }
+}
+function logError(msg) {
+  if (_onLog) _onLog(`[langfuse] ERROR: ${msg}`);
+  else try {
+    console.error(`[langfuse] ERROR: ${msg}`);
+  } catch {
+  }
+}
+async function initTracer(config, sessionManager, onLog) {
+  _onLog = onLog ?? null;
+  log2(`init: publicKey=${config.publicKey.slice(0, 12)}..., baseUrl=${config.baseUrl ?? "default"}`);
+  try {
+    const mod = await import("langfuse");
+    const Langfuse = mod.Langfuse;
+    langfuseClient = new Langfuse({
+      publicKey: config.publicKey,
+      secretKey: config.secretKey,
+      baseUrl: config.baseUrl ?? "https://cloud.langfuse.com"
+    });
+    sm = sessionManager;
+    log2("client created");
+  } catch (err2) {
+    logError(`import/init failed: ${err2}`);
+    return;
+  }
+  lifecycleUnsub = sessionManager.onSessionLifecycle((event) => {
+    try {
+      handleLifecycle(event);
+    } catch (err2) {
+      logError(`lifecycle error: ${err2}`);
+    }
+  });
+  log2("subscribed to lifecycle events");
+  const allSessions = sessionManager.listSessions();
+  const alive = allSessions.filter((s) => s.alive);
+  log2(`existing sessions: ${allSessions.length} total, ${alive.length} alive`);
+  for (const info of alive) {
+    subscribeSession(info.id);
+  }
+}
+async function shutdownTracer() {
+  lifecycleUnsub?.();
+  lifecycleUnsub = null;
+  for (const [, ss] of sessions) {
+    endCurrentTurn(ss, "shutdown");
+    ss.eventUnsub?.();
+  }
+  sessions.clear();
+  if (langfuseClient) {
+    try {
+      await langfuseClient.shutdownAsync();
+      log2("shutdown complete");
+    } catch (err2) {
+      logError(`shutdown error: ${err2}`);
+    }
+    langfuseClient = null;
+  }
+  sm = null;
+}
+function handleLifecycle(event) {
+  log2(`lifecycle: ${event.session} \u2192 ${event.state}`);
+  switch (event.state) {
+    case "started":
+    case "resumed":
+      subscribeSession(event.session);
+      break;
+    case "exited":
+    case "crashed":
+    case "killed":
+      unsubscribeSession(event.session, event.state);
+      break;
+  }
+}
+function subscribeSession(sessionId) {
+  if (!langfuseClient || !sm) return;
+  if (sessions.has(sessionId)) return;
+  const session = sm.getSession(sessionId);
+  if (!session) return;
+  const ss = {
+    sessionId,
+    label: session.label,
+    currentTurn: null,
+    turnCounter: 0,
+    eventUnsub: null
+  };
+  sessions.set(sessionId, ss);
+  ss.eventUnsub = sm.onSessionEvent(sessionId, (cursor, event) => {
+    if (cursor === -1) return;
+    try {
+      handleEvent(ss, event);
+    } catch (err2) {
+      logError(`event error [${sessionId}]: ${err2}`);
+    }
+  });
+  log2(`subscribed: ${sessionId} (label=${session.label})`);
+}
+function unsubscribeSession(sessionId, reason) {
+  const ss = sessions.get(sessionId);
+  if (!ss) return;
+  endCurrentTurn(ss, reason);
+  ss.eventUnsub?.();
+  sessions.delete(sessionId);
+  log2(`unsubscribed: ${sessionId} (${reason})`);
+  try {
+    langfuseClient?.flushAsync?.();
+  } catch {
+  }
+}
+function startTurn(ss, userMessage) {
+  if (ss.currentTurn) {
+    endCurrentTurn(ss, "new_turn");
+  }
+  ss.turnCounter++;
+  const session = sm?.getSession(ss.sessionId);
+  const trace = langfuseClient.trace({
+    name: `turn-${ss.turnCounter}`,
+    sessionId: ss.sessionId,
+    userId: _userEmail ?? _userId,
+    input: userMessage,
+    metadata: {
+      label: ss.label,
+      cwd: session?.cwd,
+      model: session?.lastStartConfig?.model,
+      turnIndex: ss.turnCounter
+    },
+    tags: ["loom", "debug"]
+  });
+  ss.currentTurn = {
+    trace,
+    input: userMessage,
+    output: "",
+    pendingToolSpans: /* @__PURE__ */ new Map(),
+    turnIndex: ss.turnCounter
+  };
+  log2(`turn ${ss.turnCounter} STARTED [${ss.sessionId}] input="${userMessage.slice(0, 60)}..."`);
+}
+function endCurrentTurn(ss, reason) {
+  const turn = ss.currentTurn;
+  if (!turn) return;
+  try {
+    endOrphanedSpans(turn);
+    turn.trace.update({
+      output: turn.output || "(no response)"
+    });
+    log2(`turn ${turn.turnIndex} ENDED [${ss.sessionId}] reason=${reason}`);
+  } catch (err2) {
+    logError(`endTurn error [${ss.sessionId}]: ${err2}`);
+  }
+  ss.currentTurn = null;
+}
+function handleEvent(ss, event) {
+  switch (event.type) {
+    case "user_message":
+      startTurn(ss, event.message ?? "");
+      break;
+    case "thinking": {
+      const turn = ss.currentTurn;
+      if (!turn || !event.message) break;
+      turn.trace.generation({ name: "thinking", output: event.message }).end();
+      break;
+    }
+    case "tool_use": {
+      const turn = ss.currentTurn;
+      if (!turn) break;
+      const toolName = event.data?.toolName ?? event.message ?? "tool";
+      const toolUseId = event.data?.toolUseId;
+      const span = turn.trace.span({ name: `tool:${toolName}`, input: event.data });
+      if (toolUseId) {
+        turn.pendingToolSpans.set(toolUseId, span);
+      } else {
+        span.end();
+      }
+      break;
+    }
+    case "tool_result": {
+      const turn = ss.currentTurn;
+      if (!turn) break;
+      const toolUseId = event.data?.toolUseId;
+      const isError = event.data?.isError === true;
+      if (toolUseId && turn.pendingToolSpans.has(toolUseId)) {
+        const span = turn.pendingToolSpans.get(toolUseId);
+        span.update({
+          output: event.message ?? "",
+          level: isError ? "ERROR" : "DEFAULT",
+          statusMessage: isError ? event.message ?? "tool error" : void 0
+        });
+        span.end();
+        turn.pendingToolSpans.delete(toolUseId);
+      } else {
+        turn.trace.span({
+          name: "tool_result",
+          input: { toolUseId },
+          output: event.message ?? "",
+          level: isError ? "ERROR" : "DEFAULT"
+        }).end();
+      }
+      break;
+    }
+    case "permission_needed": {
+      const turn = ss.currentTurn;
+      if (!turn) break;
+      turn.trace.event({ name: "permission_needed", input: event.data, level: "WARNING" });
+      break;
+    }
+    case "assistant": {
+      const turn = ss.currentTurn;
+      if (!turn || !event.message) break;
+      turn.output = event.message;
+      turn.trace.generation({ name: "assistant", output: event.message }).end();
+      break;
+    }
+    case "complete": {
+      const turn = ss.currentTurn;
+      if (!turn) break;
+      turn.trace.update({ metadata: event.data });
+      endCurrentTurn(ss, "complete");
+      try {
+        langfuseClient?.flushAsync?.();
+      } catch {
+      }
+      break;
+    }
+    case "error": {
+      const turn = ss.currentTurn;
+      if (!turn) break;
+      turn.trace.event({ name: "error", input: { message: event.message }, level: "ERROR" });
+      turn.output = `[ERROR] ${event.message}`;
+      endCurrentTurn(ss, "error");
+      break;
+    }
+    case "interrupted": {
+      const turn = ss.currentTurn;
+      if (!turn) break;
+      turn.trace.event({ name: "interrupted", level: "WARNING" });
+      endCurrentTurn(ss, "interrupted");
+      break;
+    }
+  }
+}
+function endOrphanedSpans(turn) {
+  for (const [, span] of turn.pendingToolSpans) {
+    try {
+      span.update({
+        output: "(turn ended before tool_result)",
+        level: "WARNING",
+        statusMessage: "orphaned"
+      });
+      span.end();
+    } catch {
+    }
+  }
+  turn.pendingToolSpans.clear();
+}
+var langfuseClient, sessions, lifecycleUnsub, sm, _onLog, _userId, _userEmail;
+var init_langfuse_tracer = __esm({
+  "src/lib/langfuse-tracer.ts"() {
+    "use strict";
+    init_cjs_shims();
+    langfuseClient = null;
+    sessions = /* @__PURE__ */ new Map();
+    lifecycleUnsub = null;
+    sm = null;
+    _onLog = null;
+  }
+});
+
 // src/electron/index.ts
 var electron_exports = {};
 __export(electron_exports, {
@@ -38,17 +334,13 @@ __export(electron_exports, {
   validateClaudePath: () => validateClaudePath
 });
 module.exports = __toCommonJS(electron_exports);
-
-// ../../node_modules/.pnpm/tsup@8.5.1_jiti@2.6.1_postcss@8.5.8_tsx@4.21.0_typescript@5.9.3/node_modules/tsup/assets/cjs_shims.js
-var getImportMetaUrl = () => typeof document === "undefined" ? new URL(`file:${__filename}`).href : document.currentScript && document.currentScript.tagName.toUpperCase() === "SCRIPT" ? document.currentScript.src : new URL("main.js", document.baseURI).href;
-var importMetaUrl = /* @__PURE__ */ getImportMetaUrl();
-
-// src/electron/index.ts
+init_cjs_shims();
 var import_child_process3 = require("child_process");
 var import_url2 = require("url");
 var import_fs7 = __toESM(require("fs"), 1);
 
 // src/core/providers/claude-code.ts
+init_cjs_shims();
 var import_child_process = require("child_process");
 var import_events = require("events");
 var import_fs3 = __toESM(require("fs"), 1);
@@ -56,6 +348,7 @@ var import_path3 = __toESM(require("path"), 1);
 var import_url = require("url");
 
 // src/core/providers/cc-history-adapter.ts
+init_cjs_shims();
 var import_fs = __toESM(require("fs"), 1);
 var import_path = __toESM(require("path"), 1);
 function writeHistoryJsonl(history, opts) {
@@ -124,6 +417,7 @@ ${xml}
 }
 
 // src/lib/logger.ts
+init_cjs_shims();
 var import_fs2 = __toESM(require("fs"), 1);
 var import_path2 = __toESM(require("path"), 1);
 var LOG_PATH = process.env.SNA_LOG_PATH ?? import_path2.default.join(process.cwd(), ".dev.log");
@@ -692,12 +986,15 @@ var import_cors = require("hono/cors");
 var import_node_server = require("@hono/node-server");
 
 // src/server/index.ts
+init_cjs_shims();
 var import_hono3 = require("hono");
 
 // src/server/routes/events.ts
+init_cjs_shims();
 var import_streaming = require("hono/streaming");
 
 // src/db/schema.ts
+init_cjs_shims();
 var import_node_module = require("module");
 var import_fs4 = __toESM(require("fs"), 1);
 var import_path4 = __toESM(require("path"), 1);
@@ -801,6 +1098,7 @@ function initSchema(db) {
 }
 
 // src/config.ts
+init_cjs_shims();
 var defaults = {
   port: 3099,
   model: "claude-sonnet-4-6",
@@ -883,7 +1181,11 @@ function eventsRoute(c) {
   });
 }
 
+// src/server/routes/emit.ts
+init_cjs_shims();
+
 // src/server/api-types.ts
+init_cjs_shims();
 function httpJson(c, _op, data, status) {
   return c.json(data, status);
 }
@@ -923,6 +1225,7 @@ function createEmitRoute(sessionManager) {
 }
 
 // src/server/routes/run.ts
+init_cjs_shims();
 var import_child_process2 = require("child_process");
 var import_streaming2 = require("hono/streaming");
 var ROOT = process.cwd();
@@ -973,10 +1276,15 @@ data: [done]
 }
 
 // src/server/routes/agent.ts
+init_cjs_shims();
 var import_hono = require("hono");
 var import_streaming3 = require("hono/streaming");
 
+// src/core/providers/index.ts
+init_cjs_shims();
+
 // src/core/providers/codex.ts
+init_cjs_shims();
 var CodexProvider = class {
   constructor() {
     this.name = "codex";
@@ -1001,6 +1309,7 @@ function getProvider(name = "claude-code") {
 }
 
 // src/server/history-builder.ts
+init_cjs_shims();
 function buildHistoryFromDb(sessionId) {
   const db = getDb();
   const rows = db.prepare(
@@ -1024,6 +1333,7 @@ function buildHistoryFromDb(sessionId) {
 }
 
 // src/server/image-store.ts
+init_cjs_shims();
 var import_fs5 = __toESM(require("fs"), 1);
 var import_path5 = __toESM(require("path"), 1);
 var import_crypto = require("crypto");
@@ -1498,6 +1808,7 @@ function createAgentRoutes(sessionManager) {
 }
 
 // src/server/routes/chat.ts
+init_cjs_shims();
 var import_hono2 = require("hono");
 var import_fs6 = __toESM(require("fs"), 1);
 function createChatRoutes() {
@@ -1508,11 +1819,11 @@ function createChatRoutes() {
       const rows = db.prepare(
         `SELECT id, label, type, meta, cwd, created_at FROM chat_sessions ORDER BY created_at DESC`
       ).all();
-      const sessions = rows.map((r) => ({
+      const sessions2 = rows.map((r) => ({
         ...r,
         meta: r.meta ? JSON.parse(r.meta) : null
       }));
-      return httpJson(c, "chat.sessions.list", { sessions });
+      return httpJson(c, "chat.sessions.list", { sessions: sessions2 });
     } catch (e) {
       return c.json({ status: "error", message: e.message, stack: e.stack }, 500);
     }
@@ -1613,6 +1924,7 @@ function createChatRoutes() {
 }
 
 // src/server/session-manager.ts
+init_cjs_shims();
 var SessionManager = class {
   constructor(options = {}) {
     this.sessions = /* @__PURE__ */ new Map();
@@ -2115,6 +2427,7 @@ var SessionManager = class {
 };
 
 // src/server/ws.ts
+init_cjs_shims();
 var import_ws = require("ws");
 function send(ws, data) {
   if (ws.readyState === ws.OPEN) {
@@ -2196,58 +2509,58 @@ function attachWebSocket(server, sessionManager) {
   });
   return wss;
 }
-function handleMessage(ws, msg, sm, state) {
+function handleMessage(ws, msg, sm2, state) {
   switch (msg.type) {
     // ── Session CRUD ──────────────────────────────────
     case "sessions.create":
-      return handleSessionsCreate(ws, msg, sm);
+      return handleSessionsCreate(ws, msg, sm2);
     case "sessions.list":
-      return wsReply(ws, msg, { sessions: sm.listSessions() });
+      return wsReply(ws, msg, { sessions: sm2.listSessions() });
     case "sessions.update":
-      return handleSessionsUpdate(ws, msg, sm);
+      return handleSessionsUpdate(ws, msg, sm2);
     case "sessions.remove":
-      return handleSessionsRemove(ws, msg, sm);
+      return handleSessionsRemove(ws, msg, sm2);
     // ── Agent lifecycle ───────────────────────────────
     case "agent.start":
-      return handleAgentStart(ws, msg, sm);
+      return handleAgentStart(ws, msg, sm2);
     case "agent.send":
-      return handleAgentSend(ws, msg, sm);
+      return handleAgentSend(ws, msg, sm2);
     case "agent.resume":
-      return handleAgentResume(ws, msg, sm);
+      return handleAgentResume(ws, msg, sm2);
     case "agent.restart":
-      return handleAgentRestart(ws, msg, sm);
+      return handleAgentRestart(ws, msg, sm2);
     case "agent.interrupt":
-      return handleAgentInterrupt(ws, msg, sm);
+      return handleAgentInterrupt(ws, msg, sm2);
     case "agent.set-model":
-      return handleAgentSetModel(ws, msg, sm);
+      return handleAgentSetModel(ws, msg, sm2);
     case "agent.set-permission-mode":
-      return handleAgentSetPermissionMode(ws, msg, sm);
+      return handleAgentSetPermissionMode(ws, msg, sm2);
     case "agent.kill":
-      return handleAgentKill(ws, msg, sm);
+      return handleAgentKill(ws, msg, sm2);
     case "agent.status":
-      return handleAgentStatus(ws, msg, sm);
+      return handleAgentStatus(ws, msg, sm2);
     case "agent.run-once":
-      handleAgentRunOnce(ws, msg, sm);
+      handleAgentRunOnce(ws, msg, sm2);
       return;
     // ── Agent event subscription ──────────────────────
     case "agent.subscribe":
-      return handleAgentSubscribe(ws, msg, sm, state);
+      return handleAgentSubscribe(ws, msg, sm2, state);
     case "agent.unsubscribe":
       return handleAgentUnsubscribe(ws, msg, state);
     // ── Skill events ──────────────────────────────────
     case "events.subscribe":
-      return handleEventsSubscribe(ws, msg, sm, state);
+      return handleEventsSubscribe(ws, msg, sm2, state);
     case "events.unsubscribe":
       return handleEventsUnsubscribe(ws, msg, state);
     case "emit":
-      return handleEmit(ws, msg, sm);
+      return handleEmit(ws, msg, sm2);
     // ── Permission ────────────────────────────────────
     case "permission.respond":
-      return handlePermissionRespond(ws, msg, sm);
+      return handlePermissionRespond(ws, msg, sm2);
     case "permission.pending":
-      return handlePermissionPending(ws, msg, sm);
+      return handlePermissionPending(ws, msg, sm2);
     case "permission.subscribe":
-      return handlePermissionSubscribe(ws, msg, sm, state);
+      return handlePermissionSubscribe(ws, msg, sm2, state);
     case "permission.unsubscribe":
       return handlePermissionUnsubscribe(ws, msg, state);
     // ── Chat sessions ─────────────────────────────────
@@ -2268,9 +2581,9 @@ function handleMessage(ws, msg, sm, state) {
       replyError(ws, msg, `Unknown message type: ${msg.type}`);
   }
 }
-function handleSessionsCreate(ws, msg, sm) {
+function handleSessionsCreate(ws, msg, sm2) {
   try {
-    const session = sm.createSession({
+    const session = sm2.createSession({
       id: msg.id,
       label: msg.label,
       cwd: msg.cwd,
@@ -2281,11 +2594,11 @@ function handleSessionsCreate(ws, msg, sm) {
     replyError(ws, msg, e.message);
   }
 }
-function handleSessionsUpdate(ws, msg, sm) {
+function handleSessionsUpdate(ws, msg, sm2) {
   const id = msg.session;
   if (!id) return replyError(ws, msg, "session is required");
   try {
-    sm.updateSession(id, {
+    sm2.updateSession(id, {
       label: msg.label,
       meta: msg.meta,
       cwd: msg.cwd
@@ -2295,17 +2608,17 @@ function handleSessionsUpdate(ws, msg, sm) {
     replyError(ws, msg, e.message);
   }
 }
-function handleSessionsRemove(ws, msg, sm) {
+function handleSessionsRemove(ws, msg, sm2) {
   const id = msg.session;
   if (!id) return replyError(ws, msg, "session is required");
   if (id === "default") return replyError(ws, msg, "Cannot remove default session");
-  const removed = sm.removeSession(id);
+  const removed = sm2.removeSession(id);
   if (!removed) return replyError(ws, msg, "Session not found");
   wsReply(ws, msg, { status: "removed" });
 }
-function handleAgentStart(ws, msg, sm) {
+function handleAgentStart(ws, msg, sm2) {
   const sessionId = msg.session ?? "default";
-  const session = sm.getOrCreateSession(sessionId, {
+  const session = sm2.getOrCreateSession(sessionId, {
     cwd: msg.cwd
   });
   if (session.process?.alive && !msg.force) {
@@ -2343,16 +2656,16 @@ function handleAgentStart(ws, msg, sm) {
       history: msg.history,
       extraArgs
     });
-    sm.setProcess(sessionId, proc);
-    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
+    sm2.setProcess(sessionId, proc);
+    sm2.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
     wsReply(ws, msg, { status: "started", provider: provider.name, sessionId: session.id });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
 }
-function handleAgentSend(ws, msg, sm) {
+function handleAgentSend(ws, msg, sm2) {
   const sessionId = msg.session ?? "default";
-  const session = sm.getSession(sessionId);
+  const session = sm2.getSession(sessionId);
   if (!session?.process?.alive) {
     return replyError(ws, msg, `No active agent session "${sessionId}". Start first.`);
   }
@@ -2372,14 +2685,14 @@ function handleAgentSend(ws, msg, sm) {
     db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
   } catch {
   }
-  sm.pushEvent(sessionId, {
+  sm2.pushEvent(sessionId, {
     type: "user_message",
     message: textContent,
     data: Object.keys(meta).length > 0 ? meta : void 0,
     timestamp: Date.now()
   });
-  sm.updateSessionState(sessionId, "processing");
-  sm.touch(sessionId);
+  sm2.updateSessionState(sessionId, "processing");
+  sm2.touch(sessionId);
   if (images?.length) {
     const content = [
       ...images.map((img) => ({
@@ -2394,9 +2707,9 @@ function handleAgentSend(ws, msg, sm) {
   }
   wsReply(ws, msg, { status: "sent" });
 }
-function handleAgentResume(ws, msg, sm) {
+function handleAgentResume(ws, msg, sm2) {
   const sessionId = msg.session ?? "default";
-  const session = sm.getOrCreateSession(sessionId);
+  const session = sm2.getOrCreateSession(sessionId);
   if (session.process?.alive) {
     return replyError(ws, msg, "Session already running. Use agent.send instead.");
   }
@@ -2421,8 +2734,8 @@ function handleAgentResume(ws, msg, sm) {
       history: history.length > 0 ? history : void 0,
       extraArgs
     });
-    sm.setProcess(sessionId, proc, "resumed");
-    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
+    sm2.setProcess(sessionId, proc, "resumed");
+    sm2.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
     wsReply(ws, msg, {
       status: "resumed",
       provider: providerName,
@@ -2433,11 +2746,11 @@ function handleAgentResume(ws, msg, sm) {
     replyError(ws, msg, e.message);
   }
 }
-function handleAgentRestart(ws, msg, sm) {
+function handleAgentRestart(ws, msg, sm2) {
   const sessionId = msg.session ?? "default";
   try {
-    const ccSessionId = sm.getSession(sessionId)?.ccSessionId;
-    const { config } = sm.restartSession(
+    const ccSessionId = sm2.getSession(sessionId)?.ccSessionId;
+    const { config } = sm2.restartSession(
       sessionId,
       {
         provider: msg.provider,
@@ -2450,7 +2763,7 @@ function handleAgentRestart(ws, msg, sm) {
         const prov = getProvider(cfg.provider);
         const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
         return prov.spawn({
-          cwd: sm.getSession(sessionId).cwd,
+          cwd: sm2.getSession(sessionId).cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode,
           configDir: cfg.configDir,
@@ -2464,33 +2777,33 @@ function handleAgentRestart(ws, msg, sm) {
     replyError(ws, msg, e.message);
   }
 }
-function handleAgentInterrupt(ws, msg, sm) {
+function handleAgentInterrupt(ws, msg, sm2) {
   const sessionId = msg.session ?? "default";
-  const interrupted = sm.interruptSession(sessionId);
+  const interrupted = sm2.interruptSession(sessionId);
   wsReply(ws, msg, { status: interrupted ? "interrupted" : "no_session" });
 }
-function handleAgentSetModel(ws, msg, sm) {
+function handleAgentSetModel(ws, msg, sm2) {
   const sessionId = msg.session ?? "default";
   const model = msg.model;
   if (!model) return replyError(ws, msg, "model is required");
-  const updated = sm.setSessionModel(sessionId, model);
+  const updated = sm2.setSessionModel(sessionId, model);
   wsReply(ws, msg, { status: updated ? "updated" : "no_session", model });
 }
-function handleAgentSetPermissionMode(ws, msg, sm) {
+function handleAgentSetPermissionMode(ws, msg, sm2) {
   const sessionId = msg.session ?? "default";
   const permissionMode = msg.permissionMode;
   if (!permissionMode) return replyError(ws, msg, "permissionMode is required");
-  const updated = sm.setSessionPermissionMode(sessionId, permissionMode);
+  const updated = sm2.setSessionPermissionMode(sessionId, permissionMode);
   wsReply(ws, msg, { status: updated ? "updated" : "no_session", permissionMode });
 }
-function handleAgentKill(ws, msg, sm) {
+function handleAgentKill(ws, msg, sm2) {
   const sessionId = msg.session ?? "default";
-  const killed = sm.killSession(sessionId);
+  const killed = sm2.killSession(sessionId);
   wsReply(ws, msg, { status: killed ? "killed" : "no_session" });
 }
-function handleAgentStatus(ws, msg, sm) {
+function handleAgentStatus(ws, msg, sm2) {
   const sessionId = msg.session ?? "default";
-  const session = sm.getSession(sessionId);
+  const session = sm2.getSession(sessionId);
   const alive = session?.process?.alive ?? false;
   let messageCount = 0;
   let lastMessage = null;
@@ -2513,18 +2826,18 @@ function handleAgentStatus(ws, msg, sm) {
     config: session?.lastStartConfig ?? null
   });
 }
-async function handleAgentRunOnce(ws, msg, sm) {
+async function handleAgentRunOnce(ws, msg, sm2) {
   if (!msg.message) return replyError(ws, msg, "message is required");
   try {
-    const { result, usage } = await runOnce(sm, msg);
+    const { result, usage } = await runOnce(sm2, msg);
     wsReply(ws, msg, { result, usage });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
 }
-function handleAgentSubscribe(ws, msg, sm, state) {
+function handleAgentSubscribe(ws, msg, sm2, state) {
   const sessionId = msg.session ?? "default";
-  const session = sm.getOrCreateSession(sessionId);
+  const session = sm2.getOrCreateSession(sessionId);
   state.agentUnsubs.get(sessionId)?.();
   const includeHistory = msg.since === 0 || msg.includeHistory === true;
   let cursor = 0;
@@ -2576,7 +2889,7 @@ function handleAgentSubscribe(ws, msg, sm, state) {
       cursor = session.eventCounter;
     }
   }
-  const unsub = sm.onSessionEvent(sessionId, (eventCursor, event) => {
+  const unsub = sm2.onSessionEvent(sessionId, (eventCursor, event) => {
     if (eventCursor === -1) {
       send(ws, { type: "agent.event", session: sessionId, event });
     } else {
@@ -2592,7 +2905,7 @@ function handleAgentUnsubscribe(ws, msg, state) {
   state.agentUnsubs.delete(sessionId);
   reply(ws, msg, {});
 }
-function handleEventsSubscribe(ws, msg, sm, state) {
+function handleEventsSubscribe(ws, msg, sm2, state) {
   state.skillEventUnsub?.();
   state.skillEventUnsub = null;
   if (state.skillPollTimer) {
@@ -2609,7 +2922,7 @@ function handleEventsSubscribe(ws, msg, sm, state) {
       lastId = 0;
     }
   }
-  state.skillEventUnsub = sm.onSkillEvent((event) => {
+  state.skillEventUnsub = sm2.onSkillEvent((event) => {
     const eventId = event.id;
     if (eventId > lastId) {
       lastId = eventId;
@@ -2643,7 +2956,7 @@ function handleEventsUnsubscribe(ws, msg, state) {
   }
   reply(ws, msg, {});
 }
-function handleEmit(ws, msg, sm) {
+function handleEmit(ws, msg, sm2) {
   const skill = msg.skill;
   const eventType = msg.eventType;
   const emitMessage = msg.message;
@@ -2658,7 +2971,7 @@ function handleEmit(ws, msg, sm) {
       `INSERT INTO skill_events (session_id, skill, type, message, data) VALUES (?, ?, ?, ?, ?)`
     ).run(sessionId ?? null, skill, eventType, emitMessage, data ?? null);
     const id = Number(result.lastInsertRowid);
-    sm.broadcastSkillEvent({
+    sm2.broadcastSkillEvent({
       id,
       session_id: sessionId ?? null,
       skill,
@@ -2672,29 +2985,29 @@ function handleEmit(ws, msg, sm) {
     replyError(ws, msg, e.message);
   }
 }
-function handlePermissionRespond(ws, msg, sm) {
+function handlePermissionRespond(ws, msg, sm2) {
   const sessionId = msg.session ?? "default";
   const approved = msg.approved === true;
-  const resolved = sm.resolvePendingPermission(sessionId, approved);
+  const resolved = sm2.resolvePendingPermission(sessionId, approved);
   if (!resolved) return replyError(ws, msg, "No pending permission request");
   wsReply(ws, msg, { status: approved ? "approved" : "denied" });
 }
-function handlePermissionPending(ws, msg, sm) {
+function handlePermissionPending(ws, msg, sm2) {
   const sessionId = msg.session;
   if (sessionId) {
-    const pending = sm.getPendingPermission(sessionId);
+    const pending = sm2.getPendingPermission(sessionId);
     wsReply(ws, msg, { pending: pending ? [{ sessionId, ...pending }] : [] });
   } else {
-    wsReply(ws, msg, { pending: sm.getAllPendingPermissions() });
+    wsReply(ws, msg, { pending: sm2.getAllPendingPermissions() });
   }
 }
-function handlePermissionSubscribe(ws, msg, sm, state) {
+function handlePermissionSubscribe(ws, msg, sm2, state) {
   state.permissionUnsub?.();
-  const pending = sm.getAllPendingPermissions();
+  const pending = sm2.getAllPendingPermissions();
   for (const p of pending) {
     send(ws, { type: "permission.request", session: p.sessionId, request: p.request, createdAt: p.createdAt, isHistory: true });
   }
-  state.permissionUnsub = sm.onPermissionRequest((sessionId, request, createdAt) => {
+  state.permissionUnsub = sm2.onPermissionRequest((sessionId, request, createdAt) => {
     send(ws, { type: "permission.request", session: sessionId, request, createdAt });
   });
   reply(ws, msg, { pendingCount: pending.length });
@@ -2710,8 +3023,8 @@ function handleChatSessionsList(ws, msg) {
     const rows = db.prepare(
       `SELECT id, label, type, meta, cwd, created_at FROM chat_sessions ORDER BY created_at DESC`
     ).all();
-    const sessions = rows.map((r) => ({ ...r, meta: r.meta ? JSON.parse(r.meta) : null }));
-    wsReply(ws, msg, { sessions });
+    const sessions2 = rows.map((r) => ({ ...r, meta: r.meta ? JSON.parse(r.meta) : null }));
+    wsReply(ws, msg, { sessions: sessions2 });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -2961,12 +3274,42 @@ async function startSnaServerInProcess(options) {
     if (options.onLog) options.onLog(`WebSocket endpoint \u2192 ws://localhost:${port}/ws`);
   });
   attachWebSocket(httpServer, sessionManager);
+  if (options.langfuse) {
+    setConfig({ langfuse: options.langfuse });
+    try {
+      const { initTracer: initTracer2 } = await Promise.resolve().then(() => (init_langfuse_tracer(), langfuse_tracer_exports));
+      await initTracer2(options.langfuse, sessionManager, options.onLog);
+    } catch (err2) {
+      if (options.onLog) options.onLog(`Langfuse tracer init skipped: ${err2.message}`);
+    }
+  }
   return {
     process: null,
     port,
     sessionManager,
     httpServer,
+    async initLangfuse(config2) {
+      setConfig({ langfuse: config2 });
+      try {
+        const { initTracer: initTracer2 } = await Promise.resolve().then(() => (init_langfuse_tracer(), langfuse_tracer_exports));
+        await initTracer2(config2, sessionManager, options.onLog);
+      } catch (err2) {
+        if (options.onLog) options.onLog(`Langfuse tracer init skipped: ${err2.message}`);
+      }
+    },
+    async setTracerUser(userId, userEmail) {
+      try {
+        const { setTracerUser: _setUser } = await Promise.resolve().then(() => (init_langfuse_tracer(), langfuse_tracer_exports));
+        _setUser(userId, userEmail);
+      } catch {
+      }
+    },
     async stop() {
+      try {
+        const { shutdownTracer: shutdownTracer2 } = await Promise.resolve().then(() => (init_langfuse_tracer(), langfuse_tracer_exports));
+        await shutdownTracer2();
+      } catch {
+      }
       sessionManager.killAll();
       await new Promise((resolve) => {
         httpServer.close(() => resolve());

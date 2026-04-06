@@ -113,13 +113,20 @@
     "ws": "^8.20.0"
   },
   "peerDependencies": {
-    "better-sqlite3": ">=11.0.0"
+    "better-sqlite3": ">=11.0.0",
+    "langfuse": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "langfuse": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",
+    "langfuse": "^3.38.20",
     "tsup": "^8.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0"

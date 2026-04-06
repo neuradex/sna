@@ -114,6 +114,17 @@ export interface SnaServerOptions {
    * Useful for forwarding to your app's logger.
    */
   onLog?: (line: string) => void;
+
+  /**
+   * Optional Langfuse tracing config.
+   * When present, sessions with `meta.langfuseTrace: true` emit Langfuse traces.
+   * Requires `langfuse` npm package installed.
+   */
+  langfuse?: {
+    publicKey: string;
+    secretKey: string;
+    baseUrl?: string;
+  };
 }
 
 export interface SnaServerHandle {
@@ -294,6 +305,12 @@ export interface InProcessSnaServerHandle {
   /** The underlying HTTP server. */
   httpServer: http.Server;
 
+  /** Initialize Langfuse tracer after startup (e.g., when config arrives via IPC). */
+  initLangfuse(config: { publicKey: string; secretKey: string; baseUrl?: string }): Promise<void>;
+
+  /** Set user info for Langfuse traces. */
+  setTracerUser(userId?: string, userEmail?: string): void;
+
   /** Graceful shutdown: kill all sessions and close the HTTP server. */
   stop(): Promise<void>;
 }
@@ -402,12 +419,43 @@ export async function startSnaServerInProcess(
   // Attach WebSocket on the same HTTP server
   attachWebSocket(httpServer, sessionManager);
 
+  // Initialize Langfuse tracer if configured
+  if (options.langfuse) {
+    setConfig({ langfuse: options.langfuse });
+    try {
+      const { initTracer } = await import("../lib/langfuse-tracer.js");
+      await initTracer(options.langfuse, sessionManager, options.onLog);
+    } catch (err: any) {
+      if (options.onLog) options.onLog(`Langfuse tracer init skipped: ${err.message}`);
+    }
+  }
+
   return {
     process: null,
     port,
     sessionManager,
     httpServer,
+    async initLangfuse(config) {
+      setConfig({ langfuse: config });
+      try {
+        const { initTracer } = await import("../lib/langfuse-tracer.js");
+        await initTracer(config, sessionManager, options.onLog);
+      } catch (err: any) {
+        if (options.onLog) options.onLog(`Langfuse tracer init skipped: ${err.message}`);
+      }
+    },
+    async setTracerUser(userId?: string, userEmail?: string) {
+      try {
+        const { setTracerUser: _setUser } = await import("../lib/langfuse-tracer.js");
+        _setUser(userId, userEmail);
+      } catch { /* */ }
+    },
     async stop() {
+      // Shutdown Langfuse tracer (flush pending events)
+      try {
+        const { shutdownTracer } = await import("../lib/langfuse-tracer.js");
+        await shutdownTracer();
+      } catch { /* langfuse not loaded — skip */ }
       sessionManager.killAll();
       await new Promise<void>((resolve) => {
         httpServer.close(() => resolve());

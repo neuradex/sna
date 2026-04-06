@@ -1,0 +1,275 @@
+let langfuseClient = null;
+const sessions = /* @__PURE__ */ new Map();
+let lifecycleUnsub = null;
+let sm = null;
+let _onLog = null;
+let _userId;
+let _userEmail;
+function setTracerUser(userId, userEmail) {
+  _userId = userId;
+  _userEmail = userEmail;
+}
+function log(msg) {
+  if (_onLog) _onLog(`[langfuse] ${msg}`);
+  else try {
+    console.log(`[langfuse] ${msg}`);
+  } catch {
+  }
+}
+function logError(msg) {
+  if (_onLog) _onLog(`[langfuse] ERROR: ${msg}`);
+  else try {
+    console.error(`[langfuse] ERROR: ${msg}`);
+  } catch {
+  }
+}
+async function initTracer(config, sessionManager, onLog) {
+  _onLog = onLog ?? null;
+  log(`init: publicKey=${config.publicKey.slice(0, 12)}..., baseUrl=${config.baseUrl ?? "default"}`);
+  try {
+    const mod = await import("langfuse");
+    const Langfuse = mod.Langfuse;
+    langfuseClient = new Langfuse({
+      publicKey: config.publicKey,
+      secretKey: config.secretKey,
+      baseUrl: config.baseUrl ?? "https://cloud.langfuse.com"
+    });
+    sm = sessionManager;
+    log("client created");
+  } catch (err) {
+    logError(`import/init failed: ${err}`);
+    return;
+  }
+  lifecycleUnsub = sessionManager.onSessionLifecycle((event) => {
+    try {
+      handleLifecycle(event);
+    } catch (err) {
+      logError(`lifecycle error: ${err}`);
+    }
+  });
+  log("subscribed to lifecycle events");
+  const allSessions = sessionManager.listSessions();
+  const alive = allSessions.filter((s) => s.alive);
+  log(`existing sessions: ${allSessions.length} total, ${alive.length} alive`);
+  for (const info of alive) {
+    subscribeSession(info.id);
+  }
+}
+async function shutdownTracer() {
+  lifecycleUnsub?.();
+  lifecycleUnsub = null;
+  for (const [, ss] of sessions) {
+    endCurrentTurn(ss, "shutdown");
+    ss.eventUnsub?.();
+  }
+  sessions.clear();
+  if (langfuseClient) {
+    try {
+      await langfuseClient.shutdownAsync();
+      log("shutdown complete");
+    } catch (err) {
+      logError(`shutdown error: ${err}`);
+    }
+    langfuseClient = null;
+  }
+  sm = null;
+}
+function handleLifecycle(event) {
+  log(`lifecycle: ${event.session} \u2192 ${event.state}`);
+  switch (event.state) {
+    case "started":
+    case "resumed":
+      subscribeSession(event.session);
+      break;
+    case "exited":
+    case "crashed":
+    case "killed":
+      unsubscribeSession(event.session, event.state);
+      break;
+  }
+}
+function subscribeSession(sessionId) {
+  if (!langfuseClient || !sm) return;
+  if (sessions.has(sessionId)) return;
+  const session = sm.getSession(sessionId);
+  if (!session) return;
+  const ss = {
+    sessionId,
+    label: session.label,
+    currentTurn: null,
+    turnCounter: 0,
+    eventUnsub: null
+  };
+  sessions.set(sessionId, ss);
+  ss.eventUnsub = sm.onSessionEvent(sessionId, (cursor, event) => {
+    if (cursor === -1) return;
+    try {
+      handleEvent(ss, event);
+    } catch (err) {
+      logError(`event error [${sessionId}]: ${err}`);
+    }
+  });
+  log(`subscribed: ${sessionId} (label=${session.label})`);
+}
+function unsubscribeSession(sessionId, reason) {
+  const ss = sessions.get(sessionId);
+  if (!ss) return;
+  endCurrentTurn(ss, reason);
+  ss.eventUnsub?.();
+  sessions.delete(sessionId);
+  log(`unsubscribed: ${sessionId} (${reason})`);
+  try {
+    langfuseClient?.flushAsync?.();
+  } catch {
+  }
+}
+function startTurn(ss, userMessage) {
+  if (ss.currentTurn) {
+    endCurrentTurn(ss, "new_turn");
+  }
+  ss.turnCounter++;
+  const session = sm?.getSession(ss.sessionId);
+  const trace = langfuseClient.trace({
+    name: `turn-${ss.turnCounter}`,
+    sessionId: ss.sessionId,
+    userId: _userEmail ?? _userId,
+    input: userMessage,
+    metadata: {
+      label: ss.label,
+      cwd: session?.cwd,
+      model: session?.lastStartConfig?.model,
+      turnIndex: ss.turnCounter
+    },
+    tags: ["loom", "debug"]
+  });
+  ss.currentTurn = {
+    trace,
+    input: userMessage,
+    output: "",
+    pendingToolSpans: /* @__PURE__ */ new Map(),
+    turnIndex: ss.turnCounter
+  };
+  log(`turn ${ss.turnCounter} STARTED [${ss.sessionId}] input="${userMessage.slice(0, 60)}..."`);
+}
+function endCurrentTurn(ss, reason) {
+  const turn = ss.currentTurn;
+  if (!turn) return;
+  try {
+    endOrphanedSpans(turn);
+    turn.trace.update({
+      output: turn.output || "(no response)"
+    });
+    log(`turn ${turn.turnIndex} ENDED [${ss.sessionId}] reason=${reason}`);
+  } catch (err) {
+    logError(`endTurn error [${ss.sessionId}]: ${err}`);
+  }
+  ss.currentTurn = null;
+}
+function handleEvent(ss, event) {
+  switch (event.type) {
+    case "user_message":
+      startTurn(ss, event.message ?? "");
+      break;
+    case "thinking": {
+      const turn = ss.currentTurn;
+      if (!turn || !event.message) break;
+      turn.trace.generation({ name: "thinking", output: event.message }).end();
+      break;
+    }
+    case "tool_use": {
+      const turn = ss.currentTurn;
+      if (!turn) break;
+      const toolName = event.data?.toolName ?? event.message ?? "tool";
+      const toolUseId = event.data?.toolUseId;
+      const span = turn.trace.span({ name: `tool:${toolName}`, input: event.data });
+      if (toolUseId) {
+        turn.pendingToolSpans.set(toolUseId, span);
+      } else {
+        span.end();
+      }
+      break;
+    }
+    case "tool_result": {
+      const turn = ss.currentTurn;
+      if (!turn) break;
+      const toolUseId = event.data?.toolUseId;
+      const isError = event.data?.isError === true;
+      if (toolUseId && turn.pendingToolSpans.has(toolUseId)) {
+        const span = turn.pendingToolSpans.get(toolUseId);
+        span.update({
+          output: event.message ?? "",
+          level: isError ? "ERROR" : "DEFAULT",
+          statusMessage: isError ? event.message ?? "tool error" : void 0
+        });
+        span.end();
+        turn.pendingToolSpans.delete(toolUseId);
+      } else {
+        turn.trace.span({
+          name: "tool_result",
+          input: { toolUseId },
+          output: event.message ?? "",
+          level: isError ? "ERROR" : "DEFAULT"
+        }).end();
+      }
+      break;
+    }
+    case "permission_needed": {
+      const turn = ss.currentTurn;
+      if (!turn) break;
+      turn.trace.event({ name: "permission_needed", input: event.data, level: "WARNING" });
+      break;
+    }
+    case "assistant": {
+      const turn = ss.currentTurn;
+      if (!turn || !event.message) break;
+      turn.output = event.message;
+      turn.trace.generation({ name: "assistant", output: event.message }).end();
+      break;
+    }
+    case "complete": {
+      const turn = ss.currentTurn;
+      if (!turn) break;
+      turn.trace.update({ metadata: event.data });
+      endCurrentTurn(ss, "complete");
+      try {
+        langfuseClient?.flushAsync?.();
+      } catch {
+      }
+      break;
+    }
+    case "error": {
+      const turn = ss.currentTurn;
+      if (!turn) break;
+      turn.trace.event({ name: "error", input: { message: event.message }, level: "ERROR" });
+      turn.output = `[ERROR] ${event.message}`;
+      endCurrentTurn(ss, "error");
+      break;
+    }
+    case "interrupted": {
+      const turn = ss.currentTurn;
+      if (!turn) break;
+      turn.trace.event({ name: "interrupted", level: "WARNING" });
+      endCurrentTurn(ss, "interrupted");
+      break;
+    }
+  }
+}
+function endOrphanedSpans(turn) {
+  for (const [, span] of turn.pendingToolSpans) {
+    try {
+      span.update({
+        output: "(turn ended before tool_result)",
+        level: "WARNING",
+        statusMessage: "orphaned"
+      });
+      span.end();
+    } catch {
+    }
+  }
+  turn.pendingToolSpans.clear();
+}
+export {
+  initTracer,
+  setTracerUser,
+  shutdownTracer
+};
