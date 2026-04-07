@@ -8,8 +8,11 @@
 import fs from "fs";
 import path from "path";
 import { createHash } from "crypto";
+import { getConfig } from "../config.js";
 
-const IMAGE_DIR = path.join(process.cwd(), "data/images");
+function getImageDir(): string {
+  return path.join(getConfig().dataDir, "images");
+}
 
 const MIME_TO_EXT: Record<string, string> = {
   "image/png": "png",
@@ -31,7 +34,7 @@ export function saveImages(
   sessionId: string,
   images: Array<{ base64: string; mimeType: string }>,
 ): string[] {
-  const dir = path.join(IMAGE_DIR, sessionId);
+  const dir = path.join(getImageDir(), sessionId);
   fs.mkdirSync(dir, { recursive: true });
 
   return images.map((img) => {
@@ -54,6 +57,6 @@ export function saveImages(
 export function resolveImagePath(sessionId: string, filename: string): string | null {
   // Prevent path traversal
   if (filename.includes("..") || filename.includes("/")) return null;
-  const filePath = path.join(IMAGE_DIR, sessionId, filename);
+  const filePath = path.join(getImageDir(), sessionId, filename);
   return fs.existsSync(filePath) ? filePath : null;
 }

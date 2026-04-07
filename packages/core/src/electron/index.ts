@@ -52,6 +52,7 @@ import { SessionManager } from "../server/session-manager.js";
 import { attachWebSocket } from "../server/ws.js";
 import { setConfig, getConfig } from "../config.js";
 import { getDb } from "../db/schema.js";
+import { logger as snaLogger } from "../lib/logger.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -114,6 +115,12 @@ export interface SnaServerOptions {
    * Useful for forwarding to your app's logger.
    */
   onLog?: (line: string) => void;
+
+  /**
+   * Base data directory for images, etc.
+   * Default: path.join(path.dirname(dbPath), "..")  (i.e., parent of db dir)
+   */
+  dataDir?: string;
 
   /**
    * Optional Langfuse tracing config.
@@ -217,6 +224,7 @@ export async function startSnaServer(options: SnaServerOptions): Promise<SnaServ
     ...(options.permissionMode ? { SNA_PERMISSION_MODE: options.permissionMode } : {}),
     ...(options.model ? { SNA_MODEL: options.model } : {}),
     ...(options.permissionTimeoutMs != null ? { SNA_PERMISSION_TIMEOUT_MS: String(options.permissionTimeoutMs) } : {}),
+    ...(options.dataDir ? { SNA_DATA_DIR: options.dataDir } : {}),
     ...(options.nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: options.nativeBinding } : {}),
     ...(consumerModules ? { SNA_MODULES_PATH: consumerModules } : {}),
     ...(nodePath ? { NODE_PATH: nodePath } : {}),
@@ -336,10 +344,19 @@ export async function startSnaServerInProcess(
   const port = options.port ?? 3099;
   const cwd = options.cwd ?? path.dirname(options.dbPath);
 
+  // Route ALL SNA SDK logger output through the consumer's onLog callback.
+  // Without this, logger.log() calls in claude-code.ts, session-manager.ts,
+  // langfuse-tracer.ts, etc. go to console.log which Electron stdout doesn't
+  // capture via onLog.
+  if (options.onLog) {
+    snaLogger.setOnLog(options.onLog);
+  }
+
   // Configure SNA SDK before any module reads config
   setConfig({
     port,
     dbPath: options.dbPath,
+    ...(options.dataDir ? { dataDir: options.dataDir } : {}),
     ...(options.maxSessions != null ? { maxSessions: options.maxSessions } : {}),
     ...(options.permissionMode ? { defaultPermissionMode: options.permissionMode } : {}),
     ...(options.model ? { model: options.model } : {}),
@@ -353,6 +370,7 @@ export async function startSnaServerInProcess(
   if (options.permissionMode) process.env.SNA_PERMISSION_MODE = options.permissionMode;
   if (options.model) process.env.SNA_MODEL = options.model;
   if (options.permissionTimeoutMs != null) process.env.SNA_PERMISSION_TIMEOUT_MS = String(options.permissionTimeoutMs);
+  if (options.dataDir) process.env.SNA_DATA_DIR = options.dataDir;
   if (options.nativeBinding) process.env.SNA_SQLITE_NATIVE_BINDING = options.nativeBinding;
 
   // Resolve consumer's node_modules for better-sqlite3.
@@ -457,6 +475,8 @@ export async function startSnaServerInProcess(
         await shutdownTracer();
       } catch { /* langfuse not loaded — skip */ }
       sessionManager.killAll();
+      // Clear the logger callback to avoid leaking references after shutdown
+      snaLogger.setOnLog(null);
       await new Promise<void>((resolve) => {
         httpServer.close(() => resolve());
         // Force-close after 3 seconds if connections linger

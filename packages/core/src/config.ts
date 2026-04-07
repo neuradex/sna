@@ -10,6 +10,8 @@
  *   4. Per-call parameter overrides (function args)
  */
 
+import path from "path";
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface SnaConfig {
@@ -52,6 +54,9 @@ export interface SnaConfig {
   /** SQLite database path. env: SNA_DB_PATH */
   dbPath: string;
 
+  /** Base data directory for images, etc. env: SNA_DATA_DIR */
+  dataDir: string;
+
   /**
    * Optional Langfuse tracing config.
    * When present, sessions with `meta.langfuseTrace: true` are traced.
@@ -86,6 +91,7 @@ const defaults: SnaConfig = {
   keepaliveIntervalMs: 15_000,
   skillPollMs: 2_000,
   dbPath: "data/sna.db",
+  dataDir: path.join(process.cwd(), "data"),
 };
 
 // ── Environment overrides ────────────────────────────────────────────────────
@@ -97,6 +103,7 @@ function fromEnv(): Partial<SnaConfig> {
   if (process.env.SNA_PERMISSION_MODE) env.defaultPermissionMode = process.env.SNA_PERMISSION_MODE as SnaConfig["defaultPermissionMode"];
   if (process.env.SNA_MAX_SESSIONS) env.maxSessions = parseInt(process.env.SNA_MAX_SESSIONS, 10);
   if (process.env.SNA_DB_PATH) env.dbPath = process.env.SNA_DB_PATH;
+  if (process.env.SNA_DATA_DIR) env.dataDir = process.env.SNA_DATA_DIR;
   if (process.env.SNA_PERMISSION_TIMEOUT_MS) env.permissionTimeoutMs = parseInt(process.env.SNA_PERMISSION_TIMEOUT_MS, 10);
   return env;
 }
