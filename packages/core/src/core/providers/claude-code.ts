@@ -371,6 +371,7 @@ class ClaudeCodeProcess implements AgentProcess {
           const block = inner.content_block;
           this._receivedStreamEvents = true;
           this._streamedToolUseIds.add(block.id);
+          logger.log("agent", `[cc-debug] STREAMING tool_use: ${block.name} id=${block.id}`);
           return {
             type: "tool_use",
             message: block.name,
@@ -402,8 +403,14 @@ class ClaudeCodeProcess implements AgentProcess {
 
       case "assistant": {
         // With --include-partial-messages, intermediate snapshots have stop_reason: null.
-        // Skip them — real deltas already came via stream_event above.
-        if (this._receivedStreamEvents && msg.message?.stop_reason === null) return null;
+        // Skip partials that only contain text/thinking (already streamed via stream_event).
+        // But always process partials that contain tool_use blocks — they carry the complete input.
+        const hasToolUse = Array.isArray(msg.message?.content) && msg.message.content.some((b: any) => b.type === "tool_use");
+        logger.log("agent", `[cc-debug] ASSISTANT msg: stop_reason=${msg.message?.stop_reason} hasToolUse=${hasToolUse} receivedStreams=${this._receivedStreamEvents} streamedIds=[${[...this._streamedToolUseIds]}]`);
+        if (this._receivedStreamEvents && msg.message?.stop_reason === null && !hasToolUse) {
+          logger.log("agent", `[cc-debug] ASSISTANT msg SKIPPED (partial, no tool_use)`);
+          return null;
+        }
 
         const content = msg.message?.content;
         if (!Array.isArray(content)) return null;
@@ -420,13 +427,25 @@ class ClaudeCodeProcess implements AgentProcess {
             });
           } else if (block.type === "tool_use") {
             const alreadyStreamed = this._streamedToolUseIds.has(block.id);
-            if (alreadyStreamed) this._streamedToolUseIds.delete(block.id);
-            events.push({
-              type: "tool_use",
-              message: block.name,
-              data: { toolName: block.name, input: block.input, id: block.id, update: alreadyStreamed },
-              timestamp: Date.now(),
-            });
+            if (alreadyStreamed) {
+              this._streamedToolUseIds.delete(block.id);
+              logger.log("agent", `[cc-debug] TOOL_USE UPDATE: ${block.name} id=${block.id} input=${JSON.stringify(block.input)}`);
+              // Emit update directly (not enqueued) to guarantee it arrives before tool_result
+              this.emitter.emit("event", {
+                type: "tool_use",
+                message: block.name,
+                data: { toolName: block.name, input: block.input, id: block.id, update: true },
+                timestamp: Date.now(),
+              } satisfies AgentEvent);
+              logger.log("agent", `[cc-debug] TOOL_USE UPDATE emitted directly via emitter`);
+            } else {
+              events.push({
+                type: "tool_use",
+                message: block.name,
+                data: { toolName: block.name, input: block.input, id: block.id, update: false },
+                timestamp: Date.now(),
+              });
+            }
           } else if (block.type === "text") {
             const text = (block.text ?? "").trim();
             if (text) {
@@ -454,11 +473,12 @@ class ClaudeCodeProcess implements AgentProcess {
         if (!Array.isArray(userContent)) return null;
         for (const block of userContent) {
           if (block.type === "tool_result") {
+            logger.log("agent", `[cc-debug] TOOL_RESULT: tool_use_id=${block.tool_use_id}`);
             return {
               type: "tool_result" as const,
               message: typeof block.content === "string"
-                ? block.content.slice(0, 300)
-                : JSON.stringify(block.content).slice(0, 300),
+                ? block.content
+                : JSON.stringify(block.content),
               data: { toolUseId: block.tool_use_id, isError: block.is_error },
               timestamp: Date.now(),
             };

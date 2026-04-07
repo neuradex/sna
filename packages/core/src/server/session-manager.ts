@@ -8,6 +8,7 @@
 import type { AgentProcess, AgentEvent } from "../core/providers/types.js";
 import { getDb } from "../db/schema.js";
 import { getConfig } from "../config.js";
+import { logger } from "../lib/logger.js";
 
 export type SessionState = "idle" | "processing" | "waiting" | "permission";
 
@@ -277,13 +278,16 @@ export class SessionManager {
         if (listeners) {
           for (const cb of listeners) cb(session.eventCounter, e);
         }
-      } else if (e.type === "assistant_delta") {
-        // Deltas are transient — broadcast without cursor/buffer for streaming UI.
-        // Subscribers receive them but they don't affect cursor position.
+      } else if (e.type === "assistant_delta" || (e.type === "tool_use" && e.data?.update)) {
+        // Transient events — broadcast without cursor/buffer.
+        // assistant_delta: streaming text. tool_use update: complete input for an existing tool call.
         const listeners = this.eventListeners.get(sessionId);
+        if (e.type === "tool_use") logger.log("agent", `[sm-debug] broadcasting tool_use update to ${listeners?.size ?? 0} listeners (sessionId=${sessionId})`);
         if (listeners) {
           for (const cb of listeners) cb(-1, e);
         }
+      } else if ((e as any).type !== "assistant_delta") {
+        logger.log("agent", `[sm-debug] event NOT broadcast: type=${e.type} persisted=${false}`);
       }
     });
 
@@ -637,6 +641,14 @@ export class SessionManager {
           return false;
         case "tool_use": {
           const toolName = (e.data?.toolName as string) ?? e.message ?? "tool";
+          if (e.data?.update) {
+            logger.log("agent", `[sm-debug] tool_use UPDATE received: ${toolName} id=${e.data.id} input=${JSON.stringify(e.data.input)}`);
+            // Update existing streaming tool_use with complete input (don't increment cursor)
+            db.prepare(`UPDATE chat_messages SET meta = ? WHERE session_id = ? AND role = 'tool' AND content = ? AND meta LIKE ?`)
+              .run(JSON.stringify(e.data), sessionId, toolName, `%"id":"${e.data.id}"%`);
+            return false;
+          }
+          logger.log("agent", `[sm-debug] tool_use INSERT: ${toolName} id=${e.data?.id}`);
           db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool', ?, ?)`)
             .run(sessionId, toolName, JSON.stringify(e.data ?? {}));
           return true;
@@ -656,7 +668,7 @@ export class SessionManager {
         default:
           return false;
       }
-    } catch { return false; /* DB failure is non-fatal */ }
+    } catch { return false; }
   }
 
   /** Kill all sessions. Used during shutdown. */

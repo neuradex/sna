@@ -18,6 +18,7 @@
 import type { AgentEvent } from "../core/providers/types.js";
 import type { SessionManager, SessionLifecycleEvent } from "../server/session-manager.js";
 import { setConfig } from "../config.js";
+import { logger } from "./logger.js";
 
 // ── Internal state ──────────────────────────────────────────────────────────
 
@@ -241,7 +242,7 @@ function subscribeSession(sessionId: string): void {
   sessions.set(sessionId, ss);
 
   ss.eventUnsub = sm.onSessionEvent(sessionId, (cursor, event) => {
-    if (cursor === -1) return;
+    if (cursor === -1 && !(event.type === "tool_use" && event.data?.update)) return;
     try { handleEvent(ss, event); } catch (err) { logError(`event error [${sessionId}]: ${err}`); }
   });
 
@@ -337,12 +338,23 @@ function handleEvent(ss: SessionState, event: AgentEvent): void {
 
     case "tool_use": {
       const turn = ss.currentTurn;
-      if (!turn) break;
+      if (!turn) { logger.log("agent", `[lf-debug] tool_use: no currentTurn`); break; }
       const toolName = (event.data?.toolName as string) ?? event.message ?? "tool";
-      const toolUseId = event.data?.toolUseId as string | undefined;
+      const toolUseId = (event.data?.toolUseId ?? event.data?.id) as string | undefined;
+      logger.log("agent", `[lf-debug] tool_use: ${toolName} id=${toolUseId} update=${event.data?.update} pending=[${[...turn.pendingToolSpans.keys()]}]`);
+
+      // Update event: refresh the existing span's input with complete data
+      if (event.data?.update && toolUseId && turn.pendingToolSpans.has(toolUseId)) {
+        const existing = turn.pendingToolSpans.get(toolUseId)!;
+        logger.log("agent", `[lf-debug] tool_use UPDATE: updating span input for ${toolUseId}`);
+        existing.update({ input: event.data });
+        break;
+      }
+
       const span = turn.trace.span({ name: `tool:${toolName}`, input: event.data });
       if (toolUseId) {
         turn.pendingToolSpans.set(toolUseId, span);
+        logger.log("agent", `[lf-debug] tool_use: span created, added to pending`);
       } else {
         span.end();
       }
