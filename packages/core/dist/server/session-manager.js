@@ -153,15 +153,11 @@ class SessionManager {
         if (session.eventBuffer.length > getConfig().maxEventBuffer) {
           session.eventBuffer.splice(0, session.eventBuffer.length - getConfig().maxEventBuffer);
         }
-        const listeners = this.eventListeners.get(sessionId);
-        if (listeners) {
-          for (const cb of listeners) cb(session.eventCounter, e);
-        }
-      } else if (e.type === "assistant_delta") {
-        const listeners = this.eventListeners.get(sessionId);
-        if (listeners) {
-          for (const cb of listeners) cb(-1, e);
-        }
+      }
+      const cursor = persisted ? session.eventCounter : -1;
+      const listeners = this.eventListeners.get(sessionId);
+      if (listeners) {
+        for (const cb of listeners) cb(cursor, e);
       }
     });
     proc.on("exit", (code) => {
@@ -456,6 +452,10 @@ class SessionManager {
           return false;
         case "tool_use": {
           const toolName = e.data?.toolName ?? e.message ?? "tool";
+          if (e.data?.update) {
+            db.prepare(`UPDATE chat_messages SET meta = ? WHERE session_id = ? AND role = 'tool' AND content = ? AND meta LIKE ?`).run(JSON.stringify(e.data), sessionId, toolName, `%"id":"${e.data.id}"%`);
+            return false;
+          }
           db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool', ?, ?)`).run(sessionId, toolName, JSON.stringify(e.data ?? {}));
           return true;
         }

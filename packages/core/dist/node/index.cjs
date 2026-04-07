@@ -178,6 +178,10 @@ try {
   import_fs2.default.writeFileSync(LOG_PATH, "");
 } catch {
 }
+var _onLog = null;
+function setOnLog(cb) {
+  _onLog = cb;
+}
 function ts() {
   return (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
@@ -191,21 +195,33 @@ var tags = {
   ws: " WS  ",
   err: " ERR "
 };
+function formatLine(tag, args) {
+  return `${ts()} ${tag} ${args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}`;
+}
 function appendFile(tag, args) {
-  const line = `${ts()} ${tag} ${args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}
-`;
+  const line = formatLine(tag, args) + "\n";
   import_fs2.default.appendFile(LOG_PATH, line, () => {
   });
 }
 function log(tag, ...args) {
-  console.log(`${ts()} ${tags[tag] ?? tag}`, ...args);
-  appendFile(tags[tag] ?? tag, args);
+  const resolvedTag = tags[tag] ?? tag;
+  if (_onLog) {
+    _onLog(formatLine(resolvedTag, args));
+  } else {
+    console.log(`${ts()} ${resolvedTag}`, ...args);
+  }
+  appendFile(resolvedTag, args);
 }
 function err(tag, ...args) {
-  console.error(`${ts()} ${tags[tag] ?? tag}`, ...args);
-  appendFile(tags[tag] ?? tag, args);
+  const resolvedTag = tags[tag] ?? tag;
+  if (_onLog) {
+    _onLog(formatLine(resolvedTag, args));
+  } else {
+    console.error(`${ts()} ${resolvedTag}`, ...args);
+  }
+  appendFile(resolvedTag, args);
 }
-var logger = { log, err };
+var logger = { log, err, setOnLog };
 
 // src/core/providers/claude-code.ts
 init_config();
@@ -513,7 +529,10 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
         return null;
       }
       case "assistant": {
-        if (this._receivedStreamEvents && msg.message?.stop_reason === null) return null;
+        const hasToolUse = Array.isArray(msg.message?.content) && msg.message.content.some((b) => b.type === "tool_use");
+        if (this._receivedStreamEvents && msg.message?.stop_reason === null && !hasToolUse) {
+          return null;
+        }
         const content = msg.message?.content;
         if (!Array.isArray(content)) return null;
         const events = [];
@@ -527,13 +546,22 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
             });
           } else if (block.type === "tool_use") {
             const alreadyStreamed = this._streamedToolUseIds.has(block.id);
-            if (alreadyStreamed) this._streamedToolUseIds.delete(block.id);
-            events.push({
-              type: "tool_use",
-              message: block.name,
-              data: { toolName: block.name, input: block.input, id: block.id, update: alreadyStreamed },
-              timestamp: Date.now()
-            });
+            if (alreadyStreamed) {
+              this._streamedToolUseIds.delete(block.id);
+              this.emitter.emit("event", {
+                type: "tool_use",
+                message: block.name,
+                data: { toolName: block.name, input: block.input, id: block.id, update: true },
+                timestamp: Date.now()
+              });
+            } else {
+              events.push({
+                type: "tool_use",
+                message: block.name,
+                data: { toolName: block.name, input: block.input, id: block.id, update: false },
+                timestamp: Date.now()
+              });
+            }
           } else if (block.type === "text") {
             const text = (block.text ?? "").trim();
             if (text) {
@@ -558,7 +586,7 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
           if (block.type === "tool_result") {
             return {
               type: "tool_result",
-              message: typeof block.content === "string" ? block.content.slice(0, 300) : JSON.stringify(block.content).slice(0, 300),
+              message: typeof block.content === "string" ? block.content : JSON.stringify(block.content),
               data: { toolUseId: block.tool_use_id, isError: block.is_error },
               timestamp: Date.now()
             };

@@ -162,8 +162,7 @@ function subscribeSession(sessionId) {
     eventUnsub: null
   };
   sessions.set(sessionId, ss);
-  ss.eventUnsub = sm.onSessionEvent(sessionId, (cursor, event) => {
-    if (cursor === -1) return;
+  ss.eventUnsub = sm.onSessionEvent(sessionId, (_cursor, event) => {
     try {
       handleEvent(ss, event);
     } catch (err) {
@@ -247,7 +246,12 @@ function handleEvent(ss, event) {
       const turn = ss.currentTurn;
       if (!turn) break;
       const toolName = event.data?.toolName ?? event.message ?? "tool";
-      const toolUseId = event.data?.toolUseId;
+      const toolUseId = event.data?.toolUseId ?? event.data?.id;
+      if (event.data?.update && toolUseId && turn.pendingToolSpans.has(toolUseId)) {
+        const existing = turn.pendingToolSpans.get(toolUseId);
+        existing.update({ input: event.data });
+        break;
+      }
       const span = turn.trace.span({ name: `tool:${toolName}`, input: event.data });
       if (toolUseId) {
         turn.pendingToolSpans.set(toolUseId, span);

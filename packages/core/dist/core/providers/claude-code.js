@@ -310,7 +310,10 @@ const _ClaudeCodeProcess = class _ClaudeCodeProcess {
         return null;
       }
       case "assistant": {
-        if (this._receivedStreamEvents && msg.message?.stop_reason === null) return null;
+        const hasToolUse = Array.isArray(msg.message?.content) && msg.message.content.some((b) => b.type === "tool_use");
+        if (this._receivedStreamEvents && msg.message?.stop_reason === null && !hasToolUse) {
+          return null;
+        }
         const content = msg.message?.content;
         if (!Array.isArray(content)) return null;
         const events = [];
@@ -324,13 +327,22 @@ const _ClaudeCodeProcess = class _ClaudeCodeProcess {
             });
           } else if (block.type === "tool_use") {
             const alreadyStreamed = this._streamedToolUseIds.has(block.id);
-            if (alreadyStreamed) this._streamedToolUseIds.delete(block.id);
-            events.push({
-              type: "tool_use",
-              message: block.name,
-              data: { toolName: block.name, input: block.input, id: block.id, update: alreadyStreamed },
-              timestamp: Date.now()
-            });
+            if (alreadyStreamed) {
+              this._streamedToolUseIds.delete(block.id);
+              this.emitter.emit("event", {
+                type: "tool_use",
+                message: block.name,
+                data: { toolName: block.name, input: block.input, id: block.id, update: true },
+                timestamp: Date.now()
+              });
+            } else {
+              events.push({
+                type: "tool_use",
+                message: block.name,
+                data: { toolName: block.name, input: block.input, id: block.id, update: false },
+                timestamp: Date.now()
+              });
+            }
           } else if (block.type === "text") {
             const text = (block.text ?? "").trim();
             if (text) {
@@ -355,7 +367,7 @@ const _ClaudeCodeProcess = class _ClaudeCodeProcess {
           if (block.type === "tool_result") {
             return {
               type: "tool_result",
-              message: typeof block.content === "string" ? block.content.slice(0, 300) : JSON.stringify(block.content).slice(0, 300),
+              message: typeof block.content === "string" ? block.content : JSON.stringify(block.content),
               data: { toolUseId: block.tool_use_id, isError: block.is_error },
               timestamp: Date.now()
             };

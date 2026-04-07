@@ -181,21 +181,21 @@ function setTracerUser(userId, userEmail) {
   _userEmail = userEmail;
 }
 function log2(msg) {
-  if (_onLog) _onLog(`[langfuse] ${msg}`);
+  if (_onLog2) _onLog2(`[langfuse] ${msg}`);
   else try {
     console.log(`[langfuse] ${msg}`);
   } catch {
   }
 }
 function logError(msg) {
-  if (_onLog) _onLog(`[langfuse] ERROR: ${msg}`);
+  if (_onLog2) _onLog2(`[langfuse] ERROR: ${msg}`);
   else try {
     console.error(`[langfuse] ERROR: ${msg}`);
   } catch {
   }
 }
 async function initTracer(config, sessionManager, onLog) {
-  _onLog = onLog ?? null;
+  _onLog2 = onLog ?? null;
   log2(`init: publicKey=${config.publicKey.slice(0, 12)}..., baseUrl=${config.baseUrl ?? "default"}`);
   try {
     const mod = await import("langfuse");
@@ -331,8 +331,7 @@ function subscribeSession(sessionId) {
     eventUnsub: null
   };
   sessions.set(sessionId, ss);
-  ss.eventUnsub = sm.onSessionEvent(sessionId, (cursor, event) => {
-    if (cursor === -1) return;
+  ss.eventUnsub = sm.onSessionEvent(sessionId, (_cursor, event) => {
     try {
       handleEvent(ss, event);
     } catch (err2) {
@@ -416,7 +415,12 @@ function handleEvent(ss, event) {
       const turn = ss.currentTurn;
       if (!turn) break;
       const toolName = event.data?.toolName ?? event.message ?? "tool";
-      const toolUseId = event.data?.toolUseId;
+      const toolUseId = event.data?.toolUseId ?? event.data?.id;
+      if (event.data?.update && toolUseId && turn.pendingToolSpans.has(toolUseId)) {
+        const existing = turn.pendingToolSpans.get(toolUseId);
+        existing.update({ input: event.data });
+        break;
+      }
       const span = turn.trace.span({ name: `tool:${toolName}`, input: event.data });
       if (toolUseId) {
         turn.pendingToolSpans.set(toolUseId, span);
@@ -510,7 +514,7 @@ function endOrphanedSpans(turn) {
   }
   turn.pendingToolSpans.clear();
 }
-var langfuseClient, sessions, lifecycleUnsub, sm, _onLog, _userId, _userEmail, _apiProxy;
+var langfuseClient, sessions, lifecycleUnsub, sm, _onLog2, _userId, _userEmail, _apiProxy;
 var init_langfuse_tracer = __esm({
   "src/lib/langfuse-tracer.ts"() {
     "use strict";
@@ -520,7 +524,7 @@ var init_langfuse_tracer = __esm({
     sessions = /* @__PURE__ */ new Map();
     lifecycleUnsub = null;
     sm = null;
-    _onLog = null;
+    _onLog2 = null;
     _apiProxy = null;
   }
 });
@@ -627,6 +631,10 @@ try {
   import_fs2.default.writeFileSync(LOG_PATH, "");
 } catch {
 }
+var _onLog = null;
+function setOnLog(cb) {
+  _onLog = cb;
+}
 function ts() {
   return (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
@@ -640,21 +648,33 @@ var tags = {
   ws: " WS  ",
   err: " ERR "
 };
+function formatLine(tag, args) {
+  return `${ts()} ${tag} ${args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}`;
+}
 function appendFile(tag, args) {
-  const line = `${ts()} ${tag} ${args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}
-`;
+  const line = formatLine(tag, args) + "\n";
   import_fs2.default.appendFile(LOG_PATH, line, () => {
   });
 }
 function log(tag, ...args) {
-  console.log(`${ts()} ${tags[tag] ?? tag}`, ...args);
-  appendFile(tags[tag] ?? tag, args);
+  const resolvedTag = tags[tag] ?? tag;
+  if (_onLog) {
+    _onLog(formatLine(resolvedTag, args));
+  } else {
+    console.log(`${ts()} ${resolvedTag}`, ...args);
+  }
+  appendFile(resolvedTag, args);
 }
 function err(tag, ...args) {
-  console.error(`${ts()} ${tags[tag] ?? tag}`, ...args);
-  appendFile(tags[tag] ?? tag, args);
+  const resolvedTag = tags[tag] ?? tag;
+  if (_onLog) {
+    _onLog(formatLine(resolvedTag, args));
+  } else {
+    console.error(`${ts()} ${resolvedTag}`, ...args);
+  }
+  appendFile(resolvedTag, args);
 }
-var logger = { log, err };
+var logger = { log, err, setOnLog };
 
 // src/core/providers/claude-code.ts
 init_config();
@@ -962,7 +982,10 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
         return null;
       }
       case "assistant": {
-        if (this._receivedStreamEvents && msg.message?.stop_reason === null) return null;
+        const hasToolUse = Array.isArray(msg.message?.content) && msg.message.content.some((b) => b.type === "tool_use");
+        if (this._receivedStreamEvents && msg.message?.stop_reason === null && !hasToolUse) {
+          return null;
+        }
         const content = msg.message?.content;
         if (!Array.isArray(content)) return null;
         const events = [];
@@ -976,13 +999,22 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
             });
           } else if (block.type === "tool_use") {
             const alreadyStreamed = this._streamedToolUseIds.has(block.id);
-            if (alreadyStreamed) this._streamedToolUseIds.delete(block.id);
-            events.push({
-              type: "tool_use",
-              message: block.name,
-              data: { toolName: block.name, input: block.input, id: block.id, update: alreadyStreamed },
-              timestamp: Date.now()
-            });
+            if (alreadyStreamed) {
+              this._streamedToolUseIds.delete(block.id);
+              this.emitter.emit("event", {
+                type: "tool_use",
+                message: block.name,
+                data: { toolName: block.name, input: block.input, id: block.id, update: true },
+                timestamp: Date.now()
+              });
+            } else {
+              events.push({
+                type: "tool_use",
+                message: block.name,
+                data: { toolName: block.name, input: block.input, id: block.id, update: false },
+                timestamp: Date.now()
+              });
+            }
           } else if (block.type === "text") {
             const text = (block.text ?? "").trim();
             if (text) {
@@ -1007,7 +1039,7 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
           if (block.type === "tool_result") {
             return {
               type: "tool_result",
-              message: typeof block.content === "string" ? block.content.slice(0, 300) : JSON.stringify(block.content).slice(0, 300),
+              message: typeof block.content === "string" ? block.content : JSON.stringify(block.content),
               data: { toolUseId: block.tool_use_id, isError: block.is_error },
               timestamp: Date.now()
             };
@@ -2253,15 +2285,11 @@ var SessionManager = class {
         if (session.eventBuffer.length > getConfig().maxEventBuffer) {
           session.eventBuffer.splice(0, session.eventBuffer.length - getConfig().maxEventBuffer);
         }
-        const listeners = this.eventListeners.get(sessionId);
-        if (listeners) {
-          for (const cb of listeners) cb(session.eventCounter, e);
-        }
-      } else if (e.type === "assistant_delta") {
-        const listeners = this.eventListeners.get(sessionId);
-        if (listeners) {
-          for (const cb of listeners) cb(-1, e);
-        }
+      }
+      const cursor = persisted ? session.eventCounter : -1;
+      const listeners = this.eventListeners.get(sessionId);
+      if (listeners) {
+        for (const cb of listeners) cb(cursor, e);
       }
     });
     proc.on("exit", (code) => {
@@ -2556,6 +2584,10 @@ var SessionManager = class {
           return false;
         case "tool_use": {
           const toolName = e.data?.toolName ?? e.message ?? "tool";
+          if (e.data?.update) {
+            db.prepare(`UPDATE chat_messages SET meta = ? WHERE session_id = ? AND role = 'tool' AND content = ? AND meta LIKE ?`).run(JSON.stringify(e.data), sessionId, toolName, `%"id":"${e.data.id}"%`);
+            return false;
+          }
           db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool', ?, ?)`).run(sessionId, toolName, JSON.stringify(e.data ?? {}));
           return true;
         }
@@ -3396,6 +3428,9 @@ async function startSnaServer(options) {
 async function startSnaServerInProcess(options) {
   const port = options.port ?? 3099;
   const cwd = options.cwd ?? import_path6.default.dirname(options.dbPath);
+  if (options.onLog) {
+    logger.setOnLog(options.onLog);
+  }
   setConfig({
     port,
     dbPath: options.dbPath,
@@ -3488,6 +3523,7 @@ async function startSnaServerInProcess(options) {
       } catch {
       }
       sessionManager.killAll();
+      logger.setOnLog(null);
       await new Promise((resolve) => {
         httpServer.close(() => resolve());
         setTimeout(() => resolve(), 3e3).unref();

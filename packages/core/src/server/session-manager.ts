@@ -8,7 +8,6 @@
 import type { AgentProcess, AgentEvent } from "../core/providers/types.js";
 import { getDb } from "../db/schema.js";
 import { getConfig } from "../config.js";
-import { logger } from "../lib/logger.js";
 
 export type SessionState = "idle" | "processing" | "waiting" | "permission";
 
@@ -636,13 +635,11 @@ export class SessionManager {
         case "tool_use": {
           const toolName = (e.data?.toolName as string) ?? e.message ?? "tool";
           if (e.data?.update) {
-            logger.log("agent", `[sm-debug] tool_use UPDATE received: ${toolName} id=${e.data.id} input=${JSON.stringify(e.data.input)}`);
             // Update existing streaming tool_use with complete input (don't increment cursor)
             db.prepare(`UPDATE chat_messages SET meta = ? WHERE session_id = ? AND role = 'tool' AND content = ? AND meta LIKE ?`)
               .run(JSON.stringify(e.data), sessionId, toolName, `%"id":"${e.data.id}"%`);
             return false;
           }
-          logger.log("agent", `[sm-debug] tool_use INSERT: ${toolName} id=${e.data?.id}`);
           db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool', ?, ?)`)
             .run(sessionId, toolName, JSON.stringify(e.data ?? {}));
           return true;

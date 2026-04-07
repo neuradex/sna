@@ -11,6 +11,7 @@ import { SessionManager } from "../server/session-manager.js";
 import { attachWebSocket } from "../server/ws.js";
 import { setConfig, getConfig } from "../config.js";
 import { getDb } from "../db/schema.js";
+import { logger as snaLogger } from "../lib/logger.js";
 function resolveStandaloneScript() {
   const selfPath = fileURLToPath(import.meta.url);
   let script = path.resolve(path.dirname(selfPath), "../server/standalone.js");
@@ -118,6 +119,9 @@ async function startSnaServer(options) {
 async function startSnaServerInProcess(options) {
   const port = options.port ?? 3099;
   const cwd = options.cwd ?? path.dirname(options.dbPath);
+  if (options.onLog) {
+    snaLogger.setOnLog(options.onLog);
+  }
   setConfig({
     port,
     dbPath: options.dbPath,
@@ -210,6 +214,7 @@ async function startSnaServerInProcess(options) {
       } catch {
       }
       sessionManager.killAll();
+      snaLogger.setOnLog(null);
       await new Promise((resolve) => {
         httpServer.close(() => resolve());
         setTimeout(() => resolve(), 3e3).unref();
