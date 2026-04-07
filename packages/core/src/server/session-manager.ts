@@ -273,21 +273,15 @@ export class SessionManager {
         if (session.eventBuffer.length > getConfig().maxEventBuffer) {
           session.eventBuffer.splice(0, session.eventBuffer.length - getConfig().maxEventBuffer);
         }
-        // Notify real-time listeners (WebSocket subscribers)
-        const listeners = this.eventListeners.get(sessionId);
-        if (listeners) {
-          for (const cb of listeners) cb(session.eventCounter, e);
-        }
-      } else if (e.type === "assistant_delta" || (e.type === "tool_use" && e.data?.update)) {
-        // Transient events — broadcast without cursor/buffer.
-        // assistant_delta: streaming text. tool_use update: complete input for an existing tool call.
-        const listeners = this.eventListeners.get(sessionId);
-        if (e.type === "tool_use") logger.log("agent", `[sm-debug] broadcasting tool_use update to ${listeners?.size ?? 0} listeners (sessionId=${sessionId})`);
-        if (listeners) {
-          for (const cb of listeners) cb(-1, e);
-        }
-      } else if ((e as any).type !== "assistant_delta") {
-        logger.log("agent", `[sm-debug] event NOT broadcast: type=${e.type} persisted=${false}`);
+      }
+
+      // Always broadcast to listeners — each listener decides what to handle.
+      // cursor > 0 = persisted event with sequence position.
+      // cursor = -1 = transient (not in buffer, no sequence position).
+      const cursor = persisted ? session.eventCounter : -1;
+      const listeners = this.eventListeners.get(sessionId);
+      if (listeners) {
+        for (const cb of listeners) cb(cursor, e);
       }
     });
 

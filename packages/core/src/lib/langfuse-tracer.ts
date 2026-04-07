@@ -241,8 +241,7 @@ function subscribeSession(sessionId: string): void {
 
   sessions.set(sessionId, ss);
 
-  ss.eventUnsub = sm.onSessionEvent(sessionId, (cursor, event) => {
-    if (cursor === -1 && !(event.type === "tool_use" && event.data?.update)) return;
+  ss.eventUnsub = sm.onSessionEvent(sessionId, (_cursor, event) => {
     try { handleEvent(ss, event); } catch (err) { logError(`event error [${sessionId}]: ${err}`); }
   });
 
