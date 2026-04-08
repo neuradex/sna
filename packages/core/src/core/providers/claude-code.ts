@@ -451,12 +451,17 @@ class ClaudeCodeProcess implements AgentProcess {
         }
 
         if (events.length > 0 || textBlocks.length > 0) {
+          // When content was already streamed via deltas, emit directly (not enqueued)
+          // to guarantee persistence before tool execution starts.
+          const shouldEmitDirectly = this._receivedStreamEvents;
           for (const e of events) {
-            this.enqueue(e);
+            if (shouldEmitDirectly) this.emitter.emit("event", e);
+            else this.enqueue(e);
           }
           for (const text of textBlocks) {
-            // this.enqueueTextAsDeltas(text); // synthetic delta fallback — disabled in favour of --include-partial-messages
-            this.enqueue({ type: "assistant", message: text, timestamp: Date.now() } satisfies AgentEvent);
+            const event = { type: "assistant", message: text, timestamp: Date.now() } satisfies AgentEvent;
+            if (shouldEmitDirectly) this.emitter.emit("event", event);
+            else this.enqueue(event);
           }
         }
         return null;
