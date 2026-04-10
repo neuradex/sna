@@ -387,7 +387,8 @@ var TAG_LEVELS = {
   req: "info",
   stdin: "info",
   stdout: "info",
-  route: "info"
+  route: "info",
+  langfuse: "info"
 };
 var LEVEL_ORDER = { info: 0, warn: 1, error: 2, silent: 3 };
 function shouldEmit(tag) {
@@ -406,7 +407,8 @@ var tags = {
   stdout: " OUT ",
   route: " API ",
   ws: " WS  ",
-  err: " ERR "
+  err: " ERR ",
+  langfuse: " LFE "
 };
 function formatLine(tag, args) {
   return `${ts()} ${tag} ${args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}`;

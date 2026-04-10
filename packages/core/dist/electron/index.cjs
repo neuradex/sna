@@ -40,6 +40,90 @@ var init_cjs_shims = __esm({
   }
 });
 
+// src/lib/logger.ts
+function setOnLog(cb) {
+  _onLog = cb;
+}
+function setLogLevel(level) {
+  _logLevel = level;
+}
+function shouldEmit(tag) {
+  if (_logLevel === "silent") return false;
+  const tagMinLevel = TAG_LEVELS[tag] ?? "info";
+  return LEVEL_ORDER[tagMinLevel] >= LEVEL_ORDER[_logLevel];
+}
+function ts() {
+  return (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+function formatLine(tag, args) {
+  return `${ts()} ${tag} ${args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}`;
+}
+function appendFile(tag, args) {
+  const line = formatLine(tag, args) + "\n";
+  import_fs2.default.appendFile(LOG_PATH, line, () => {
+  });
+}
+function log(tag, ...args) {
+  const resolvedTag = tags[tag] ?? tag;
+  appendFile(resolvedTag, args);
+  if (!shouldEmit(tag)) return;
+  if (_onLog) {
+    _onLog(formatLine(resolvedTag, args));
+  } else {
+    console.log(`${ts()} ${resolvedTag}`, ...args);
+  }
+}
+function err(tag, ...args) {
+  const resolvedTag = tags[tag] ?? tag;
+  appendFile(resolvedTag, args);
+  if (!shouldEmit(tag)) return;
+  if (_onLog) {
+    _onLog(formatLine(resolvedTag, args));
+  } else {
+    console.error(`${ts()} ${resolvedTag}`, ...args);
+  }
+}
+var import_fs2, import_path2, LOG_PATH, _onLog, _logLevel, TAG_LEVELS, LEVEL_ORDER, tags, logger;
+var init_logger = __esm({
+  "src/lib/logger.ts"() {
+    "use strict";
+    init_cjs_shims();
+    import_fs2 = __toESM(require("fs"), 1);
+    import_path2 = __toESM(require("path"), 1);
+    LOG_PATH = process.env.SNA_LOG_PATH ?? import_path2.default.join(process.cwd(), ".dev.log");
+    try {
+      import_fs2.default.writeFileSync(LOG_PATH, "");
+    } catch {
+    }
+    _onLog = null;
+    _logLevel = "info";
+    TAG_LEVELS = {
+      err: "error",
+      sna: "warn",
+      agent: "warn",
+      ws: "warn",
+      req: "info",
+      stdin: "info",
+      stdout: "info",
+      route: "info",
+      langfuse: "info"
+    };
+    LEVEL_ORDER = { info: 0, warn: 1, error: 2, silent: 3 };
+    tags = {
+      sna: " SNA ",
+      req: " REQ ",
+      agent: " AGT ",
+      stdin: " IN  ",
+      stdout: " OUT ",
+      route: " API ",
+      ws: " WS  ",
+      err: " ERR ",
+      langfuse: " LFE "
+    };
+    logger = { log, err, setOnLog, setLogLevel };
+  }
+});
+
 // src/config.ts
 function fromEnv() {
   const env = {};
@@ -184,21 +268,12 @@ function setTracerUser(userId, userEmail) {
   _userEmail = userEmail;
 }
 function log2(msg) {
-  if (_onLog2) _onLog2(`[langfuse] ${msg}`);
-  else try {
-    console.log(`[langfuse] ${msg}`);
-  } catch {
-  }
+  logger.log("langfuse", msg);
 }
 function logError(msg) {
-  if (_onLog2) _onLog2(`[langfuse] ERROR: ${msg}`);
-  else try {
-    console.error(`[langfuse] ERROR: ${msg}`);
-  } catch {
-  }
+  logger.err("err", `[langfuse] ${msg}`);
 }
-async function initTracer(config, sessionManager, onLog) {
-  _onLog2 = onLog ?? null;
+async function initTracer(config, sessionManager, _onLog2) {
   log2(`init: publicKey=${config.publicKey.slice(0, 12)}..., baseUrl=${config.baseUrl ?? "default"}`);
   try {
     const mod = await import("langfuse");
@@ -517,17 +592,17 @@ function endOrphanedSpans(turn) {
   }
   turn.pendingToolSpans.clear();
 }
-var langfuseClient, sessions, lifecycleUnsub, sm, _onLog2, _userId, _userEmail, _apiProxy;
+var langfuseClient, sessions, lifecycleUnsub, sm, _userId, _userEmail, _apiProxy;
 var init_langfuse_tracer = __esm({
   "src/lib/langfuse-tracer.ts"() {
     "use strict";
     init_cjs_shims();
     init_config();
+    init_logger();
     langfuseClient = null;
     sessions = /* @__PURE__ */ new Map();
     lifecycleUnsub = null;
     sm = null;
-    _onLog2 = null;
     _apiProxy = null;
   }
 });
@@ -625,83 +700,8 @@ ${xml}
   });
 }
 
-// src/lib/logger.ts
-init_cjs_shims();
-var import_fs2 = __toESM(require("fs"), 1);
-var import_path2 = __toESM(require("path"), 1);
-var LOG_PATH = process.env.SNA_LOG_PATH ?? import_path2.default.join(process.cwd(), ".dev.log");
-try {
-  import_fs2.default.writeFileSync(LOG_PATH, "");
-} catch {
-}
-var _onLog = null;
-function setOnLog(cb) {
-  _onLog = cb;
-}
-var _logLevel = "info";
-function setLogLevel(level) {
-  _logLevel = level;
-}
-var TAG_LEVELS = {
-  err: "error",
-  sna: "warn",
-  agent: "warn",
-  ws: "warn",
-  req: "info",
-  stdin: "info",
-  stdout: "info",
-  route: "info"
-};
-var LEVEL_ORDER = { info: 0, warn: 1, error: 2, silent: 3 };
-function shouldEmit(tag) {
-  if (_logLevel === "silent") return false;
-  const tagMinLevel = TAG_LEVELS[tag] ?? "info";
-  return LEVEL_ORDER[tagMinLevel] >= LEVEL_ORDER[_logLevel];
-}
-function ts() {
-  return (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-var tags = {
-  sna: " SNA ",
-  req: " REQ ",
-  agent: " AGT ",
-  stdin: " IN  ",
-  stdout: " OUT ",
-  route: " API ",
-  ws: " WS  ",
-  err: " ERR "
-};
-function formatLine(tag, args) {
-  return `${ts()} ${tag} ${args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ")}`;
-}
-function appendFile(tag, args) {
-  const line = formatLine(tag, args) + "\n";
-  import_fs2.default.appendFile(LOG_PATH, line, () => {
-  });
-}
-function log(tag, ...args) {
-  const resolvedTag = tags[tag] ?? tag;
-  appendFile(resolvedTag, args);
-  if (!shouldEmit(tag)) return;
-  if (_onLog) {
-    _onLog(formatLine(resolvedTag, args));
-  } else {
-    console.log(`${ts()} ${resolvedTag}`, ...args);
-  }
-}
-function err(tag, ...args) {
-  const resolvedTag = tags[tag] ?? tag;
-  appendFile(resolvedTag, args);
-  if (!shouldEmit(tag)) return;
-  if (_onLog) {
-    _onLog(formatLine(resolvedTag, args));
-  } else {
-    console.error(`${ts()} ${resolvedTag}`, ...args);
-  }
-}
-var logger = { log, err, setOnLog, setLogLevel };
-
 // src/core/providers/claude-code.ts
+init_logger();
 init_config();
 var SHELL = process.env.SHELL || "/bin/zsh";
 function parseCommandVOutput(raw) {
@@ -1541,6 +1541,9 @@ function getProvider(name = "claude-code") {
   if (!provider) throw new Error(`Unknown agent provider: ${name}`);
   return provider;
 }
+
+// src/server/routes/agent.ts
+init_logger();
 
 // src/server/history-builder.ts
 init_cjs_shims();
@@ -2679,6 +2682,7 @@ var SessionManager = class {
 // src/server/ws.ts
 init_cjs_shims();
 var import_ws = require("ws");
+init_logger();
 init_config();
 function send(ws, data) {
   if (ws.readyState === ws.OPEN) {
@@ -3364,6 +3368,7 @@ function createSnaApp(options = {}) {
 
 // src/electron/index.ts
 init_config();
+init_logger();
 function resolveStandaloneScript() {
   const selfPath = (0, import_url3.fileURLToPath)(importMetaUrl);
   let script = import_path7.default.resolve(import_path7.default.dirname(selfPath), "../server/standalone.js");

@@ -46,6 +46,7 @@ const TAG_LEVELS: Record<string, LogLevel> = {
   stdin: "info",
   stdout: "info",
   route: "info",
+  langfuse: "info",
 };
 
 const LEVEL_ORDER: Record<LogLevel, number> = { info: 0, warn: 1, error: 2, silent: 3 };
@@ -64,6 +65,7 @@ function ts(): string {
 const tags: Record<string, string> = {
   sna: " SNA ", req: " REQ ", agent: " AGT ", stdin: " IN  ",
   stdout: " OUT ", route: " API ", ws: " WS  ", err: " ERR ",
+  langfuse: " LFE ",
 };
 
 type Tag = keyof typeof tags;

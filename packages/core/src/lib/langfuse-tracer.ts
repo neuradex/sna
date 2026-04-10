@@ -18,6 +18,7 @@
 import type { AgentEvent } from "../core/providers/types.js";
 import type { SessionManager, SessionLifecycleEvent } from "../server/session-manager.js";
 import { setConfig } from "../config.js";
+import { logger as snaLogger } from "./logger.js";
 
 // ── Internal state ──────────────────────────────────────────────────────────
 
@@ -50,7 +51,6 @@ interface SessionState {
 const sessions = new Map<string, SessionState>();
 let lifecycleUnsub: (() => void) | null = null;
 let sm: SessionManager | null = null;
-let _onLog: ((msg: string) => void) | null = null;
 let _userId: string | undefined;
 let _userEmail: string | undefined;
 let _apiProxy: { port: number; close: () => void } | null = null;
@@ -61,15 +61,13 @@ export function setTracerUser(userId?: string, userEmail?: string): void {
   _userEmail = userEmail;
 }
 
-// ── Logger ──────────────────────────────────────────────────────────────────
+// ── Logger (routed through SDK logger for logLevel filtering) ───────────────
 
 function log(msg: string): void {
-  if (_onLog) _onLog(`[langfuse] ${msg}`);
-  else try { console.log(`[langfuse] ${msg}`); } catch { /* */ }
+  snaLogger.log("langfuse", msg);
 }
 function logError(msg: string): void {
-  if (_onLog) _onLog(`[langfuse] ERROR: ${msg}`);
-  else try { console.error(`[langfuse] ERROR: ${msg}`); } catch { /* */ }
+  snaLogger.err("err", `[langfuse] ${msg}`);
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -77,9 +75,9 @@ function logError(msg: string): void {
 export async function initTracer(
   config: { publicKey: string; secretKey: string; baseUrl?: string },
   sessionManager: SessionManager,
-  onLog?: (msg: string) => void,
+  /** @deprecated onLog is ignored — langfuse logs now route through SDK logger */
+  _onLog?: (msg: string) => void,
 ): Promise<void> {
-  _onLog = onLog ?? null;
   log(`init: publicKey=${config.publicKey.slice(0, 12)}..., baseUrl=${config.baseUrl ?? "default"}`);
 
   try {

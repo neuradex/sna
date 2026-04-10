@@ -24,7 +24,9 @@ declare function initTracer(config: {
     publicKey: string;
     secretKey: string;
     baseUrl?: string;
-}, sessionManager: SessionManager, onLog?: (msg: string) => void): Promise<void>;
+}, sessionManager: SessionManager, 
+/** @deprecated onLog is ignored — langfuse logs now route through SDK logger */
+_onLog?: (msg: string) => void): Promise<void>;
 declare function shutdownTracer(): Promise<void>;
 
 export { initTracer, setTracerUser, shutdownTracer };

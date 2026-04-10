@@ -1,9 +1,9 @@
 import { setConfig } from "../config.js";
+import { logger as snaLogger } from "./logger.js";
 let langfuseClient = null;
 const sessions = /* @__PURE__ */ new Map();
 let lifecycleUnsub = null;
 let sm = null;
-let _onLog = null;
 let _userId;
 let _userEmail;
 let _apiProxy = null;
@@ -12,21 +12,12 @@ function setTracerUser(userId, userEmail) {
   _userEmail = userEmail;
 }
 function log(msg) {
-  if (_onLog) _onLog(`[langfuse] ${msg}`);
-  else try {
-    console.log(`[langfuse] ${msg}`);
-  } catch {
-  }
+  snaLogger.log("langfuse", msg);
 }
 function logError(msg) {
-  if (_onLog) _onLog(`[langfuse] ERROR: ${msg}`);
-  else try {
-    console.error(`[langfuse] ERROR: ${msg}`);
-  } catch {
-  }
+  snaLogger.err("err", `[langfuse] ${msg}`);
 }
-async function initTracer(config, sessionManager, onLog) {
-  _onLog = onLog ?? null;
+async function initTracer(config, sessionManager, _onLog) {
   log(`init: publicKey=${config.publicKey.slice(0, 12)}..., baseUrl=${config.baseUrl ?? "default"}`);
   try {
     const mod = await import("langfuse");
