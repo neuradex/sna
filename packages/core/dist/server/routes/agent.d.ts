@@ -13,6 +13,7 @@ interface RunOnceOptions {
     timeout?: number;
     provider?: string;
     extraArgs?: string[];
+    env?: Record<string, string>;
 }
 interface RunOnceResult {
     result: string;

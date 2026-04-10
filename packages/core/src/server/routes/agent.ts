@@ -46,6 +46,7 @@ export interface RunOnceOptions {
   timeout?: number;
   provider?: string;
   extraArgs?: string[];
+  env?: Record<string, string>;
 }
 
 export interface RunOnceResult {
@@ -82,7 +83,7 @@ export async function runOnce(
     prompt: opts.message,
     model: opts.model ?? cfg.model,
     permissionMode: (opts.permissionMode as any) ?? cfg.defaultPermissionMode,
-    env: { SNA_SESSION_ID: sessionId },
+    env: { ...opts.env, SNA_SESSION_ID: sessionId },
     extraArgs,
   });
 
@@ -226,6 +227,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       extraArgs?: string[];
       cwd?: string;
       history?: Array<{ role: "user" | "assistant"; content: string }>;
+      env?: Record<string, string>;
     };
 
     // Auto-create session if it doesn't exist (backward compat for "default")
@@ -280,7 +282,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
         model,
         permissionMode: permissionMode as any,
         configDir,
-        env: { SNA_SESSION_ID: sessionId },
+        env: { ...body.env, SNA_SESSION_ID: sessionId },
         history: body.history,
         extraArgs,
       });
@@ -450,6 +452,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       permissionMode?: string;
       configDir?: string;
       extraArgs?: string[];
+      env?: Record<string, string>;
     };
 
     try {
@@ -462,7 +465,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
           model: cfg.model,
           permissionMode: cfg.permissionMode as any,
           configDir: cfg.configDir,
-          env: { SNA_SESSION_ID: sessionId },
+          env: { ...body.env, SNA_SESSION_ID: sessionId },
           extraArgs: [...(cfg.extraArgs ?? []), ...resumeArgs],
         });
       });
@@ -488,6 +491,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       configDir?: string;
       provider?: string;
       extraArgs?: string[];
+      env?: Record<string, string>;
     };
 
     const session = sessionManager.getOrCreateSession(sessionId);
@@ -514,7 +518,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
         model,
         permissionMode: permissionMode as any,
         configDir,
-        env: { SNA_SESSION_ID: sessionId },
+        env: { ...body.env, SNA_SESSION_ID: sessionId },
         history: history.length > 0 ? history : undefined,
         extraArgs,
       });

@@ -364,7 +364,7 @@ function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): vo
       model,
       permissionMode: permissionMode as any,
       configDir,
-      env: { SNA_SESSION_ID: sessionId },
+      env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
       history: msg.history as any[] | undefined,
       extraArgs,
     });
@@ -455,7 +455,7 @@ function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManager): v
       model,
       permissionMode: permissionMode as any,
       configDir,
-      env: { SNA_SESSION_ID: sessionId },
+      env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
       history: history.length > 0 ? history : undefined,
       extraArgs,
     });
@@ -493,7 +493,7 @@ function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionManager): 
           model: cfg.model,
           permissionMode: cfg.permissionMode as any,
           configDir: cfg.configDir,
-          env: { SNA_SESSION_ID: sessionId },
+          env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
           extraArgs: [...(cfg.extraArgs ?? []), ...resumeArgs],
         });
       },

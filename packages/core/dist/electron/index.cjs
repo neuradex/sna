@@ -1628,7 +1628,7 @@ async function runOnce(sessionManager, opts) {
     prompt: opts.message,
     model: opts.model ?? cfg.model,
     permissionMode: opts.permissionMode ?? cfg.defaultPermissionMode,
-    env: { SNA_SESSION_ID: sessionId },
+    env: { ...opts.env, SNA_SESSION_ID: sessionId },
     extraArgs
   });
   sessionManager.setProcess(sessionId, proc);
@@ -1768,7 +1768,7 @@ function createAgentRoutes(sessionManager) {
         model,
         permissionMode,
         configDir,
-        env: { SNA_SESSION_ID: sessionId },
+        env: { ...body.env, SNA_SESSION_ID: sessionId },
         history: body.history,
         extraArgs
       });
@@ -1913,7 +1913,7 @@ function createAgentRoutes(sessionManager) {
           model: cfg.model,
           permissionMode: cfg.permissionMode,
           configDir: cfg.configDir,
-          env: { SNA_SESSION_ID: sessionId },
+          env: { ...body.env, SNA_SESSION_ID: sessionId },
           extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
         });
       });
@@ -1952,7 +1952,7 @@ function createAgentRoutes(sessionManager) {
         model,
         permissionMode,
         configDir,
-        env: { SNA_SESSION_ID: sessionId },
+        env: { ...body.env, SNA_SESSION_ID: sessionId },
         history: history.length > 0 ? history : void 0,
         extraArgs
       });
@@ -2907,7 +2907,7 @@ function handleAgentStart(ws, msg, sm2) {
       model,
       permissionMode,
       configDir,
-      env: { SNA_SESSION_ID: sessionId },
+      env: { ...msg.env, SNA_SESSION_ID: sessionId },
       history: msg.history,
       extraArgs
     });
@@ -2985,7 +2985,7 @@ function handleAgentResume(ws, msg, sm2) {
       model,
       permissionMode,
       configDir,
-      env: { SNA_SESSION_ID: sessionId },
+      env: { ...msg.env, SNA_SESSION_ID: sessionId },
       history: history.length > 0 ? history : void 0,
       extraArgs
     });
@@ -3022,7 +3022,7 @@ function handleAgentRestart(ws, msg, sm2) {
           model: cfg.model,
           permissionMode: cfg.permissionMode,
           configDir: cfg.configDir,
-          env: { SNA_SESSION_ID: sessionId },
+          env: { ...msg.env, SNA_SESSION_ID: sessionId },
           extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
         });
       }

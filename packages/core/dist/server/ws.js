@@ -230,7 +230,7 @@ function handleAgentStart(ws, msg, sm) {
       model,
       permissionMode,
       configDir,
-      env: { SNA_SESSION_ID: sessionId },
+      env: { ...msg.env, SNA_SESSION_ID: sessionId },
       history: msg.history,
       extraArgs
     });
@@ -308,7 +308,7 @@ function handleAgentResume(ws, msg, sm) {
       model,
       permissionMode,
       configDir,
-      env: { SNA_SESSION_ID: sessionId },
+      env: { ...msg.env, SNA_SESSION_ID: sessionId },
       history: history.length > 0 ? history : void 0,
       extraArgs
     });
@@ -345,7 +345,7 @@ function handleAgentRestart(ws, msg, sm) {
           model: cfg.model,
           permissionMode: cfg.permissionMode,
           configDir: cfg.configDir,
-          env: { SNA_SESSION_ID: sessionId },
+          env: { ...msg.env, SNA_SESSION_ID: sessionId },
           extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
         });
       }
