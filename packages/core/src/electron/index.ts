@@ -41,6 +41,7 @@ import http from "http";
 // Re-export Claude CLI resolution utilities for consumer apps (e.g., Loom preflight)
 export { resolveClaudeCli, validateClaudePath, cacheClaudePath, parseCommandVOutput } from "../core/providers/claude-code.js";
 export type { ResolveResult } from "../core/providers/claude-code.js";
+export type { LogLevel } from "../lib/logger.js";
 import path from "path";
 
 // In-process mode imports
@@ -52,7 +53,7 @@ import { SessionManager } from "../server/session-manager.js";
 import { attachWebSocket } from "../server/ws.js";
 import { setConfig, getConfig } from "../config.js";
 import { getDb } from "../db/schema.js";
-import { logger as snaLogger } from "../lib/logger.js";
+import { logger as snaLogger, type LogLevel } from "../lib/logger.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -121,6 +122,19 @@ export interface SnaServerOptions {
    * Default: path.join(path.dirname(dbPath), "..")  (i.e., parent of db dir)
    */
   dataDir?: string;
+
+  /**
+   * Controls verbosity of log output sent to `onLog` and console.
+   * File recording (.dev.log) is unaffected — all levels are always written.
+   *
+   * - `"info"`:   all output (default, current behavior)
+   * - `"warn"`:   errors + agent lifecycle only; HTTP request logs excluded
+   * - `"error"`:  errors only
+   * - `"silent"`: no onLog calls (file recording continues)
+   *
+   * @default "info"
+   */
+  logLevel?: LogLevel;
 
   /**
    * Optional Langfuse tracing config.
@@ -352,6 +366,9 @@ export async function startSnaServerInProcess(
     snaLogger.setOnLog(options.onLog);
   }
 
+  // Apply log level filtering (default: "info" = current behavior)
+  snaLogger.setLogLevel(options.logLevel ?? "info");
+
   // Configure SNA SDK before any module reads config
   setConfig({
     port,
@@ -411,15 +428,15 @@ export async function startSnaServerInProcess(
   // Global error handler
   root.onError((err, c) => {
     const pathname = new URL(c.req.url).pathname;
-    if (options.onLog) options.onLog(`ERR ${c.req.method} ${pathname} → ${err.message}`);
+    snaLogger.err("err", `${c.req.method} ${pathname} → ${err.message}`);
     return c.json({ status: "error", message: err.message, stack: err.stack }, 500);
   });
 
-  // Request logger
+  // Request logger — routed through snaLogger so logLevel filtering applies
   root.use("*", async (c, next) => {
     const m = c.req.method;
     const pathname = new URL(c.req.url).pathname;
-    if (options.onLog) options.onLog(`${m.padEnd(6)} ${pathname}`);
+    snaLogger.log("req", `${m.padEnd(6)} ${pathname}`);
     await next();
   });
 
@@ -430,8 +447,8 @@ export async function startSnaServerInProcess(
 
   // Start HTTP server
   const httpServer = serve({ fetch: root.fetch, port }, () => {
-    if (options.onLog) options.onLog(`API server ready → http://localhost:${port}`);
-    if (options.onLog) options.onLog(`WebSocket endpoint → ws://localhost:${port}/ws`);
+    snaLogger.log("sna", `API server ready → http://localhost:${port}`);
+    snaLogger.log("sna", `WebSocket endpoint → ws://localhost:${port}/ws`);
   }) as unknown as http.Server;
 
   // Attach WebSocket on the same HTTP server
@@ -475,8 +492,9 @@ export async function startSnaServerInProcess(
         await shutdownTracer();
       } catch { /* langfuse not loaded — skip */ }
       sessionManager.killAll();
-      // Clear the logger callback to avoid leaking references after shutdown
+      // Clear the logger callback and reset level to avoid leaking references after shutdown
       snaLogger.setOnLog(null);
+      snaLogger.setLogLevel("info");
       await new Promise<void>((resolve) => {
         httpServer.close(() => resolve());
         // Force-close after 3 seconds if connections linger

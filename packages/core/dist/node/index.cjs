@@ -48,17 +48,19 @@ function fromEnv() {
   if (process.env.SNA_PERMISSION_MODE) env.defaultPermissionMode = process.env.SNA_PERMISSION_MODE;
   if (process.env.SNA_MAX_SESSIONS) env.maxSessions = parseInt(process.env.SNA_MAX_SESSIONS, 10);
   if (process.env.SNA_DB_PATH) env.dbPath = process.env.SNA_DB_PATH;
+  if (process.env.SNA_DATA_DIR) env.dataDir = process.env.SNA_DATA_DIR;
   if (process.env.SNA_PERMISSION_TIMEOUT_MS) env.permissionTimeoutMs = parseInt(process.env.SNA_PERMISSION_TIMEOUT_MS, 10);
   return env;
 }
 function getConfig() {
   return current;
 }
-var defaults, current;
+var import_path3, defaults, current;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
     init_cjs_shims();
+    import_path3 = __toESM(require("path"), 1);
     defaults = {
       port: 3099,
       model: "claude-sonnet-4-6",
@@ -72,7 +74,8 @@ var init_config = __esm({
       pollIntervalMs: 500,
       keepaliveIntervalMs: 15e3,
       skillPollMs: 2e3,
-      dbPath: "data/sna.db"
+      dbPath: "data/sna.db",
+      dataDir: import_path3.default.join(process.cwd(), "data")
     };
     current = { ...defaults, ...fromEnv() };
   }
@@ -97,7 +100,7 @@ init_cjs_shims();
 var import_child_process = require("child_process");
 var import_events = require("events");
 var import_fs3 = __toESM(require("fs"), 1);
-var import_path3 = __toESM(require("path"), 1);
+var import_path4 = __toESM(require("path"), 1);
 var import_url = require("url");
 
 // src/core/providers/cc-history-adapter.ts
@@ -182,6 +185,26 @@ var _onLog = null;
 function setOnLog(cb) {
   _onLog = cb;
 }
+var _logLevel = "info";
+function setLogLevel(level) {
+  _logLevel = level;
+}
+var TAG_LEVELS = {
+  err: "error",
+  sna: "warn",
+  agent: "warn",
+  ws: "warn",
+  req: "info",
+  stdin: "info",
+  stdout: "info",
+  route: "info"
+};
+var LEVEL_ORDER = { info: 0, warn: 1, error: 2, silent: 3 };
+function shouldEmit(tag) {
+  if (_logLevel === "silent") return false;
+  const tagMinLevel = TAG_LEVELS[tag] ?? "info";
+  return LEVEL_ORDER[tagMinLevel] >= LEVEL_ORDER[_logLevel];
+}
 function ts() {
   return (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
@@ -205,23 +228,25 @@ function appendFile(tag, args) {
 }
 function log(tag, ...args) {
   const resolvedTag = tags[tag] ?? tag;
+  appendFile(resolvedTag, args);
+  if (!shouldEmit(tag)) return;
   if (_onLog) {
     _onLog(formatLine(resolvedTag, args));
   } else {
     console.log(`${ts()} ${resolvedTag}`, ...args);
   }
-  appendFile(resolvedTag, args);
 }
 function err(tag, ...args) {
   const resolvedTag = tags[tag] ?? tag;
+  appendFile(resolvedTag, args);
+  if (!shouldEmit(tag)) return;
   if (_onLog) {
     _onLog(formatLine(resolvedTag, args));
   } else {
     console.error(`${ts()} ${resolvedTag}`, ...args);
   }
-  appendFile(resolvedTag, args);
 }
-var logger = { log, err, setOnLog };
+var logger = { log, err, setOnLog, setLogLevel };
 
 // src/core/providers/claude-code.ts
 init_config();
@@ -237,7 +262,7 @@ function parseCommandVOutput(raw) {
 }
 function validateClaudePath(claudePath) {
   try {
-    const claudeDir = import_path3.default.dirname(claudePath);
+    const claudeDir = import_path4.default.dirname(claudePath);
     const env = { ...process.env, PATH: `${claudeDir}:${process.env.PATH ?? ""}` };
     const out = (0, import_child_process.execSync)(`"${claudePath}" --version`, { encoding: "utf8", stdio: "pipe", timeout: 1e4, env }).trim();
     return { ok: true, version: out.split("\n")[0].slice(0, 30) };
@@ -246,10 +271,10 @@ function validateClaudePath(claudePath) {
   }
 }
 function cacheClaudePath(claudePath, cacheDir) {
-  const dir = cacheDir ?? import_path3.default.join(process.cwd(), ".sna");
+  const dir = cacheDir ?? import_path4.default.join(process.cwd(), ".sna");
   try {
     if (!import_fs3.default.existsSync(dir)) import_fs3.default.mkdirSync(dir, { recursive: true });
-    import_fs3.default.writeFileSync(import_path3.default.join(dir, "claude-path"), claudePath);
+    import_fs3.default.writeFileSync(import_path4.default.join(dir, "claude-path"), claudePath);
   } catch {
   }
 }
@@ -259,7 +284,7 @@ function resolveClaudeCli(opts) {
     const v = validateClaudePath(process.env.SNA_CLAUDE_COMMAND);
     return { path: process.env.SNA_CLAUDE_COMMAND, version: v.version, source: "env" };
   }
-  const cacheFile = cacheDir ? import_path3.default.join(cacheDir, "claude-path") : import_path3.default.join(process.cwd(), ".sna/claude-path");
+  const cacheFile = cacheDir ? import_path4.default.join(cacheDir, "claude-path") : import_path4.default.join(process.cwd(), ".sna/claude-path");
   try {
     const cached = import_fs3.default.readFileSync(cacheFile, "utf8").trim();
     if (cached) {
@@ -297,7 +322,7 @@ function resolveClaudeCli(opts) {
   return { path: "claude", source: "fallback" };
 }
 function resolveClaudePath(cwd) {
-  const result = resolveClaudeCli({ cacheDir: import_path3.default.join(cwd, ".sna") });
+  const result = resolveClaudeCli({ cacheDir: import_path4.default.join(cwd, ".sna") });
   logger.log("agent", `claude path: ${result.source}=${result.path}${result.version ? ` (${result.version})` : ""}`);
   return result.path;
 }
@@ -570,11 +595,15 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
           }
         }
         if (events.length > 0 || textBlocks.length > 0) {
+          const shouldEmitDirectly = this._receivedStreamEvents;
           for (const e of events) {
-            this.enqueue(e);
+            if (shouldEmitDirectly) this.emitter.emit("event", e);
+            else this.enqueue(e);
           }
           for (const text of textBlocks) {
-            this.enqueue({ type: "assistant", message: text, timestamp: Date.now() });
+            const event = { type: "assistant", message: text, timestamp: Date.now() };
+            if (shouldEmitDirectly) this.emitter.emit("event", event);
+            else this.enqueue(event);
           }
         }
         return null;
@@ -672,13 +701,13 @@ var ClaudeCodeProvider = class {
     const claudeParts = claudeCommand.split(/\s+/);
     const claudePath = claudeParts[0];
     const claudePrefix = claudeParts.slice(1);
-    let pkgRoot = import_path3.default.dirname((0, import_url.fileURLToPath)(importMetaUrl));
-    while (!import_fs3.default.existsSync(import_path3.default.join(pkgRoot, "package.json"))) {
-      const parent = import_path3.default.dirname(pkgRoot);
+    let pkgRoot = import_path4.default.dirname((0, import_url.fileURLToPath)(importMetaUrl));
+    while (!import_fs3.default.existsSync(import_path4.default.join(pkgRoot, "package.json"))) {
+      const parent = import_path4.default.dirname(pkgRoot);
       if (parent === pkgRoot) break;
       pkgRoot = parent;
     }
-    const hookScript = import_path3.default.join(pkgRoot, "dist", "scripts", "hook.js");
+    const hookScript = import_path4.default.join(pkgRoot, "dist", "scripts", "hook.js");
     const sessionId = options.env?.SNA_SESSION_ID ?? "default";
     const sdkSettings = {};
     if (options.permissionMode !== "bypassPermissions") {
@@ -751,7 +780,7 @@ var ClaudeCodeProvider = class {
     delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
     delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
     delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
-    const claudeDir = import_path3.default.dirname(claudePath);
+    const claudeDir = import_path4.default.dirname(claudePath);
     if (claudeDir && claudeDir !== ".") {
       cleanEnv.PATH = `${claudeDir}:${cleanEnv.PATH ?? ""}`;
     }
@@ -782,8 +811,8 @@ var import_streaming = require("hono/streaming");
 // src/db/schema.ts
 init_cjs_shims();
 var import_node_module = require("module");
-var import_path4 = __toESM(require("path"), 1);
-var NATIVE_DIR = import_path4.default.join(process.cwd(), ".sna/native");
+var import_path5 = __toESM(require("path"), 1);
+var NATIVE_DIR = import_path5.default.join(process.cwd(), ".sna/native");
 
 // src/server/routes/events.ts
 init_config();
@@ -832,8 +861,7 @@ init_cjs_shims();
 
 // src/server/image-store.ts
 init_cjs_shims();
-var import_path5 = __toESM(require("path"), 1);
-var IMAGE_DIR = import_path5.default.join(process.cwd(), "data/images");
+init_config();
 
 // src/server/routes/agent.ts
 init_config();
@@ -896,6 +924,7 @@ async function startSnaServer(options) {
     ...options.permissionMode ? { SNA_PERMISSION_MODE: options.permissionMode } : {},
     ...options.model ? { SNA_MODEL: options.model } : {},
     ...options.permissionTimeoutMs != null ? { SNA_PERMISSION_TIMEOUT_MS: String(options.permissionTimeoutMs) } : {},
+    ...options.dataDir ? { SNA_DATA_DIR: options.dataDir } : {},
     ...options.nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: options.nativeBinding } : {},
     ...consumerModules ? { SNA_MODULES_PATH: consumerModules } : {},
     ...nodePath ? { NODE_PATH: nodePath } : {},

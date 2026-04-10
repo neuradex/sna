@@ -29,6 +29,8 @@ interface ChatState {
   // API URL for DB sync (set by SnaProvider)
   _apiUrl: string;
   _setApiUrl: (url: string) => void;
+  /** Tracks which sessions have had their messages fetched */
+  _hydratedSessions: Set<string>;
 
   // Global actions
   setOpen: (open: boolean) => void;
@@ -47,7 +49,10 @@ interface ChatState {
   markEventProcessed: (eventId: number, sessionId?: string) => boolean;
 
   // DB sync
+  /** Hydrate session list only (no messages). */
   hydrate: () => Promise<void>;
+  /** Lazy-fetch messages for a specific session. No-op if already fetched. */
+  fetchSessionMessages: (sessionId: string) => Promise<void>;
 }
 
 let messageCounter = 0;
@@ -85,6 +90,7 @@ export const useChatStore = create<ChatState>()(
     sessions: { default: emptySession() },
     _apiUrl: "",
     _setApiUrl: (url) => set({ _apiUrl: url }),
+    _hydratedSessions: new Set<string>(),
 
     setOpen: (open) => set({ isOpen: open }),
     toggle: () => set((s) => ({ isOpen: !s.isOpen })),
@@ -97,6 +103,8 @@ export const useChatStore = create<ChatState>()(
       } else {
         set({ activeSessionId: id });
       }
+      // Lazy-fetch messages if not yet hydrated
+      get().fetchSessionMessages(id);
     },
 
     initSession: (id) => {
@@ -173,34 +181,14 @@ export const useChatStore = create<ChatState>()(
       if (!apiUrl) return;
 
       try {
-        // Fetch all sessions
+        // Fetch session metadata only — no messages
         const sessRes = await fetch(`${apiUrl}/chat/sessions`);
         const sessData = await sessRes.json();
         const dbSessions = sessData.sessions as Array<{ id: string; label: string; type: string }>;
 
         const sessions: Record<string, SessionChatState> = {};
-
-        // Fetch messages for each session
         for (const sess of dbSessions) {
-          try {
-            const msgRes = await fetch(`${apiUrl}/chat/sessions/${encodeURIComponent(sess.id)}/messages`);
-            const msgData = await msgRes.json();
-            const messages = (msgData.messages as Array<{
-              id: number; role: string; content: string;
-              skill_name: string | null; meta: string | null; created_at: string;
-            }>).map((m) => ({
-              id: `db-${m.id}`,
-              role: m.role as ChatMessage["role"],
-              content: m.content,
-              timestamp: new Date(m.created_at).getTime(),
-              skillName: m.skill_name ?? undefined,
-              meta: m.meta ? JSON.parse(m.meta) : undefined,
-            }));
-            sessions[sess.id] = { messages, processedEventIds: new Set() };
-            if (messages.length > messageCounter) messageCounter = messages.length;
-          } catch {
-            sessions[sess.id] = emptySession();
-          }
+          sessions[sess.id] = emptySession();
         }
 
         // Ensure default session exists
@@ -209,8 +197,55 @@ export const useChatStore = create<ChatState>()(
         }
 
         set({ sessions });
+
+        // Auto-fetch messages for the active session only
+        const activeId = get().activeSessionId;
+        if (sessions[activeId]) {
+          get().fetchSessionMessages(activeId);
+        }
       } catch {
         // Server not ready — start with empty state
+      }
+    },
+
+    fetchSessionMessages: async (sessionId) => {
+      const { _apiUrl: apiUrl, _hydratedSessions } = get();
+      if (!apiUrl || _hydratedSessions.has(sessionId)) return;
+
+      // Mark as hydrated immediately to prevent concurrent fetches
+      const next = new Set(_hydratedSessions);
+      next.add(sessionId);
+      set({ _hydratedSessions: next });
+
+      try {
+        const msgRes = await fetch(
+          `${apiUrl}/chat/sessions/${encodeURIComponent(sessionId)}/messages`
+        );
+        const msgData = await msgRes.json();
+        const messages = (msgData.messages as Array<{
+          id: number; role: string; content: string;
+          skill_name: string | null; meta: string | null; created_at: string;
+        }>).map((m) => ({
+          id: `db-${m.id}`,
+          role: m.role as ChatMessage["role"],
+          content: m.content,
+          timestamp: new Date(m.created_at).getTime(),
+          skillName: m.skill_name ?? undefined,
+          meta: m.meta ? JSON.parse(m.meta) : undefined,
+        }));
+        if (messages.length > messageCounter) messageCounter = messages.length;
+
+        set((state) => ({
+          sessions: {
+            ...state.sessions,
+            [sessionId]: {
+              ...state.sessions[sessionId],
+              messages,
+            },
+          },
+        }));
+      } catch {
+        // Non-fatal — session stays with empty messages
       }
     },
   }),

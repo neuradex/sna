@@ -16,6 +16,12 @@ interface SnaProviderProps {
    * @default "default"
    */
   sessionId?: string;
+  /**
+   * Whether to hydrate chat sessions on mount.
+   * Set to false if your app doesn't use the chat store.
+   * @default true
+   */
+  hydrate?: boolean;
 }
 
 /**
@@ -48,6 +54,7 @@ export function SnaProvider({
   children,
   snaUrl,
   sessionId = "default",
+  hydrate: shouldHydrate = true,
 }: SnaProviderProps) {
   const [resolvedUrl, setResolvedUrl] = useState(snaUrl ?? "");
 
@@ -75,9 +82,11 @@ export function SnaProvider({
 
     discover().then((url) => {
       useChatStore.getState()._setApiUrl(url);
-      useChatStore.getState().hydrate();
+      if (shouldHydrate) {
+        useChatStore.getState().hydrate();
+      }
     });
-  }, [snaUrl]);
+  }, [snaUrl, shouldHydrate]);
 
   return (
     <SnaContext.Provider value={{ apiUrl: resolvedUrl, sessionId }}>

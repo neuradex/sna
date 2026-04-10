@@ -351,11 +351,15 @@ const _ClaudeCodeProcess = class _ClaudeCodeProcess {
           }
         }
         if (events.length > 0 || textBlocks.length > 0) {
+          const shouldEmitDirectly = this._receivedStreamEvents;
           for (const e of events) {
-            this.enqueue(e);
+            if (shouldEmitDirectly) this.emitter.emit("event", e);
+            else this.enqueue(e);
           }
           for (const text of textBlocks) {
-            this.enqueue({ type: "assistant", message: text, timestamp: Date.now() });
+            const event = { type: "assistant", message: text, timestamp: Date.now() };
+            if (shouldEmitDirectly) this.emitter.emit("event", event);
+            else this.enqueue(event);
           }
         }
         return null;

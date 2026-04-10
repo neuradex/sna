@@ -20,6 +20,8 @@ interface ChatState {
     sessions: Record<string, SessionChatState>;
     _apiUrl: string;
     _setApiUrl: (url: string) => void;
+    /** Tracks which sessions have had their messages fetched */
+    _hydratedSessions: Set<string>;
     setOpen: (open: boolean) => void;
     toggle: () => void;
     setWidth: (width: number) => void;
@@ -30,7 +32,10 @@ interface ChatState {
     clearMessages: (sessionId?: string) => void;
     /** Returns true if this event has NOT been processed yet (and marks it). */
     markEventProcessed: (eventId: number, sessionId?: string) => boolean;
+    /** Hydrate session list only (no messages). */
     hydrate: () => Promise<void>;
+    /** Lazy-fetch messages for a specific session. No-op if already fetched. */
+    fetchSessionMessages: (sessionId: string) => Promise<void>;
 }
 declare const useChatStore: zustand.UseBoundStore<zustand.StoreApi<ChatState>>;
 

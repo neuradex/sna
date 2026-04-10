@@ -55,6 +55,7 @@ async function startSnaServer(options) {
     ...options.permissionMode ? { SNA_PERMISSION_MODE: options.permissionMode } : {},
     ...options.model ? { SNA_MODEL: options.model } : {},
     ...options.permissionTimeoutMs != null ? { SNA_PERMISSION_TIMEOUT_MS: String(options.permissionTimeoutMs) } : {},
+    ...options.dataDir ? { SNA_DATA_DIR: options.dataDir } : {},
     ...options.nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: options.nativeBinding } : {},
     ...consumerModules ? { SNA_MODULES_PATH: consumerModules } : {},
     ...nodePath ? { NODE_PATH: nodePath } : {},
@@ -122,9 +123,11 @@ async function startSnaServerInProcess(options) {
   if (options.onLog) {
     snaLogger.setOnLog(options.onLog);
   }
+  snaLogger.setLogLevel(options.logLevel ?? "info");
   setConfig({
     port,
     dbPath: options.dbPath,
+    ...options.dataDir ? { dataDir: options.dataDir } : {},
     ...options.maxSessions != null ? { maxSessions: options.maxSessions } : {},
     ...options.permissionMode ? { defaultPermissionMode: options.permissionMode } : {},
     ...options.model ? { model: options.model } : {},
@@ -136,6 +139,7 @@ async function startSnaServerInProcess(options) {
   if (options.permissionMode) process.env.SNA_PERMISSION_MODE = options.permissionMode;
   if (options.model) process.env.SNA_MODEL = options.model;
   if (options.permissionTimeoutMs != null) process.env.SNA_PERMISSION_TIMEOUT_MS = String(options.permissionTimeoutMs);
+  if (options.dataDir) process.env.SNA_DATA_DIR = options.dataDir;
   if (options.nativeBinding) process.env.SNA_SQLITE_NATIVE_BINDING = options.nativeBinding;
   if (!process.env.SNA_MODULES_PATH) {
     try {
@@ -161,20 +165,20 @@ async function startSnaServerInProcess(options) {
   root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] }));
   root.onError((err, c) => {
     const pathname = new URL(c.req.url).pathname;
-    if (options.onLog) options.onLog(`ERR ${c.req.method} ${pathname} \u2192 ${err.message}`);
+    snaLogger.err("err", `${c.req.method} ${pathname} \u2192 ${err.message}`);
     return c.json({ status: "error", message: err.message, stack: err.stack }, 500);
   });
   root.use("*", async (c, next) => {
     const m = c.req.method;
     const pathname = new URL(c.req.url).pathname;
-    if (options.onLog) options.onLog(`${m.padEnd(6)} ${pathname}`);
+    snaLogger.log("req", `${m.padEnd(6)} ${pathname}`);
     await next();
   });
   const sessionManager = new SessionManager({ maxSessions: config.maxSessions });
   root.route("/", createSnaApp({ sessionManager }));
   const httpServer = serve({ fetch: root.fetch, port }, () => {
-    if (options.onLog) options.onLog(`API server ready \u2192 http://localhost:${port}`);
-    if (options.onLog) options.onLog(`WebSocket endpoint \u2192 ws://localhost:${port}/ws`);
+    snaLogger.log("sna", `API server ready \u2192 http://localhost:${port}`);
+    snaLogger.log("sna", `WebSocket endpoint \u2192 ws://localhost:${port}/ws`);
   });
   attachWebSocket(httpServer, sessionManager);
   if (options.langfuse) {
@@ -215,6 +219,7 @@ async function startSnaServerInProcess(options) {
       }
       sessionManager.killAll();
       snaLogger.setOnLog(null);
+      snaLogger.setLogLevel("info");
       await new Promise((resolve) => {
         httpServer.close(() => resolve());
         setTimeout(() => resolve(), 3e3).unref();

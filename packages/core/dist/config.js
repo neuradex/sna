@@ -1,3 +1,4 @@
+import path from "path";
 const defaults = {
   port: 3099,
   model: "claude-sonnet-4-6",
@@ -11,7 +12,8 @@ const defaults = {
   pollIntervalMs: 500,
   keepaliveIntervalMs: 15e3,
   skillPollMs: 2e3,
-  dbPath: "data/sna.db"
+  dbPath: "data/sna.db",
+  dataDir: path.join(process.cwd(), "data")
 };
 function fromEnv() {
   const env = {};
@@ -20,6 +22,7 @@ function fromEnv() {
   if (process.env.SNA_PERMISSION_MODE) env.defaultPermissionMode = process.env.SNA_PERMISSION_MODE;
   if (process.env.SNA_MAX_SESSIONS) env.maxSessions = parseInt(process.env.SNA_MAX_SESSIONS, 10);
   if (process.env.SNA_DB_PATH) env.dbPath = process.env.SNA_DB_PATH;
+  if (process.env.SNA_DATA_DIR) env.dataDir = process.env.SNA_DATA_DIR;
   if (process.env.SNA_PERMISSION_TIMEOUT_MS) env.permissionTimeoutMs = parseInt(process.env.SNA_PERMISSION_TIMEOUT_MS, 10);
   return env;
 }

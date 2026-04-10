@@ -12,6 +12,12 @@ interface SnaProviderProps {
      * @default "default"
      */
     sessionId?: string;
+    /**
+     * Whether to hydrate chat sessions on mount.
+     * Set to false if your app doesn't use the chat store.
+     * @default true
+     */
+    hydrate?: boolean;
 }
 /**
  * SnaProvider — provides SNA context (apiUrl + sessionId) to the app.
@@ -39,6 +45,6 @@ interface SnaProviderProps {
  *   <SnaSession id={projectSessionId}><ChatArea /></SnaSession>
  * </SnaProvider>
  */
-declare function SnaProvider({ children, snaUrl, sessionId, }: SnaProviderProps): react_jsx_runtime.JSX.Element;
+declare function SnaProvider({ children, snaUrl, sessionId, hydrate: shouldHydrate, }: SnaProviderProps): react_jsx_runtime.JSX.Element;
 
 export { SnaProvider };

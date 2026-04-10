@@ -1,7 +1,10 @@
 import fs from "fs";
 import path from "path";
 import { createHash } from "crypto";
-const IMAGE_DIR = path.join(process.cwd(), "data/images");
+import { getConfig } from "../config.js";
+function getImageDir() {
+  return path.join(getConfig().dataDir, "images");
+}
 const MIME_TO_EXT = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -10,7 +13,7 @@ const MIME_TO_EXT = {
   "image/svg+xml": "svg"
 };
 function saveImages(sessionId, images) {
-  const dir = path.join(IMAGE_DIR, sessionId);
+  const dir = path.join(getImageDir(), sessionId);
   fs.mkdirSync(dir, { recursive: true });
   return images.map((img) => {
     const ext = MIME_TO_EXT[img.mimeType] ?? "bin";
@@ -25,7 +28,7 @@ function saveImages(sessionId, images) {
 }
 function resolveImagePath(sessionId, filename) {
   if (filename.includes("..") || filename.includes("/")) return null;
-  const filePath = path.join(IMAGE_DIR, sessionId, filename);
+  const filePath = path.join(getImageDir(), sessionId, filename);
   return fs.existsSync(filePath) ? filePath : null;
 }
 export {

@@ -19,6 +19,44 @@ function setOnLog(cb: ((line: string) => void) | null): void {
   _onLog = cb;
 }
 
+// ── Log level filtering ──────────────────────────────────────────────────────
+
+export type LogLevel = "info" | "warn" | "error" | "silent";
+
+let _logLevel: LogLevel = "info";
+
+/** Set the log level. File recording is unaffected — only callback/console output is filtered. */
+function setLogLevel(level: LogLevel): void {
+  _logLevel = level;
+}
+
+/**
+ * Tags allowed at each log level.
+ * - info:   all tags
+ * - warn:   errors, lifecycle, ws — excludes noisy per-request/per-line output
+ * - error:  errors only
+ * - silent: nothing
+ */
+const TAG_LEVELS: Record<string, LogLevel> = {
+  err: "error",
+  sna: "warn",
+  agent: "warn",
+  ws: "warn",
+  req: "info",
+  stdin: "info",
+  stdout: "info",
+  route: "info",
+};
+
+const LEVEL_ORDER: Record<LogLevel, number> = { info: 0, warn: 1, error: 2, silent: 3 };
+
+/** Returns true if the given tag should emit to callback/console at the current log level. */
+function shouldEmit(tag: Tag): boolean {
+  if (_logLevel === "silent") return false;
+  const tagMinLevel = TAG_LEVELS[tag] ?? "info";
+  return LEVEL_ORDER[tagMinLevel] >= LEVEL_ORDER[_logLevel];
+}
+
 function ts(): string {
   return new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
@@ -41,22 +79,28 @@ function appendFile(tag: string, args: unknown[]) {
 
 function log(tag: Tag, ...args: unknown[]) {
   const resolvedTag = tags[tag] ?? tag;
+  // Always write to file regardless of log level
+  appendFile(resolvedTag, args);
+  // Callback/console output respects log level
+  if (!shouldEmit(tag)) return;
   if (_onLog) {
     _onLog(formatLine(resolvedTag, args));
   } else {
     console.log(`${ts()} ${resolvedTag}`, ...args);
   }
-  appendFile(resolvedTag, args);
 }
 
 function err(tag: Tag, ...args: unknown[]) {
   const resolvedTag = tags[tag] ?? tag;
+  // Always write to file regardless of log level
+  appendFile(resolvedTag, args);
+  // Callback/console output respects log level
+  if (!shouldEmit(tag)) return;
   if (_onLog) {
     _onLog(formatLine(resolvedTag, args));
   } else {
     console.error(`${ts()} ${resolvedTag}`, ...args);
   }
-  appendFile(resolvedTag, args);
 }
 
-export const logger = { log, err, setOnLog };
+export const logger = { log, err, setOnLog, setLogLevel };

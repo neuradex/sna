@@ -79,12 +79,25 @@ export function createChatRoutes() {
   app.get("/sessions/:id/messages", (c) => {
     const id = c.req.param("id");
     const sinceParam = c.req.query("since");
+    const limitParam = c.req.query("limit");
     try {
       const db = getDb();
-      const query = sinceParam
-        ? db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY id ASC`)
-        : db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id ASC`);
-      const messages = sinceParam ? query.all(id, parseInt(sinceParam, 10)) : query.all(id);
+      let sql = `SELECT * FROM chat_messages WHERE session_id = ?`;
+      const params: (string | number)[] = [id];
+
+      if (sinceParam) {
+        sql += ` AND id > ?`;
+        params.push(parseInt(sinceParam, 10));
+      }
+
+      sql += ` ORDER BY id ASC`;
+
+      if (limitParam) {
+        sql += ` LIMIT ?`;
+        params.push(parseInt(limitParam, 10));
+      }
+
+      const messages = db.prepare(sql).all(...params);
       return httpJson(c, "chat.messages.list", { messages });
     } catch (e: any) {
       return c.json({ status: "error", message: e.message, stack: e.stack }, 500);

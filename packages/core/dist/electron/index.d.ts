@@ -1,6 +1,7 @@
 import { ChildProcess } from 'child_process';
 import http from 'http';
 export { ResolveResult, cacheClaudePath, parseCommandVOutput, resolveClaudeCli, validateClaudePath } from '../core/providers/claude-code.js';
+import { LogLevel } from '../lib/logger.js';
 import { SessionManager } from '../server/session-manager.js';
 import '../core/providers/types.js';
 
@@ -89,6 +90,23 @@ interface SnaServerOptions {
      */
     onLog?: (line: string) => void;
     /**
+     * Base data directory for images, etc.
+     * Default: path.join(path.dirname(dbPath), "..")  (i.e., parent of db dir)
+     */
+    dataDir?: string;
+    /**
+     * Controls verbosity of log output sent to `onLog` and console.
+     * File recording (.dev.log) is unaffected — all levels are always written.
+     *
+     * - `"info"`:   all output (default, current behavior)
+     * - `"warn"`:   errors + agent lifecycle only; HTTP request logs excluded
+     * - `"error"`:  errors only
+     * - `"silent"`: no onLog calls (file recording continues)
+     *
+     * @default "info"
+     */
+    logLevel?: LogLevel;
+    /**
      * Optional Langfuse tracing config.
      * When present, sessions with `meta.langfuseTrace: true` emit Langfuse traces.
      * Requires `langfuse` npm package installed.
@@ -151,4 +169,4 @@ interface InProcessSnaServerHandle {
  */
 declare function startSnaServerInProcess(options: SnaServerOptions): Promise<InProcessSnaServerHandle>;
 
-export { type InProcessSnaServerHandle, type SnaServerHandle, type SnaServerOptions, startSnaServer, startSnaServerInProcess };
+export { type InProcessSnaServerHandle, LogLevel, type SnaServerHandle, type SnaServerOptions, startSnaServer, startSnaServerInProcess };

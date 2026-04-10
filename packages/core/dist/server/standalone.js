@@ -113,6 +113,7 @@ function initSchema(db) {
 }
 
 // src/config.ts
+import path2 from "path";
 var defaults = {
   port: 3099,
   model: "claude-sonnet-4-6",
@@ -126,7 +127,8 @@ var defaults = {
   pollIntervalMs: 500,
   keepaliveIntervalMs: 15e3,
   skillPollMs: 2e3,
-  dbPath: "data/sna.db"
+  dbPath: "data/sna.db",
+  dataDir: path2.join(process.cwd(), "data")
 };
 function fromEnv() {
   const env = {};
@@ -135,6 +137,7 @@ function fromEnv() {
   if (process.env.SNA_PERMISSION_MODE) env.defaultPermissionMode = process.env.SNA_PERMISSION_MODE;
   if (process.env.SNA_MAX_SESSIONS) env.maxSessions = parseInt(process.env.SNA_MAX_SESSIONS, 10);
   if (process.env.SNA_DB_PATH) env.dbPath = process.env.SNA_DB_PATH;
+  if (process.env.SNA_DATA_DIR) env.dataDir = process.env.SNA_DATA_DIR;
   if (process.env.SNA_PERMISSION_TIMEOUT_MS) env.permissionTimeoutMs = parseInt(process.env.SNA_PERMISSION_TIMEOUT_MS, 10);
   return env;
 }
@@ -289,12 +292,12 @@ import { streamSSE as streamSSE3 } from "hono/streaming";
 import { spawn as spawn2, execSync } from "child_process";
 import { EventEmitter } from "events";
 import fs4 from "fs";
-import path4 from "path";
+import path5 from "path";
 import { fileURLToPath } from "url";
 
 // src/core/providers/cc-history-adapter.ts
 import fs2 from "fs";
-import path2 from "path";
+import path3 from "path";
 function writeHistoryJsonl(history, opts) {
   for (let i = 1; i < history.length; i++) {
     if (history[i].role === history[i - 1].role) {
@@ -304,10 +307,10 @@ function writeHistoryJsonl(history, opts) {
     }
   }
   try {
-    const dir = path2.join(opts.cwd, ".sna", "history");
+    const dir = path3.join(opts.cwd, ".sna", "history");
     fs2.mkdirSync(dir, { recursive: true });
     const sessionId = crypto.randomUUID();
-    const filePath = path2.join(dir, `${sessionId}.jsonl`);
+    const filePath = path3.join(dir, `${sessionId}.jsonl`);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const lines = [];
     let prevUuid = null;
@@ -362,8 +365,8 @@ ${xml}
 
 // src/lib/logger.ts
 import fs3 from "fs";
-import path3 from "path";
-var LOG_PATH = process.env.SNA_LOG_PATH ?? path3.join(process.cwd(), ".dev.log");
+import path4 from "path";
+var LOG_PATH = process.env.SNA_LOG_PATH ?? path4.join(process.cwd(), ".dev.log");
 try {
   fs3.writeFileSync(LOG_PATH, "");
 } catch {
@@ -371,6 +374,26 @@ try {
 var _onLog = null;
 function setOnLog(cb) {
   _onLog = cb;
+}
+var _logLevel = "info";
+function setLogLevel(level) {
+  _logLevel = level;
+}
+var TAG_LEVELS = {
+  err: "error",
+  sna: "warn",
+  agent: "warn",
+  ws: "warn",
+  req: "info",
+  stdin: "info",
+  stdout: "info",
+  route: "info"
+};
+var LEVEL_ORDER = { info: 0, warn: 1, error: 2, silent: 3 };
+function shouldEmit(tag) {
+  if (_logLevel === "silent") return false;
+  const tagMinLevel = TAG_LEVELS[tag] ?? "info";
+  return LEVEL_ORDER[tagMinLevel] >= LEVEL_ORDER[_logLevel];
 }
 function ts() {
   return (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -395,23 +418,25 @@ function appendFile(tag, args) {
 }
 function log(tag, ...args) {
   const resolvedTag = tags[tag] ?? tag;
+  appendFile(resolvedTag, args);
+  if (!shouldEmit(tag)) return;
   if (_onLog) {
     _onLog(formatLine(resolvedTag, args));
   } else {
     console.log(`${ts()} ${resolvedTag}`, ...args);
   }
-  appendFile(resolvedTag, args);
 }
 function err(tag, ...args) {
   const resolvedTag = tags[tag] ?? tag;
+  appendFile(resolvedTag, args);
+  if (!shouldEmit(tag)) return;
   if (_onLog) {
     _onLog(formatLine(resolvedTag, args));
   } else {
     console.error(`${ts()} ${resolvedTag}`, ...args);
   }
-  appendFile(resolvedTag, args);
 }
-var logger = { log, err, setOnLog };
+var logger = { log, err, setOnLog, setLogLevel };
 
 // src/core/providers/claude-code.ts
 var SHELL = process.env.SHELL || "/bin/zsh";
@@ -426,7 +451,7 @@ function parseCommandVOutput(raw) {
 }
 function validateClaudePath(claudePath) {
   try {
-    const claudeDir = path4.dirname(claudePath);
+    const claudeDir = path5.dirname(claudePath);
     const env = { ...process.env, PATH: `${claudeDir}:${process.env.PATH ?? ""}` };
     const out = execSync(`"${claudePath}" --version`, { encoding: "utf8", stdio: "pipe", timeout: 1e4, env }).trim();
     return { ok: true, version: out.split("\n")[0].slice(0, 30) };
@@ -435,10 +460,10 @@ function validateClaudePath(claudePath) {
   }
 }
 function cacheClaudePath(claudePath, cacheDir) {
-  const dir = cacheDir ?? path4.join(process.cwd(), ".sna");
+  const dir = cacheDir ?? path5.join(process.cwd(), ".sna");
   try {
     if (!fs4.existsSync(dir)) fs4.mkdirSync(dir, { recursive: true });
-    fs4.writeFileSync(path4.join(dir, "claude-path"), claudePath);
+    fs4.writeFileSync(path5.join(dir, "claude-path"), claudePath);
   } catch {
   }
 }
@@ -448,7 +473,7 @@ function resolveClaudeCli(opts) {
     const v = validateClaudePath(process.env.SNA_CLAUDE_COMMAND);
     return { path: process.env.SNA_CLAUDE_COMMAND, version: v.version, source: "env" };
   }
-  const cacheFile = cacheDir ? path4.join(cacheDir, "claude-path") : path4.join(process.cwd(), ".sna/claude-path");
+  const cacheFile = cacheDir ? path5.join(cacheDir, "claude-path") : path5.join(process.cwd(), ".sna/claude-path");
   try {
     const cached = fs4.readFileSync(cacheFile, "utf8").trim();
     if (cached) {
@@ -486,7 +511,7 @@ function resolveClaudeCli(opts) {
   return { path: "claude", source: "fallback" };
 }
 function resolveClaudePath(cwd) {
-  const result = resolveClaudeCli({ cacheDir: path4.join(cwd, ".sna") });
+  const result = resolveClaudeCli({ cacheDir: path5.join(cwd, ".sna") });
   logger.log("agent", `claude path: ${result.source}=${result.path}${result.version ? ` (${result.version})` : ""}`);
   return result.path;
 }
@@ -759,11 +784,15 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
           }
         }
         if (events.length > 0 || textBlocks.length > 0) {
+          const shouldEmitDirectly = this._receivedStreamEvents;
           for (const e of events) {
-            this.enqueue(e);
+            if (shouldEmitDirectly) this.emitter.emit("event", e);
+            else this.enqueue(e);
           }
           for (const text of textBlocks) {
-            this.enqueue({ type: "assistant", message: text, timestamp: Date.now() });
+            const event = { type: "assistant", message: text, timestamp: Date.now() };
+            if (shouldEmitDirectly) this.emitter.emit("event", event);
+            else this.enqueue(event);
           }
         }
         return null;
@@ -861,13 +890,13 @@ var ClaudeCodeProvider = class {
     const claudeParts = claudeCommand.split(/\s+/);
     const claudePath = claudeParts[0];
     const claudePrefix = claudeParts.slice(1);
-    let pkgRoot = path4.dirname(fileURLToPath(import.meta.url));
-    while (!fs4.existsSync(path4.join(pkgRoot, "package.json"))) {
-      const parent = path4.dirname(pkgRoot);
+    let pkgRoot = path5.dirname(fileURLToPath(import.meta.url));
+    while (!fs4.existsSync(path5.join(pkgRoot, "package.json"))) {
+      const parent = path5.dirname(pkgRoot);
       if (parent === pkgRoot) break;
       pkgRoot = parent;
     }
-    const hookScript = path4.join(pkgRoot, "dist", "scripts", "hook.js");
+    const hookScript = path5.join(pkgRoot, "dist", "scripts", "hook.js");
     const sessionId = options.env?.SNA_SESSION_ID ?? "default";
     const sdkSettings = {};
     if (options.permissionMode !== "bypassPermissions") {
@@ -940,7 +969,7 @@ var ClaudeCodeProvider = class {
     delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
     delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
     delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
-    const claudeDir = path4.dirname(claudePath);
+    const claudeDir = path5.dirname(claudePath);
     if (claudeDir && claudeDir !== ".") {
       cleanEnv.PATH = `${claudeDir}:${cleanEnv.PATH ?? ""}`;
     }
@@ -1003,9 +1032,11 @@ function buildHistoryFromDb(sessionId) {
 
 // src/server/image-store.ts
 import fs5 from "fs";
-import path5 from "path";
+import path6 from "path";
 import { createHash } from "crypto";
-var IMAGE_DIR = path5.join(process.cwd(), "data/images");
+function getImageDir() {
+  return path6.join(getConfig().dataDir, "images");
+}
 var MIME_TO_EXT = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -1014,13 +1045,13 @@ var MIME_TO_EXT = {
   "image/svg+xml": "svg"
 };
 function saveImages(sessionId, images) {
-  const dir = path5.join(IMAGE_DIR, sessionId);
+  const dir = path6.join(getImageDir(), sessionId);
   fs5.mkdirSync(dir, { recursive: true });
   return images.map((img) => {
     const ext = MIME_TO_EXT[img.mimeType] ?? "bin";
     const hash = createHash("sha256").update(img.base64).digest("hex").slice(0, 12);
     const filename = `${hash}.${ext}`;
-    const filePath = path5.join(dir, filename);
+    const filePath = path6.join(dir, filename);
     if (!fs5.existsSync(filePath)) {
       fs5.writeFileSync(filePath, Buffer.from(img.base64, "base64"));
     }
@@ -1029,7 +1060,7 @@ function saveImages(sessionId, images) {
 }
 function resolveImagePath(sessionId, filename) {
   if (filename.includes("..") || filename.includes("/")) return null;
-  const filePath = path5.join(IMAGE_DIR, sessionId, filename);
+  const filePath = path6.join(getImageDir(), sessionId, filename);
   return fs5.existsSync(filePath) ? filePath : null;
 }
 
@@ -1525,10 +1556,21 @@ function createChatRoutes() {
   app.get("/sessions/:id/messages", (c) => {
     const id = c.req.param("id");
     const sinceParam = c.req.query("since");
+    const limitParam = c.req.query("limit");
     try {
       const db = getDb();
-      const query = sinceParam ? db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY id ASC`) : db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id ASC`);
-      const messages = sinceParam ? query.all(id, parseInt(sinceParam, 10)) : query.all(id);
+      let sql = `SELECT * FROM chat_messages WHERE session_id = ?`;
+      const params = [id];
+      if (sinceParam) {
+        sql += ` AND id > ?`;
+        params.push(parseInt(sinceParam, 10));
+      }
+      sql += ` ORDER BY id ASC`;
+      if (limitParam) {
+        sql += ` LIMIT ?`;
+        params.push(parseInt(limitParam, 10));
+      }
+      const messages = db.prepare(sql).all(...params);
       return httpJson(c, "chat.messages.list", { messages });
     } catch (e) {
       return c.json({ status: "error", message: e.message, stack: e.stack }, 500);
@@ -2802,8 +2844,8 @@ root.onError((err2, c) => {
 });
 root.use("*", async (c, next) => {
   const m = c.req.method;
-  const path6 = new URL(c.req.url).pathname;
-  logger.log("req", `${m.padEnd(6)} ${path6}`);
+  const path7 = new URL(c.req.url).pathname;
+  logger.log("req", `${m.padEnd(6)} ${path7}`);
   await next();
 });
 var sessionManager = new SessionManager({ maxSessions });

@@ -37,6 +37,8 @@ interface SnaConfig {
     skillPollMs: number;
     /** SQLite database path. env: SNA_DB_PATH */
     dbPath: string;
+    /** Base data directory for images, etc. env: SNA_DATA_DIR */
+    dataDir: string;
     /**
      * Optional Langfuse tracing config.
      * When present, sessions with `meta.langfuseTrace: true` are traced.

@@ -48,6 +48,7 @@ function fromEnv() {
   if (process.env.SNA_PERMISSION_MODE) env.defaultPermissionMode = process.env.SNA_PERMISSION_MODE;
   if (process.env.SNA_MAX_SESSIONS) env.maxSessions = parseInt(process.env.SNA_MAX_SESSIONS, 10);
   if (process.env.SNA_DB_PATH) env.dbPath = process.env.SNA_DB_PATH;
+  if (process.env.SNA_DATA_DIR) env.dataDir = process.env.SNA_DATA_DIR;
   if (process.env.SNA_PERMISSION_TIMEOUT_MS) env.permissionTimeoutMs = parseInt(process.env.SNA_PERMISSION_TIMEOUT_MS, 10);
   return env;
 }
@@ -57,11 +58,12 @@ function getConfig() {
 function setConfig(overrides) {
   current = { ...current, ...overrides };
 }
-var defaults, current;
+var import_path3, defaults, current;
 var init_config = __esm({
   "src/config.ts"() {
     "use strict";
     init_cjs_shims();
+    import_path3 = __toESM(require("path"), 1);
     defaults = {
       port: 3099,
       model: "claude-sonnet-4-6",
@@ -75,7 +77,8 @@ var init_config = __esm({
       pollIntervalMs: 500,
       keepaliveIntervalMs: 15e3,
       skillPollMs: 2e3,
-      dbPath: "data/sna.db"
+      dbPath: "data/sna.db",
+      dataDir: import_path3.default.join(process.cwd(), "data")
     };
     current = { ...defaults, ...fromEnv() };
   }
@@ -550,7 +553,7 @@ init_cjs_shims();
 var import_child_process = require("child_process");
 var import_events = require("events");
 var import_fs3 = __toESM(require("fs"), 1);
-var import_path3 = __toESM(require("path"), 1);
+var import_path4 = __toESM(require("path"), 1);
 var import_url = require("url");
 
 // src/core/providers/cc-history-adapter.ts
@@ -635,6 +638,26 @@ var _onLog = null;
 function setOnLog(cb) {
   _onLog = cb;
 }
+var _logLevel = "info";
+function setLogLevel(level) {
+  _logLevel = level;
+}
+var TAG_LEVELS = {
+  err: "error",
+  sna: "warn",
+  agent: "warn",
+  ws: "warn",
+  req: "info",
+  stdin: "info",
+  stdout: "info",
+  route: "info"
+};
+var LEVEL_ORDER = { info: 0, warn: 1, error: 2, silent: 3 };
+function shouldEmit(tag) {
+  if (_logLevel === "silent") return false;
+  const tagMinLevel = TAG_LEVELS[tag] ?? "info";
+  return LEVEL_ORDER[tagMinLevel] >= LEVEL_ORDER[_logLevel];
+}
 function ts() {
   return (/* @__PURE__ */ new Date()).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
@@ -658,23 +681,25 @@ function appendFile(tag, args) {
 }
 function log(tag, ...args) {
   const resolvedTag = tags[tag] ?? tag;
+  appendFile(resolvedTag, args);
+  if (!shouldEmit(tag)) return;
   if (_onLog) {
     _onLog(formatLine(resolvedTag, args));
   } else {
     console.log(`${ts()} ${resolvedTag}`, ...args);
   }
-  appendFile(resolvedTag, args);
 }
 function err(tag, ...args) {
   const resolvedTag = tags[tag] ?? tag;
+  appendFile(resolvedTag, args);
+  if (!shouldEmit(tag)) return;
   if (_onLog) {
     _onLog(formatLine(resolvedTag, args));
   } else {
     console.error(`${ts()} ${resolvedTag}`, ...args);
   }
-  appendFile(resolvedTag, args);
 }
-var logger = { log, err, setOnLog };
+var logger = { log, err, setOnLog, setLogLevel };
 
 // src/core/providers/claude-code.ts
 init_config();
@@ -690,7 +715,7 @@ function parseCommandVOutput(raw) {
 }
 function validateClaudePath(claudePath) {
   try {
-    const claudeDir = import_path3.default.dirname(claudePath);
+    const claudeDir = import_path4.default.dirname(claudePath);
     const env = { ...process.env, PATH: `${claudeDir}:${process.env.PATH ?? ""}` };
     const out = (0, import_child_process.execSync)(`"${claudePath}" --version`, { encoding: "utf8", stdio: "pipe", timeout: 1e4, env }).trim();
     return { ok: true, version: out.split("\n")[0].slice(0, 30) };
@@ -699,10 +724,10 @@ function validateClaudePath(claudePath) {
   }
 }
 function cacheClaudePath(claudePath, cacheDir) {
-  const dir = cacheDir ?? import_path3.default.join(process.cwd(), ".sna");
+  const dir = cacheDir ?? import_path4.default.join(process.cwd(), ".sna");
   try {
     if (!import_fs3.default.existsSync(dir)) import_fs3.default.mkdirSync(dir, { recursive: true });
-    import_fs3.default.writeFileSync(import_path3.default.join(dir, "claude-path"), claudePath);
+    import_fs3.default.writeFileSync(import_path4.default.join(dir, "claude-path"), claudePath);
   } catch {
   }
 }
@@ -712,7 +737,7 @@ function resolveClaudeCli(opts) {
     const v = validateClaudePath(process.env.SNA_CLAUDE_COMMAND);
     return { path: process.env.SNA_CLAUDE_COMMAND, version: v.version, source: "env" };
   }
-  const cacheFile = cacheDir ? import_path3.default.join(cacheDir, "claude-path") : import_path3.default.join(process.cwd(), ".sna/claude-path");
+  const cacheFile = cacheDir ? import_path4.default.join(cacheDir, "claude-path") : import_path4.default.join(process.cwd(), ".sna/claude-path");
   try {
     const cached = import_fs3.default.readFileSync(cacheFile, "utf8").trim();
     if (cached) {
@@ -750,7 +775,7 @@ function resolveClaudeCli(opts) {
   return { path: "claude", source: "fallback" };
 }
 function resolveClaudePath(cwd) {
-  const result = resolveClaudeCli({ cacheDir: import_path3.default.join(cwd, ".sna") });
+  const result = resolveClaudeCli({ cacheDir: import_path4.default.join(cwd, ".sna") });
   logger.log("agent", `claude path: ${result.source}=${result.path}${result.version ? ` (${result.version})` : ""}`);
   return result.path;
 }
@@ -1023,11 +1048,15 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
           }
         }
         if (events.length > 0 || textBlocks.length > 0) {
+          const shouldEmitDirectly = this._receivedStreamEvents;
           for (const e of events) {
-            this.enqueue(e);
+            if (shouldEmitDirectly) this.emitter.emit("event", e);
+            else this.enqueue(e);
           }
           for (const text of textBlocks) {
-            this.enqueue({ type: "assistant", message: text, timestamp: Date.now() });
+            const event = { type: "assistant", message: text, timestamp: Date.now() };
+            if (shouldEmitDirectly) this.emitter.emit("event", event);
+            else this.enqueue(event);
           }
         }
         return null;
@@ -1125,13 +1154,13 @@ var ClaudeCodeProvider = class {
     const claudeParts = claudeCommand.split(/\s+/);
     const claudePath = claudeParts[0];
     const claudePrefix = claudeParts.slice(1);
-    let pkgRoot = import_path3.default.dirname((0, import_url.fileURLToPath)(importMetaUrl));
-    while (!import_fs3.default.existsSync(import_path3.default.join(pkgRoot, "package.json"))) {
-      const parent = import_path3.default.dirname(pkgRoot);
+    let pkgRoot = import_path4.default.dirname((0, import_url.fileURLToPath)(importMetaUrl));
+    while (!import_fs3.default.existsSync(import_path4.default.join(pkgRoot, "package.json"))) {
+      const parent = import_path4.default.dirname(pkgRoot);
       if (parent === pkgRoot) break;
       pkgRoot = parent;
     }
-    const hookScript = import_path3.default.join(pkgRoot, "dist", "scripts", "hook.js");
+    const hookScript = import_path4.default.join(pkgRoot, "dist", "scripts", "hook.js");
     const sessionId = options.env?.SNA_SESSION_ID ?? "default";
     const sdkSettings = {};
     if (options.permissionMode !== "bypassPermissions") {
@@ -1204,7 +1233,7 @@ var ClaudeCodeProvider = class {
     delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
     delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
     delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
-    const claudeDir = import_path3.default.dirname(claudePath);
+    const claudeDir = import_path4.default.dirname(claudePath);
     if (claudeDir && claudeDir !== ".") {
       cleanEnv.PATH = `${claudeDir}:${cleanEnv.PATH ?? ""}`;
     }
@@ -1219,7 +1248,7 @@ var ClaudeCodeProvider = class {
 };
 
 // src/electron/index.ts
-var import_path6 = __toESM(require("path"), 1);
+var import_path7 = __toESM(require("path"), 1);
 var import_hono4 = require("hono");
 var import_cors = require("hono/cors");
 var import_node_server = require("@hono/node-server");
@@ -1236,24 +1265,24 @@ var import_streaming = require("hono/streaming");
 init_cjs_shims();
 var import_node_module = require("module");
 var import_fs4 = __toESM(require("fs"), 1);
-var import_path4 = __toESM(require("path"), 1);
+var import_path5 = __toESM(require("path"), 1);
 function getDbPath() {
-  return process.env.SNA_DB_PATH ?? import_path4.default.join(process.cwd(), "data/sna.db");
+  return process.env.SNA_DB_PATH ?? import_path5.default.join(process.cwd(), "data/sna.db");
 }
-var NATIVE_DIR = import_path4.default.join(process.cwd(), ".sna/native");
+var NATIVE_DIR = import_path5.default.join(process.cwd(), ".sna/native");
 var _db = null;
 function loadBetterSqlite3() {
   const modulesPath = process.env.SNA_MODULES_PATH;
   if (modulesPath) {
-    const entry = import_path4.default.join(modulesPath, "better-sqlite3");
+    const entry = import_path5.default.join(modulesPath, "better-sqlite3");
     if (import_fs4.default.existsSync(entry)) {
-      const req2 = (0, import_node_module.createRequire)(import_path4.default.join(modulesPath, "noop.js"));
+      const req2 = (0, import_node_module.createRequire)(import_path5.default.join(modulesPath, "noop.js"));
       return req2("better-sqlite3");
     }
   }
-  const nativeEntry = import_path4.default.join(NATIVE_DIR, "node_modules", "better-sqlite3");
+  const nativeEntry = import_path5.default.join(NATIVE_DIR, "node_modules", "better-sqlite3");
   if (import_fs4.default.existsSync(nativeEntry)) {
-    const req2 = (0, import_node_module.createRequire)(import_path4.default.join(NATIVE_DIR, "noop.js"));
+    const req2 = (0, import_node_module.createRequire)(import_path5.default.join(NATIVE_DIR, "noop.js"));
     return req2("better-sqlite3");
   }
   const req = (0, import_node_module.createRequire)(importMetaUrl);
@@ -1262,7 +1291,7 @@ function loadBetterSqlite3() {
 function getDb() {
   if (!_db) {
     const BetterSqlite3 = loadBetterSqlite3();
-    const dir = import_path4.default.dirname(getDbPath());
+    const dir = import_path5.default.dirname(getDbPath());
     if (!import_fs4.default.existsSync(dir)) import_fs4.default.mkdirSync(dir, { recursive: true });
     const nativeBinding = process.env.SNA_SQLITE_NATIVE_BINDING || void 0;
     _db = nativeBinding ? new BetterSqlite3(getDbPath(), { nativeBinding }) : new BetterSqlite3(getDbPath());
@@ -1540,9 +1569,12 @@ function buildHistoryFromDb(sessionId) {
 // src/server/image-store.ts
 init_cjs_shims();
 var import_fs5 = __toESM(require("fs"), 1);
-var import_path5 = __toESM(require("path"), 1);
+var import_path6 = __toESM(require("path"), 1);
 var import_crypto = require("crypto");
-var IMAGE_DIR = import_path5.default.join(process.cwd(), "data/images");
+init_config();
+function getImageDir() {
+  return import_path6.default.join(getConfig().dataDir, "images");
+}
 var MIME_TO_EXT = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -1551,13 +1583,13 @@ var MIME_TO_EXT = {
   "image/svg+xml": "svg"
 };
 function saveImages(sessionId, images) {
-  const dir = import_path5.default.join(IMAGE_DIR, sessionId);
+  const dir = import_path6.default.join(getImageDir(), sessionId);
   import_fs5.default.mkdirSync(dir, { recursive: true });
   return images.map((img) => {
     const ext = MIME_TO_EXT[img.mimeType] ?? "bin";
     const hash = (0, import_crypto.createHash)("sha256").update(img.base64).digest("hex").slice(0, 12);
     const filename = `${hash}.${ext}`;
-    const filePath = import_path5.default.join(dir, filename);
+    const filePath = import_path6.default.join(dir, filename);
     if (!import_fs5.default.existsSync(filePath)) {
       import_fs5.default.writeFileSync(filePath, Buffer.from(img.base64, "base64"));
     }
@@ -1566,7 +1598,7 @@ function saveImages(sessionId, images) {
 }
 function resolveImagePath(sessionId, filename) {
   if (filename.includes("..") || filename.includes("/")) return null;
-  const filePath = import_path5.default.join(IMAGE_DIR, sessionId, filename);
+  const filePath = import_path6.default.join(getImageDir(), sessionId, filename);
   return import_fs5.default.existsSync(filePath) ? filePath : null;
 }
 
@@ -2064,10 +2096,21 @@ function createChatRoutes() {
   app.get("/sessions/:id/messages", (c) => {
     const id = c.req.param("id");
     const sinceParam = c.req.query("since");
+    const limitParam = c.req.query("limit");
     try {
       const db = getDb();
-      const query = sinceParam ? db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? AND id > ? ORDER BY id ASC`) : db.prepare(`SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id ASC`);
-      const messages = sinceParam ? query.all(id, parseInt(sinceParam, 10)) : query.all(id);
+      let sql = `SELECT * FROM chat_messages WHERE session_id = ?`;
+      const params = [id];
+      if (sinceParam) {
+        sql += ` AND id > ?`;
+        params.push(parseInt(sinceParam, 10));
+      }
+      sql += ` ORDER BY id ASC`;
+      if (limitParam) {
+        sql += ` LIMIT ?`;
+        params.push(parseInt(limitParam, 10));
+      }
+      const messages = db.prepare(sql).all(...params);
       return httpJson(c, "chat.messages.list", { messages });
     } catch (e) {
       return c.json({ status: "error", message: e.message, stack: e.stack }, 500);
@@ -3323,7 +3366,7 @@ function createSnaApp(options = {}) {
 init_config();
 function resolveStandaloneScript() {
   const selfPath = (0, import_url3.fileURLToPath)(importMetaUrl);
-  let script = import_path6.default.resolve(import_path6.default.dirname(selfPath), "../server/standalone.js");
+  let script = import_path7.default.resolve(import_path7.default.dirname(selfPath), "../server/standalone.js");
   if (script.includes(".asar") && !script.includes(".asar.unpacked")) {
     script = script.replace(/(\.asar)([/\\])/, ".asar.unpacked$2");
   }
@@ -3338,14 +3381,14 @@ Ensure "@sna-sdk/core" is listed in asarUnpack in your electron-builder config.`
 function buildNodePath() {
   const resourcesPath = process.resourcesPath;
   if (!resourcesPath) return void 0;
-  const unpacked = import_path6.default.join(resourcesPath, "app.asar.unpacked", "node_modules");
+  const unpacked = import_path7.default.join(resourcesPath, "app.asar.unpacked", "node_modules");
   if (!import_fs7.default.existsSync(unpacked)) return void 0;
   const existing = process.env.NODE_PATH;
-  return existing ? `${unpacked}${import_path6.default.delimiter}${existing}` : unpacked;
+  return existing ? `${unpacked}${import_path7.default.delimiter}${existing}` : unpacked;
 }
 async function startSnaServer(options) {
   const port = options.port ?? 3099;
-  const cwd = options.cwd ?? import_path6.default.dirname(options.dbPath);
+  const cwd = options.cwd ?? import_path7.default.dirname(options.dbPath);
   const readyTimeout = options.readyTimeout ?? 15e3;
   const { onLog } = options;
   const standaloneScript = resolveStandaloneScript();
@@ -3353,7 +3396,7 @@ async function startSnaServer(options) {
   let consumerModules;
   try {
     const bsPkg = require.resolve("better-sqlite3/package.json", { paths: [process.cwd()] });
-    consumerModules = import_path6.default.resolve(bsPkg, "../..");
+    consumerModules = import_path7.default.resolve(bsPkg, "../..");
   } catch {
   }
   const env = {
@@ -3364,6 +3407,7 @@ async function startSnaServer(options) {
     ...options.permissionMode ? { SNA_PERMISSION_MODE: options.permissionMode } : {},
     ...options.model ? { SNA_MODEL: options.model } : {},
     ...options.permissionTimeoutMs != null ? { SNA_PERMISSION_TIMEOUT_MS: String(options.permissionTimeoutMs) } : {},
+    ...options.dataDir ? { SNA_DATA_DIR: options.dataDir } : {},
     ...options.nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: options.nativeBinding } : {},
     ...consumerModules ? { SNA_MODULES_PATH: consumerModules } : {},
     ...nodePath ? { NODE_PATH: nodePath } : {},
@@ -3427,13 +3471,15 @@ async function startSnaServer(options) {
 }
 async function startSnaServerInProcess(options) {
   const port = options.port ?? 3099;
-  const cwd = options.cwd ?? import_path6.default.dirname(options.dbPath);
+  const cwd = options.cwd ?? import_path7.default.dirname(options.dbPath);
   if (options.onLog) {
     logger.setOnLog(options.onLog);
   }
+  logger.setLogLevel(options.logLevel ?? "info");
   setConfig({
     port,
     dbPath: options.dbPath,
+    ...options.dataDir ? { dataDir: options.dataDir } : {},
     ...options.maxSessions != null ? { maxSessions: options.maxSessions } : {},
     ...options.permissionMode ? { defaultPermissionMode: options.permissionMode } : {},
     ...options.model ? { model: options.model } : {},
@@ -3445,11 +3491,12 @@ async function startSnaServerInProcess(options) {
   if (options.permissionMode) process.env.SNA_PERMISSION_MODE = options.permissionMode;
   if (options.model) process.env.SNA_MODEL = options.model;
   if (options.permissionTimeoutMs != null) process.env.SNA_PERMISSION_TIMEOUT_MS = String(options.permissionTimeoutMs);
+  if (options.dataDir) process.env.SNA_DATA_DIR = options.dataDir;
   if (options.nativeBinding) process.env.SNA_SQLITE_NATIVE_BINDING = options.nativeBinding;
   if (!process.env.SNA_MODULES_PATH) {
     try {
       const bsPkg = require.resolve("better-sqlite3/package.json", { paths: [process.cwd()] });
-      process.env.SNA_MODULES_PATH = import_path6.default.resolve(bsPkg, "../..");
+      process.env.SNA_MODULES_PATH = import_path7.default.resolve(bsPkg, "../..");
     } catch {
     }
   }
@@ -3470,20 +3517,20 @@ async function startSnaServerInProcess(options) {
   root.use("*", (0, import_cors.cors)({ origin: "*", allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] }));
   root.onError((err2, c) => {
     const pathname = new URL(c.req.url).pathname;
-    if (options.onLog) options.onLog(`ERR ${c.req.method} ${pathname} \u2192 ${err2.message}`);
+    logger.err("err", `${c.req.method} ${pathname} \u2192 ${err2.message}`);
     return c.json({ status: "error", message: err2.message, stack: err2.stack }, 500);
   });
   root.use("*", async (c, next) => {
     const m = c.req.method;
     const pathname = new URL(c.req.url).pathname;
-    if (options.onLog) options.onLog(`${m.padEnd(6)} ${pathname}`);
+    logger.log("req", `${m.padEnd(6)} ${pathname}`);
     await next();
   });
   const sessionManager = new SessionManager({ maxSessions: config.maxSessions });
   root.route("/", createSnaApp({ sessionManager }));
   const httpServer = (0, import_node_server.serve)({ fetch: root.fetch, port }, () => {
-    if (options.onLog) options.onLog(`API server ready \u2192 http://localhost:${port}`);
-    if (options.onLog) options.onLog(`WebSocket endpoint \u2192 ws://localhost:${port}/ws`);
+    logger.log("sna", `API server ready \u2192 http://localhost:${port}`);
+    logger.log("sna", `WebSocket endpoint \u2192 ws://localhost:${port}/ws`);
   });
   attachWebSocket(httpServer, sessionManager);
   if (options.langfuse) {
@@ -3524,6 +3571,7 @@ async function startSnaServerInProcess(options) {
       }
       sessionManager.killAll();
       logger.setOnLog(null);
+      logger.setLogLevel("info");
       await new Promise((resolve) => {
         httpServer.close(() => resolve());
         setTimeout(() => resolve(), 3e3).unref();

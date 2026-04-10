@@ -31,6 +31,7 @@ const useChatStore = create()(
     sessions: { default: emptySession() },
     _apiUrl: "",
     _setApiUrl: (url) => set({ _apiUrl: url }),
+    _hydratedSessions: /* @__PURE__ */ new Set(),
     setOpen: (open) => set({ isOpen: open }),
     toggle: () => set((s) => ({ isOpen: !s.isOpen })),
     setWidth: (width) => set({ width: Math.max(320, Math.min(520, width)) }),
@@ -41,6 +42,7 @@ const useChatStore = create()(
       } else {
         set({ activeSessionId: id });
       }
+      get().fetchSessionMessages(id);
     },
     initSession: (id) => {
       const s = get().sessions;
@@ -113,27 +115,48 @@ const useChatStore = create()(
         const dbSessions = sessData.sessions;
         const sessions = {};
         for (const sess of dbSessions) {
-          try {
-            const msgRes = await fetch(`${apiUrl}/chat/sessions/${encodeURIComponent(sess.id)}/messages`);
-            const msgData = await msgRes.json();
-            const messages = msgData.messages.map((m) => ({
-              id: `db-${m.id}`,
-              role: m.role,
-              content: m.content,
-              timestamp: new Date(m.created_at).getTime(),
-              skillName: m.skill_name ?? void 0,
-              meta: m.meta ? JSON.parse(m.meta) : void 0
-            }));
-            sessions[sess.id] = { messages, processedEventIds: /* @__PURE__ */ new Set() };
-            if (messages.length > messageCounter) messageCounter = messages.length;
-          } catch {
-            sessions[sess.id] = emptySession();
-          }
+          sessions[sess.id] = emptySession();
         }
         if (!sessions.default) {
           sessions.default = emptySession();
         }
         set({ sessions });
+        const activeId = get().activeSessionId;
+        if (sessions[activeId]) {
+          get().fetchSessionMessages(activeId);
+        }
+      } catch {
+      }
+    },
+    fetchSessionMessages: async (sessionId) => {
+      const { _apiUrl: apiUrl, _hydratedSessions } = get();
+      if (!apiUrl || _hydratedSessions.has(sessionId)) return;
+      const next = new Set(_hydratedSessions);
+      next.add(sessionId);
+      set({ _hydratedSessions: next });
+      try {
+        const msgRes = await fetch(
+          `${apiUrl}/chat/sessions/${encodeURIComponent(sessionId)}/messages`
+        );
+        const msgData = await msgRes.json();
+        const messages = msgData.messages.map((m) => ({
+          id: `db-${m.id}`,
+          role: m.role,
+          content: m.content,
+          timestamp: new Date(m.created_at).getTime(),
+          skillName: m.skill_name ?? void 0,
+          meta: m.meta ? JSON.parse(m.meta) : void 0
+        }));
+        if (messages.length > messageCounter) messageCounter = messages.length;
+        set((state) => ({
+          sessions: {
+            ...state.sessions,
+            [sessionId]: {
+              ...state.sessions[sessionId],
+              messages
+            }
+          }
+        }));
       } catch {
       }
     }
