@@ -29,6 +29,7 @@ import '../core/providers/types.js';
  *   agent.subscribe   { session?, since? }
  *   agent.unsubscribe { session? }
  *   agent.run-once    { message, model?, systemPrompt?, appendSystemPrompt?, permissionMode?, cwd?, timeout?, provider?, extraArgs? }
+ *   agent.completion  { prompt, model?, label?, systemPrompt?, appendSystemPrompt?, timeout?, extraArgs?, env? }
  *
  *   events.subscribe  { since? }
  *   events.unsubscribe {}

@@ -24,6 +24,7 @@
  *   agent.subscribe   { session?, since? }
  *   agent.unsubscribe { session? }
  *   agent.run-once    { message, model?, systemPrompt?, appendSystemPrompt?, permissionMode?, cwd?, timeout?, provider?, extraArgs? }
+ *   agent.completion  { prompt, model?, label?, systemPrompt?, appendSystemPrompt?, timeout?, extraArgs?, env? }
  *
  *   events.subscribe  { since? }
  *   events.unsubscribe {}
@@ -53,6 +54,7 @@ import { getProvider } from "../core/providers/index.js";
 import { getDb } from "../db/schema.js";
 import { logger } from "../lib/logger.js";
 import { runOnce, type RunOnceOptions } from "./routes/agent.js";
+import { completion, type CompletionOptions } from "../core/completion.js";
 import { wsReply } from "./api-types.js";
 import { buildHistoryFromDb } from "./history-builder.js";
 import { saveImages } from "./image-store.js";
@@ -230,6 +232,9 @@ function handleMessage(
       return handleAgentStatus(ws, msg, sm);
     case "agent.run-once":
       handleAgentRunOnce(ws, msg, sm);
+      return;
+    case "agent.completion":
+      handleAgentCompletion(ws, msg);
       return;
 
     // ── Agent event subscription ──────────────────────
@@ -562,6 +567,16 @@ async function handleAgentRunOnce(ws: WebSocket, msg: WsRequest, sm: SessionMana
   try {
     const { result, usage } = await runOnce(sm, msg as unknown as RunOnceOptions);
     wsReply(ws, msg, { result, usage });
+  } catch (e: any) {
+    replyError(ws, msg, e.message);
+  }
+}
+
+async function handleAgentCompletion(ws: WebSocket, msg: WsRequest): Promise<void> {
+  if (!msg.prompt) return replyError(ws, msg, "prompt is required");
+  try {
+    const result = await completion(msg as unknown as CompletionOptions);
+    wsReply(ws, msg, result);
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }

@@ -28,6 +28,7 @@ import { buildHistoryFromDb } from "../history-builder.js";
 import { httpJson } from "../api-types.js";
 import { saveImages } from "../image-store.js";
 import { getConfig } from "../../config.js";
+import { completion, type CompletionOptions } from "../../core/completion.js";
 
 /** Helper: read session ID from query string, default "default". */
 function getSessionId(c: { req: { query: (k: string) => string | undefined } }): string {
@@ -207,6 +208,21 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       return httpJson(c, "agent.run-once", result);
     } catch (e: any) {
       logger.err("err", `POST /run-once → ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 500);
+    }
+  });
+
+  // POST /completion — lightweight one-shot LLM call (no session)
+  app.post("/completion", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as CompletionOptions;
+    if (!body.prompt) {
+      return c.json({ status: "error", message: "prompt is required" }, 400);
+    }
+    try {
+      const result = await completion(body);
+      return httpJson(c, "agent.completion", result);
+    } catch (e: any) {
+      logger.err("err", `POST /completion → ${e.message}`);
       return c.json({ status: "error", message: e.message }, 500);
     }
   });

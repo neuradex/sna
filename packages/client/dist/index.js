@@ -682,6 +682,33 @@ var AgentApi = class {
     return this.client.request("agent.status", { session });
   }
   /**
+   * Lightweight one-shot LLM completion — no session, no event pipeline.
+   *
+   * Spawns `claude -p` on the server, returns the response text and usage.
+   * Much faster than {@link runOnce} for simple prompt→response calls.
+   *
+   * @param opts - Completion options.
+   * @param opts.prompt - The prompt to send.
+   * @param opts.model - Model to use (e.g. `"claude-haiku-4-5-20251001"`).
+   * @param opts.label - Label for Langfuse tracing. Default: `"completion"`.
+   * @returns Text, token usage, cost, and timing.
+   *
+   * @example
+   * ```ts
+   * const { text, costUsd } = await sna.agent.completion({
+   *   prompt: "Classify this text: ...",
+   *   model: "claude-haiku-4-5-20251001",
+   *   label: "librarian",
+   * });
+   * ```
+   */
+  async completion(opts) {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("POST", "/agent/completion", opts);
+    }
+    return this.client.request("agent.completion", opts);
+  }
+  /**
    * Run a one-shot agent task and return the result.
    *
    * Creates a temporary session, spawns an agent, waits for it to

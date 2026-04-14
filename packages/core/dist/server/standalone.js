@@ -1066,6 +1066,161 @@ function resolveImagePath(sessionId, filename) {
   return fs5.existsSync(filePath) ? filePath : null;
 }
 
+// src/core/completion.ts
+import { spawn as spawn3 } from "child_process";
+
+// src/lib/langfuse-tracer.ts
+var langfuseClient = null;
+var _userId;
+var _userEmail;
+var _baseTags = [];
+function logError(msg) {
+  logger.err("err", `[langfuse] ${msg}`);
+}
+function traceCompletion(opts) {
+  if (!langfuseClient) return null;
+  try {
+    const trace = langfuseClient.trace({
+      name: opts.label,
+      userId: _userEmail ?? _userId,
+      input: opts.input,
+      tags: [..._baseTags, opts.label]
+    });
+    const generation = trace.generation({
+      name: "completion",
+      model: opts.model,
+      input: opts.input
+    });
+    return {
+      end(result) {
+        generation.update({
+          output: result.text,
+          model: result.model,
+          usage: {
+            input: result.usage.inputTokens,
+            output: result.usage.outputTokens,
+            total: (result.usage.inputTokens ?? 0) + (result.usage.outputTokens ?? 0)
+          }
+        });
+        generation.end();
+        trace.update({
+          output: result.text,
+          metadata: { costUsd: result.costUsd, durationMs: result.durationMs, model: result.model, usage: result.usage }
+        });
+        langfuseClient?.flushAsync?.().catch(() => {
+        });
+      },
+      error(err2) {
+        generation.update({ output: `[ERROR] ${err2.message}`, level: "ERROR" });
+        generation.end();
+        trace.update({ output: `[ERROR] ${err2.message}` });
+        langfuseClient?.flushAsync?.().catch(() => {
+        });
+      }
+    };
+  } catch (err2) {
+    logError(`traceCompletion failed: ${err2}`);
+    return null;
+  }
+}
+
+// src/core/completion.ts
+async function completion(opts) {
+  const cwd = opts.cwd ?? process.cwd();
+  const resolved = resolveClaudeCli({ cacheDir: void 0 });
+  const claudeParts = resolved.path.split(/\s+/);
+  const claudePath = claudeParts[0];
+  const claudePrefix = claudeParts.slice(1);
+  const args = [
+    ...claudePrefix,
+    "-p",
+    "--output-format",
+    "json",
+    "--no-session-persistence"
+  ];
+  const model = opts.model ?? getConfig().model;
+  if (model) args.push("--model", model);
+  if (opts.systemPrompt) args.push("--system-prompt", opts.systemPrompt);
+  if (opts.appendSystemPrompt) args.push("--append-system-prompt", opts.appendSystemPrompt);
+  if (opts.extraArgs) args.push(...opts.extraArgs);
+  args.push(opts.prompt);
+  const cleanEnv = { ...process.env, ...opts.env };
+  const proxyPort = getConfig().apiProxyPort;
+  if (proxyPort) {
+    cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
+  }
+  delete cleanEnv.CLAUDECODE;
+  delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
+  delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
+  delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
+  const label = opts.label ?? "completion";
+  const timeout = opts.timeout ?? 6e4;
+  logger.log("agent", `completion: ${label} model=${model ?? "default"} prompt="${opts.prompt.slice(0, 60)}..."`);
+  const trace = traceCompletion({ label, model, input: opts.prompt });
+  return new Promise((resolve, reject) => {
+    const proc = spawn3(claudePath, args, {
+      cwd,
+      env: cleanEnv,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      proc.kill();
+      const err2 = new Error(`completion timed out after ${timeout}ms`);
+      trace?.error(err2);
+      reject(err2);
+    }, timeout);
+    proc.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    proc.on("error", (err2) => {
+      clearTimeout(timer);
+      trace?.error(err2);
+      reject(new Error(`completion spawn error: ${err2.message}`));
+    });
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      let parsed;
+      try {
+        parsed = JSON.parse(stdout);
+      } catch {
+        const err2 = new Error(`completion: failed to parse JSON (code=${code}): ${stdout.slice(0, 200)} ${stderr.slice(0, 200)}`);
+        trace?.error(err2);
+        reject(err2);
+        return;
+      }
+      if (parsed.is_error) {
+        const err2 = new Error(`completion error: ${parsed.result}`);
+        trace?.error(err2);
+        reject(err2);
+        return;
+      }
+      const modelKey = Object.keys(parsed.modelUsage)[0] ?? model ?? "unknown";
+      const result = {
+        text: parsed.result,
+        usage: {
+          inputTokens: parsed.usage.input_tokens,
+          outputTokens: parsed.usage.output_tokens,
+          cacheReadTokens: parsed.usage.cache_read_input_tokens,
+          cacheCreationTokens: parsed.usage.cache_creation_input_tokens
+        },
+        costUsd: parsed.total_cost_usd,
+        durationMs: parsed.duration_ms,
+        durationApiMs: parsed.duration_api_ms,
+        model: modelKey
+      };
+      logger.log("agent", `completion done: ${label} ${result.durationMs}ms cost=$${result.costUsd.toFixed(4)} in=${result.usage.inputTokens} out=${result.usage.outputTokens}`);
+      trace?.end(result);
+      resolve(result);
+    });
+    proc.stdin.end();
+  });
+}
+
 // src/server/routes/agent.ts
 function getSessionId(c) {
   return c.req.query("session") ?? "default";
@@ -1181,6 +1336,19 @@ function createAgentRoutes(sessionManager2) {
       return httpJson(c, "agent.run-once", result);
     } catch (e) {
       logger.err("err", `POST /run-once \u2192 ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 500);
+    }
+  });
+  app.post("/completion", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.prompt) {
+      return c.json({ status: "error", message: "prompt is required" }, 400);
+    }
+    try {
+      const result = await completion(body);
+      return httpJson(c, "agent.completion", result);
+    } catch (e) {
+      logger.err("err", `POST /completion \u2192 ${e.message}`);
       return c.json({ status: "error", message: e.message }, 500);
     }
   });
@@ -2251,6 +2419,9 @@ function handleMessage(ws, msg, sm, state) {
     case "agent.run-once":
       handleAgentRunOnce(ws, msg, sm);
       return;
+    case "agent.completion":
+      handleAgentCompletion(ws, msg);
+      return;
     // ── Agent event subscription ──────────────────────
     case "agent.subscribe":
       return handleAgentSubscribe(ws, msg, sm, state);
@@ -2540,6 +2711,15 @@ async function handleAgentRunOnce(ws, msg, sm) {
   try {
     const { result, usage } = await runOnce(sm, msg);
     wsReply(ws, msg, { result, usage });
+  } catch (e) {
+    replyError(ws, msg, e.message);
+  }
+}
+async function handleAgentCompletion(ws, msg) {
+  if (!msg.prompt) return replyError(ws, msg, "prompt is required");
+  try {
+    const result = await completion(msg);
+    wsReply(ws, msg, result);
   } catch (e) {
     replyError(ws, msg, e.message);
   }

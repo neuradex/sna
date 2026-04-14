@@ -9,6 +9,7 @@ import { buildHistoryFromDb } from "../history-builder.js";
 import { httpJson } from "../api-types.js";
 import { saveImages } from "../image-store.js";
 import { getConfig } from "../../config.js";
+import { completion } from "../../core/completion.js";
 function getSessionId(c) {
   return c.req.query("session") ?? "default";
 }
@@ -123,6 +124,19 @@ function createAgentRoutes(sessionManager) {
       return httpJson(c, "agent.run-once", result);
     } catch (e) {
       logger.err("err", `POST /run-once \u2192 ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 500);
+    }
+  });
+  app.post("/completion", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.prompt) {
+      return c.json({ status: "error", message: "prompt is required" }, 400);
+    }
+    try {
+      const result = await completion(body);
+      return httpJson(c, "agent.completion", result);
+    } catch (e) {
+      logger.err("err", `POST /completion \u2192 ${e.message}`);
       return c.json({ status: "error", message: e.message }, 500);
     }
   });

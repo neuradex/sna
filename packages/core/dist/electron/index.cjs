@@ -678,7 +678,7 @@ __export(electron_exports, {
 });
 module.exports = __toCommonJS(electron_exports);
 init_cjs_shims();
-var import_child_process3 = require("child_process");
+var import_child_process4 = require("child_process");
 var import_url3 = require("url");
 var import_fs7 = __toESM(require("fs"), 1);
 
@@ -1666,6 +1666,110 @@ function resolveImagePath(sessionId, filename) {
 
 // src/server/routes/agent.ts
 init_config();
+
+// src/core/completion.ts
+init_cjs_shims();
+var import_child_process3 = require("child_process");
+init_logger();
+init_config();
+init_langfuse_tracer();
+async function completion(opts) {
+  const cwd = opts.cwd ?? process.cwd();
+  const resolved = resolveClaudeCli({ cacheDir: void 0 });
+  const claudeParts = resolved.path.split(/\s+/);
+  const claudePath = claudeParts[0];
+  const claudePrefix = claudeParts.slice(1);
+  const args = [
+    ...claudePrefix,
+    "-p",
+    "--output-format",
+    "json",
+    "--no-session-persistence"
+  ];
+  const model = opts.model ?? getConfig().model;
+  if (model) args.push("--model", model);
+  if (opts.systemPrompt) args.push("--system-prompt", opts.systemPrompt);
+  if (opts.appendSystemPrompt) args.push("--append-system-prompt", opts.appendSystemPrompt);
+  if (opts.extraArgs) args.push(...opts.extraArgs);
+  args.push(opts.prompt);
+  const cleanEnv = { ...process.env, ...opts.env };
+  const proxyPort = getConfig().apiProxyPort;
+  if (proxyPort) {
+    cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
+  }
+  delete cleanEnv.CLAUDECODE;
+  delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
+  delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
+  delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
+  const label = opts.label ?? "completion";
+  const timeout = opts.timeout ?? 6e4;
+  logger.log("agent", `completion: ${label} model=${model ?? "default"} prompt="${opts.prompt.slice(0, 60)}..."`);
+  const trace = traceCompletion({ label, model, input: opts.prompt });
+  return new Promise((resolve, reject) => {
+    const proc = (0, import_child_process3.spawn)(claudePath, args, {
+      cwd,
+      env: cleanEnv,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      proc.kill();
+      const err2 = new Error(`completion timed out after ${timeout}ms`);
+      trace?.error(err2);
+      reject(err2);
+    }, timeout);
+    proc.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    proc.on("error", (err2) => {
+      clearTimeout(timer);
+      trace?.error(err2);
+      reject(new Error(`completion spawn error: ${err2.message}`));
+    });
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      let parsed;
+      try {
+        parsed = JSON.parse(stdout);
+      } catch {
+        const err2 = new Error(`completion: failed to parse JSON (code=${code}): ${stdout.slice(0, 200)} ${stderr.slice(0, 200)}`);
+        trace?.error(err2);
+        reject(err2);
+        return;
+      }
+      if (parsed.is_error) {
+        const err2 = new Error(`completion error: ${parsed.result}`);
+        trace?.error(err2);
+        reject(err2);
+        return;
+      }
+      const modelKey = Object.keys(parsed.modelUsage)[0] ?? model ?? "unknown";
+      const result = {
+        text: parsed.result,
+        usage: {
+          inputTokens: parsed.usage.input_tokens,
+          outputTokens: parsed.usage.output_tokens,
+          cacheReadTokens: parsed.usage.cache_read_input_tokens,
+          cacheCreationTokens: parsed.usage.cache_creation_input_tokens
+        },
+        costUsd: parsed.total_cost_usd,
+        durationMs: parsed.duration_ms,
+        durationApiMs: parsed.duration_api_ms,
+        model: modelKey
+      };
+      logger.log("agent", `completion done: ${label} ${result.durationMs}ms cost=$${result.costUsd.toFixed(4)} in=${result.usage.inputTokens} out=${result.usage.outputTokens}`);
+      trace?.end(result);
+      resolve(result);
+    });
+    proc.stdin.end();
+  });
+}
+
+// src/server/routes/agent.ts
 function getSessionId(c) {
   return c.req.query("session") ?? "default";
 }
@@ -1780,6 +1884,19 @@ function createAgentRoutes(sessionManager) {
       return httpJson(c, "agent.run-once", result);
     } catch (e) {
       logger.err("err", `POST /run-once \u2192 ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 500);
+    }
+  });
+  app.post("/completion", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.prompt) {
+      return c.json({ status: "error", message: "prompt is required" }, 400);
+    }
+    try {
+      const result = await completion(body);
+      return httpJson(c, "agent.completion", result);
+    } catch (e) {
+      logger.err("err", `POST /completion \u2192 ${e.message}`);
       return c.json({ status: "error", message: e.message }, 500);
     }
   });
@@ -2856,6 +2973,9 @@ function handleMessage(ws, msg, sm2, state) {
     case "agent.run-once":
       handleAgentRunOnce(ws, msg, sm2);
       return;
+    case "agent.completion":
+      handleAgentCompletion(ws, msg);
+      return;
     // ── Agent event subscription ──────────────────────
     case "agent.subscribe":
       return handleAgentSubscribe(ws, msg, sm2, state);
@@ -3145,6 +3265,15 @@ async function handleAgentRunOnce(ws, msg, sm2) {
   try {
     const { result, usage } = await runOnce(sm2, msg);
     wsReply(ws, msg, { result, usage });
+  } catch (e) {
+    replyError(ws, msg, e.message);
+  }
+}
+async function handleAgentCompletion(ws, msg) {
+  if (!msg.prompt) return replyError(ws, msg, "prompt is required");
+  try {
+    const result = await completion(msg);
+    wsReply(ws, msg, result);
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -3478,7 +3607,7 @@ async function startSnaServer(options) {
     // Consumer overrides last so they can always win
     ...options.env ?? {}
   };
-  const proc = (0, import_child_process3.fork)(standaloneScript, [], {
+  const proc = (0, import_child_process4.fork)(standaloneScript, [], {
     cwd,
     env,
     stdio: "pipe"

@@ -85,6 +85,14 @@ export interface ApiResponses {
     result: string;
     usage: Record<string, unknown> | null;
   };
+  "agent.completion": {
+    text: string;
+    usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number };
+    costUsd: number;
+    durationMs: number;
+    durationApiMs: number;
+    model: string;
+  };
 
   // Skill events
   "emit": {

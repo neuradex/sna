@@ -165,6 +165,16 @@ var init_config = __esm({
   }
 });
 
+// src/lib/langfuse-tracer.ts
+var init_langfuse_tracer = __esm({
+  "src/lib/langfuse-tracer.ts"() {
+    "use strict";
+    init_cjs_shims();
+    init_config();
+    init_logger();
+  }
+});
+
 // src/node/index.ts
 var node_exports = {};
 __export(node_exports, {
@@ -877,6 +887,12 @@ init_config();
 
 // src/server/routes/agent.ts
 init_config();
+
+// src/core/completion.ts
+init_cjs_shims();
+init_logger();
+init_config();
+init_langfuse_tracer();
 
 // src/server/routes/chat.ts
 init_cjs_shims();

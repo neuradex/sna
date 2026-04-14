@@ -679,6 +679,33 @@ export interface SessionInfo {
   lastActivityAt: number;
 }
 
+/** Options for a lightweight one-shot completion (no session). */
+export interface CompletionOptions {
+  prompt: string;
+  model?: string;
+  systemPrompt?: string;
+  appendSystemPrompt?: string;
+  label?: string;
+  timeout?: number;
+  extraArgs?: string[];
+  env?: Record<string, string>;
+}
+
+/** Result of a lightweight completion call. */
+export interface CompletionResult {
+  text: string;
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+  };
+  costUsd: number;
+  durationMs: number;
+  durationApiMs: number;
+  model: string;
+}
+
 /** Options for a one-shot agent execution. */
 export interface RunOnceOptions {
   message: string;
@@ -1264,6 +1291,34 @@ class AgentApi {
       return this.client._httpFetch("GET", `/agent/status?session=${encodeURIComponent(session)}`);
     }
     return this.client.request("agent.status", { session });
+  }
+
+  /**
+   * Lightweight one-shot LLM completion — no session, no event pipeline.
+   *
+   * Spawns `claude -p` on the server, returns the response text and usage.
+   * Much faster than {@link runOnce} for simple prompt→response calls.
+   *
+   * @param opts - Completion options.
+   * @param opts.prompt - The prompt to send.
+   * @param opts.model - Model to use (e.g. `"claude-haiku-4-5-20251001"`).
+   * @param opts.label - Label for Langfuse tracing. Default: `"completion"`.
+   * @returns Text, token usage, cost, and timing.
+   *
+   * @example
+   * ```ts
+   * const { text, costUsd } = await sna.agent.completion({
+   *   prompt: "Classify this text: ...",
+   *   model: "claude-haiku-4-5-20251001",
+   *   label: "librarian",
+   * });
+   * ```
+   */
+  async completion(opts: CompletionOptions): Promise<CompletionResult> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("POST", "/agent/completion", opts as unknown as Record<string, unknown>);
+    }
+    return this.client.request("agent.completion", opts as unknown as Record<string, unknown>);
   }
 
   /**

@@ -446,6 +446,31 @@ interface SessionInfo {
     /** Unix timestamp (ms) of the last activity (message sent/received). */
     lastActivityAt: number;
 }
+/** Options for a lightweight one-shot completion (no session). */
+interface CompletionOptions {
+    prompt: string;
+    model?: string;
+    systemPrompt?: string;
+    appendSystemPrompt?: string;
+    label?: string;
+    timeout?: number;
+    extraArgs?: string[];
+    env?: Record<string, string>;
+}
+/** Result of a lightweight completion call. */
+interface CompletionResult {
+    text: string;
+    usage: {
+        inputTokens: number;
+        outputTokens: number;
+        cacheReadTokens: number;
+        cacheCreationTokens: number;
+    };
+    costUsd: number;
+    durationMs: number;
+    durationApiMs: number;
+    model: string;
+}
 /** Options for a one-shot agent execution. */
 interface RunOnceOptions {
     message: string;
@@ -975,6 +1000,28 @@ declare class AgentApi {
             extraArgs?: string[];
         } | null;
     }>;
+    /**
+     * Lightweight one-shot LLM completion — no session, no event pipeline.
+     *
+     * Spawns `claude -p` on the server, returns the response text and usage.
+     * Much faster than {@link runOnce} for simple prompt→response calls.
+     *
+     * @param opts - Completion options.
+     * @param opts.prompt - The prompt to send.
+     * @param opts.model - Model to use (e.g. `"claude-haiku-4-5-20251001"`).
+     * @param opts.label - Label for Langfuse tracing. Default: `"completion"`.
+     * @returns Text, token usage, cost, and timing.
+     *
+     * @example
+     * ```ts
+     * const { text, costUsd } = await sna.agent.completion({
+     *   prompt: "Classify this text: ...",
+     *   model: "claude-haiku-4-5-20251001",
+     *   label: "librarian",
+     * });
+     * ```
+     */
+    completion(opts: CompletionOptions): Promise<CompletionResult>;
     /**
      * Run a one-shot agent task and return the result.
      *

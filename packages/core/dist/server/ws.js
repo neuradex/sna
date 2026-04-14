@@ -3,6 +3,7 @@ import { getProvider } from "../core/providers/index.js";
 import { getDb } from "../db/schema.js";
 import { logger } from "../lib/logger.js";
 import { runOnce } from "./routes/agent.js";
+import { completion } from "../core/completion.js";
 import { wsReply } from "./api-types.js";
 import { buildHistoryFromDb } from "./history-builder.js";
 import { saveImages } from "./image-store.js";
@@ -119,6 +120,9 @@ function handleMessage(ws, msg, sm, state) {
       return handleAgentStatus(ws, msg, sm);
     case "agent.run-once":
       handleAgentRunOnce(ws, msg, sm);
+      return;
+    case "agent.completion":
+      handleAgentCompletion(ws, msg);
       return;
     // ── Agent event subscription ──────────────────────
     case "agent.subscribe":
@@ -409,6 +413,15 @@ async function handleAgentRunOnce(ws, msg, sm) {
   try {
     const { result, usage } = await runOnce(sm, msg);
     wsReply(ws, msg, { result, usage });
+  } catch (e) {
+    replyError(ws, msg, e.message);
+  }
+}
+async function handleAgentCompletion(ws, msg) {
+  if (!msg.prompt) return replyError(ws, msg, "prompt is required");
+  try {
+    const result = await completion(msg);
+    wsReply(ws, msg, result);
   } catch (e) {
     replyError(ws, msg, e.message);
   }
