@@ -334,6 +334,52 @@ function handleEvent(ss, event) {
     }
   }
 }
+function traceCompletion(opts) {
+  if (!langfuseClient) return null;
+  try {
+    const trace = langfuseClient.trace({
+      name: opts.label,
+      userId: _userEmail ?? _userId,
+      input: opts.input,
+      tags: [..._baseTags, opts.label]
+    });
+    const generation = trace.generation({
+      name: "completion",
+      model: opts.model,
+      input: opts.input
+    });
+    return {
+      end(result) {
+        generation.update({
+          output: result.text,
+          model: result.model,
+          usage: {
+            input: result.usage.inputTokens,
+            output: result.usage.outputTokens,
+            total: (result.usage.inputTokens ?? 0) + (result.usage.outputTokens ?? 0)
+          }
+        });
+        generation.end();
+        trace.update({
+          output: result.text,
+          metadata: { costUsd: result.costUsd, durationMs: result.durationMs, model: result.model, usage: result.usage }
+        });
+        langfuseClient?.flushAsync?.().catch(() => {
+        });
+      },
+      error(err) {
+        generation.update({ output: `[ERROR] ${err.message}`, level: "ERROR" });
+        generation.end();
+        trace.update({ output: `[ERROR] ${err.message}` });
+        langfuseClient?.flushAsync?.().catch(() => {
+        });
+      }
+    };
+  } catch (err) {
+    logError(`traceCompletion failed: ${err}`);
+    return null;
+  }
+}
 function endOrphanedSpans(turn) {
   for (const [, span] of turn.pendingToolSpans) {
     try {
@@ -351,5 +397,6 @@ function endOrphanedSpans(turn) {
 export {
   initTracer,
   setTracerUser,
-  shutdownTracer
+  shutdownTracer,
+  traceCompletion
 };

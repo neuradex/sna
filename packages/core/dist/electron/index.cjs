@@ -261,7 +261,8 @@ var langfuse_tracer_exports = {};
 __export(langfuse_tracer_exports, {
   initTracer: () => initTracer,
   setTracerUser: () => setTracerUser,
-  shutdownTracer: () => shutdownTracer
+  shutdownTracer: () => shutdownTracer,
+  traceCompletion: () => traceCompletion
 });
 function setTracerUser(userId, userEmail) {
   _userId = userId;
@@ -586,6 +587,52 @@ function handleEvent(ss, event) {
       endCurrentTurn(ss, "interrupted");
       break;
     }
+  }
+}
+function traceCompletion(opts) {
+  if (!langfuseClient) return null;
+  try {
+    const trace = langfuseClient.trace({
+      name: opts.label,
+      userId: _userEmail ?? _userId,
+      input: opts.input,
+      tags: [..._baseTags, opts.label]
+    });
+    const generation = trace.generation({
+      name: "completion",
+      model: opts.model,
+      input: opts.input
+    });
+    return {
+      end(result) {
+        generation.update({
+          output: result.text,
+          model: result.model,
+          usage: {
+            input: result.usage.inputTokens,
+            output: result.usage.outputTokens,
+            total: (result.usage.inputTokens ?? 0) + (result.usage.outputTokens ?? 0)
+          }
+        });
+        generation.end();
+        trace.update({
+          output: result.text,
+          metadata: { costUsd: result.costUsd, durationMs: result.durationMs, model: result.model, usage: result.usage }
+        });
+        langfuseClient?.flushAsync?.().catch(() => {
+        });
+      },
+      error(err2) {
+        generation.update({ output: `[ERROR] ${err2.message}`, level: "ERROR" });
+        generation.end();
+        trace.update({ output: `[ERROR] ${err2.message}` });
+        langfuseClient?.flushAsync?.().catch(() => {
+        });
+      }
+    };
+  } catch (err2) {
+    logError(`traceCompletion failed: ${err2}`);
+    return null;
   }
 }
 function endOrphanedSpans(turn) {

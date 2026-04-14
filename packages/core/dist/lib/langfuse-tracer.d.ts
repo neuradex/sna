@@ -31,5 +31,24 @@ declare function initTracer(config: {
 /** @deprecated onLog is ignored — langfuse logs now route through SDK logger */
 _onLog?: (msg: string) => void): Promise<void>;
 declare function shutdownTracer(): Promise<void>;
+interface CompletionTraceHandle {
+    end(result: {
+        text: string;
+        model: string;
+        usage: Record<string, number>;
+        costUsd: number;
+        durationMs: number;
+    }): void;
+    error(err: Error): void;
+}
+/**
+ * Create a lightweight Langfuse trace for a one-shot completion.
+ * Returns null if Langfuse is not initialized — caller should skip tracing.
+ */
+declare function traceCompletion(opts: {
+    label: string;
+    model?: string;
+    input: string;
+}): CompletionTraceHandle | null;
 
-export { initTracer, setTracerUser, shutdownTracer };
+export { type CompletionTraceHandle, initTracer, setTracerUser, shutdownTracer, traceCompletion };
