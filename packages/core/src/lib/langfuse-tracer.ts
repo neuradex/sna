@@ -53,6 +53,7 @@ let lifecycleUnsub: (() => void) | null = null;
 let sm: SessionManager | null = null;
 let _userId: string | undefined;
 let _userEmail: string | undefined;
+let _baseTags: string[] = [];
 let _apiProxy: { port: number; close: () => void } | null = null;
 
 /** Set the current user info for Langfuse traces. */
@@ -73,12 +74,13 @@ function logError(msg: string): void {
 // ── Public API ──────────────────────────────────────────────────────────────
 
 export async function initTracer(
-  config: { publicKey: string; secretKey: string; baseUrl?: string },
+  config: { publicKey: string; secretKey: string; baseUrl?: string; tags?: string[] },
   sessionManager: SessionManager,
   /** @deprecated onLog is ignored — langfuse logs now route through SDK logger */
   _onLog?: (msg: string) => void,
 ): Promise<void> {
   log(`init: publicKey=${config.publicKey.slice(0, 12)}..., baseUrl=${config.baseUrl ?? "default"}`);
+  _baseTags = config.tags ?? [];
 
   try {
     const mod = await import("langfuse");
@@ -268,8 +270,16 @@ function startTurn(ss: SessionState, userMessage: string): void {
   ss.turnCounter++;
   const session = sm?.getSession(ss.sessionId);
 
+  const turnName = ss.label
+    ? `${ss.label}/turn-${ss.turnCounter}`
+    : `turn-${ss.turnCounter}`;
+  const tags = [
+    ..._baseTags,
+    ...(ss.label ? [ss.label] : []),
+  ];
+
   const trace = langfuseClient.trace({
-    name: `turn-${ss.turnCounter}`,
+    name: turnName,
     sessionId: ss.sessionId,
     userId: _userEmail ?? _userId,
     input: userMessage,
@@ -279,7 +289,7 @@ function startTurn(ss: SessionState, userMessage: string): void {
       model: session?.lastStartConfig?.model,
       turnIndex: ss.turnCounter,
     },
-    tags: ["loom", "debug"],
+    tags,
   });
 
   ss.currentTurn = {
