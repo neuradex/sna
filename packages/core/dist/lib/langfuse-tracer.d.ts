@@ -25,6 +25,8 @@ declare function initTracer(config: {
     secretKey: string;
     baseUrl?: string;
     tags?: string[];
+    /** Map SNA sessionId + label to a custom Langfuse sessionId. */
+    mapSessionId?: (sessionId: string, label: string) => string;
 }, sessionManager: SessionManager, 
 /** @deprecated onLog is ignored — langfuse logs now route through SDK logger */
 _onLog?: (msg: string) => void): Promise<void>;

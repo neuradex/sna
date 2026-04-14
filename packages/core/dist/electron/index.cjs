@@ -276,6 +276,7 @@ function logError(msg) {
 async function initTracer(config, sessionManager, _onLog2) {
   log2(`init: publicKey=${config.publicKey.slice(0, 12)}..., baseUrl=${config.baseUrl ?? "default"}`);
   _baseTags = config.tags ?? [];
+  _mapSessionId = config.mapSessionId ?? null;
   try {
     const mod = await import("langfuse");
     const Langfuse = mod.Langfuse;
@@ -402,9 +403,12 @@ function subscribeSession(sessionId) {
   if (sessions.has(sessionId)) return;
   const session = sm.getSession(sessionId);
   if (!session) return;
+  const label = session.label;
+  const langfuseSessionId = _mapSessionId ? _mapSessionId(sessionId, label) : sessionId;
   const ss = {
     sessionId,
-    label: session.label,
+    langfuseSessionId,
+    label,
     currentTurn: null,
     turnCounter: 0,
     eventUnsub: null
@@ -444,7 +448,7 @@ function startTurn(ss, userMessage) {
   ];
   const trace = langfuseClient.trace({
     name: turnName,
-    sessionId: ss.sessionId,
+    sessionId: ss.langfuseSessionId,
     userId: _userEmail ?? _userId,
     input: userMessage,
     metadata: {
@@ -598,7 +602,7 @@ function endOrphanedSpans(turn) {
   }
   turn.pendingToolSpans.clear();
 }
-var langfuseClient, sessions, lifecycleUnsub, sm, _userId, _userEmail, _baseTags, _apiProxy;
+var langfuseClient, sessions, lifecycleUnsub, sm, _userId, _userEmail, _baseTags, _mapSessionId, _apiProxy;
 var init_langfuse_tracer = __esm({
   "src/lib/langfuse-tracer.ts"() {
     "use strict";
@@ -610,6 +614,7 @@ var init_langfuse_tracer = __esm({
     lifecycleUnsub = null;
     sm = null;
     _baseTags = [];
+    _mapSessionId = null;
     _apiProxy = null;
   }
 });

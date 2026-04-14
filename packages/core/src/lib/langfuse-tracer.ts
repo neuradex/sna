@@ -42,6 +42,8 @@ interface TurnTrace {
 /** Per-session state */
 interface SessionState {
   sessionId: string;
+  /** Langfuse sessionId (may differ from SNA sessionId if mapSessionId is set) */
+  langfuseSessionId: string;
   label: string;
   currentTurn: TurnTrace | null;
   turnCounter: number;
@@ -54,6 +56,7 @@ let sm: SessionManager | null = null;
 let _userId: string | undefined;
 let _userEmail: string | undefined;
 let _baseTags: string[] = [];
+let _mapSessionId: ((sessionId: string, label: string) => string) | null = null;
 let _apiProxy: { port: number; close: () => void } | null = null;
 
 /** Set the current user info for Langfuse traces. */
@@ -74,13 +77,21 @@ function logError(msg: string): void {
 // ── Public API ──────────────────────────────────────────────────────────────
 
 export async function initTracer(
-  config: { publicKey: string; secretKey: string; baseUrl?: string; tags?: string[] },
+  config: {
+    publicKey: string;
+    secretKey: string;
+    baseUrl?: string;
+    tags?: string[];
+    /** Map SNA sessionId + label to a custom Langfuse sessionId. */
+    mapSessionId?: (sessionId: string, label: string) => string;
+  },
   sessionManager: SessionManager,
   /** @deprecated onLog is ignored — langfuse logs now route through SDK logger */
   _onLog?: (msg: string) => void,
 ): Promise<void> {
   log(`init: publicKey=${config.publicKey.slice(0, 12)}..., baseUrl=${config.baseUrl ?? "default"}`);
   _baseTags = config.tags ?? [];
+  _mapSessionId = config.mapSessionId ?? null;
 
   try {
     const mod = await import("langfuse");
@@ -230,9 +241,15 @@ function subscribeSession(sessionId: string): void {
   const session = sm.getSession(sessionId);
   if (!session) return;
 
+  const label = session.label;
+  const langfuseSessionId = _mapSessionId
+    ? _mapSessionId(sessionId, label)
+    : sessionId;
+
   const ss: SessionState = {
     sessionId,
-    label: session.label,
+    langfuseSessionId,
+    label,
     currentTurn: null,
     turnCounter: 0,
     eventUnsub: null,
@@ -280,7 +297,7 @@ function startTurn(ss: SessionState, userMessage: string): void {
 
   const trace = langfuseClient.trace({
     name: turnName,
-    sessionId: ss.sessionId,
+    sessionId: ss.langfuseSessionId,
     userId: _userEmail ?? _userId,
     input: userMessage,
     metadata: {
