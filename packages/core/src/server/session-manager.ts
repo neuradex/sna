@@ -261,6 +261,20 @@ export class SessionManager {
         this.setSessionState(sessionId, session, "waiting");
       }
 
+      // Auto-create pending permission for providers with bidirectional approval
+      // (e.g. Codex JSON-RPC). Claude Code handles this via external hook script.
+      if (e.type === "permission_needed" && e.data?.requestId && proc.respondToPermission) {
+        const requestId = e.data.requestId as string;
+        this.createPendingPermission(sessionId, {
+          tool_name: e.data.toolName as string,
+          command: e.data.command,
+          path: e.data.path,
+          requestId,
+        }).then((approved) => {
+          proc.respondToPermission!(requestId, approved);
+        });
+      }
+
       // Persist to DB first — only persisted events increment the cursor.
       // This keeps eventCounter === DB row count, so history replay and
       // live cursors share the same monotonic sequence with no gaps or overlaps.

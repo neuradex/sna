@@ -146,6 +146,17 @@ class SessionManager {
       } else if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
         this.setSessionState(sessionId, session, "waiting");
       }
+      if (e.type === "permission_needed" && e.data?.requestId && proc.respondToPermission) {
+        const requestId = e.data.requestId;
+        this.createPendingPermission(sessionId, {
+          tool_name: e.data.toolName,
+          command: e.data.command,
+          path: e.data.path,
+          requestId
+        }).then((approved) => {
+          proc.respondToPermission(requestId, approved);
+        });
+      }
       const persisted = this.persistEvent(sessionId, e);
       if (persisted) {
         session.eventCounter++;

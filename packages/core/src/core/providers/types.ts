@@ -41,6 +41,12 @@ export interface AgentProcess {
   setModel(model: string): void;
   /** Change permission mode at runtime via control message. No restart needed. */
   setPermissionMode(mode: string): void;
+  /**
+   * Respond to a permission request from the agent.
+   * Used by providers with bidirectional approval flow (e.g. Codex JSON-RPC).
+   * No-op for providers that handle permissions externally (e.g. Claude Code hooks).
+   */
+  respondToPermission?(requestId: string, approved: boolean): void;
   /** Kill the agent process. */
   kill(): void;
   /** Whether the process is still running. */

@@ -1,18 +1,22 @@
 import { AgentProvider, SpawnOptions, AgentProcess } from './types.js';
 
-/**
- * Codex provider stub.
- *
- * Codex uses JSONL output: `codex exec --json "prompt"`
- * Event types: thread.started, turn.started, turn.completed,
- *              turn.failed, item.completed, error
- *
- * Not yet implemented — placeholder to validate the provider interface.
- */
+declare function validateCodexPath(codexPath: string): {
+    ok: boolean;
+    version?: string;
+};
+declare function cacheCodexPath(codexPath: string, cacheDir?: string): void;
+interface CodexResolveResult {
+    path: string;
+    version?: string;
+    source: "env" | "cache" | "static" | "shell" | "fallback";
+}
+declare function resolveCodexCli(opts?: {
+    cacheDir?: string;
+}): CodexResolveResult;
 declare class CodexProvider implements AgentProvider {
     readonly name = "codex";
     isAvailable(): Promise<boolean>;
-    spawn(_options: SpawnOptions): AgentProcess;
+    spawn(options: SpawnOptions): AgentProcess;
 }
 
-export { CodexProvider };
+export { CodexProvider, type CodexResolveResult, cacheCodexPath, resolveCodexCli, validateCodexPath };

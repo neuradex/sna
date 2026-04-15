@@ -986,15 +986,812 @@ var ClaudeCodeProvider = class {
 };
 
 // src/core/providers/codex.ts
+import { spawn as spawn3, execSync as execSync2 } from "child_process";
+import { EventEmitter as EventEmitter2 } from "events";
+import fs5 from "fs";
+import path6 from "path";
+import { fileURLToPath as fileURLToPath2 } from "url";
+var SHELL2 = process.env.SHELL || "/bin/zsh";
+function validateCodexPath(codexPath) {
+  try {
+    const codexDir = path6.dirname(codexPath);
+    const env = { ...process.env, PATH: `${codexDir}:${process.env.PATH ?? ""}` };
+    const out = execSync2(`"${codexPath}" --version`, {
+      encoding: "utf8",
+      stdio: "pipe",
+      timeout: 1e4,
+      env
+    }).trim();
+    return { ok: true, version: out.split("\n")[0].slice(0, 50) };
+  } catch {
+    return { ok: false };
+  }
+}
+function cacheCodexPath(codexPath, cacheDir) {
+  const dir = cacheDir ?? path6.join(process.cwd(), ".sna");
+  try {
+    if (!fs5.existsSync(dir)) fs5.mkdirSync(dir, { recursive: true });
+    fs5.writeFileSync(path6.join(dir, "codex-path"), codexPath);
+  } catch {
+  }
+}
+function resolveCodexCli(opts) {
+  const cacheDir = opts?.cacheDir;
+  if (process.env.SNA_CODEX_COMMAND) {
+    const v = validateCodexPath(process.env.SNA_CODEX_COMMAND);
+    return { path: process.env.SNA_CODEX_COMMAND, version: v.version, source: "env" };
+  }
+  const cacheFile = cacheDir ? path6.join(cacheDir, "codex-path") : path6.join(process.cwd(), ".sna/codex-path");
+  try {
+    const cached = fs5.readFileSync(cacheFile, "utf8").trim();
+    if (cached) {
+      const v = validateCodexPath(cached);
+      if (v.ok) return { path: cached, version: v.version, source: "cache" };
+    }
+  } catch {
+  }
+  const staticPaths = [
+    "/opt/homebrew/bin/codex",
+    "/usr/local/bin/codex",
+    `${process.env.HOME}/.local/bin/codex`,
+    `${process.env.HOME}/.cargo/bin/codex`,
+    `${process.env.HOME}/.codex/bin/codex`
+  ];
+  for (const p of staticPaths) {
+    const v = validateCodexPath(p);
+    if (v.ok) {
+      cacheCodexPath(p, cacheDir);
+      return { path: p, version: v.version, source: "static" };
+    }
+  }
+  try {
+    const raw = execSync2(`${SHELL2} -i -l -c "command -v codex" 2>/dev/null`, {
+      encoding: "utf8",
+      timeout: 5e3
+    }).trim();
+    if (raw && raw !== "codex" && raw.startsWith("/")) {
+      const v = validateCodexPath(raw);
+      if (v.ok) {
+        cacheCodexPath(raw, cacheDir);
+        return { path: raw, version: v.version, source: "shell" };
+      }
+    }
+  } catch {
+  }
+  return { path: "codex", source: "fallback" };
+}
+function resolveCodexPath(cwd) {
+  const result = resolveCodexCli({ cacheDir: path6.join(cwd, ".sna") });
+  logger.log("agent", `codex path: ${result.source}=${result.path}${result.version ? ` (${result.version})` : ""}`);
+  return result.path;
+}
+function toCodexSandbox(mode) {
+  switch (mode) {
+    case "bypassPermissions":
+      return "danger-full-access";
+    case "acceptEdits":
+      return "workspace-write";
+    default:
+      return "read-only";
+  }
+}
+function buildHistoryContext(history) {
+  const turns = history.map(
+    (msg) => `<${msg.role}>
+${msg.content}
+</${msg.role}>`
+  ).join("\n\n");
+  return `<conversation-history>
+The following is our previous conversation. Use it as context.
+
+${turns}
+</conversation-history>
+
+`;
+}
+function extractResumeArg(extraArgs) {
+  if (!extraArgs) return null;
+  const idx = extraArgs.indexOf("--resume");
+  if (idx === -1) return null;
+  const threadId = extraArgs[idx + 1];
+  if (!threadId || threadId.startsWith("--")) return null;
+  const cleanArgs = [...extraArgs];
+  cleanArgs.splice(idx, 2);
+  return { threadId, cleanArgs };
+}
+function extractSystemPromptArgs(extraArgs) {
+  if (!extraArgs) return { cleanArgs: [] };
+  const cleanArgs = [...extraArgs];
+  let baseInstructions;
+  let developerInstructions;
+  const sysIdx = cleanArgs.indexOf("--system-prompt");
+  if (sysIdx !== -1 && sysIdx + 1 < cleanArgs.length) {
+    baseInstructions = cleanArgs[sysIdx + 1];
+    cleanArgs.splice(sysIdx, 2);
+  }
+  const appendIdx = cleanArgs.indexOf("--append-system-prompt");
+  if (appendIdx !== -1 && appendIdx + 1 < cleanArgs.length) {
+    developerInstructions = cleanArgs[appendIdx + 1];
+    cleanArgs.splice(appendIdx, 2);
+  }
+  return { baseInstructions, developerInstructions, cleanArgs };
+}
+var rpcIdCounter = 0;
+function rpcRequest(method, params) {
+  return { method, id: ++rpcIdCounter, params: params ?? {} };
+}
+function rpcNotification(method, params) {
+  return { method, params: params ?? {} };
+}
+var _CodexProcess = class _CodexProcess {
+  constructor(proc, options) {
+    this.options = options;
+    this.emitter = new EventEmitter2();
+    this._alive = true;
+    this._sessionId = null;
+    this._threadId = null;
+    this._initEmitted = false;
+    this.buffer = "";
+    this.pendingResponses = /* @__PURE__ */ new Map();
+    /** Maps permission requestId → JSON-RPC server request id for approval responses. */
+    this.pendingServerRequests = /* @__PURE__ */ new Map();
+    this._ready = false;
+    this._pendingSend = [];
+    /** Set when interrupt() is called — causes queue to fast-drain delta events. */
+    this._interrupted = false;
+    /** Set after the interrupted event is emitted — prevents duplicate. */
+    this._interruptedEmitted = false;
+    /** Current active turnId — needed for turn/interrupt. */
+    this._currentTurnId = null;
+    /** Accumulated token usage from tokenUsage/updated notifications. */
+    this._lastUsage = null;
+    /** FIFO event queue for ordered emission. */
+    this.eventQueue = [];
+    this.drainTimer = null;
+    this.proc = proc;
+    proc.stdout.on("data", (chunk) => {
+      this.buffer += chunk.toString();
+      const lines = this.buffer.split("\n");
+      this.buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        logger.log("stdout", line.slice(0, 300));
+        try {
+          const msg = JSON.parse(line);
+          this.handleMessage(msg);
+        } catch {
+        }
+      }
+    });
+    proc.stderr.on("data", () => {
+    });
+    proc.on("exit", (code) => {
+      this._alive = false;
+      if (this.buffer.trim()) {
+        try {
+          const msg = JSON.parse(this.buffer);
+          this.handleMessage(msg);
+        } catch {
+        }
+      }
+      this.flushQueue();
+      this.emitter.emit("exit", code);
+      logger.log("agent", `codex process exited (code=${code})`);
+    });
+    proc.on("error", (err2) => {
+      this._alive = false;
+      this.emitter.emit("error", err2);
+    });
+    this.initialize();
+  }
+  enqueue(event) {
+    if (this._interrupted) {
+      if (event.type === "assistant_delta" || event.type === "thinking_delta") return;
+      this.emitter.emit("event", event);
+      if (event.type === "interrupted" || event.type === "complete") {
+        this._interrupted = false;
+        this.eventQueue = this.eventQueue.filter(
+          (e) => e.type !== "assistant_delta" && e.type !== "thinking_delta"
+        );
+        this.flushQueue();
+      }
+      return;
+    }
+    this.eventQueue.push(event);
+    if (!this.drainTimer) {
+      this.drainTimer = setInterval(() => this.drainOne(), _CodexProcess.DRAIN_INTERVAL_MS);
+    }
+  }
+  drainOne() {
+    const event = this.eventQueue.shift();
+    if (event) this.emitter.emit("event", event);
+    if (this.eventQueue.length === 0 && this.drainTimer) {
+      clearInterval(this.drainTimer);
+      this.drainTimer = null;
+    }
+  }
+  flushQueue() {
+    if (this.drainTimer) {
+      clearInterval(this.drainTimer);
+      this.drainTimer = null;
+    }
+    while (this.eventQueue.length > 0) {
+      this.emitter.emit("event", this.eventQueue.shift());
+    }
+  }
+  get alive() {
+    return this._alive;
+  }
+  get pid() {
+    return this.proc.pid ?? null;
+  }
+  get sessionId() {
+    return this._sessionId;
+  }
+  // ── JSON-RPC communication ──────────────────────────────────────────────
+  write(msg) {
+    if (!this._alive || !this.proc.stdin.writable) return;
+    const line = JSON.stringify(msg);
+    logger.log("stdin", line.slice(0, 200));
+    this.proc.stdin.write(line + "\n");
+  }
+  sendRpc(method, params) {
+    return new Promise((resolve) => {
+      const req = rpcRequest(method, params);
+      this.pendingResponses.set(req.id, resolve);
+      this.write(req);
+    });
+  }
+  sendNotification(method, params) {
+    this.write(rpcNotification(method, params));
+  }
+  handleMessage(msg) {
+    if (msg.id != null && !msg.method && (msg.result !== void 0 || msg.error !== void 0)) {
+      const handler = this.pendingResponses.get(msg.id);
+      if (handler) {
+        this.pendingResponses.delete(msg.id);
+        if (msg.error) {
+          handler({ _error: true, ...msg.error });
+        } else {
+          handler(msg.result);
+        }
+      }
+      return;
+    }
+    if (msg.method && msg.id != null) {
+      this.handleServerRequest(msg.method, msg.id, msg.params ?? {});
+      return;
+    }
+    if (msg.method) {
+      const event = this.normalizeNotification(msg.method, msg.params ?? {});
+      if (event) this.enqueue(event);
+      return;
+    }
+  }
+  /**
+   * Handle a JSON-RPC server request (Codex asking the client for a decision).
+   * Stores the rpcId so we can respond later via respondToPermission().
+   */
+  handleServerRequest(method, rpcId, params) {
+    if (method === "item/commandExecution/requestApproval" || method === "item/fileChange/requestApproval") {
+      const requestId = params.itemId ?? params.id ?? `perm-${rpcId}`;
+      this.pendingServerRequests.set(requestId, rpcId);
+      const isFileChange = method.includes("fileChange");
+      this.enqueue({
+        type: "permission_needed",
+        message: isFileChange ? `File change: ${params.path ?? "unknown"}` : `Command: ${params.command ?? "unknown"}`,
+        data: {
+          requestId,
+          toolName: isFileChange ? "file_change" : "shell",
+          command: params.command,
+          path: params.path,
+          itemId: params.itemId
+        },
+        timestamp: Date.now()
+      });
+      return;
+    }
+    logger.log("agent", `codex unknown server request: ${method} (id=${rpcId})`);
+    this.write({ id: rpcId, result: {} });
+  }
+  // ── Initialization handshake ────────────────────────────────────────────
+  async initialize() {
+    try {
+      await this.sendRpc("initialize", {
+        clientInfo: { name: "sna", title: "SNA SDK", version: "1.0.0" },
+        capabilities: { experimentalApi: true }
+      });
+      this.sendNotification("initialized");
+      const resumeInfo = extractResumeArg(this.options.extraArgs);
+      const sysPrompt = extractSystemPromptArgs(
+        resumeInfo ? resumeInfo.cleanArgs : this.options.extraArgs
+      );
+      const sandbox = toCodexSandbox(this.options.permissionMode);
+      const threadParams = {
+        sandbox,
+        ...this.options.model ? { model: this.options.model } : {},
+        ...sysPrompt.baseInstructions ? { baseInstructions: sysPrompt.baseInstructions } : {},
+        ...sysPrompt.developerInstructions ? { developerInstructions: sysPrompt.developerInstructions } : {}
+      };
+      if (resumeInfo?.threadId) {
+        const resumeResult = await this.sendRpc("thread/resume", {
+          threadId: resumeInfo.threadId,
+          ...sysPrompt.baseInstructions ? { baseInstructions: sysPrompt.baseInstructions } : {},
+          ...sysPrompt.developerInstructions ? { developerInstructions: sysPrompt.developerInstructions } : {}
+        });
+        if (resumeResult?._error) {
+          logger.log("agent", `codex: resume failed (${resumeResult.message ?? "unknown"}), starting new thread`);
+          const threadResult = await this.sendRpc("thread/start", threadParams);
+          this._threadId = threadResult?.threadId ?? threadResult?.thread?.id ?? null;
+        } else {
+          this._threadId = resumeResult?.thread?.id ?? resumeInfo.threadId;
+          logger.log("agent", `codex: resumed thread ${this._threadId}`);
+        }
+      } else {
+        const threadResult = await this.sendRpc("thread/start", threadParams);
+        this._threadId = threadResult?.threadId ?? threadResult?.thread?.id ?? null;
+      }
+      this._sessionId = this._threadId;
+      this._ready = true;
+      if (!this._initEmitted) {
+        this._initEmitted = true;
+        this.enqueue({
+          type: "init",
+          message: `Codex ready (thread=${this._threadId})`,
+          data: { sessionId: this._threadId, provider: "codex" },
+          timestamp: Date.now()
+        });
+      }
+      let prompt = this.options.prompt;
+      if (this.options.history?.length && prompt) {
+        const context = buildHistoryContext(this.options.history);
+        prompt = context + prompt;
+        logger.log("agent", `codex: injected ${this.options.history.length} history messages as context`);
+      } else if (this.options.history?.length && !prompt) {
+        const context = buildHistoryContext(this.options.history);
+        prompt = context + "Continue from where we left off. What would you like to do next?";
+        logger.log("agent", `codex: injected ${this.options.history.length} history messages (no prompt)`);
+      }
+      if (prompt) {
+        this.startTurn(prompt);
+      }
+      for (const fn of this._pendingSend) fn();
+      this._pendingSend = [];
+    } catch (err2) {
+      logger.err("agent", `codex init failed:`, err2);
+      this.enqueue({
+        type: "error",
+        message: `Codex initialization failed: ${err2}`,
+        timestamp: Date.now()
+      });
+    }
+  }
+  startTurn(input) {
+    if (!this._threadId) return;
+    const contentBlocks = typeof input === "string" ? [{ type: "text", text: input }] : input.map((b) => {
+      if (b.type === "text") return { type: "text", text: b.text };
+      const src = b.source;
+      const url = `data:${src.media_type};base64,${src.data}`;
+      return { type: "image", url };
+    });
+    this.sendRpc("turn/start", {
+      threadId: this._threadId,
+      input: contentBlocks
+    }).then((result) => {
+      if (result?.turn?.id) this._currentTurnId = result.turn.id;
+    }).catch((err2) => {
+      logger.err("agent", "turn/start failed:", err2);
+    });
+  }
+  // ── Public AgentProcess API ─────────────────────────────────────────────
+  send(input) {
+    if (!this._alive) return;
+    if (!this._ready) {
+      this._pendingSend.push(() => this.startTurn(input));
+      return;
+    }
+    this.startTurn(input);
+  }
+  interrupt() {
+    if (!this._alive || !this._threadId) return;
+    this._interrupted = true;
+    const params = { threadId: this._threadId };
+    if (this._currentTurnId) params.turnId = this._currentTurnId;
+    this.sendRpc("turn/interrupt", params).then((result) => {
+      logger.log("agent", `codex: turn/interrupt response: ${JSON.stringify(result).slice(0, 300)}`);
+      this._interruptedEmitted = true;
+      this.enqueue({
+        type: "interrupted",
+        message: "Turn interrupted by user",
+        data: {
+          durationMs: result?.turn?.durationMs ?? result?.durationMs,
+          provider: "codex"
+        },
+        timestamp: Date.now()
+      });
+    }).catch((err2) => {
+      logger.err("agent", `codex: turn/interrupt failed:`, err2);
+      this.enqueue({
+        type: "interrupted",
+        message: "Turn interrupted",
+        data: { provider: "codex" },
+        timestamp: Date.now()
+      });
+    });
+  }
+  setModel(_model) {
+    logger.log("agent", "codex: setModel ignored (set at thread creation)");
+  }
+  setPermissionMode(_mode) {
+    logger.log("agent", "codex: setPermissionMode ignored (set at thread creation)");
+  }
+  /**
+   * Respond to a pending permission request from Codex.
+   * Sends JSON-RPC response back via stdin to approve/deny the tool execution.
+   */
+  /**
+   * Respond to a pending permission request from Codex.
+   * Codex expects: { id, result: { decision: "accept"|"decline" } }
+   */
+  respondToPermission(requestId, approved) {
+    const rpcId = this.pendingServerRequests.get(requestId);
+    if (rpcId == null) {
+      logger.log("agent", `codex: no pending server request for ${requestId}`);
+      return;
+    }
+    this.pendingServerRequests.delete(requestId);
+    const decision = approved ? "accept" : "decline";
+    this.write({ id: rpcId, result: { decision } });
+    logger.log("agent", `codex: permission ${decision} (rpcId=${rpcId}, requestId=${requestId})`);
+  }
+  kill() {
+    if (this._alive) {
+      this._alive = false;
+      this.proc.kill("SIGTERM");
+    }
+  }
+  on(event, handler) {
+    this.emitter.on(event, handler);
+  }
+  off(event, handler) {
+    this.emitter.off(event, handler);
+  }
+  // ── Event normalization ─────────────────────────────────────────────────
+  normalizeNotification(method, params) {
+    switch (method) {
+      // ── Thread lifecycle ─────────────────────────────────────────────
+      case "thread/started":
+        if (params.thread?.id) this._threadId = params.thread.id;
+        return null;
+      case "thread/closed":
+      case "thread/archived":
+        return null;
+      // ── Turn lifecycle ───────────────────────────────────────────────
+      case "turn/started":
+        if (params.turn?.id) this._currentTurnId = params.turn.id;
+        this._interrupted = false;
+        this._interruptedEmitted = false;
+        return null;
+      case "turn/completed": {
+        this._currentTurnId = null;
+        const turn = params.turn ?? params;
+        if (turn.status === "interrupted" && this._interruptedEmitted) {
+          this._interruptedEmitted = false;
+          this._lastUsage = null;
+          return null;
+        }
+        const usage = this._lastUsage ?? {};
+        const event = {
+          type: turn.status === "interrupted" ? "interrupted" : "complete",
+          message: turn.status === "failed" ? turn.error?.message ?? "Turn failed" : "Done",
+          data: {
+            durationMs: turn.durationMs ?? turn.duration_ms,
+            inputTokens: usage.inputTokens ?? 0,
+            outputTokens: usage.outputTokens ?? 0,
+            cacheReadTokens: usage.cachedInputTokens ?? 0,
+            provider: "codex"
+          },
+          timestamp: Date.now()
+        };
+        this._lastUsage = null;
+        return event;
+      }
+      // ── Item events ──────────────────────────────────────────────────
+      case "item/started": {
+        const item = params.item ?? params;
+        return this.normalizeItemStarted(item);
+      }
+      case "item/completed": {
+        const item = params.item ?? params;
+        return this.normalizeItemCompleted(item);
+      }
+      // ── Streaming deltas ─────────────────────────────────────────────
+      case "item/agentMessage/delta":
+        return {
+          type: "assistant_delta",
+          delta: params.delta ?? params.text ?? "",
+          index: 0,
+          timestamp: Date.now()
+        };
+      case "item/reasoning/summaryTextDelta":
+        return {
+          type: "thinking_delta",
+          message: params.delta ?? params.text ?? "",
+          timestamp: Date.now()
+        };
+      case "item/commandExecution/outputDelta":
+        return {
+          type: "tool_use",
+          message: "shell",
+          data: {
+            toolName: "shell",
+            id: params.itemId,
+            outputDelta: params.delta,
+            update: true
+          },
+          timestamp: Date.now()
+        };
+      // ── Approval requests (fallback for notifications without id) ───
+      // Server requests (with id) are handled in handleServerRequest().
+      case "item/commandExecution/requestApproval":
+      case "item/fileChange/requestApproval":
+        return null;
+      // handled as server request
+      case "item/fileChange/outputDelta":
+        return null;
+      // patch output — skip
+      // ── Token usage tracking ─────────────────────────────────────────
+      case "thread/tokenUsage/updated": {
+        const usage = params.tokenUsage ?? {};
+        const tu = usage.last ?? usage.total ?? {};
+        this._lastUsage = {
+          inputTokens: tu.inputTokens ?? tu.input_tokens ?? 0,
+          outputTokens: tu.outputTokens ?? tu.output_tokens ?? 0,
+          cachedInputTokens: tu.cachedInputTokens ?? tu.cached_input_tokens ?? 0
+        };
+        return null;
+      }
+      // ── Informational (no-op) ──────────────────────────────────────────
+      case "turn/diff/updated":
+      case "turn/plan/updated":
+      case "thread/name/updated":
+      case "thread/status/changed":
+      case "model/rerouted":
+      case "skills/changed":
+      case "mcpServer/startupStatus/updated":
+      case "account/rateLimits/updated":
+        return null;
+      // ── Error ────────────────────────────────────────────────────────
+      case "error":
+        return {
+          type: "error",
+          message: params.message ?? params.error ?? "Unknown codex error",
+          timestamp: Date.now()
+        };
+      default:
+        logger.log("agent", `codex unhandled notification: ${method}`, JSON.stringify(params).substring(0, 200));
+        return null;
+    }
+  }
+  normalizeItemStarted(item) {
+    switch (item.type) {
+      case "command_execution":
+      case "commandExecution":
+        return {
+          type: "tool_use",
+          message: "shell",
+          data: {
+            toolName: "shell",
+            id: item.id,
+            command: item.command,
+            streaming: true
+          },
+          timestamp: Date.now()
+        };
+      case "file_change":
+      case "fileChange":
+        return {
+          type: "tool_use",
+          message: "file_change",
+          data: {
+            toolName: "file_change",
+            id: item.id,
+            changes: item.changes,
+            streaming: true
+          },
+          timestamp: Date.now()
+        };
+      case "mcp_tool_call":
+      case "mcpToolCall":
+        return {
+          type: "tool_use",
+          message: `${item.server}:${item.tool}`,
+          data: {
+            toolName: `${item.server}:${item.tool}`,
+            id: item.id,
+            input: item.arguments,
+            streaming: true
+          },
+          timestamp: Date.now()
+        };
+      case "web_search":
+      case "webSearch":
+        return {
+          type: "tool_use",
+          message: "web_search",
+          data: { toolName: "web_search", id: item.id, query: item.query },
+          timestamp: Date.now()
+        };
+      case "userMessage":
+      case "user_message":
+        return null;
+      // echo of user input — skip
+      default:
+        return null;
+    }
+  }
+  normalizeItemCompleted(item) {
+    switch (item.type) {
+      case "agent_message":
+      case "agentMessage":
+        return {
+          type: "assistant",
+          message: item.text ?? "",
+          timestamp: Date.now()
+        };
+      case "reasoning":
+        return {
+          type: "thinking",
+          message: item.text ?? "",
+          timestamp: Date.now()
+        };
+      case "command_execution":
+      case "commandExecution":
+        return {
+          type: "tool_result",
+          message: item.aggregated_output ?? item.aggregatedOutput ?? "",
+          data: {
+            toolName: "shell",
+            id: item.id,
+            exitCode: item.exit_code ?? item.exitCode,
+            status: item.status,
+            isError: item.status === "failed" || item.status === "declined"
+          },
+          timestamp: Date.now()
+        };
+      case "file_change":
+      case "fileChange":
+        return {
+          type: "tool_result",
+          message: `File changes ${item.status}`,
+          data: {
+            toolName: "file_change",
+            id: item.id,
+            changes: item.changes,
+            status: item.status,
+            isError: item.status === "failed"
+          },
+          timestamp: Date.now()
+        };
+      case "mcp_tool_call":
+      case "mcpToolCall":
+        return {
+          type: "tool_result",
+          message: item.result ? JSON.stringify(item.result).slice(0, 500) : item.error?.message ?? "",
+          data: {
+            toolName: `${item.server}:${item.tool}`,
+            id: item.id,
+            isError: !!item.error || item.status === "failed"
+          },
+          timestamp: Date.now()
+        };
+      case "web_search":
+      case "webSearch":
+        return {
+          type: "tool_result",
+          message: "Web search completed",
+          data: { toolName: "web_search", id: item.id },
+          timestamp: Date.now()
+        };
+      case "todo_list":
+      case "todoList":
+        return null;
+      // internal tracking
+      case "error":
+        return {
+          type: "error",
+          message: item.message ?? "Item error",
+          timestamp: Date.now()
+        };
+      default:
+        return null;
+    }
+  }
+};
+_CodexProcess.DRAIN_INTERVAL_MS = 15;
+var CodexProcess = _CodexProcess;
 var CodexProvider = class {
   constructor() {
     this.name = "codex";
   }
   async isAvailable() {
-    return false;
+    try {
+      const result = resolveCodexCli();
+      if (result.source === "fallback") return false;
+      return result.version != null;
+    } catch {
+      return false;
+    }
   }
-  spawn(_options) {
-    throw new Error("Codex provider not yet implemented");
+  spawn(options) {
+    const codexPath = resolveCodexPath(options.cwd);
+    const args = ["app-server"];
+    const cleanEnv = { ...process.env, ...options.env };
+    const codexHome = options.configDir ?? path6.join(options.cwd, ".sna", "codex-home");
+    if (!fs5.existsSync(codexHome)) {
+      fs5.mkdirSync(codexHome, { recursive: true });
+    }
+    const realCodexHome = `${process.env.HOME}/.codex`;
+    for (const f of ["auth.json", "installation_id"]) {
+      const src = path6.join(realCodexHome, f);
+      const dst = path6.join(codexHome, f);
+      if (fs5.existsSync(src) && !fs5.existsSync(dst)) {
+        fs5.copyFileSync(src, dst);
+      }
+    }
+    const configTomlPath = path6.join(codexHome, "config.toml");
+    if (!fs5.existsSync(configTomlPath)) {
+      const realConfig = path6.join(realCodexHome, "config.toml");
+      if (fs5.existsSync(realConfig)) {
+        fs5.copyFileSync(realConfig, configTomlPath);
+      }
+    }
+    cleanEnv.CODEX_HOME = codexHome;
+    if (options.permissionMode !== "bypassPermissions") {
+      let pkgRoot = path6.dirname(fileURLToPath2(import.meta.url));
+      while (!fs5.existsSync(path6.join(pkgRoot, "package.json"))) {
+        const parent = path6.dirname(pkgRoot);
+        if (parent === pkgRoot) break;
+        pkgRoot = parent;
+      }
+      const hookScript = path6.join(pkgRoot, "dist", "scripts", "hook.js");
+      const sessionId = options.env?.SNA_SESSION_ID ?? "default";
+      const hooksJson = {
+        hooks: {
+          PreToolUse: [{
+            matcher: ".*",
+            hooks: [{
+              type: "command",
+              command: `node "${hookScript}" --session=${sessionId}`,
+              timeout: 300
+            }]
+          }]
+        }
+      };
+      fs5.writeFileSync(path6.join(codexHome, "hooks.json"), JSON.stringify(hooksJson));
+      const existingConfig = fs5.readFileSync(configTomlPath, "utf8");
+      if (!existingConfig.includes("codex_hooks")) {
+        fs5.appendFileSync(configTomlPath, "\n[features]\ncodex_hooks = true\n");
+      }
+      logger.log("agent", `codex: hooks injected \u2192 ${hookScript} --session=${sessionId}`);
+    }
+    logger.log("agent", `codex: CODEX_HOME=${codexHome}`);
+    const codexDir = path6.dirname(codexPath);
+    if (codexDir && codexDir !== ".") {
+      cleanEnv.PATH = `${codexDir}:${cleanEnv.PATH ?? ""}`;
+    }
+    const resumeInfo = extractResumeArg(options.extraArgs);
+    const sysInfo = extractSystemPromptArgs(resumeInfo ? resumeInfo.cleanArgs : options.extraArgs);
+    if (sysInfo.cleanArgs.length) {
+      args.push(...sysInfo.cleanArgs);
+    }
+    const proc = spawn3(codexPath, args, {
+      cwd: options.cwd,
+      env: cleanEnv,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    logger.log("agent", `spawned codex app-server (pid=${proc.pid}) \u2192 ${codexPath} ${args.join(" ")}`);
+    return new CodexProcess(proc, options);
   }
 };
 
@@ -1033,11 +1830,11 @@ function buildHistoryFromDb(sessionId) {
 }
 
 // src/server/image-store.ts
-import fs5 from "fs";
-import path6 from "path";
+import fs6 from "fs";
+import path7 from "path";
 import { createHash } from "crypto";
 function getImageDir() {
-  return path6.join(getConfig().dataDir, "images");
+  return path7.join(getConfig().dataDir, "images");
 }
 var MIME_TO_EXT = {
   "image/png": "png",
@@ -1047,27 +1844,27 @@ var MIME_TO_EXT = {
   "image/svg+xml": "svg"
 };
 function saveImages(sessionId, images) {
-  const dir = path6.join(getImageDir(), sessionId);
-  fs5.mkdirSync(dir, { recursive: true });
+  const dir = path7.join(getImageDir(), sessionId);
+  fs6.mkdirSync(dir, { recursive: true });
   return images.map((img) => {
     const ext = MIME_TO_EXT[img.mimeType] ?? "bin";
     const hash = createHash("sha256").update(img.base64).digest("hex").slice(0, 12);
     const filename = `${hash}.${ext}`;
-    const filePath = path6.join(dir, filename);
-    if (!fs5.existsSync(filePath)) {
-      fs5.writeFileSync(filePath, Buffer.from(img.base64, "base64"));
+    const filePath = path7.join(dir, filename);
+    if (!fs6.existsSync(filePath)) {
+      fs6.writeFileSync(filePath, Buffer.from(img.base64, "base64"));
     }
     return filename;
   });
 }
 function resolveImagePath(sessionId, filename) {
   if (filename.includes("..") || filename.includes("/")) return null;
-  const filePath = path6.join(getImageDir(), sessionId, filename);
-  return fs5.existsSync(filePath) ? filePath : null;
+  const filePath = path7.join(getImageDir(), sessionId, filename);
+  return fs6.existsSync(filePath) ? filePath : null;
 }
 
 // src/core/completion.ts
-import { spawn as spawn3 } from "child_process";
+import { spawn as spawn4 } from "child_process";
 
 // src/lib/langfuse-tracer.ts
 var langfuseClient = null;
@@ -1126,6 +1923,13 @@ function traceCompletion(opts) {
 
 // src/core/completion.ts
 async function completion(opts) {
+  const providerName = opts.provider ?? getConfig().defaultProvider;
+  if (providerName === "codex") {
+    return completionCodex(opts);
+  }
+  return completionClaudeCode(opts);
+}
+function completionClaudeCode(opts) {
   const cwd = opts.cwd ?? process.cwd();
   const resolved = resolveClaudeCli({ cacheDir: void 0 });
   const claudeParts = resolved.path.split(/\s+/);
@@ -1155,10 +1959,10 @@ async function completion(opts) {
   delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
   const label = opts.label ?? "completion";
   const timeout = opts.timeout ?? 6e4;
-  logger.log("agent", `completion: ${label} model=${model ?? "default"} prompt="${opts.prompt.slice(0, 60)}..."`);
+  logger.log("agent", `completion: ${label} provider=claude-code model=${model ?? "default"} prompt="${opts.prompt.slice(0, 60)}..."`);
   const trace = traceCompletion({ label, model, input: opts.prompt });
   return new Promise((resolve, reject) => {
-    const proc = spawn3(claudePath, args, {
+    const proc = spawn4(claudePath, args, {
       cwd,
       env: cleanEnv,
       stdio: ["pipe", "pipe", "pipe"]
@@ -1218,6 +2022,113 @@ async function completion(opts) {
       resolve(result);
     });
     proc.stdin.end();
+  });
+}
+function completionCodex(opts) {
+  const cwd = opts.cwd ?? process.cwd();
+  const resolved = resolveCodexCli();
+  const codexPath = resolved.path;
+  const args = ["exec", "--json", "--ephemeral", "--full-auto"];
+  if (opts.model) args.push("--model", opts.model);
+  if (opts.extraArgs) args.push(...opts.extraArgs);
+  const instructions = [opts.systemPrompt, opts.appendSystemPrompt].filter(Boolean).join("\n\n");
+  if (instructions) {
+    args.push("-c", `developer_instructions=${JSON.stringify(instructions)}`);
+  }
+  const prompt = opts.prompt;
+  args.push(prompt);
+  const cleanEnv = { ...process.env, ...opts.env };
+  const codexDir = codexPath.includes("/") ? codexPath.slice(0, codexPath.lastIndexOf("/")) : "";
+  if (codexDir && codexDir !== ".") {
+    cleanEnv.PATH = `${codexDir}:${cleanEnv.PATH ?? ""}`;
+  }
+  const label = opts.label ?? "completion";
+  const timeout = opts.timeout ?? 6e4;
+  const model = opts.model ?? "codex-default";
+  logger.log("agent", `completion: ${label} provider=codex model=${model} prompt="${opts.prompt.slice(0, 60)}..."`);
+  const trace = traceCompletion({ label, model, input: opts.prompt });
+  const startTime = Date.now();
+  return new Promise((resolve, reject) => {
+    const proc = spawn4(codexPath, args, {
+      cwd,
+      env: cleanEnv,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      proc.kill();
+      const err2 = new Error(`completion timed out after ${timeout}ms`);
+      trace?.error(err2);
+      reject(err2);
+    }, timeout);
+    proc.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    proc.on("error", (err2) => {
+      clearTimeout(timer);
+      trace?.error(err2);
+      reject(new Error(`completion spawn error: ${err2.message}`));
+    });
+    proc.stdin.end();
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      const durationMs = Date.now() - startTime;
+      const lines = stdout.trim().split("\n").filter((l) => l.trim());
+      const events = [];
+      for (const line of lines) {
+        try {
+          events.push(JSON.parse(line));
+        } catch {
+        }
+      }
+      let text = "";
+      for (const evt of events) {
+        if (evt.type === "item.completed" && evt.item?.type === "agent_message") {
+          text = evt.item.text ?? "";
+        }
+      }
+      let usage = { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 };
+      for (const evt of events) {
+        if (evt.type === "turn.completed" && evt.usage) {
+          usage = evt.usage;
+        }
+      }
+      const errorEvent = events.find((e) => e.type === "turn.failed" || e.type === "error");
+      if (errorEvent) {
+        const err2 = new Error(`completion error: ${errorEvent.error?.message ?? "unknown"}`);
+        trace?.error(err2);
+        reject(err2);
+        return;
+      }
+      if (!text && code !== 0) {
+        const err2 = new Error(`completion: codex exited with code ${code}: ${stderr.slice(0, 200)}`);
+        trace?.error(err2);
+        reject(err2);
+        return;
+      }
+      const result = {
+        text,
+        usage: {
+          inputTokens: usage.input_tokens,
+          outputTokens: usage.output_tokens,
+          cacheReadTokens: usage.cached_input_tokens,
+          cacheCreationTokens: 0
+        },
+        costUsd: 0,
+        // Codex doesn't return cost
+        durationMs,
+        durationApiMs: durationMs,
+        // no separate API duration
+        model: model ?? "codex"
+      };
+      logger.log("agent", `completion done: ${label} ${result.durationMs}ms in=${result.usage.inputTokens} out=${result.usage.outputTokens}`);
+      trace?.end(result);
+      resolve(result);
+    });
   });
 }
 
@@ -1678,7 +2589,7 @@ function createAgentRoutes(sessionManager2) {
 
 // src/server/routes/chat.ts
 import { Hono as Hono2 } from "hono";
-import fs6 from "fs";
+import fs7 from "fs";
 function createChatRoutes() {
   const app = new Hono2();
   app.get("/sessions", (c) => {
@@ -1796,7 +2707,7 @@ function createChatRoutes() {
       svg: "image/svg+xml"
     };
     const contentType = mimeMap[ext ?? ""] ?? "application/octet-stream";
-    const data = fs6.readFileSync(filePath);
+    const data = fs7.readFileSync(filePath);
     return new Response(data, { headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=31536000, immutable" } });
   });
   return app;
@@ -1948,6 +2859,17 @@ var SessionManager = class {
         this.setSessionState(sessionId, session, "processing");
       } else if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
         this.setSessionState(sessionId, session, "waiting");
+      }
+      if (e.type === "permission_needed" && e.data?.requestId && proc.respondToPermission) {
+        const requestId = e.data.requestId;
+        this.createPendingPermission(sessionId, {
+          tool_name: e.data.toolName,
+          command: e.data.command,
+          path: e.data.path,
+          requestId
+        }).then((approved) => {
+          proc.respondToPermission(requestId, approved);
+        });
       }
       const persisted = this.persistEvent(sessionId, e);
       if (persisted) {
@@ -3026,8 +3948,8 @@ root.onError((err2, c) => {
 });
 root.use("*", async (c, next) => {
   const m = c.req.method;
-  const path7 = new URL(c.req.url).pathname;
-  logger.log("req", `${m.padEnd(6)} ${path7}`);
+  const path8 = new URL(c.req.url).pathname;
+  logger.log("req", `${m.padEnd(6)} ${path8}`);
   await next();
 });
 var sessionManager = new SessionManager({ maxSessions });
