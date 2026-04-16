@@ -996,6 +996,43 @@ export class CodexProvider implements AgentProvider {
 
     cleanEnv.CODEX_HOME = codexHome;
 
+    // ── MCP server injection ────────────────────────────────────────────
+    if (options.mcpServers && Object.keys(options.mcpServers).length > 0) {
+      const tomlLines: string[] = [];
+      for (const [name, cfg] of Object.entries(options.mcpServers)) {
+        if ("url" in cfg) {
+          // HTTP server
+          tomlLines.push(`[mcp_servers.${name}]`);
+          tomlLines.push(`url = ${JSON.stringify(cfg.url)}`);
+          if (cfg.headers) {
+            tomlLines.push(`[mcp_servers.${name}.headers]`);
+            for (const [k, v] of Object.entries(cfg.headers)) {
+              tomlLines.push(`${k} = ${JSON.stringify(v)}`);
+            }
+          }
+        } else {
+          // Stdio server
+          tomlLines.push(`[mcp_servers.${name}]`);
+          tomlLines.push(`command = ${JSON.stringify(cfg.command)}`);
+          if (cfg.args?.length) {
+            tomlLines.push(`args = ${JSON.stringify(cfg.args)}`);
+          }
+          if (cfg.cwd) {
+            tomlLines.push(`cwd = ${JSON.stringify(cfg.cwd)}`);
+          }
+          if (cfg.env && Object.keys(cfg.env).length > 0) {
+            tomlLines.push(`[mcp_servers.${name}.env]`);
+            for (const [k, v] of Object.entries(cfg.env)) {
+              tomlLines.push(`${k} = ${JSON.stringify(v)}`);
+            }
+          }
+        }
+        tomlLines.push("");
+      }
+      fs.appendFileSync(configTomlPath, "\n" + tomlLines.join("\n"));
+      logger.log("agent", `codex: ${Object.keys(options.mcpServers).length} MCP servers injected`);
+    }
+
     // ── Hook injection ─────────────────────────────────────────────────
     // Resolve package root for hook scripts
     let pkgRoot = path.dirname(fileURLToPath(import.meta.url));

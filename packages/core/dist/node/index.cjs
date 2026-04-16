@@ -782,6 +782,9 @@ var ClaudeCodeProvider = class {
     if (options.appendSystemPrompt) {
       args.push("--append-system-prompt", options.appendSystemPrompt);
     }
+    if (options.mcpServers && Object.keys(options.mcpServers).length > 0) {
+      args.push("--mcp-config", JSON.stringify({ mcpServers: options.mcpServers }));
+    }
     if (options.allowedTools?.length) {
       args.push("--allowedTools", ...options.allowedTools);
     }
@@ -1675,6 +1678,39 @@ var CodexProvider = class {
       }
     }
     cleanEnv.CODEX_HOME = codexHome;
+    if (options.mcpServers && Object.keys(options.mcpServers).length > 0) {
+      const tomlLines = [];
+      for (const [name, cfg] of Object.entries(options.mcpServers)) {
+        if ("url" in cfg) {
+          tomlLines.push(`[mcp_servers.${name}]`);
+          tomlLines.push(`url = ${JSON.stringify(cfg.url)}`);
+          if (cfg.headers) {
+            tomlLines.push(`[mcp_servers.${name}.headers]`);
+            for (const [k, v] of Object.entries(cfg.headers)) {
+              tomlLines.push(`${k} = ${JSON.stringify(v)}`);
+            }
+          }
+        } else {
+          tomlLines.push(`[mcp_servers.${name}]`);
+          tomlLines.push(`command = ${JSON.stringify(cfg.command)}`);
+          if (cfg.args?.length) {
+            tomlLines.push(`args = ${JSON.stringify(cfg.args)}`);
+          }
+          if (cfg.cwd) {
+            tomlLines.push(`cwd = ${JSON.stringify(cfg.cwd)}`);
+          }
+          if (cfg.env && Object.keys(cfg.env).length > 0) {
+            tomlLines.push(`[mcp_servers.${name}.env]`);
+            for (const [k, v] of Object.entries(cfg.env)) {
+              tomlLines.push(`${k} = ${JSON.stringify(v)}`);
+            }
+          }
+        }
+        tomlLines.push("");
+      }
+      import_fs4.default.appendFileSync(configTomlPath, "\n" + tomlLines.join("\n"));
+      logger.log("agent", `codex: ${Object.keys(options.mcpServers).length} MCP servers injected`);
+    }
     let pkgRoot = import_path6.default.dirname((0, import_url2.fileURLToPath)(importMetaUrl));
     while (!import_fs4.default.existsSync(import_path6.default.join(pkgRoot, "package.json"))) {
       const parent = import_path6.default.dirname(pkgRoot);

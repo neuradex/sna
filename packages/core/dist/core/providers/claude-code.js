@@ -519,6 +519,9 @@ class ClaudeCodeProvider {
     if (options.appendSystemPrompt) {
       args.push("--append-system-prompt", options.appendSystemPrompt);
     }
+    if (options.mcpServers && Object.keys(options.mcpServers).length > 0) {
+      args.push("--mcp-config", JSON.stringify({ mcpServers: options.mcpServers }));
+    }
     if (options.allowedTools?.length) {
       args.push("--allowedTools", ...options.allowedTools);
     }

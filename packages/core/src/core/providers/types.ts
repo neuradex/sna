@@ -74,6 +74,14 @@ export interface HistoryMessage {
   content: string;
 }
 
+/**
+ * MCP server definition — common format for all providers.
+ * Supports stdio (command+args) and HTTP (url) servers.
+ */
+export type McpServerConfig =
+  | { command: string; args?: string[]; env?: Record<string, string>; cwd?: string }
+  | { type: "http"; url: string; headers?: Record<string, string> };
+
 export interface SpawnOptions {
   cwd: string;
   prompt?: string;
@@ -125,6 +133,13 @@ export interface SpawnOptions {
    * If both allowedTools and disallowedTools are set, allowedTools takes precedence.
    */
   disallowedTools?: string[];
+
+  /**
+   * MCP servers to make available to the agent.
+   * Claude Code: --mcp-config JSON
+   * Codex: written to CODEX_HOME/config.toml [mcp_servers.*]
+   */
+  mcpServers?: Record<string, McpServerConfig>;
 
   /**
    * Conversation history to inject before the first prompt.

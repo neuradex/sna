@@ -646,6 +646,11 @@ export class ClaudeCodeProvider implements AgentProvider {
       args.push("--append-system-prompt", options.appendSystemPrompt);
     }
 
+    // MCP servers
+    if (options.mcpServers && Object.keys(options.mcpServers).length > 0) {
+      args.push("--mcp-config", JSON.stringify({ mcpServers: options.mcpServers }));
+    }
+
     // Tool filtering
     if (options.allowedTools?.length) {
       args.push("--allowedTools", ...options.allowedTools);

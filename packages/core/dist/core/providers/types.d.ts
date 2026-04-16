@@ -63,6 +63,20 @@ interface HistoryMessage {
     role: "user" | "assistant";
     content: string;
 }
+/**
+ * MCP server definition — common format for all providers.
+ * Supports stdio (command+args) and HTTP (url) servers.
+ */
+type McpServerConfig = {
+    command: string;
+    args?: string[];
+    env?: Record<string, string>;
+    cwd?: string;
+} | {
+    type: "http";
+    url: string;
+    headers?: Record<string, string>;
+};
 interface SpawnOptions {
     cwd: string;
     prompt?: string;
@@ -107,6 +121,12 @@ interface SpawnOptions {
      */
     disallowedTools?: string[];
     /**
+     * MCP servers to make available to the agent.
+     * Claude Code: --mcp-config JSON
+     * Codex: written to CODEX_HOME/config.toml [mcp_servers.*]
+     */
+    mcpServers?: Record<string, McpServerConfig>;
+    /**
      * Conversation history to inject before the first prompt.
      * Claude Code: JSONL resume or recalled-conversation
      * Codex: XML context prefix
@@ -141,4 +161,4 @@ interface AgentProvider {
     spawn(options: SpawnOptions): AgentProcess;
 }
 
-export type { AgentEvent, AgentProcess, AgentProvider, ContentBlock, HistoryMessage, SpawnOptions };
+export type { AgentEvent, AgentProcess, AgentProvider, ContentBlock, HistoryMessage, McpServerConfig, SpawnOptions };

@@ -954,6 +954,9 @@ var ClaudeCodeProvider = class {
     if (options.appendSystemPrompt) {
       args.push("--append-system-prompt", options.appendSystemPrompt);
     }
+    if (options.mcpServers && Object.keys(options.mcpServers).length > 0) {
+      args.push("--mcp-config", JSON.stringify({ mcpServers: options.mcpServers }));
+    }
     if (options.allowedTools?.length) {
       args.push("--allowedTools", ...options.allowedTools);
     }
@@ -1803,6 +1806,39 @@ var CodexProvider = class {
       }
     }
     cleanEnv.CODEX_HOME = codexHome;
+    if (options.mcpServers && Object.keys(options.mcpServers).length > 0) {
+      const tomlLines = [];
+      for (const [name, cfg] of Object.entries(options.mcpServers)) {
+        if ("url" in cfg) {
+          tomlLines.push(`[mcp_servers.${name}]`);
+          tomlLines.push(`url = ${JSON.stringify(cfg.url)}`);
+          if (cfg.headers) {
+            tomlLines.push(`[mcp_servers.${name}.headers]`);
+            for (const [k, v] of Object.entries(cfg.headers)) {
+              tomlLines.push(`${k} = ${JSON.stringify(v)}`);
+            }
+          }
+        } else {
+          tomlLines.push(`[mcp_servers.${name}]`);
+          tomlLines.push(`command = ${JSON.stringify(cfg.command)}`);
+          if (cfg.args?.length) {
+            tomlLines.push(`args = ${JSON.stringify(cfg.args)}`);
+          }
+          if (cfg.cwd) {
+            tomlLines.push(`cwd = ${JSON.stringify(cfg.cwd)}`);
+          }
+          if (cfg.env && Object.keys(cfg.env).length > 0) {
+            tomlLines.push(`[mcp_servers.${name}.env]`);
+            for (const [k, v] of Object.entries(cfg.env)) {
+              tomlLines.push(`${k} = ${JSON.stringify(v)}`);
+            }
+          }
+        }
+        tomlLines.push("");
+      }
+      fs5.appendFileSync(configTomlPath, "\n" + tomlLines.join("\n"));
+      logger.log("agent", `codex: ${Object.keys(options.mcpServers).length} MCP servers injected`);
+    }
     let pkgRoot = path6.dirname(fileURLToPath2(import.meta.url));
     while (!fs5.existsSync(path6.join(pkgRoot, "package.json"))) {
       const parent = path6.dirname(pkgRoot);
