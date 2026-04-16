@@ -100,7 +100,8 @@ function resolveCodexPath(cwd: string): string {
 
 // ── Permission mode → Codex sandbox mapping ─────────────────────────────────
 
-function toCodexSandbox(mode?: string): string {
+/** @internal Exported for testing only. */
+export function toCodexSandbox(mode?: string): string {
   switch (mode) {
     case "bypassPermissions": return "danger-full-access";
     case "acceptEdits": return "workspace-write";
@@ -115,7 +116,8 @@ function toCodexSandbox(mode?: string): string {
  * Codex doesn't support synthetic history injection like Claude Code's JSONL resume,
  * so we prepend it as structured context that the model can reference.
  */
-function buildHistoryContext(history: HistoryMessage[]): string {
+/** @internal Exported for testing only. */
+export function buildHistoryContext(history: HistoryMessage[]): string {
   const turns = history.map((msg) =>
     `<${msg.role}>\n${msg.content}\n</${msg.role}>`
   ).join("\n\n");
@@ -126,7 +128,8 @@ function buildHistoryContext(history: HistoryMessage[]): string {
  * Extract --resume <threadId> from extraArgs.
  * Returns the threadId and cleaned args, or null if not found.
  */
-function extractResumeArg(extraArgs?: string[]): { threadId: string; cleanArgs: string[] } | null {
+/** @internal Exported for testing only. */
+export function extractResumeArg(extraArgs?: string[]): { threadId: string; cleanArgs: string[] } | null {
   if (!extraArgs) return null;
   const idx = extraArgs.indexOf("--resume");
   if (idx === -1) return null;
@@ -146,7 +149,8 @@ function extractResumeArg(extraArgs?: string[]): { threadId: string; cleanArgs: 
  *   --system-prompt <text>         → baseInstructions
  *   --append-system-prompt <text>  → developerInstructions
  */
-function extractSystemPromptArgs(extraArgs?: string[]): {
+/** @internal Exported for testing only. */
+export function extractSystemPromptArgs(extraArgs?: string[]): {
   baseInstructions?: string;
   developerInstructions?: string;
   cleanArgs: string[];
