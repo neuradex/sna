@@ -947,6 +947,16 @@ function toCodexSandbox(mode) {
       return "read-only";
   }
 }
+function toCodexSandboxPolicy(mode) {
+  switch (mode) {
+    case "bypassPermissions":
+      return "dangerFullAccess";
+    case "acceptEdits":
+      return "workspaceWrite";
+    default:
+      return "readOnly";
+  }
+}
 function buildHistoryContext(history) {
   const turns = history.map(
     (msg) => `<${msg.role}>
@@ -1011,6 +1021,10 @@ var _CodexProcess = class _CodexProcess {
     this._pendingSend = [];
     /** Set when interrupt() is called — causes queue to fast-drain delta events. */
     this._interrupted = false;
+    /** Model override — applied on next turn/start. */
+    this._modelOverride = null;
+    /** Sandbox override — applied on next turn/start. */
+    this._sandboxOverride = null;
     /** Set after the interrupted event is emitted — prevents duplicate. */
     this._interruptedEmitted = false;
     /** Current active turnId — needed for turn/interrupt. */
@@ -1240,16 +1254,33 @@ var _CodexProcess = class _CodexProcess {
   }
   startTurn(input) {
     if (!this._threadId) return;
+    const userText = typeof input === "string" ? input : input.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+    this.enqueue({
+      type: "user_message",
+      message: userText,
+      timestamp: Date.now()
+    });
     const contentBlocks = typeof input === "string" ? [{ type: "text", text: input }] : input.map((b) => {
       if (b.type === "text") return { type: "text", text: b.text };
       const src = b.source;
       const url = `data:${src.media_type};base64,${src.data}`;
       return { type: "image", url };
     });
-    this.sendRpc("turn/start", {
+    const turnParams = {
       threadId: this._threadId,
       input: contentBlocks
-    }).then((result) => {
+    };
+    if (this._modelOverride) {
+      turnParams.model = this._modelOverride;
+      logger.log("agent", `codex: turn/start with model=${this._modelOverride}`);
+      this._modelOverride = null;
+    }
+    if (this._sandboxOverride) {
+      turnParams.sandboxPolicy = toCodexSandboxPolicy(this._sandboxOverride);
+      logger.log("agent", `codex: turn/start with sandboxPolicy=${turnParams.sandboxPolicy}`);
+      this._sandboxOverride = null;
+    }
+    this.sendRpc("turn/start", turnParams).then((result) => {
       if (result?.turn?.id) this._currentTurnId = result.turn.id;
     }).catch((err2) => {
       logger.err("agent", "turn/start failed:", err2);
@@ -1291,11 +1322,13 @@ var _CodexProcess = class _CodexProcess {
       });
     });
   }
-  setModel(_model) {
-    logger.log("agent", "codex: setModel ignored (set at thread creation)");
+  setModel(model) {
+    this._modelOverride = model;
+    logger.log("agent", `codex: model override set \u2192 ${model} (applied on next turn)`);
   }
-  setPermissionMode(_mode) {
-    logger.log("agent", "codex: setPermissionMode ignored (set at thread creation)");
+  setPermissionMode(mode) {
+    this._sandboxOverride = mode;
+    logger.log("agent", `codex: sandbox override set \u2192 ${mode} (applied on next turn)`);
   }
   /**
    * Respond to a pending permission request from Codex.

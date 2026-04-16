@@ -480,7 +480,10 @@ function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManager): v
 function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
   const sessionId = (msg.session as string) ?? "default";
   try {
-    const ccSessionId = sm.getSession(sessionId)?.ccSessionId;
+    const session = sm.getSession(sessionId);
+    const prevProvider = session?.lastStartConfig?.provider;
+    const ccSessionId = session?.ccSessionId;
+
     const { config } = sm.restartSession(
       sessionId,
       {
@@ -492,6 +495,23 @@ function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionManager): 
       },
       (cfg) => {
         const prov = getProvider(cfg.provider);
+        const providerChanged = prevProvider && cfg.provider !== prevProvider;
+
+        if (providerChanged) {
+          // Cross-provider: inject DB history instead of --resume
+          const history = buildHistoryFromDb(sessionId);
+          return prov.spawn({
+            cwd: sm.getSession(sessionId)!.cwd,
+            model: cfg.model,
+            permissionMode: cfg.permissionMode as any,
+            configDir: cfg.configDir,
+            env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
+            history: history.length > 0 ? history : undefined,
+            extraArgs: cfg.extraArgs,
+          });
+        }
+
+        // Same provider: native resume
         const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
         return prov.spawn({
           cwd: sm.getSession(sessionId)!.cwd,

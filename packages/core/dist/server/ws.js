@@ -331,7 +331,9 @@ function handleAgentResume(ws, msg, sm) {
 function handleAgentRestart(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
   try {
-    const ccSessionId = sm.getSession(sessionId)?.ccSessionId;
+    const session = sm.getSession(sessionId);
+    const prevProvider = session?.lastStartConfig?.provider;
+    const ccSessionId = session?.ccSessionId;
     const { config } = sm.restartSession(
       sessionId,
       {
@@ -343,6 +345,19 @@ function handleAgentRestart(ws, msg, sm) {
       },
       (cfg) => {
         const prov = getProvider(cfg.provider);
+        const providerChanged = prevProvider && cfg.provider !== prevProvider;
+        if (providerChanged) {
+          const history = buildHistoryFromDb(sessionId);
+          return prov.spawn({
+            cwd: sm.getSession(sessionId).cwd,
+            model: cfg.model,
+            permissionMode: cfg.permissionMode,
+            configDir: cfg.configDir,
+            env: { ...msg.env, SNA_SESSION_ID: sessionId },
+            history: history.length > 0 ? history : void 0,
+            extraArgs: cfg.extraArgs
+          });
+        }
         const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
         return prov.spawn({
           cwd: sm.getSession(sessionId).cwd,

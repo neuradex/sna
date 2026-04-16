@@ -459,7 +459,9 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     });
   });
 
-  // POST /restart — kill + re-spawn with merged config + --resume
+  // POST /restart — kill + re-spawn with merged config
+  // Same provider: --resume (native session continuity)
+  // Different provider: DB history injection (cross-provider handoff)
   app.post("/restart", async (c) => {
     const sessionId = getSessionId(c);
     const body = (await c.req.json().catch(() => ({}))) as {
@@ -472,9 +474,30 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     };
 
     try {
-      const ccSessionId = sessionManager.getSession(sessionId)?.ccSessionId;
+      const session = sessionManager.getSession(sessionId);
+      const prevProvider = session?.lastStartConfig?.provider;
+      const ccSessionId = session?.ccSessionId;
+
       const { config } = sessionManager.restartSession(sessionId, body, (cfg) => {
         const prov = getProvider(cfg.provider);
+        const providerChanged = prevProvider && cfg.provider !== prevProvider;
+
+        if (providerChanged) {
+          // Cross-provider: inject DB history instead of --resume
+          const history = buildHistoryFromDb(sessionId);
+          logger.log("route", `restart: provider changed ${prevProvider} → ${cfg.provider}, using DB history (${history.length} msgs)`);
+          return prov.spawn({
+            cwd: sessionManager.getSession(sessionId)!.cwd,
+            model: cfg.model,
+            permissionMode: cfg.permissionMode as any,
+            configDir: cfg.configDir,
+            env: { ...body.env, SNA_SESSION_ID: sessionId },
+            history: history.length > 0 ? history : undefined,
+            extraArgs: cfg.extraArgs,
+          });
+        }
+
+        // Same provider: native resume
         const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
         return prov.spawn({
           cwd: sessionManager.getSession(sessionId)!.cwd,
@@ -485,7 +508,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
           extraArgs: [...(cfg.extraArgs ?? []), ...resumeArgs],
         });
       });
-      logger.log("route", `POST /restart?session=${sessionId} → restarted`);
+      logger.log("route", `POST /restart?session=${sessionId} → restarted (${config.provider})`);
       return httpJson(c, "agent.restart", {
         status: "restarted",
         provider: config.provider,

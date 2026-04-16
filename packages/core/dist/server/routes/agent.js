@@ -320,9 +320,25 @@ function createAgentRoutes(sessionManager) {
     const sessionId = getSessionId(c);
     const body = await c.req.json().catch(() => ({}));
     try {
-      const ccSessionId = sessionManager.getSession(sessionId)?.ccSessionId;
+      const session = sessionManager.getSession(sessionId);
+      const prevProvider = session?.lastStartConfig?.provider;
+      const ccSessionId = session?.ccSessionId;
       const { config } = sessionManager.restartSession(sessionId, body, (cfg) => {
         const prov = getProvider(cfg.provider);
+        const providerChanged = prevProvider && cfg.provider !== prevProvider;
+        if (providerChanged) {
+          const history = buildHistoryFromDb(sessionId);
+          logger.log("route", `restart: provider changed ${prevProvider} \u2192 ${cfg.provider}, using DB history (${history.length} msgs)`);
+          return prov.spawn({
+            cwd: sessionManager.getSession(sessionId).cwd,
+            model: cfg.model,
+            permissionMode: cfg.permissionMode,
+            configDir: cfg.configDir,
+            env: { ...body.env, SNA_SESSION_ID: sessionId },
+            history: history.length > 0 ? history : void 0,
+            extraArgs: cfg.extraArgs
+          });
+        }
         const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
         return prov.spawn({
           cwd: sessionManager.getSession(sessionId).cwd,
@@ -333,7 +349,7 @@ function createAgentRoutes(sessionManager) {
           extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
         });
       });
-      logger.log("route", `POST /restart?session=${sessionId} \u2192 restarted`);
+      logger.log("route", `POST /restart?session=${sessionId} \u2192 restarted (${config.provider})`);
       return httpJson(c, "agent.restart", {
         status: "restarted",
         provider: config.provider,

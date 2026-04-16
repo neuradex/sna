@@ -442,10 +442,12 @@ function startTurn(ss, userMessage) {
   }
   ss.turnCounter++;
   const session = sm?.getSession(ss.sessionId);
+  const provider = session?.lastStartConfig?.provider ?? "unknown";
   const turnName = ss.label ? `${ss.label}/turn-${ss.turnCounter}` : `turn-${ss.turnCounter}`;
   const tags2 = [
     ..._baseTags,
-    ...ss.label ? [ss.label] : []
+    ...ss.label ? [ss.label] : [],
+    `provider:${provider}`
   ];
   const trace = langfuseClient.trace({
     name: turnName,
@@ -454,6 +456,7 @@ function startTurn(ss, userMessage) {
     input: userMessage,
     metadata: {
       label: ss.label,
+      provider,
       cwd: session?.cwd,
       model: session?.lastStartConfig?.model,
       turnIndex: ss.turnCounter
@@ -557,13 +560,27 @@ function handleEvent(ss, event) {
         turn.llmGeneration.end();
         turn.llmGeneration = null;
       } else {
-        turn.trace.generation({ name: "assistant", output: event.message }).end();
+        turn.llmGeneration = turn.trace.generation({ name: "assistant", output: event.message });
       }
       break;
     }
     case "complete": {
       const turn = ss.currentTurn;
       if (!turn) break;
+      if (turn.llmGeneration && event.data) {
+        const d = event.data;
+        turn.llmGeneration.update({
+          model: d.model,
+          usage: {
+            input: d.inputTokens,
+            output: d.outputTokens,
+            total: (d.inputTokens ?? 0) + (d.outputTokens ?? 0)
+          },
+          metadata: { provider: d.provider, durationMs: d.durationMs, costUsd: d.costUsd }
+        });
+        turn.llmGeneration.end();
+        turn.llmGeneration = null;
+      }
       turn.trace.update({ metadata: event.data });
       endCurrentTurn(ss, "complete");
       try {
@@ -1668,6 +1685,16 @@ function toCodexSandbox(mode) {
       return "read-only";
   }
 }
+function toCodexSandboxPolicy(mode) {
+  switch (mode) {
+    case "bypassPermissions":
+      return "dangerFullAccess";
+    case "acceptEdits":
+      return "workspaceWrite";
+    default:
+      return "readOnly";
+  }
+}
 function buildHistoryContext(history) {
   const turns = history.map(
     (msg) => `<${msg.role}>
@@ -1732,6 +1759,10 @@ var _CodexProcess = class _CodexProcess {
     this._pendingSend = [];
     /** Set when interrupt() is called — causes queue to fast-drain delta events. */
     this._interrupted = false;
+    /** Model override — applied on next turn/start. */
+    this._modelOverride = null;
+    /** Sandbox override — applied on next turn/start. */
+    this._sandboxOverride = null;
     /** Set after the interrupted event is emitted — prevents duplicate. */
     this._interruptedEmitted = false;
     /** Current active turnId — needed for turn/interrupt. */
@@ -1961,16 +1992,33 @@ var _CodexProcess = class _CodexProcess {
   }
   startTurn(input) {
     if (!this._threadId) return;
+    const userText = typeof input === "string" ? input : input.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+    this.enqueue({
+      type: "user_message",
+      message: userText,
+      timestamp: Date.now()
+    });
     const contentBlocks = typeof input === "string" ? [{ type: "text", text: input }] : input.map((b) => {
       if (b.type === "text") return { type: "text", text: b.text };
       const src = b.source;
       const url = `data:${src.media_type};base64,${src.data}`;
       return { type: "image", url };
     });
-    this.sendRpc("turn/start", {
+    const turnParams = {
       threadId: this._threadId,
       input: contentBlocks
-    }).then((result) => {
+    };
+    if (this._modelOverride) {
+      turnParams.model = this._modelOverride;
+      logger.log("agent", `codex: turn/start with model=${this._modelOverride}`);
+      this._modelOverride = null;
+    }
+    if (this._sandboxOverride) {
+      turnParams.sandboxPolicy = toCodexSandboxPolicy(this._sandboxOverride);
+      logger.log("agent", `codex: turn/start with sandboxPolicy=${turnParams.sandboxPolicy}`);
+      this._sandboxOverride = null;
+    }
+    this.sendRpc("turn/start", turnParams).then((result) => {
       if (result?.turn?.id) this._currentTurnId = result.turn.id;
     }).catch((err2) => {
       logger.err("agent", "turn/start failed:", err2);
@@ -2012,11 +2060,13 @@ var _CodexProcess = class _CodexProcess {
       });
     });
   }
-  setModel(_model) {
-    logger.log("agent", "codex: setModel ignored (set at thread creation)");
+  setModel(model) {
+    this._modelOverride = model;
+    logger.log("agent", `codex: model override set \u2192 ${model} (applied on next turn)`);
   }
-  setPermissionMode(_mode) {
-    logger.log("agent", "codex: setPermissionMode ignored (set at thread creation)");
+  setPermissionMode(mode) {
+    this._sandboxOverride = mode;
+    logger.log("agent", `codex: sandbox override set \u2192 ${mode} (applied on next turn)`);
   }
   /**
    * Respond to a pending permission request from Codex.
@@ -2992,9 +3042,25 @@ function createAgentRoutes(sessionManager) {
     const sessionId = getSessionId(c);
     const body = await c.req.json().catch(() => ({}));
     try {
-      const ccSessionId = sessionManager.getSession(sessionId)?.ccSessionId;
+      const session = sessionManager.getSession(sessionId);
+      const prevProvider = session?.lastStartConfig?.provider;
+      const ccSessionId = session?.ccSessionId;
       const { config } = sessionManager.restartSession(sessionId, body, (cfg) => {
         const prov = getProvider(cfg.provider);
+        const providerChanged = prevProvider && cfg.provider !== prevProvider;
+        if (providerChanged) {
+          const history = buildHistoryFromDb(sessionId);
+          logger.log("route", `restart: provider changed ${prevProvider} \u2192 ${cfg.provider}, using DB history (${history.length} msgs)`);
+          return prov.spawn({
+            cwd: sessionManager.getSession(sessionId).cwd,
+            model: cfg.model,
+            permissionMode: cfg.permissionMode,
+            configDir: cfg.configDir,
+            env: { ...body.env, SNA_SESSION_ID: sessionId },
+            history: history.length > 0 ? history : void 0,
+            extraArgs: cfg.extraArgs
+          });
+        }
         const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
         return prov.spawn({
           cwd: sessionManager.getSession(sessionId).cwd,
@@ -3005,7 +3071,7 @@ function createAgentRoutes(sessionManager) {
           extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
         });
       });
-      logger.log("route", `POST /restart?session=${sessionId} \u2192 restarted`);
+      logger.log("route", `POST /restart?session=${sessionId} \u2192 restarted (${config.provider})`);
       return httpJson(c, "agent.restart", {
         status: "restarted",
         provider: config.provider,
@@ -4106,7 +4172,9 @@ function handleAgentResume(ws, msg, sm2) {
 function handleAgentRestart(ws, msg, sm2) {
   const sessionId = msg.session ?? "default";
   try {
-    const ccSessionId = sm2.getSession(sessionId)?.ccSessionId;
+    const session = sm2.getSession(sessionId);
+    const prevProvider = session?.lastStartConfig?.provider;
+    const ccSessionId = session?.ccSessionId;
     const { config } = sm2.restartSession(
       sessionId,
       {
@@ -4118,6 +4186,19 @@ function handleAgentRestart(ws, msg, sm2) {
       },
       (cfg) => {
         const prov = getProvider(cfg.provider);
+        const providerChanged = prevProvider && cfg.provider !== prevProvider;
+        if (providerChanged) {
+          const history = buildHistoryFromDb(sessionId);
+          return prov.spawn({
+            cwd: sm2.getSession(sessionId).cwd,
+            model: cfg.model,
+            permissionMode: cfg.permissionMode,
+            configDir: cfg.configDir,
+            env: { ...msg.env, SNA_SESSION_ID: sessionId },
+            history: history.length > 0 ? history : void 0,
+            extraArgs: cfg.extraArgs
+          });
+        }
         const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
         return prov.spawn({
           cwd: sm2.getSession(sessionId).cwd,
