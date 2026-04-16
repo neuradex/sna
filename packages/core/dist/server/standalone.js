@@ -954,6 +954,12 @@ var ClaudeCodeProvider = class {
     if (options.appendSystemPrompt) {
       args.push("--append-system-prompt", options.appendSystemPrompt);
     }
+    if (options.allowedTools?.length) {
+      args.push("--allowedTools", ...options.allowedTools);
+    }
+    if (options.disallowedTools?.length) {
+      args.push("--disallowedTools", ...options.disallowedTools);
+    }
     if (options.providerOptions) {
       const po = options.providerOptions;
       if (typeof po.maxTurns === "number") args.push("--max-turns", String(po.maxTurns));
@@ -1797,24 +1803,43 @@ var CodexProvider = class {
       }
     }
     cleanEnv.CODEX_HOME = codexHome;
+    let pkgRoot = path6.dirname(fileURLToPath2(import.meta.url));
+    while (!fs5.existsSync(path6.join(pkgRoot, "package.json"))) {
+      const parent = path6.dirname(pkgRoot);
+      if (parent === pkgRoot) break;
+      pkgRoot = parent;
+    }
+    const preToolUseHooks = [];
     if (options.permissionMode !== "bypassPermissions") {
-      let pkgRoot = path6.dirname(fileURLToPath2(import.meta.url));
-      while (!fs5.existsSync(path6.join(pkgRoot, "package.json"))) {
-        const parent = path6.dirname(pkgRoot);
-        if (parent === pkgRoot) break;
-        pkgRoot = parent;
-      }
       const hookScript = path6.join(pkgRoot, "dist", "scripts", "hook.js");
       const sessionId = options.env?.SNA_SESSION_ID ?? "default";
+      preToolUseHooks.push({
+        type: "command",
+        command: `node "${hookScript}" --session=${sessionId}`,
+        timeout: 300
+      });
+      logger.log("agent", `codex: permission hook \u2192 ${hookScript} --session=${sessionId}`);
+    }
+    if (options.allowedTools?.length || options.disallowedTools?.length) {
+      const filterScript = path6.join(pkgRoot, "dist", "scripts", "tool-filter.js");
+      const filterArgs = [];
+      if (options.allowedTools?.length) {
+        filterArgs.push(`--allowed=${options.allowedTools.join(",")}`);
+      } else if (options.disallowedTools?.length) {
+        filterArgs.push(`--disallowed=${options.disallowedTools.join(",")}`);
+      }
+      preToolUseHooks.push({
+        type: "command",
+        command: `node "${filterScript}" ${filterArgs.join(" ")}`
+      });
+      logger.log("agent", `codex: tool-filter hook \u2192 ${options.allowedTools ? `allowed=[${options.allowedTools}]` : `disallowed=[${options.disallowedTools}]`}`);
+    }
+    if (preToolUseHooks.length > 0) {
       const hooksJson = {
         hooks: {
           PreToolUse: [{
             matcher: ".*",
-            hooks: [{
-              type: "command",
-              command: `node "${hookScript}" --session=${sessionId}`,
-              timeout: 300
-            }]
+            hooks: preToolUseHooks
           }]
         }
       };
@@ -1823,7 +1848,6 @@ var CodexProvider = class {
       if (!existingConfig.includes("codex_hooks")) {
         fs5.appendFileSync(configTomlPath, "\n[features]\ncodex_hooks = true\n");
       }
-      logger.log("agent", `codex: hooks injected \u2192 ${hookScript} --session=${sessionId}`);
     }
     logger.log("agent", `codex: CODEX_HOME=${codexHome}`);
     const codexDir = path6.dirname(codexPath);

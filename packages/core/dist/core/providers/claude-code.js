@@ -519,6 +519,12 @@ class ClaudeCodeProvider {
     if (options.appendSystemPrompt) {
       args.push("--append-system-prompt", options.appendSystemPrompt);
     }
+    if (options.allowedTools?.length) {
+      args.push("--allowedTools", ...options.allowedTools);
+    }
+    if (options.disallowedTools?.length) {
+      args.push("--disallowedTools", ...options.disallowedTools);
+    }
     if (options.providerOptions) {
       const po = options.providerOptions;
       if (typeof po.maxTurns === "number") args.push("--max-turns", String(po.maxTurns));

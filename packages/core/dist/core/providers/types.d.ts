@@ -94,6 +94,19 @@ interface SpawnOptions {
      */
     appendSystemPrompt?: string;
     /**
+     * Restrict the agent to only use these tools. Others are blocked.
+     * Claude Code: --allowedTools
+     * Codex: PreToolUse hook that denies unlisted tools
+     */
+    allowedTools?: string[];
+    /**
+     * Block specific tools. All others are allowed.
+     * Claude Code: --disallowedTools
+     * Codex: PreToolUse hook that denies listed tools
+     * If both allowedTools and disallowedTools are set, allowedTools takes precedence.
+     */
+    disallowedTools?: string[];
+    /**
      * Conversation history to inject before the first prompt.
      * Claude Code: JSONL resume or recalled-conversation
      * Codex: XML context prefix

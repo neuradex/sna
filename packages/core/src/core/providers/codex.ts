@@ -996,29 +996,52 @@ export class CodexProvider implements AgentProvider {
 
     cleanEnv.CODEX_HOME = codexHome;
 
-    // ── Hook injection (same pattern as ClaudeCodeProvider) ───────────
-    // Skip when bypassPermissions — all tools auto-allowed.
+    // ── Hook injection ─────────────────────────────────────────────────
+    // Resolve package root for hook scripts
+    let pkgRoot = path.dirname(fileURLToPath(import.meta.url));
+    while (!fs.existsSync(path.join(pkgRoot, "package.json"))) {
+      const parent = path.dirname(pkgRoot);
+      if (parent === pkgRoot) break;
+      pkgRoot = parent;
+    }
+
+    const preToolUseHooks: Array<{ type: string; command: string; timeout?: number }> = [];
+
+    // 1. Permission hook (skip when bypassPermissions)
     if (options.permissionMode !== "bypassPermissions") {
-      // Resolve hook script path
-      let pkgRoot = path.dirname(fileURLToPath(import.meta.url));
-      while (!fs.existsSync(path.join(pkgRoot, "package.json"))) {
-        const parent = path.dirname(pkgRoot);
-        if (parent === pkgRoot) break;
-        pkgRoot = parent;
-      }
       const hookScript = path.join(pkgRoot, "dist", "scripts", "hook.js");
       const sessionId = options.env?.SNA_SESSION_ID ?? "default";
+      preToolUseHooks.push({
+        type: "command",
+        command: `node "${hookScript}" --session=${sessionId}`,
+        timeout: 300,
+      });
+      logger.log("agent", `codex: permission hook → ${hookScript} --session=${sessionId}`);
+    }
 
-      // Write hooks.json
+    // 2. Tool filter hook (allowedTools / disallowedTools)
+    if (options.allowedTools?.length || options.disallowedTools?.length) {
+      const filterScript = path.join(pkgRoot, "dist", "scripts", "tool-filter.js");
+      const filterArgs: string[] = [];
+      if (options.allowedTools?.length) {
+        filterArgs.push(`--allowed=${options.allowedTools.join(",")}`);
+      } else if (options.disallowedTools?.length) {
+        filterArgs.push(`--disallowed=${options.disallowedTools.join(",")}`);
+      }
+      preToolUseHooks.push({
+        type: "command",
+        command: `node "${filterScript}" ${filterArgs.join(" ")}`,
+      });
+      logger.log("agent", `codex: tool-filter hook → ${options.allowedTools ? `allowed=[${options.allowedTools}]` : `disallowed=[${options.disallowedTools}]`}`);
+    }
+
+    // Write hooks.json if any hooks are configured
+    if (preToolUseHooks.length > 0) {
       const hooksJson = {
         hooks: {
           PreToolUse: [{
             matcher: ".*",
-            hooks: [{
-              type: "command",
-              command: `node "${hookScript}" --session=${sessionId}`,
-              timeout: 300,
-            }],
+            hooks: preToolUseHooks,
           }],
         },
       };
@@ -1029,8 +1052,6 @@ export class CodexProvider implements AgentProvider {
       if (!existingConfig.includes("codex_hooks")) {
         fs.appendFileSync(configTomlPath, "\n[features]\ncodex_hooks = true\n");
       }
-
-      logger.log("agent", `codex: hooks injected → ${hookScript} --session=${sessionId}`);
     }
 
     logger.log("agent", `codex: CODEX_HOME=${codexHome}`);

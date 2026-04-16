@@ -646,6 +646,14 @@ export class ClaudeCodeProvider implements AgentProvider {
       args.push("--append-system-prompt", options.appendSystemPrompt);
     }
 
+    // Tool filtering
+    if (options.allowedTools?.length) {
+      args.push("--allowedTools", ...options.allowedTools);
+    }
+    if (options.disallowedTools?.length) {
+      args.push("--disallowedTools", ...options.disallowedTools);
+    }
+
     // Provider-specific options
     if (options.providerOptions) {
       const po = options.providerOptions;
