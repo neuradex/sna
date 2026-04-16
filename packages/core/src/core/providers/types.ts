@@ -87,6 +87,13 @@ export interface SpawnOptions {
    */
   configDir?: string;
   /**
+   * Native session ID to resume (provider-specific).
+   * Claude Code: CC session ID → --resume <id>
+   * Codex: thread ID → thread/resume API
+   * When set, the provider resumes the native session instead of starting fresh.
+   */
+  resumeSessionId?: string;
+  /**
    * Conversation history to inject before the first prompt.
    * Written to stdin as NDJSON — Claude Code treats these as prior conversation turns.
    * Must alternate user→assistant. Assistant content is auto-wrapped in array format.

@@ -358,14 +358,14 @@ function handleAgentRestart(ws, msg, sm) {
             extraArgs: cfg.extraArgs
           });
         }
-        const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
         return prov.spawn({
           cwd: sm.getSession(sessionId).cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode,
           configDir: cfg.configDir,
           env: { ...msg.env, SNA_SESSION_ID: sessionId },
-          extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
+          resumeSessionId: ccSessionId ?? void 0,
+          extraArgs: cfg.extraArgs
         });
       }
     );

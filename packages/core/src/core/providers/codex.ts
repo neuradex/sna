@@ -436,7 +436,9 @@ class CodexProcess implements AgentProcess {
       this.sendNotification("initialized");
 
       // Step 3: start or resume thread
+      // resumeSessionId (from SpawnOptions) takes precedence over --resume in extraArgs
       const resumeInfo = extractResumeArg(this.options.extraArgs);
+      const resumeThreadId = this.options.resumeSessionId ?? resumeInfo?.threadId;
       const sysPrompt = extractSystemPromptArgs(
         resumeInfo ? resumeInfo.cleanArgs : this.options.extraArgs,
       );
@@ -451,10 +453,10 @@ class CodexProcess implements AgentProcess {
         ...(sysPrompt.developerInstructions ? { developerInstructions: sysPrompt.developerInstructions } : {}),
       };
 
-      if (resumeInfo?.threadId) {
+      if (resumeThreadId) {
         // Try to resume existing Codex thread by ID
         const resumeResult = await this.sendRpc("thread/resume", {
-          threadId: resumeInfo.threadId,
+          threadId: resumeThreadId,
           ...(sysPrompt.baseInstructions ? { baseInstructions: sysPrompt.baseInstructions } : {}),
           ...(sysPrompt.developerInstructions ? { developerInstructions: sysPrompt.developerInstructions } : {}),
         });
@@ -463,7 +465,7 @@ class CodexProcess implements AgentProcess {
           const threadResult = await this.sendRpc("thread/start", threadParams);
           this._threadId = threadResult?.threadId ?? threadResult?.thread?.id ?? null;
         } else {
-          this._threadId = resumeResult?.thread?.id ?? resumeInfo.threadId;
+          this._threadId = resumeResult?.thread?.id ?? resumeThreadId;
           logger.log("agent", `codex: resumed thread ${this._threadId}`);
         }
       } else {

@@ -513,7 +513,10 @@ class ClaudeCodeProvider {
     if (options.permissionMode) {
       args.push("--permission-mode", options.permissionMode);
     }
-    if (options.history?.length && options.prompt) {
+    if (options.resumeSessionId) {
+      args.push("--resume", options.resumeSessionId);
+    }
+    if (!options.resumeSessionId && options.history?.length && options.prompt) {
       const result = writeHistoryJsonl(options.history, { cwd: options.cwd });
       if (result) {
         args.push(...result.extraArgs);

@@ -1286,7 +1286,10 @@ var ClaudeCodeProvider = class {
     if (options.permissionMode) {
       args.push("--permission-mode", options.permissionMode);
     }
-    if (options.history?.length && options.prompt) {
+    if (options.resumeSessionId) {
+      args.push("--resume", options.resumeSessionId);
+    }
+    if (!options.resumeSessionId && options.history?.length && options.prompt) {
       const result = writeHistoryJsonl(options.history, { cwd: options.cwd });
       if (result) {
         args.push(...result.extraArgs);
@@ -1927,6 +1930,7 @@ var _CodexProcess = class _CodexProcess {
       });
       this.sendNotification("initialized");
       const resumeInfo = extractResumeArg(this.options.extraArgs);
+      const resumeThreadId = this.options.resumeSessionId ?? resumeInfo?.threadId;
       const sysPrompt = extractSystemPromptArgs(
         resumeInfo ? resumeInfo.cleanArgs : this.options.extraArgs
       );
@@ -1937,9 +1941,9 @@ var _CodexProcess = class _CodexProcess {
         ...sysPrompt.baseInstructions ? { baseInstructions: sysPrompt.baseInstructions } : {},
         ...sysPrompt.developerInstructions ? { developerInstructions: sysPrompt.developerInstructions } : {}
       };
-      if (resumeInfo?.threadId) {
+      if (resumeThreadId) {
         const resumeResult = await this.sendRpc("thread/resume", {
-          threadId: resumeInfo.threadId,
+          threadId: resumeThreadId,
           ...sysPrompt.baseInstructions ? { baseInstructions: sysPrompt.baseInstructions } : {},
           ...sysPrompt.developerInstructions ? { developerInstructions: sysPrompt.developerInstructions } : {}
         });
@@ -1948,7 +1952,7 @@ var _CodexProcess = class _CodexProcess {
           const threadResult = await this.sendRpc("thread/start", threadParams);
           this._threadId = threadResult?.threadId ?? threadResult?.thread?.id ?? null;
         } else {
-          this._threadId = resumeResult?.thread?.id ?? resumeInfo.threadId;
+          this._threadId = resumeResult?.thread?.id ?? resumeThreadId;
           logger.log("agent", `codex: resumed thread ${this._threadId}`);
         }
       } else {
@@ -3061,14 +3065,14 @@ function createAgentRoutes(sessionManager) {
             extraArgs: cfg.extraArgs
           });
         }
-        const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
         return prov.spawn({
           cwd: sessionManager.getSession(sessionId).cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode,
           configDir: cfg.configDir,
           env: { ...body.env, SNA_SESSION_ID: sessionId },
-          extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
+          resumeSessionId: ccSessionId ?? void 0,
+          extraArgs: cfg.extraArgs
         });
       });
       logger.log("route", `POST /restart?session=${sessionId} \u2192 restarted (${config.provider})`);
@@ -4199,14 +4203,14 @@ function handleAgentRestart(ws, msg, sm2) {
             extraArgs: cfg.extraArgs
           });
         }
-        const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
         return prov.spawn({
           cwd: sm2.getSession(sessionId).cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode,
           configDir: cfg.configDir,
           env: { ...msg.env, SNA_SESSION_ID: sessionId },
-          extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
+          resumeSessionId: ccSessionId ?? void 0,
+          extraArgs: cfg.extraArgs
         });
       }
     );

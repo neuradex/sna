@@ -498,7 +498,7 @@ function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionManager): 
         const providerChanged = prevProvider && cfg.provider !== prevProvider;
 
         if (providerChanged) {
-          // Cross-provider: inject DB history instead of --resume
+          // Cross-provider: inject DB history
           const history = buildHistoryFromDb(sessionId);
           return prov.spawn({
             cwd: sm.getSession(sessionId)!.cwd,
@@ -511,15 +511,15 @@ function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionManager): 
           });
         }
 
-        // Same provider: native resume
-        const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
+        // Same provider: native resume via resumeSessionId
         return prov.spawn({
           cwd: sm.getSession(sessionId)!.cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode as any,
           configDir: cfg.configDir,
           env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
-          extraArgs: [...(cfg.extraArgs ?? []), ...resumeArgs],
+          resumeSessionId: ccSessionId ?? undefined,
+          extraArgs: cfg.extraArgs,
         });
       },
     );

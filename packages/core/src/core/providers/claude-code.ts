@@ -638,8 +638,13 @@ export class ClaudeCodeProvider implements AgentProvider {
       args.push("--permission-mode", options.permissionMode);
     }
 
+    // Native session resume via --resume <sessionId>
+    if (options.resumeSessionId) {
+      args.push("--resume", options.resumeSessionId);
+    }
+
     // History injection: write JSONL file, pass --resume <filepath>
-    if (options.history?.length && options.prompt) {
+    if (!options.resumeSessionId && options.history?.length && options.prompt) {
       const result = writeHistoryJsonl(options.history, { cwd: options.cwd });
       if (result) {
         args.push(...result.extraArgs);

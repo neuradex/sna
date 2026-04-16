@@ -483,7 +483,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
         const providerChanged = prevProvider && cfg.provider !== prevProvider;
 
         if (providerChanged) {
-          // Cross-provider: inject DB history instead of --resume
+          // Cross-provider: inject DB history
           const history = buildHistoryFromDb(sessionId);
           logger.log("route", `restart: provider changed ${prevProvider} → ${cfg.provider}, using DB history (${history.length} msgs)`);
           return prov.spawn({
@@ -497,15 +497,15 @@ export function createAgentRoutes(sessionManager: SessionManager) {
           });
         }
 
-        // Same provider: native resume
-        const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
+        // Same provider: native resume via resumeSessionId
         return prov.spawn({
           cwd: sessionManager.getSession(sessionId)!.cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode as any,
           configDir: cfg.configDir,
           env: { ...body.env, SNA_SESSION_ID: sessionId },
-          extraArgs: [...(cfg.extraArgs ?? []), ...resumeArgs],
+          resumeSessionId: ccSessionId ?? undefined,
+          extraArgs: cfg.extraArgs,
         });
       });
       logger.log("route", `POST /restart?session=${sessionId} → restarted (${config.provider})`);

@@ -330,6 +330,7 @@ const _CodexProcess = class _CodexProcess {
       });
       this.sendNotification("initialized");
       const resumeInfo = extractResumeArg(this.options.extraArgs);
+      const resumeThreadId = this.options.resumeSessionId ?? resumeInfo?.threadId;
       const sysPrompt = extractSystemPromptArgs(
         resumeInfo ? resumeInfo.cleanArgs : this.options.extraArgs
       );
@@ -340,9 +341,9 @@ const _CodexProcess = class _CodexProcess {
         ...sysPrompt.baseInstructions ? { baseInstructions: sysPrompt.baseInstructions } : {},
         ...sysPrompt.developerInstructions ? { developerInstructions: sysPrompt.developerInstructions } : {}
       };
-      if (resumeInfo?.threadId) {
+      if (resumeThreadId) {
         const resumeResult = await this.sendRpc("thread/resume", {
-          threadId: resumeInfo.threadId,
+          threadId: resumeThreadId,
           ...sysPrompt.baseInstructions ? { baseInstructions: sysPrompt.baseInstructions } : {},
           ...sysPrompt.developerInstructions ? { developerInstructions: sysPrompt.developerInstructions } : {}
         });
@@ -351,7 +352,7 @@ const _CodexProcess = class _CodexProcess {
           const threadResult = await this.sendRpc("thread/start", threadParams);
           this._threadId = threadResult?.threadId ?? threadResult?.thread?.id ?? null;
         } else {
-          this._threadId = resumeResult?.thread?.id ?? resumeInfo.threadId;
+          this._threadId = resumeResult?.thread?.id ?? resumeThreadId;
           logger.log("agent", `codex: resumed thread ${this._threadId}`);
         }
       } else {

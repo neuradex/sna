@@ -339,14 +339,14 @@ function createAgentRoutes(sessionManager) {
             extraArgs: cfg.extraArgs
           });
         }
-        const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
         return prov.spawn({
           cwd: sessionManager.getSession(sessionId).cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode,
           configDir: cfg.configDir,
           env: { ...body.env, SNA_SESSION_ID: sessionId },
-          extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
+          resumeSessionId: ccSessionId ?? void 0,
+          extraArgs: cfg.extraArgs
         });
       });
       logger.log("route", `POST /restart?session=${sessionId} \u2192 restarted (${config.provider})`);
