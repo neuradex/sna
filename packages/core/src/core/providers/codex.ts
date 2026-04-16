@@ -100,12 +100,21 @@ function resolveCodexPath(cwd: string): string {
 
 // ── Permission mode → Codex sandbox mapping ─────────────────────────────────
 
-/** @internal Exported for testing only. */
+/** @internal Exported for testing only. Maps SNA permissionMode → thread/start sandbox value (kebab-case). */
 export function toCodexSandbox(mode?: string): string {
   switch (mode) {
     case "bypassPermissions": return "danger-full-access";
     case "acceptEdits": return "workspace-write";
     default: return "read-only";
+  }
+}
+
+/** Maps SNA permissionMode → turn/start sandboxPolicy value (camelCase). */
+function toCodexSandboxPolicy(mode: string): string {
+  switch (mode) {
+    case "bypassPermissions": return "dangerFullAccess";
+    case "acceptEdits": return "workspaceWrite";
+    default: return "readOnly";
   }
 }
 
@@ -225,6 +234,10 @@ class CodexProcess implements AgentProcess {
   private _pendingSend: (() => void)[] = [];
   /** Set when interrupt() is called — causes queue to fast-drain delta events. */
   private _interrupted = false;
+  /** Model override — applied on next turn/start. */
+  private _modelOverride: string | null = null;
+  /** Sandbox override — applied on next turn/start. */
+  private _sandboxOverride: string | null = null;
   /** Set after the interrupted event is emitted — prevents duplicate. */
   private _interruptedEmitted = false;
   /** Current active turnId — needed for turn/interrupt. */
@@ -529,10 +542,23 @@ class CodexProcess implements AgentProcess {
           return { type: "image" as const, url };
         });
 
-    this.sendRpc("turn/start", {
+    const turnParams: Record<string, unknown> = {
       threadId: this._threadId,
       input: contentBlocks,
-    }).then((result) => {
+    };
+    // Apply per-turn overrides (become new thread defaults)
+    if (this._modelOverride) {
+      turnParams.model = this._modelOverride;
+      logger.log("agent", `codex: turn/start with model=${this._modelOverride}`);
+      this._modelOverride = null;
+    }
+    if (this._sandboxOverride) {
+      turnParams.sandboxPolicy = toCodexSandboxPolicy(this._sandboxOverride);
+      logger.log("agent", `codex: turn/start with sandboxPolicy=${turnParams.sandboxPolicy}`);
+      this._sandboxOverride = null;
+    }
+
+    this.sendRpc("turn/start", turnParams).then((result) => {
       // Capture turnId for interrupt
       if (result?.turn?.id) this._currentTurnId = result.turn.id;
     }).catch((err) => {
@@ -581,15 +607,17 @@ class CodexProcess implements AgentProcess {
     });
   }
 
-  setModel(_model: string): void {
-    // Codex doesn't support runtime model change on existing thread.
-    // Model is set at thread creation. Log and ignore.
-    logger.log("agent", "codex: setModel ignored (set at thread creation)");
+  setModel(model: string): void {
+    // Codex supports per-turn model override via turn/start params.
+    // Store it and apply on the next turn.
+    this._modelOverride = model;
+    logger.log("agent", `codex: model override set → ${model} (applied on next turn)`);
   }
 
-  setPermissionMode(_mode: string): void {
-    // Codex sandbox mode is set at thread creation.
-    logger.log("agent", "codex: setPermissionMode ignored (set at thread creation)");
+  setPermissionMode(mode: string): void {
+    // Codex supports per-turn sandbox override via turn/start params.
+    this._sandboxOverride = mode;
+    logger.log("agent", `codex: sandbox override set → ${mode} (applied on next turn)`);
   }
 
   /**

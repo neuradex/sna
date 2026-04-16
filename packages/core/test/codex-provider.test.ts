@@ -13,6 +13,7 @@ import {
   extractResumeArg,
   extractSystemPromptArgs,
   validateCodexPath,
+  // @ts-ignore — toCodexSandboxPolicy is not exported but we test via toCodexSandbox
 } from "../src/core/providers/codex.js";
 
 // ── toCodexSandbox ──────────────────────────────────────────────────────────
