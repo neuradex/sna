@@ -502,6 +502,16 @@ class CodexProcess implements AgentProcess {
   private startTurn(input: string | ContentBlock[]): void {
     if (!this._threadId) return;
 
+    // Emit user_message event so Langfuse tracer can start a new turn
+    const userText = typeof input === "string"
+      ? input
+      : input.filter(b => b.type === "text").map(b => (b as { text: string }).text).join("\n");
+    this.enqueue({
+      type: "user_message",
+      message: userText,
+      timestamp: Date.now(),
+    });
+
     // Codex app-server input content block format:
     //   text:  { type: "text", text: "..." }
     //   image: { type: "image", url: "data:<mime>;base64,<data>" }

@@ -287,12 +287,14 @@ function startTurn(ss: SessionState, userMessage: string): void {
   ss.turnCounter++;
   const session = sm?.getSession(ss.sessionId);
 
+  const provider = session?.lastStartConfig?.provider ?? "unknown";
   const turnName = ss.label
     ? `${ss.label}/turn-${ss.turnCounter}`
     : `turn-${ss.turnCounter}`;
   const tags = [
     ..._baseTags,
     ...(ss.label ? [ss.label] : []),
+    `provider:${provider}`,
   ];
 
   const trace = langfuseClient.trace({
@@ -302,6 +304,7 @@ function startTurn(ss: SessionState, userMessage: string): void {
     input: userMessage,
     metadata: {
       label: ss.label,
+      provider,
       cwd: session?.cwd,
       model: session?.lastStartConfig?.model,
       turnIndex: ss.turnCounter,
@@ -423,8 +426,9 @@ function handleEvent(ss: SessionState, event: AgentEvent): void {
         turn.llmGeneration.end();
         turn.llmGeneration = null;
       } else {
-        // Fallback: no proxy generation, create standalone
-        turn.trace.generation({ name: "assistant", output: event.message }).end();
+        // No proxy generation (e.g. Codex provider) — create standalone.
+        // Keep it open so `complete` handler can attach usage data.
+        turn.llmGeneration = turn.trace.generation({ name: "assistant", output: event.message });
       }
       break;
     }
@@ -432,6 +436,21 @@ function handleEvent(ss: SessionState, event: AgentEvent): void {
     case "complete": {
       const turn = ss.currentTurn;
       if (!turn) break;
+      // Attach usage data to open generation (Codex fallback path)
+      if (turn.llmGeneration && event.data) {
+        const d = event.data as Record<string, unknown>;
+        turn.llmGeneration.update({
+          model: d.model as string | undefined,
+          usage: {
+            input: d.inputTokens as number | undefined,
+            output: d.outputTokens as number | undefined,
+            total: ((d.inputTokens as number) ?? 0) + ((d.outputTokens as number) ?? 0),
+          },
+          metadata: { provider: d.provider, durationMs: d.durationMs, costUsd: d.costUsd },
+        });
+        turn.llmGeneration.end();
+        turn.llmGeneration = null;
+      }
       turn.trace.update({ metadata: event.data });
       endCurrentTurn(ss, "complete");
       try { langfuseClient?.flushAsync?.(); } catch { /* */ }
