@@ -436,29 +436,32 @@ class CodexProcess implements AgentProcess {
       this.sendNotification("initialized");
 
       // Step 3: start or resume thread
-      // resumeSessionId (from SpawnOptions) takes precedence over --resume in extraArgs
+      // Typed fields take precedence, extraArgs as fallback for backward compat
       const resumeInfo = extractResumeArg(this.options.extraArgs);
       const resumeThreadId = this.options.resumeSessionId ?? resumeInfo?.threadId;
-      const sysPrompt = extractSystemPromptArgs(
+      const extraArgPrompts = extractSystemPromptArgs(
         resumeInfo ? resumeInfo.cleanArgs : this.options.extraArgs,
       );
 
+      // Typed fields > extraArgs fallback
+      const baseInstructions = this.options.systemPrompt ?? extraArgPrompts.baseInstructions;
+      const developerInstructions = this.options.appendSystemPrompt ?? extraArgPrompts.developerInstructions;
+
       const sandbox = toCodexSandbox(this.options.permissionMode);
 
-      // Common thread params for instructions
+      // Common thread params
       const threadParams: Record<string, unknown> = {
         sandbox,
         ...(this.options.model ? { model: this.options.model } : {}),
-        ...(sysPrompt.baseInstructions ? { baseInstructions: sysPrompt.baseInstructions } : {}),
-        ...(sysPrompt.developerInstructions ? { developerInstructions: sysPrompt.developerInstructions } : {}),
+        ...(baseInstructions ? { baseInstructions } : {}),
+        ...(developerInstructions ? { developerInstructions } : {}),
       };
 
       if (resumeThreadId) {
-        // Try to resume existing Codex thread by ID
         const resumeResult = await this.sendRpc("thread/resume", {
           threadId: resumeThreadId,
-          ...(sysPrompt.baseInstructions ? { baseInstructions: sysPrompt.baseInstructions } : {}),
-          ...(sysPrompt.developerInstructions ? { developerInstructions: sysPrompt.developerInstructions } : {}),
+          ...(baseInstructions ? { baseInstructions } : {}),
+          ...(developerInstructions ? { developerInstructions } : {}),
         });
         if (resumeResult?._error) {
           logger.log("agent", `codex: resume failed (${resumeResult.message ?? "unknown"}), starting new thread`);

@@ -638,6 +638,21 @@ export class ClaudeCodeProvider implements AgentProvider {
       args.push("--permission-mode", options.permissionMode);
     }
 
+    // System prompt from typed fields (takes precedence over extraArgs)
+    if (options.systemPrompt) {
+      args.push("--system-prompt", options.systemPrompt);
+    }
+    if (options.appendSystemPrompt) {
+      args.push("--append-system-prompt", options.appendSystemPrompt);
+    }
+
+    // Provider-specific options
+    if (options.providerOptions) {
+      const po = options.providerOptions;
+      if (typeof po.maxTurns === "number") args.push("--max-turns", String(po.maxTurns));
+      if (po.disableSlashCommands) args.push("--disable-slash-commands");
+    }
+
     // Native session resume via --resume <sessionId>
     if (options.resumeSessionId) {
       args.push("--resume", options.resumeSessionId);

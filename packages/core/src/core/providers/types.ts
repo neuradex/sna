@@ -80,32 +80,64 @@ export interface SpawnOptions {
   model?: string;
   permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan";
   env?: Record<string, string>;
+
+  // ── Common options (provider-agnostic) ─────────────────────────────
+
   /**
-   * Override CLAUDE_CONFIG_DIR for this session.
-   * Isolates Claude config (permissions, theme, API keys, etc.) per session.
-   * If omitted, inherits the process-level CLAUDE_CONFIG_DIR or default (~/).
+   * Override the agent config directory for this session.
+   * Claude Code: CLAUDE_CONFIG_DIR
+   * Codex: CODEX_HOME
    */
   configDir?: string;
+
   /**
    * Native session ID to resume (provider-specific).
    * Claude Code: CC session ID → --resume <id>
    * Codex: thread ID → thread/resume API
-   * When set, the provider resumes the native session instead of starting fresh.
    */
   resumeSessionId?: string;
+
+  /**
+   * Replace the base system prompt.
+   * Claude Code: --system-prompt
+   * Codex: baseInstructions on thread/start
+   */
+  systemPrompt?: string;
+
+  /**
+   * Append to the system prompt (additive, for project-specific rules).
+   * Claude Code: --append-system-prompt
+   * Codex: developerInstructions on thread/start
+   */
+  appendSystemPrompt?: string;
+
   /**
    * Conversation history to inject before the first prompt.
-   * Written to stdin as NDJSON — Claude Code treats these as prior conversation turns.
-   * Must alternate user→assistant. Assistant content is auto-wrapped in array format.
+   * Claude Code: JSONL resume or recalled-conversation
+   * Codex: XML context prefix
    */
   history?: HistoryMessage[];
-  /** @internal Set by provider when history was injected via JSONL resume. */
-  _historyViaResume?: boolean;
+
+  // ── Provider-specific options ──────────────────────────────────────
+
+  /**
+   * Provider-specific options passed through to the provider.
+   * Not interpreted by the framework — each provider defines its own shape.
+   *
+   * Claude Code: { settings?: object, maxTurns?: number, disableSlashCommands?: boolean }
+   * Codex: { config?: Record<string, string>, profile?: string }
+   */
+  providerOptions?: Record<string, unknown>;
+
   /**
    * Additional CLI flags passed directly to the agent binary.
-   * e.g. ["--system-prompt", "You are...", "--append-system-prompt", "Also...", "--mcp-config", "path"]
+   * Prefer typed fields above; use this only for flags not yet abstracted.
+   * @deprecated Prefer systemPrompt, appendSystemPrompt, resumeSessionId etc.
    */
   extraArgs?: string[];
+
+  /** @internal Set by provider when history was injected via JSONL resume. */
+  _historyViaResume?: boolean;
 }
 
 /**

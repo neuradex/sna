@@ -331,21 +331,23 @@ const _CodexProcess = class _CodexProcess {
       this.sendNotification("initialized");
       const resumeInfo = extractResumeArg(this.options.extraArgs);
       const resumeThreadId = this.options.resumeSessionId ?? resumeInfo?.threadId;
-      const sysPrompt = extractSystemPromptArgs(
+      const extraArgPrompts = extractSystemPromptArgs(
         resumeInfo ? resumeInfo.cleanArgs : this.options.extraArgs
       );
+      const baseInstructions = this.options.systemPrompt ?? extraArgPrompts.baseInstructions;
+      const developerInstructions = this.options.appendSystemPrompt ?? extraArgPrompts.developerInstructions;
       const sandbox = toCodexSandbox(this.options.permissionMode);
       const threadParams = {
         sandbox,
         ...this.options.model ? { model: this.options.model } : {},
-        ...sysPrompt.baseInstructions ? { baseInstructions: sysPrompt.baseInstructions } : {},
-        ...sysPrompt.developerInstructions ? { developerInstructions: sysPrompt.developerInstructions } : {}
+        ...baseInstructions ? { baseInstructions } : {},
+        ...developerInstructions ? { developerInstructions } : {}
       };
       if (resumeThreadId) {
         const resumeResult = await this.sendRpc("thread/resume", {
           threadId: resumeThreadId,
-          ...sysPrompt.baseInstructions ? { baseInstructions: sysPrompt.baseInstructions } : {},
-          ...sysPrompt.developerInstructions ? { developerInstructions: sysPrompt.developerInstructions } : {}
+          ...baseInstructions ? { baseInstructions } : {},
+          ...developerInstructions ? { developerInstructions } : {}
         });
         if (resumeResult?._error) {
           logger.log("agent", `codex: resume failed (${resumeResult.message ?? "unknown"}), starting new thread`);
