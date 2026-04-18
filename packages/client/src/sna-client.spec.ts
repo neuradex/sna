@@ -525,7 +525,7 @@ describe("agent status & config", () => {
         ccSessionId: "cc-123",
         eventCount: 42,
         messageCount: 10,
-        lastMessage: { role: "assistant", content: "hello", created_at: "2025-01-01" },
+        lastMessage: { actor: "assistant", kind: "text", content: "hello", created_at: "2025-01-01" },
         config: { provider: "claude-code", model: "claude-sonnet-4-6", permissionMode: "acceptEdits" },
       }),
       "agent.set-model": (msg) => ({ status: "updated", model: msg.model }),

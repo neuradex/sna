@@ -4,7 +4,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import type { AgentProvider, AgentProcess, AgentEvent, SpawnOptions } from "./types.js";
-import { writeHistoryJsonl, buildRecalledConversation } from "./cc-history-adapter.js";
+import { writeClaudeHistoryJsonl } from "../../history/claude-code.js";
 import { logger } from "../../lib/logger.js";
 import { getConfig } from "../../config.js";
 
@@ -272,17 +272,10 @@ class ClaudeCodeProcess implements AgentProcess {
       this.emitter.emit("error", err);
     });
 
-    // Inject conversation history.
-    // Primary: JSONL resume (real multi-turn structure).
-    // Fallback: recalled-conversation (single assistant message with XML).
-    // Note: JSONL resume args are added by the caller (spawn method) before
-    // the process is created, so here we only handle the fallback case.
-    if (options.history?.length && !options._historyViaResume) {
-      // Fallback: recalled-conversation as single assistant message.
-      // Works with or without prompt — if no prompt, CC enters waiting state.
-      const line = buildRecalledConversation(options.history);
-      this.proc.stdin!.write(line + "\n");
-    }
+    // History injection happens exclusively via --resume <jsonl-path> before
+    // spawn (see spawn() below). If that path wasn't taken, we don't try to
+    // stuff history into stdin — better to start fresh than to pollute the
+    // transcript with malformed recalled-conversation JSON.
 
     // Send initial prompt if provided
     if (options.prompt) {
@@ -572,7 +565,8 @@ export class ClaudeCodeProvider implements AgentProvider {
     const claudePath = claudeParts[0]!;
     const claudePrefix = claudeParts.slice(1);
 
-    // Build merged settings: SDK's PreToolUse hook + app's settings from extraArgs.
+    // Build merged settings: SDK's PreToolUse hook + app's settings (from
+    // providerOptions.settings, or legacy extraArgs --settings).
     // Skip hook injection when bypassPermissions is set — all tools are auto-allowed.
     // Resolve hook script by walking up to the package root (where package.json lives).
     // import.meta.url varies depending on whether this code runs from the bundled
@@ -596,28 +590,40 @@ export class ClaudeCodeProvider implements AgentProvider {
       };
     }
 
-    // Extract --settings from extraArgs (if any) and merge
+    // Helper: merge an app settings object into sdkSettings
+    // (hooks merge additively, other top-level keys overwrite).
+    const mergeAppSettings = (appSettings: Record<string, unknown>) => {
+      if (appSettings.hooks && typeof appSettings.hooks === "object") {
+        const appHooks = appSettings.hooks as Record<string, unknown[]>;
+        for (const [event, hooks] of Object.entries(appHooks)) {
+          const cur = sdkSettings.hooks as Record<string, unknown[]> | undefined;
+          if (cur && cur[event]) {
+            cur[event] = [...cur[event], ...(hooks as unknown[])];
+          } else {
+            sdkSettings.hooks = sdkSettings.hooks ?? {};
+            (sdkSettings.hooks as Record<string, unknown>)[event] = hooks;
+          }
+        }
+        const rest = { ...appSettings };
+        delete rest.hooks;
+        Object.assign(sdkSettings, rest);
+      } else {
+        Object.assign(sdkSettings, appSettings);
+      }
+    };
+
+    // Preferred: providerOptions.settings (typed)
+    const po = (options.providerOptions ?? {}) as Record<string, unknown>;
+    if (po.settings && typeof po.settings === "object") {
+      mergeAppSettings(po.settings as Record<string, unknown>);
+    }
+
+    // Legacy: --settings in extraArgs (kept for backward compat; callers should migrate to providerOptions.settings)
     let extraArgsClean = options.extraArgs ? [...options.extraArgs] : [];
     const settingsIdx = extraArgsClean.indexOf("--settings");
     if (settingsIdx !== -1 && settingsIdx + 1 < extraArgsClean.length) {
       try {
-        const appSettings = JSON.parse(extraArgsClean[settingsIdx + 1]);
-        // Merge hooks: SDK hooks + app hooks
-        if (appSettings.hooks) {
-          for (const [event, hooks] of Object.entries(appSettings.hooks)) {
-            if (sdkSettings.hooks && (sdkSettings.hooks as Record<string, unknown[]>)[event]) {
-              (sdkSettings.hooks as Record<string, unknown[]>)[event] = [
-                ...(sdkSettings.hooks as Record<string, unknown[]>)[event],
-                ...(hooks as unknown[]),
-              ];
-            } else {
-              (sdkSettings.hooks as Record<string, unknown>)[event] = hooks;
-            }
-          }
-          delete appSettings.hooks;
-        }
-        // Merge remaining top-level settings
-        Object.assign(sdkSettings, appSettings);
+        mergeAppSettings(JSON.parse(extraArgsClean[settingsIdx + 1]));
       } catch { /* invalid JSON — ignore app settings */ }
       extraArgsClean.splice(settingsIdx, 2);
     }
@@ -638,13 +644,65 @@ export class ClaudeCodeProvider implements AgentProvider {
       args.push("--permission-mode", options.permissionMode);
     }
 
-    // History injection: write JSONL file, pass --resume <filepath>
-    if (options.history?.length && options.prompt) {
-      const result = writeHistoryJsonl(options.history, { cwd: options.cwd });
+    // System prompt from typed fields (takes precedence over extraArgs)
+    if (options.systemPrompt) {
+      args.push("--system-prompt", options.systemPrompt);
+    }
+    if (options.appendSystemPrompt) {
+      args.push("--append-system-prompt", options.appendSystemPrompt);
+    }
+
+    // MCP servers
+    if (options.mcpServers && Object.keys(options.mcpServers).length > 0) {
+      args.push("--mcp-config", JSON.stringify({ mcpServers: options.mcpServers }));
+    }
+
+    // Tool filtering
+    if (options.allowedTools?.length) {
+      args.push("--allowedTools", ...options.allowedTools);
+    }
+    if (options.disallowedTools?.length) {
+      args.push("--disallowedTools", ...options.disallowedTools);
+    }
+
+    // Provider-specific options (typed — preferred over extraArgs for these flags)
+    //   settings: merged above into sdkSettings
+    //   settingSources: string[] → --setting-sources <csv>  (pass [""] to disable CLAUDE.md/skills/memory)
+    //   strictMcpConfig: boolean → --strict-mcp-config
+    //   maxTurns: number → --max-turns
+    //   disableSlashCommands: boolean → --disable-slash-commands
+    if (typeof po.maxTurns === "number") args.push("--max-turns", String(po.maxTurns));
+    if (po.disableSlashCommands) args.push("--disable-slash-commands");
+    if (po.strictMcpConfig) args.push("--strict-mcp-config");
+    if (Array.isArray(po.settingSources)) {
+      // Claude CLI accepts repeated --setting-sources; empty string disables defaults.
+      for (const src of po.settingSources as string[]) {
+        args.push("--setting-sources", src);
+      }
+    }
+
+    // Native session resume via --resume <sessionId>
+    if (options.resumeSessionId) {
+      args.push("--resume", options.resumeSessionId);
+    }
+
+    // History injection: write JSONL session file, pass --resume <filepath>.
+    // The adapter converts canonical blocks into Anthropic wire format and
+    // writes the JSONL; requires a prompt so CC has something to respond to
+    // after loading the history.
+    // History injection: write JSONL session file, pass --resume <filepath>.
+    // Must fire whenever canonical history is provided — NOT conditioned on
+    // options.prompt. Cross-provider restart (Codex → Claude) arrives with
+    // history but no prompt; Claude CLI will load the JSONL and wait for the
+    // user's next stdin input, which already has the full prior context.
+    if (!options.resumeSessionId && options.history?.length) {
+      const sessionId = options.env?.SNA_SESSION_ID ?? "default";
+      const result = writeClaudeHistoryJsonl(options.history, { cwd: options.cwd, sessionId });
       if (result) {
         args.push(...result.extraArgs);
-        options._historyViaResume = true;
         logger.log("agent", `history via JSONL resume → ${result.filePath}`);
+      } else {
+        logger.log("agent", "history injection skipped (adapter returned null)");
       }
     }
 

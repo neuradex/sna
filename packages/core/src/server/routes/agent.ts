@@ -24,9 +24,12 @@ import {
 import { logger } from "../../lib/logger.js";
 import { getDb } from "../../db/schema.js";
 import { SessionManager } from "../session-manager.js";
-import { buildHistoryFromDb } from "../history-builder.js";
+import { buildCanonicalFromDb } from "../../history/canonical.js";
 import { httpJson } from "../api-types.js";
-import { saveImages } from "../image-store.js";
+import { saveEmbeds } from "../image-store.js";
+import { insertChatMessage } from "../../db/chat-messages.js";
+import { formatEmbedRef } from "../../history/embed-refs.js";
+import type { EmbedRecord } from "../../history/types.js";
 import { getConfig } from "../../config.js";
 import { completion, type CompletionOptions } from "../../core/completion.js";
 
@@ -234,6 +237,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     const sessionId = getSessionId(c);
     const body = (await c.req.json().catch(() => ({}))) as {
       provider?: string;
+      modelProvider?: string;
       prompt?: string;
       model?: string;
       permissionMode?: string;
@@ -241,8 +245,14 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       force?: boolean;
       meta?: Record<string, unknown>;
       extraArgs?: string[];
+      providerOptions?: Record<string, unknown>;
+      systemPrompt?: string;
+      appendSystemPrompt?: string;
+      allowedTools?: string[];
+      disallowedTools?: string[];
+      mcpServers?: Record<string, unknown>;
       cwd?: string;
-      history?: Array<{ role: "user" | "assistant"; content: string }>;
+      history?: import("../../history/types.js").CanonicalBlock[];
       env?: Record<string, string>;
     };
 
@@ -274,8 +284,11 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`)
         .run(sessionId, session.label ?? sessionId);
       if (body.prompt) {
-        db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`)
-          .run(sessionId, body.prompt, body.meta ? JSON.stringify(body.meta) : null);
+        insertChatMessage(db, {
+          sessionId, actor: "user", kind: "text",
+          content: body.prompt,
+          meta: body.meta,
+        });
       }
       const skillMatch = body.prompt?.match(/^Execute the skill:\s*(\S+)/);
       if (skillMatch) {
@@ -301,10 +314,16 @@ export function createAgentRoutes(sessionManager: SessionManager) {
         env: { ...body.env, SNA_SESSION_ID: sessionId },
         history: body.history,
         extraArgs,
+        providerOptions: body.providerOptions,
+        systemPrompt: body.systemPrompt,
+        appendSystemPrompt: body.appendSystemPrompt,
+        allowedTools: body.allowedTools,
+        disallowedTools: body.disallowedTools,
+        mcpServers: body.mcpServers as any,
       });
 
       sessionManager.setProcess(sessionId, proc);
-      sessionManager.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
+      sessionManager.saveStartConfig(sessionId, { provider: providerName, modelProvider: body.modelProvider, model, permissionMode, configDir, extraArgs, providerOptions: body.providerOptions });
       logger.log("route", `POST /start?session=${sessionId} → started`);
 
       return httpJson(c, "agent.start", {
@@ -341,25 +360,39 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       return c.json({ status: "error", message: "message or images required" }, 400);
     }
 
-    // Save images to disk and persist message with image filenames in meta
-    const textContent = body.message ?? "(image)";
-    let meta: Record<string, unknown> = body.meta ? { ...body.meta } : {};
+    // Persist user message. Attached images/files are stashed into the same
+    // row via embed refs (`![](embed://<id>)` in content) + the `embeds` JSON
+    // column holding the EmbedRecord dictionary.
+    const userText = body.message ?? "";
+    const meta: Record<string, unknown> = body.meta ? { ...body.meta } : {};
+    const embeds: Record<string, EmbedRecord> = {};
+    let contentText = userText;
     if (body.images?.length) {
-      const filenames = saveImages(sessionId, body.images);
-      meta.images = filenames;
+      const saved = saveEmbeds(sessionId, body.images);
+      const refs = saved.map(({ id, record }) => {
+        embeds[id] = record;
+        return formatEmbedRef(id);
+      });
+      contentText = userText ? `${userText}\n${refs.join(" ")}` : refs.join(" ");
     }
     try {
       const db = getDb();
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`)
         .run(sessionId, session.label ?? sessionId);
-      db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`)
-        .run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
+      insertChatMessage(db, {
+        sessionId,
+        actor: "user",
+        kind: "text",
+        content: contentText,
+        embeds: Object.keys(embeds).length > 0 ? embeds : undefined,
+        meta: Object.keys(meta).length > 0 ? meta : undefined,
+      });
     } catch { /* DB write failure is non-fatal */ }
 
     // Broadcast user message to agent.subscribe listeners (multi-client sync)
     sessionManager.pushEvent(sessionId, {
       type: "user_message",
-      message: textContent,
+      message: contentText,
       data: Object.keys(meta).length > 0 ? meta : undefined,
       timestamp: Date.now(),
     });
@@ -459,33 +492,78 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     });
   });
 
-  // POST /restart — kill + re-spawn with merged config + --resume
+  // POST /restart — kill + re-spawn with merged config
+  // Same provider: --resume (native session continuity)
+  // Different provider: DB history injection (cross-provider handoff)
   app.post("/restart", async (c) => {
     const sessionId = getSessionId(c);
     const body = (await c.req.json().catch(() => ({}))) as {
       provider?: string;
+      modelProvider?: string;
       model?: string;
       permissionMode?: string;
       configDir?: string;
       extraArgs?: string[];
+      providerOptions?: Record<string, unknown>;
+      systemPrompt?: string;
+      appendSystemPrompt?: string;
+      allowedTools?: string[];
+      disallowedTools?: string[];
+      mcpServers?: Record<string, unknown>;
       env?: Record<string, string>;
     };
 
     try {
-      const ccSessionId = sessionManager.getSession(sessionId)?.ccSessionId;
+      const session = sessionManager.getSession(sessionId);
+      const prevProvider = session?.lastStartConfig?.provider;
+      const ccSessionId = session?.ccSessionId;
+
       const { config } = sessionManager.restartSession(sessionId, body, (cfg) => {
         const prov = getProvider(cfg.provider);
-        const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
+        const providerChanged = prevProvider && cfg.provider !== prevProvider;
+
+        // Typed SpawnOptions fields are forwarded from the request body directly
+        // — they are not part of StartConfig persistence because they describe
+        // the current spawn, not the session's identity.
+        const typedOpts = {
+          systemPrompt: body.systemPrompt,
+          appendSystemPrompt: body.appendSystemPrompt,
+          allowedTools: body.allowedTools,
+          disallowedTools: body.disallowedTools,
+          mcpServers: body.mcpServers as any,
+        };
+
+        if (providerChanged) {
+          // Cross-provider: inject DB history
+          const history = buildCanonicalFromDb(sessionId);
+          logger.log("route", `restart: provider changed ${prevProvider} → ${cfg.provider}, using DB history (${history.length} msgs)`);
+          return prov.spawn({
+            cwd: sessionManager.getSession(sessionId)!.cwd,
+            model: cfg.model,
+            permissionMode: cfg.permissionMode as any,
+            configDir: cfg.configDir,
+            env: { ...body.env, SNA_SESSION_ID: sessionId },
+            history: history.length > 0 ? history : undefined,
+            extraArgs: cfg.extraArgs,
+            providerOptions: cfg.providerOptions,
+            ...typedOpts,
+          });
+        }
+
+        // Same provider: native resume via resumeSessionId
         return prov.spawn({
           cwd: sessionManager.getSession(sessionId)!.cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode as any,
           configDir: cfg.configDir,
           env: { ...body.env, SNA_SESSION_ID: sessionId },
-          extraArgs: [...(cfg.extraArgs ?? []), ...resumeArgs],
+          resumeSessionId: ccSessionId ?? undefined,
+          extraArgs: cfg.extraArgs,
+          providerOptions: cfg.providerOptions,
+          ...typedOpts,
         });
       });
-      logger.log("route", `POST /restart?session=${sessionId} → restarted`);
+      logger.log("route", `POST /restart?session=${sessionId} → restarted (${config.provider})`);
       return httpJson(c, "agent.restart", {
         status: "restarted",
         provider: config.provider,
@@ -506,7 +584,14 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       permissionMode?: string;
       configDir?: string;
       provider?: string;
+      modelProvider?: string;
       extraArgs?: string[];
+      providerOptions?: Record<string, unknown>;
+      systemPrompt?: string;
+      appendSystemPrompt?: string;
+      allowedTools?: string[];
+      disallowedTools?: string[];
+      mcpServers?: Record<string, unknown>;
       env?: Record<string, string>;
     };
 
@@ -515,16 +600,22 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       return c.json({ status: "error", message: "Session already running. Use agent.send instead." }, 400);
     }
 
-    const history = buildHistoryFromDb(sessionId);
+    const history = buildCanonicalFromDb(sessionId);
     if (history.length === 0 && !body.prompt) {
       return c.json({ status: "error", message: "No history in DB — nothing to resume." }, 400);
     }
 
     const providerName = body.provider ?? getConfig().defaultProvider;
+    const providerChanged = session.lastStartConfig && session.lastStartConfig.provider !== providerName;
     const model = body.model ?? session.lastStartConfig?.model ?? getConfig().model;
     const permissionMode = body.permissionMode ?? session.lastStartConfig?.permissionMode;
-    const configDir = body.configDir ?? session.lastStartConfig?.configDir;
-    const extraArgs = body.extraArgs ?? session.lastStartConfig?.extraArgs;
+    const configDir = providerChanged ? body.configDir : (body.configDir ?? session.lastStartConfig?.configDir);
+    // Provider-specific fields: inherit only when provider is unchanged.
+    const extraArgs = providerChanged ? body.extraArgs : (body.extraArgs ?? session.lastStartConfig?.extraArgs);
+    const providerOptions = providerChanged ? body.providerOptions : (body.providerOptions ?? session.lastStartConfig?.providerOptions);
+    // modelProvider: inherit only when provider is unchanged AND caller didn't
+    // supply one; otherwise prefer the caller's explicit value.
+    const modelProvider = body.modelProvider ?? (providerChanged ? undefined : session.lastStartConfig?.modelProvider);
     const provider = getProvider(providerName);
 
     try {
@@ -537,9 +628,15 @@ export function createAgentRoutes(sessionManager: SessionManager) {
         env: { ...body.env, SNA_SESSION_ID: sessionId },
         history: history.length > 0 ? history : undefined,
         extraArgs,
+        providerOptions,
+        systemPrompt: body.systemPrompt,
+        appendSystemPrompt: body.appendSystemPrompt,
+        allowedTools: body.allowedTools,
+        disallowedTools: body.disallowedTools,
+        mcpServers: body.mcpServers as any,
       });
       sessionManager.setProcess(sessionId, proc, "resumed");
-      sessionManager.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
+      sessionManager.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, permissionMode, configDir, extraArgs, providerOptions });
       logger.log("route", `POST /resume?session=${sessionId} → resumed (${history.length} history msgs)`);
       return httpJson(c, "agent.resume", {
         status: "resumed",
@@ -591,13 +688,13 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     const session = sessionManager.getSession(sessionId);
     const alive = session?.process?.alive ?? false;
     let messageCount = 0;
-    let lastMessage: { role: string; content: string; created_at: string } | null = null;
+    let lastMessage: { actor: string; kind: string; content: string; created_at: string } | null = null;
     try {
       const db = getDb();
       const count = db.prepare("SELECT COUNT(*) as c FROM chat_messages WHERE session_id = ?").get(sessionId) as any;
       messageCount = count?.c ?? 0;
-      const last = db.prepare("SELECT role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1").get(sessionId) as any;
-      if (last) lastMessage = { role: last.role, content: last.content, created_at: last.created_at };
+      const last = db.prepare("SELECT actor, kind, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1").get(sessionId) as any;
+      if (last) lastMessage = { actor: last.actor, kind: last.kind, content: last.content, created_at: last.created_at };
     } catch {}
     return httpJson(c, "agent.status", {
       alive,

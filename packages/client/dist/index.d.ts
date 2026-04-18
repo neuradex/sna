@@ -437,7 +437,8 @@ interface SessionInfo {
     messageCount: number;
     /** The most recent chat message, or `null` if none. */
     lastMessage: {
-        role: string;
+        actor: string;
+        kind: string;
         content: string;
         created_at: string;
     } | null;
@@ -714,30 +715,58 @@ declare class SessionsApi {
  * Configuration for starting or restarting an agent.
  */
 interface AgentStartConfig {
-    /** Agent provider name (e.g. `"claude-code"`). */
+    /**
+     * Runtime — the CLI binary to spawn (e.g. `"claude-code"`, `"codex"`).
+     * Dispatches the request to a registered AgentProvider.
+     */
     provider?: string;
+    /**
+     * Model vendor / API backend (e.g. `"anthropic"`, `"openai"`, `"google"`).
+     * Attribution metadata — stamped onto assistant-authored canonical rows so
+     * downstream consumers can tell whose model produced each turn. Not used
+     * by the runtime itself.
+     */
+    modelProvider?: string;
     /** Initial prompt to send to the agent on startup. */
     prompt?: string;
-    /** Model to use (e.g. `"claude-sonnet-4-6"`, `"claude-opus-4-6"`). */
+    /** Model slug within the modelProvider's catalog (e.g. `"sonnet-4-6"`, `"gpt-5.4"`). */
     model?: string;
     /** Permission mode: `"acceptEdits"`, `"bypassPermissions"`, etc. */
     permissionMode?: string;
     /**
-     * Override CLAUDE_CONFIG_DIR for this session.
-     * Isolates Claude config (permissions, theme, API keys, etc.) per agent.
-     * Useful for running multiple agents with different permission profiles.
+     * Override the agent config directory for this session.
+     * Claude Code: CLAUDE_CONFIG_DIR. Codex: CODEX_HOME.
      */
     configDir?: string;
     /** If `true`, kill the existing agent and start fresh. */
     force?: boolean;
     /** Arbitrary metadata to attach to the agent invocation. */
     meta?: Record<string, unknown>;
-    /** Extra CLI arguments passed to the agent process. */
-    extraArgs?: string[];
     /** Working directory override for this agent. */
     cwd?: string;
     /** Conversation history to resume from. */
     history?: unknown[];
+    /** Replace the base system prompt. */
+    systemPrompt?: string;
+    /** Append to the system prompt (additive). */
+    appendSystemPrompt?: string;
+    /** Restrict the agent to only these tools. */
+    allowedTools?: string[];
+    /** Block specific tools. */
+    disallowedTools?: string[];
+    /** MCP servers to make available. */
+    mcpServers?: Record<string, unknown>;
+    /**
+     * Provider-specific structured options. See SpawnOptions.providerOptions
+     * for the per-provider shape. Dropped on cross-provider restart.
+     */
+    providerOptions?: Record<string, unknown>;
+    /**
+     * Additional CLI flags passed directly to the agent binary.
+     * @deprecated Prefer typed fields above (systemPrompt, mcpServers,
+     * providerOptions, etc.). Dropped on cross-provider restart.
+     */
+    extraArgs?: string[];
 }
 /**
  * Agent control, event streaming, and permission handling APIs.
@@ -988,7 +1017,8 @@ declare class AgentApi {
         messageCount: number;
         /** The most recent message, or `null`. */
         lastMessage: {
-            role: string;
+            actor: string;
+            kind: string;
             content: string;
             created_at: string;
         } | null;

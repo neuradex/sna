@@ -187,10 +187,16 @@ function startTurn(ss, userMessage) {
   }
   ss.turnCounter++;
   const session = sm?.getSession(ss.sessionId);
+  const runtime = session?.lastStartConfig?.provider ?? "unknown";
+  const modelProvider = session?.lastStartConfig?.modelProvider ?? "unknown";
+  const model = session?.lastStartConfig?.model ?? "unknown";
   const turnName = ss.label ? `${ss.label}/turn-${ss.turnCounter}` : `turn-${ss.turnCounter}`;
   const tags = [
     ..._baseTags,
-    ...ss.label ? [ss.label] : []
+    ...ss.label ? [ss.label] : [],
+    `runtime:${runtime}`,
+    `modelProvider:${modelProvider}`,
+    `model:${model}`
   ];
   const trace = langfuseClient.trace({
     name: turnName,
@@ -199,8 +205,10 @@ function startTurn(ss, userMessage) {
     input: userMessage,
     metadata: {
       label: ss.label,
+      runtime,
+      modelProvider,
+      model,
       cwd: session?.cwd,
-      model: session?.lastStartConfig?.model,
       turnIndex: ss.turnCounter
     },
     tags
@@ -302,13 +310,33 @@ function handleEvent(ss, event) {
         turn.llmGeneration.end();
         turn.llmGeneration = null;
       } else {
-        turn.trace.generation({ name: "assistant", output: event.message }).end();
+        turn.llmGeneration = turn.trace.generation({ name: "assistant", output: event.message });
       }
       break;
     }
     case "complete": {
       const turn = ss.currentTurn;
       if (!turn) break;
+      if (turn.llmGeneration && event.data) {
+        const d = event.data;
+        const session = sm?.getSession(ss.sessionId);
+        turn.llmGeneration.update({
+          model: d.model ?? session?.lastStartConfig?.model,
+          usage: {
+            input: d.inputTokens,
+            output: d.outputTokens,
+            total: (d.inputTokens ?? 0) + (d.outputTokens ?? 0)
+          },
+          metadata: {
+            runtime: d.provider ?? session?.lastStartConfig?.provider,
+            modelProvider: session?.lastStartConfig?.modelProvider,
+            durationMs: d.durationMs,
+            costUsd: d.costUsd
+          }
+        });
+        turn.llmGeneration.end();
+        turn.llmGeneration = null;
+      }
       turn.trace.update({ metadata: event.data });
       endCurrentTurn(ss, "complete");
       try {

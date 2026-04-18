@@ -67,9 +67,102 @@ function migrateChatSessionsMeta(db) {
     db.exec("ALTER TABLE chat_sessions ADD COLUMN last_start_config TEXT");
   }
 }
+function migrateChatMessagesCanonical(db) {
+  const cols = db.prepare("PRAGMA table_info(chat_messages)").all();
+  if (cols.length === 0) return;
+  const hasRole = cols.some((c) => c.name === "role");
+  const hasActor = cols.some((c) => c.name === "actor");
+  const hasKind = cols.some((c) => c.name === "kind");
+  const hasEmbeds = cols.some((c) => c.name === "embeds");
+  const hasUpdatedAt = cols.some((c) => c.name === "updated_at");
+  if (!hasRole && hasActor && hasKind && hasEmbeds && hasUpdatedAt) return;
+  db.transaction(() => {
+    if (!hasActor) db.exec("ALTER TABLE chat_messages ADD COLUMN actor TEXT");
+    if (!hasKind) db.exec("ALTER TABLE chat_messages ADD COLUMN kind TEXT");
+    if (!hasEmbeds) db.exec("ALTER TABLE chat_messages ADD COLUMN embeds TEXT");
+    if (!hasUpdatedAt) db.exec("ALTER TABLE chat_messages ADD COLUMN updated_at TEXT");
+    if (hasRole) {
+      db.exec(`
+        UPDATE chat_messages SET
+          actor = CASE role
+            WHEN 'user' THEN 'user'
+            WHEN 'assistant' THEN 'assistant'
+            WHEN 'thinking' THEN 'assistant'
+            WHEN 'tool' THEN 'assistant'
+            WHEN 'tool_use' THEN 'assistant'
+            WHEN 'tool_result' THEN 'system'
+            WHEN 'status' THEN 'system'
+            WHEN 'error' THEN 'system'
+            ELSE 'system'
+          END,
+          kind = CASE role
+            WHEN 'user' THEN 'text'
+            WHEN 'assistant' THEN 'text'
+            WHEN 'thinking' THEN 'thinking'
+            WHEN 'tool' THEN 'tool_use'
+            WHEN 'tool_use' THEN 'tool_use'
+            WHEN 'tool_result' THEN 'tool_result'
+            WHEN 'status' THEN 'status'
+            WHEN 'error' THEN 'error'
+            ELSE 'text'
+          END
+        WHERE actor IS NULL OR kind IS NULL;
+      `);
+    }
+    db.exec(`UPDATE chat_messages SET updated_at = created_at WHERE updated_at IS NULL`);
+    const legacyImageRows = db.prepare(`
+      SELECT id, content, meta FROM chat_messages
+      WHERE meta IS NOT NULL AND meta LIKE '%"images"%' AND embeds IS NULL
+    `).all();
+    const updateEmbeds = db.prepare(`UPDATE chat_messages SET content = ?, embeds = ?, meta = ? WHERE id = ?`);
+    for (const row of legacyImageRows) {
+      try {
+        const meta = JSON.parse(row.meta);
+        const files = Array.isArray(meta.images) ? meta.images.filter((f) => typeof f === "string") : [];
+        if (files.length === 0) continue;
+        const embedEntries = {};
+        const refsSuffix = [];
+        for (const filename of files) {
+          const id = filename.replace(/\.[^.]+$/, "");
+          const ext = filename.match(/\.([^.]+)$/)?.[1] ?? "";
+          embedEntries[id] = { mime_type: extToMime(ext), path: filename };
+          refsSuffix.push(`![](embed://${id})`);
+        }
+        const newContent = row.content + (refsSuffix.length > 0 ? "\n" + refsSuffix.join(" ") : "");
+        delete meta.images;
+        const newMeta = Object.keys(meta).length > 0 ? JSON.stringify(meta) : null;
+        updateEmbeds.run(newContent, JSON.stringify(embedEntries), newMeta, row.id);
+      } catch {
+      }
+    }
+    if (hasRole) {
+      db.exec("ALTER TABLE chat_messages DROP COLUMN role");
+    }
+  })();
+}
+function extToMime(ext) {
+  switch (ext.toLowerCase()) {
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    case "svg":
+      return "image/svg+xml";
+    case "pdf":
+      return "application/pdf";
+    default:
+      return "application/octet-stream";
+  }
+}
 function initSchema(db) {
   migrateSkillEvents(db);
   migrateChatSessionsMeta(db);
+  migrateChatMessagesCanonical(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS chat_sessions (
       id         TEXT PRIMARY KEY,
@@ -84,17 +177,27 @@ function initSchema(db) {
     -- Ensure default session always exists
     INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES ('default', 'Chat', 'main');
 
+    -- Canonical chat_messages schema. Two orthogonal axes describe each block:
+    --   actor  WHO produced it:    'user' | 'assistant' | 'system'
+    --   kind   WHAT kind it is:    'text' | 'thinking' | 'tool_use' | 'tool_result' | 'status' | 'error'
+    --   content Textual body. May contain inline embed refs: ![](embed://<id>)
+    --   embeds  JSON { "<id>": { mime_type, path, ... } } \u2014 binary attachments referenced by content.
+    --   meta    Kind-specific structured overlay (usage, tool_use_id, input JSON, isError, ...)
     CREATE TABLE IF NOT EXISTS chat_messages (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-      role       TEXT NOT NULL,
+      actor      TEXT NOT NULL DEFAULT 'user',
+      kind       TEXT NOT NULL DEFAULT 'text',
       content    TEXT NOT NULL DEFAULT '',
+      embeds     TEXT,
       skill_name TEXT,
       meta       TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_session_kind ON chat_messages(session_id, kind);
 
     CREATE TABLE IF NOT EXISTS skill_events (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -295,53 +398,179 @@ import fs4 from "fs";
 import path5 from "path";
 import { fileURLToPath } from "url";
 
-// src/core/providers/cc-history-adapter.ts
+// src/history/claude-code.ts
 import fs2 from "fs";
 import path3 from "path";
-function writeHistoryJsonl(history, opts) {
-  for (let i = 1; i < history.length; i++) {
-    if (history[i].role === history[i - 1].role) {
+
+// src/history/embed-refs.ts
+var EMBED_REF_RE = /!\[[^\]]*\]\(embed:\/\/([^)\s]+)\)/g;
+function splitContentByEmbeds(content) {
+  const segments = [];
+  let lastIndex = 0;
+  EMBED_REF_RE.lastIndex = 0;
+  let m;
+  while ((m = EMBED_REF_RE.exec(content)) !== null) {
+    if (m.index > lastIndex) {
+      segments.push({ type: "text", text: content.slice(lastIndex, m.index) });
+    }
+    segments.push({ type: "embed", id: m[1] });
+    lastIndex = m.index + m[0].length;
+  }
+  if (lastIndex < content.length) {
+    segments.push({ type: "text", text: content.slice(lastIndex) });
+  }
+  return segments;
+}
+function formatEmbedRef(id, altText = "") {
+  return `![${altText}](embed://${id})`;
+}
+
+// src/history/claude-code.ts
+function renderTextWithEmbeds(content, embeds, sessionId) {
+  const segments = splitContentByEmbeds(content);
+  const out = [];
+  for (const seg of segments) {
+    if (seg.type === "text") {
+      if (seg.text.length > 0) out.push({ type: "text", text: seg.text });
+    } else {
+      const record = embeds?.[seg.id];
+      if (!record) continue;
+      const data = loadEmbedAsBase64(sessionId, record);
+      if (!data) continue;
+      out.push({
+        type: "image",
+        source: { type: "base64", media_type: record.mime_type, data }
+      });
+    }
+  }
+  return out;
+}
+function loadEmbedAsBase64(sessionId, record) {
+  const fullPath = path3.isAbsolute(record.path) ? record.path : path3.join(getConfig().dataDir, "images", sessionId, record.path);
+  try {
+    return fs2.readFileSync(fullPath).toString("base64");
+  } catch {
+    return null;
+  }
+}
+function canonicalToAnthropicMessages(blocks, sessionId) {
+  const msgs = [];
+  let current2 = null;
+  const flushCurrent = () => {
+    if (current2 && current2.content.length > 0) msgs.push(current2);
+    current2 = null;
+  };
+  for (const b of blocks) {
+    if (b.actor === "user" && b.kind === "text") {
+      flushCurrent();
+      current2 = { role: "user", content: renderTextWithEmbeds(b.content, b.embeds, sessionId) };
+      flushCurrent();
+      continue;
+    }
+    if (b.actor === "assistant") {
+      if (!current2 || current2.role !== "assistant") {
+        flushCurrent();
+        current2 = { role: "assistant", content: [] };
+      }
+      if (b.kind === "text") {
+        current2.content.push(...renderTextWithEmbeds(b.content, b.embeds, sessionId));
+      } else if (b.kind === "thinking") {
+        const signature = typeof b.meta?.signature === "string" ? b.meta.signature : void 0;
+        current2.content.push({ type: "thinking", thinking: b.content, ...signature ? { signature } : {} });
+      } else if (b.kind === "tool_use") {
+        const id = b.meta?.id ?? `tool_${b.id ?? Math.random().toString(36).slice(2)}`;
+        const name = b.content || b.meta?.name || "tool";
+        const input = b.meta?.input ?? {};
+        current2.content.push({ type: "tool_use", id, name, input });
+      }
+      continue;
+    }
+    if (b.actor === "system" && b.kind === "tool_result") {
+      if (!current2 || current2.role !== "user") {
+        flushCurrent();
+        current2 = { role: "user", content: [] };
+      }
+      const toolUseId = b.meta?.toolUseId ?? "";
+      const isError = b.meta?.isError === true;
+      const inner = renderTextWithEmbeds(b.content, b.embeds, sessionId);
+      const resultContent = inner.length === 1 && inner[0].type === "text" ? inner[0].text : inner;
+      current2.content.push({
+        type: "tool_result",
+        tool_use_id: toolUseId,
+        content: resultContent,
+        ...isError ? { is_error: true } : {}
+      });
+      continue;
+    }
+  }
+  flushCurrent();
+  return repairOrphanToolUses(msgs);
+}
+function repairOrphanToolUses(msgs) {
+  const repaired = [];
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    repaired.push(m);
+    if (m.role !== "assistant") continue;
+    const toolUseIds = m.content.filter((b) => b.type === "tool_use").map((b) => b.id);
+    if (toolUseIds.length === 0) continue;
+    const next = msgs[i + 1];
+    const satisfied = /* @__PURE__ */ new Set();
+    if (next && next.role === "user") {
+      for (const b of next.content) {
+        if (b.type === "tool_result") satisfied.add(b.tool_use_id);
+      }
+    }
+    const missing = toolUseIds.filter((id) => !satisfied.has(id));
+    if (missing.length === 0) continue;
+    const syntheticResults = missing.map((id) => ({
+      type: "tool_result",
+      tool_use_id: id,
+      content: "(tool call did not produce a result; synthesized during history restore)",
+      is_error: true
+    }));
+    if (next && next.role === "user") {
+      next.content = [...syntheticResults, ...next.content];
+    } else {
+      repaired.push({ role: "user", content: syntheticResults });
+    }
+  }
+  return repaired;
+}
+function assertAlternating(msgs) {
+  for (let i = 1; i < msgs.length; i++) {
+    if (msgs[i].role === msgs[i - 1].role) {
       throw new Error(
-        `History validation failed: consecutive ${history[i].role} at index ${i - 1} and ${i}. Messages must alternate user\u2194assistant. Merge tool results into text before injecting.`
+        `Claude JSONL validation failed: consecutive ${msgs[i].role} at index ${i - 1} and ${i}. This usually means canonical blocks are mis-ordered (tool_result without a preceding tool_use, etc.).`
       );
     }
   }
+}
+function writeClaudeHistoryJsonl(blocks, opts) {
+  const msgs = canonicalToAnthropicMessages(blocks, opts.sessionId);
+  if (msgs.length === 0) return null;
+  assertAlternating(msgs);
   try {
     const dir = path3.join(opts.cwd, ".sna", "history");
     fs2.mkdirSync(dir, { recursive: true });
-    const sessionId = crypto.randomUUID();
-    const filePath = path3.join(dir, `${sessionId}.jsonl`);
+    const syntheticSessionId = crypto.randomUUID();
+    const filePath = path3.join(dir, `${syntheticSessionId}.jsonl`);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const lines = [];
     let prevUuid = null;
-    for (const msg of history) {
+    for (const m of msgs) {
       const uuid = crypto.randomUUID();
-      if (msg.role === "user") {
-        lines.push(JSON.stringify({
-          parentUuid: prevUuid,
-          isSidechain: false,
-          type: "user",
-          uuid,
-          timestamp: now,
-          cwd: opts.cwd,
-          sessionId,
-          message: { role: "user", content: msg.content }
-        }));
-      } else {
-        lines.push(JSON.stringify({
-          parentUuid: prevUuid,
-          isSidechain: false,
-          type: "assistant",
-          uuid,
-          timestamp: now,
-          cwd: opts.cwd,
-          sessionId,
-          message: {
-            role: "assistant",
-            content: [{ type: "text", text: msg.content }]
-          }
-        }));
-      }
+      lines.push(JSON.stringify({
+        parentUuid: prevUuid,
+        isSidechain: false,
+        type: m.role,
+        // "user" | "assistant"
+        uuid,
+        timestamp: now,
+        cwd: opts.cwd,
+        sessionId: syntheticSessionId,
+        message: { role: m.role, content: m.content }
+      }));
       prevUuid = uuid;
     }
     fs2.writeFileSync(filePath, lines.join("\n") + "\n");
@@ -349,18 +578,6 @@ function writeHistoryJsonl(history, opts) {
   } catch {
     return null;
   }
-}
-function buildRecalledConversation(history) {
-  const xml = history.map((msg) => `<${msg.role}>${msg.content}</${msg.role}>`).join("\n");
-  return JSON.stringify({
-    type: "assistant",
-    message: {
-      role: "assistant",
-      content: [{ type: "text", text: `<recalled-conversation>
-${xml}
-</recalled-conversation>` }]
-    }
-  });
 }
 
 // src/lib/logger.ts
@@ -574,10 +791,6 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
       this._alive = false;
       this.emitter.emit("error", err2);
     });
-    if (options.history?.length && !options._historyViaResume) {
-      const line = buildRecalledConversation(options.history);
-      this.proc.stdin.write(line + "\n");
-    }
     if (options.prompt) {
       this.send(options.prompt);
     }
@@ -909,25 +1122,34 @@ var ClaudeCodeProvider = class {
         }]
       };
     }
+    const mergeAppSettings = (appSettings) => {
+      if (appSettings.hooks && typeof appSettings.hooks === "object") {
+        const appHooks = appSettings.hooks;
+        for (const [event, hooks] of Object.entries(appHooks)) {
+          const cur = sdkSettings.hooks;
+          if (cur && cur[event]) {
+            cur[event] = [...cur[event], ...hooks];
+          } else {
+            sdkSettings.hooks = sdkSettings.hooks ?? {};
+            sdkSettings.hooks[event] = hooks;
+          }
+        }
+        const rest = { ...appSettings };
+        delete rest.hooks;
+        Object.assign(sdkSettings, rest);
+      } else {
+        Object.assign(sdkSettings, appSettings);
+      }
+    };
+    const po = options.providerOptions ?? {};
+    if (po.settings && typeof po.settings === "object") {
+      mergeAppSettings(po.settings);
+    }
     let extraArgsClean = options.extraArgs ? [...options.extraArgs] : [];
     const settingsIdx = extraArgsClean.indexOf("--settings");
     if (settingsIdx !== -1 && settingsIdx + 1 < extraArgsClean.length) {
       try {
-        const appSettings = JSON.parse(extraArgsClean[settingsIdx + 1]);
-        if (appSettings.hooks) {
-          for (const [event, hooks] of Object.entries(appSettings.hooks)) {
-            if (sdkSettings.hooks && sdkSettings.hooks[event]) {
-              sdkSettings.hooks[event] = [
-                ...sdkSettings.hooks[event],
-                ...hooks
-              ];
-            } else {
-              sdkSettings.hooks[event] = hooks;
-            }
-          }
-          delete appSettings.hooks;
-        }
-        Object.assign(sdkSettings, appSettings);
+        mergeAppSettings(JSON.parse(extraArgsClean[settingsIdx + 1]));
       } catch {
       }
       extraArgsClean.splice(settingsIdx, 2);
@@ -948,12 +1170,40 @@ var ClaudeCodeProvider = class {
     if (options.permissionMode) {
       args.push("--permission-mode", options.permissionMode);
     }
-    if (options.history?.length && options.prompt) {
-      const result = writeHistoryJsonl(options.history, { cwd: options.cwd });
+    if (options.systemPrompt) {
+      args.push("--system-prompt", options.systemPrompt);
+    }
+    if (options.appendSystemPrompt) {
+      args.push("--append-system-prompt", options.appendSystemPrompt);
+    }
+    if (options.mcpServers && Object.keys(options.mcpServers).length > 0) {
+      args.push("--mcp-config", JSON.stringify({ mcpServers: options.mcpServers }));
+    }
+    if (options.allowedTools?.length) {
+      args.push("--allowedTools", ...options.allowedTools);
+    }
+    if (options.disallowedTools?.length) {
+      args.push("--disallowedTools", ...options.disallowedTools);
+    }
+    if (typeof po.maxTurns === "number") args.push("--max-turns", String(po.maxTurns));
+    if (po.disableSlashCommands) args.push("--disable-slash-commands");
+    if (po.strictMcpConfig) args.push("--strict-mcp-config");
+    if (Array.isArray(po.settingSources)) {
+      for (const src of po.settingSources) {
+        args.push("--setting-sources", src);
+      }
+    }
+    if (options.resumeSessionId) {
+      args.push("--resume", options.resumeSessionId);
+    }
+    if (!options.resumeSessionId && options.history?.length) {
+      const sessionId2 = options.env?.SNA_SESSION_ID ?? "default";
+      const result = writeClaudeHistoryJsonl(options.history, { cwd: options.cwd, sessionId: sessionId2 });
       if (result) {
         args.push(...result.extraArgs);
-        options._historyViaResume = true;
         logger.log("agent", `history via JSONL resume \u2192 ${result.filePath}`);
+      } else {
+        logger.log("agent", "history injection skipped (adapter returned null)");
       }
     }
     if (extraArgsClean.length > 0) {
@@ -986,15 +1236,1061 @@ var ClaudeCodeProvider = class {
 };
 
 // src/core/providers/codex.ts
+import { spawn as spawn3, execSync as execSync2 } from "child_process";
+import { EventEmitter as EventEmitter2 } from "events";
+import fs6 from "fs";
+import path7 from "path";
+import { fileURLToPath as fileURLToPath2 } from "url";
+
+// src/history/codex.ts
+import fs5 from "fs";
+import path6 from "path";
+function loadEmbedAsDataUrl(sessionId, record) {
+  const fullPath = path6.isAbsolute(record.path) ? record.path : path6.join(getConfig().dataDir, "images", sessionId, record.path);
+  try {
+    const buf = fs5.readFileSync(fullPath);
+    return `data:${record.mime_type};base64,${buf.toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+function renderUserContent(content, embeds, sessionId) {
+  const out = [];
+  for (const seg of splitContentByEmbeds(content)) {
+    if (seg.type === "text") {
+      if (seg.text.length > 0) out.push({ type: "input_text", text: seg.text });
+    } else {
+      const record = embeds?.[seg.id];
+      if (!record) continue;
+      const dataUrl = loadEmbedAsDataUrl(sessionId, record);
+      if (!dataUrl) continue;
+      out.push({ type: "input_image", image_url: dataUrl });
+    }
+  }
+  return out;
+}
+function renderAssistantContent(content) {
+  return content.length > 0 ? [{ type: "output_text", text: content }] : [];
+}
+function renderToolOutputContent(content, embeds, sessionId) {
+  const segments = splitContentByEmbeds(content);
+  const parts = [];
+  for (const seg of segments) {
+    if (seg.type === "text") {
+      parts.push(seg.text);
+    } else {
+      const record = embeds?.[seg.id];
+      if (!record) continue;
+      const dataUrl = loadEmbedAsDataUrl(sessionId, record);
+      parts.push(dataUrl ? `![](${dataUrl})` : `(missing embed ${seg.id})`);
+    }
+  }
+  return parts.join("");
+}
+function canonicalToCodexResponseItems(blocks, sessionId) {
+  const out = [];
+  for (const b of blocks) {
+    if (b.actor === "user" && b.kind === "text") {
+      const content = renderUserContent(b.content, b.embeds, sessionId);
+      if (content.length > 0) out.push({ type: "message", role: "user", content });
+      continue;
+    }
+    if (b.actor === "assistant") {
+      if (b.kind === "text") {
+        const content = renderAssistantContent(b.content);
+        if (content.length > 0) out.push({ type: "message", role: "assistant", content });
+      } else if (b.kind === "thinking") {
+        if (b.content.length > 0) {
+          out.push({
+            type: "reasoning",
+            summary: [{ type: "summary_text", text: b.content }],
+            encrypted_content: b.meta?.signature ?? null
+          });
+        }
+      } else if (b.kind === "tool_use") {
+        const callId = b.meta?.id ?? `call_${b.id ?? Math.random().toString(36).slice(2)}`;
+        const name = b.content || b.meta?.name || "tool";
+        const input = b.meta?.input ?? {};
+        out.push({
+          type: "function_call",
+          name,
+          arguments: typeof input === "string" ? input : JSON.stringify(input),
+          call_id: callId
+        });
+      }
+      continue;
+    }
+    if (b.actor === "system" && b.kind === "tool_result") {
+      const callId = b.meta?.toolUseId ?? "";
+      const output = renderToolOutputContent(b.content, b.embeds, sessionId);
+      out.push({ type: "function_call_output", call_id: callId, output });
+      continue;
+    }
+  }
+  return out;
+}
+
+// src/core/providers/codex.ts
+var SHELL2 = process.env.SHELL || "/bin/zsh";
+function validateCodexPath(codexPath) {
+  try {
+    const codexDir = path7.dirname(codexPath);
+    const env = { ...process.env, PATH: `${codexDir}:${process.env.PATH ?? ""}` };
+    const out = execSync2(`"${codexPath}" --version`, {
+      encoding: "utf8",
+      stdio: "pipe",
+      timeout: 1e4,
+      env
+    }).trim();
+    return { ok: true, version: out.split("\n")[0].slice(0, 50) };
+  } catch {
+    return { ok: false };
+  }
+}
+function cacheCodexPath(codexPath, cacheDir) {
+  const dir = cacheDir ?? path7.join(process.cwd(), ".sna");
+  try {
+    if (!fs6.existsSync(dir)) fs6.mkdirSync(dir, { recursive: true });
+    fs6.writeFileSync(path7.join(dir, "codex-path"), codexPath);
+  } catch {
+  }
+}
+function resolveCodexCli(opts) {
+  const cacheDir = opts?.cacheDir;
+  if (process.env.SNA_CODEX_COMMAND) {
+    const v = validateCodexPath(process.env.SNA_CODEX_COMMAND);
+    return { path: process.env.SNA_CODEX_COMMAND, version: v.version, source: "env" };
+  }
+  const cacheFile = cacheDir ? path7.join(cacheDir, "codex-path") : path7.join(process.cwd(), ".sna/codex-path");
+  try {
+    const cached = fs6.readFileSync(cacheFile, "utf8").trim();
+    if (cached) {
+      const v = validateCodexPath(cached);
+      if (v.ok) return { path: cached, version: v.version, source: "cache" };
+    }
+  } catch {
+  }
+  const staticPaths = [
+    "/opt/homebrew/bin/codex",
+    "/usr/local/bin/codex",
+    `${process.env.HOME}/.local/bin/codex`,
+    `${process.env.HOME}/.cargo/bin/codex`,
+    `${process.env.HOME}/.codex/bin/codex`
+  ];
+  for (const p of staticPaths) {
+    const v = validateCodexPath(p);
+    if (v.ok) {
+      cacheCodexPath(p, cacheDir);
+      return { path: p, version: v.version, source: "static" };
+    }
+  }
+  try {
+    const raw = execSync2(`${SHELL2} -i -l -c "command -v codex" 2>/dev/null`, {
+      encoding: "utf8",
+      timeout: 5e3
+    }).trim();
+    if (raw && raw !== "codex" && raw.startsWith("/")) {
+      const v = validateCodexPath(raw);
+      if (v.ok) {
+        cacheCodexPath(raw, cacheDir);
+        return { path: raw, version: v.version, source: "shell" };
+      }
+    }
+  } catch {
+  }
+  return { path: "codex", source: "fallback" };
+}
+function resolveCodexPath(cwd) {
+  const result = resolveCodexCli({ cacheDir: path7.join(cwd, ".sna") });
+  logger.log("agent", `codex path: ${result.source}=${result.path}${result.version ? ` (${result.version})` : ""}`);
+  return result.path;
+}
+function toCodexSandbox(mode) {
+  switch (mode) {
+    case "bypassPermissions":
+      return "danger-full-access";
+    case "acceptEdits":
+      return "workspace-write";
+    default:
+      return "read-only";
+  }
+}
+function toCodexSandboxPolicy(mode) {
+  switch (mode) {
+    case "bypassPermissions":
+      return "dangerFullAccess";
+    case "acceptEdits":
+      return "workspaceWrite";
+    default:
+      return "readOnly";
+  }
+}
+function extractResumeArg(extraArgs) {
+  if (!extraArgs) return null;
+  const idx = extraArgs.indexOf("--resume");
+  if (idx === -1) return null;
+  const threadId = extraArgs[idx + 1];
+  if (!threadId || threadId.startsWith("--")) return null;
+  const cleanArgs = [...extraArgs];
+  cleanArgs.splice(idx, 2);
+  return { threadId, cleanArgs };
+}
+function extractSystemPromptArgs(extraArgs) {
+  if (!extraArgs) return { cleanArgs: [] };
+  const cleanArgs = [...extraArgs];
+  let baseInstructions;
+  let developerInstructions;
+  const sysIdx = cleanArgs.indexOf("--system-prompt");
+  if (sysIdx !== -1 && sysIdx + 1 < cleanArgs.length) {
+    baseInstructions = cleanArgs[sysIdx + 1];
+    cleanArgs.splice(sysIdx, 2);
+  }
+  const appendIdx = cleanArgs.indexOf("--append-system-prompt");
+  if (appendIdx !== -1 && appendIdx + 1 < cleanArgs.length) {
+    developerInstructions = cleanArgs[appendIdx + 1];
+    cleanArgs.splice(appendIdx, 2);
+  }
+  return { baseInstructions, developerInstructions, cleanArgs };
+}
+var rpcIdCounter = 0;
+function rpcRequest(method, params) {
+  return { method, id: ++rpcIdCounter, params: params ?? {} };
+}
+function rpcNotification(method, params) {
+  return { method, params: params ?? {} };
+}
+var _CodexProcess = class _CodexProcess {
+  constructor(proc, options) {
+    this.options = options;
+    this.emitter = new EventEmitter2();
+    this._alive = true;
+    this._sessionId = null;
+    this._threadId = null;
+    this._initEmitted = false;
+    this.buffer = "";
+    this.pendingResponses = /* @__PURE__ */ new Map();
+    /**
+     * Maps permission requestId → the JSON-RPC server request that raised it.
+     * We remember the `method` because each approval kind wants a distinct
+     * response shape (decision vs action vs permissions object) and the field
+     * names differ — one-size-fits-all response writes would send the wrong
+     * JSON and Codex silently interprets that as "decline" (observed live:
+     * MCP tool calls always appearing as "user rejected").
+     */
+    this.pendingServerRequests = /* @__PURE__ */ new Map();
+    this._ready = false;
+    this._pendingSend = [];
+    /** Set when interrupt() is called — causes queue to fast-drain delta events. */
+    this._interrupted = false;
+    /** Model override — applied on next turn/start. */
+    this._modelOverride = null;
+    /** Sandbox override — applied on next turn/start. */
+    this._sandboxOverride = null;
+    /** Set after the interrupted event is emitted — prevents duplicate. */
+    this._interruptedEmitted = false;
+    /** Current active turnId — needed for turn/interrupt. */
+    this._currentTurnId = null;
+    /** Accumulated token usage from tokenUsage/updated notifications. */
+    this._lastUsage = null;
+    /** FIFO event queue for ordered emission. */
+    this.eventQueue = [];
+    this.drainTimer = null;
+    this.proc = proc;
+    proc.stdout.on("data", (chunk) => {
+      this.buffer += chunk.toString();
+      const lines = this.buffer.split("\n");
+      this.buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        logger.log("stdout", line.slice(0, 300));
+        try {
+          const msg = JSON.parse(line);
+          this.handleMessage(msg);
+        } catch {
+        }
+      }
+    });
+    proc.stderr.on("data", () => {
+    });
+    proc.on("exit", (code) => {
+      this._alive = false;
+      if (this.buffer.trim()) {
+        try {
+          const msg = JSON.parse(this.buffer);
+          this.handleMessage(msg);
+        } catch {
+        }
+      }
+      this.flushQueue();
+      this.emitter.emit("exit", code);
+      logger.log("agent", `codex process exited (code=${code})`);
+    });
+    proc.on("error", (err2) => {
+      this._alive = false;
+      this.emitter.emit("error", err2);
+    });
+    this.initialize();
+  }
+  enqueue(event) {
+    if (this._interrupted) {
+      if (event.type === "assistant_delta" || event.type === "thinking_delta") return;
+      this.emitter.emit("event", event);
+      if (event.type === "interrupted" || event.type === "complete") {
+        this._interrupted = false;
+        this.eventQueue = this.eventQueue.filter(
+          (e) => e.type !== "assistant_delta" && e.type !== "thinking_delta"
+        );
+        this.flushQueue();
+      }
+      return;
+    }
+    this.eventQueue.push(event);
+    if (!this.drainTimer) {
+      this.drainTimer = setInterval(() => this.drainOne(), _CodexProcess.DRAIN_INTERVAL_MS);
+    }
+  }
+  drainOne() {
+    const event = this.eventQueue.shift();
+    if (event) this.emitter.emit("event", event);
+    if (this.eventQueue.length === 0 && this.drainTimer) {
+      clearInterval(this.drainTimer);
+      this.drainTimer = null;
+    }
+  }
+  flushQueue() {
+    if (this.drainTimer) {
+      clearInterval(this.drainTimer);
+      this.drainTimer = null;
+    }
+    while (this.eventQueue.length > 0) {
+      this.emitter.emit("event", this.eventQueue.shift());
+    }
+  }
+  get alive() {
+    return this._alive;
+  }
+  get pid() {
+    return this.proc.pid ?? null;
+  }
+  get sessionId() {
+    return this._sessionId;
+  }
+  // ── JSON-RPC communication ──────────────────────────────────────────────
+  write(msg) {
+    if (!this._alive || !this.proc.stdin.writable) return;
+    const line = JSON.stringify(msg);
+    logger.log("stdin", line.slice(0, 200));
+    this.proc.stdin.write(line + "\n");
+  }
+  sendRpc(method, params) {
+    return new Promise((resolve) => {
+      const req = rpcRequest(method, params);
+      this.pendingResponses.set(req.id, resolve);
+      this.write(req);
+    });
+  }
+  sendNotification(method, params) {
+    this.write(rpcNotification(method, params));
+  }
+  handleMessage(msg) {
+    if (msg.id != null && !msg.method && (msg.result !== void 0 || msg.error !== void 0)) {
+      const handler = this.pendingResponses.get(msg.id);
+      if (handler) {
+        this.pendingResponses.delete(msg.id);
+        if (msg.error) {
+          handler({ _error: true, ...msg.error });
+        } else {
+          handler(msg.result);
+        }
+      }
+      return;
+    }
+    if (msg.method && msg.id != null) {
+      this.handleServerRequest(msg.method, msg.id, msg.params ?? {});
+      return;
+    }
+    if (msg.method) {
+      const event = this.normalizeNotification(msg.method, msg.params ?? {});
+      if (event) this.enqueue(event);
+      return;
+    }
+  }
+  /**
+   * Handle a JSON-RPC server request (Codex asking the client for a decision).
+   * Stores the (rpcId, method) so we can later respond with the correct
+   * per-method schema via respondToPermission().
+   *
+   * Recognized methods:
+   *   item/commandExecution/requestApproval — shell command gate (decision enum)
+   *   item/fileChange/requestApproval       — file write gate (decision enum)
+   *   item/permissions/requestApproval      — session permission grant (permissions profile)
+   *   mcpServer/elicitation/request         — MCP tool / elicitation (action enum)
+   *
+   * When the session is in bypassPermissions mode we auto-accept every
+   * request without routing to the UI — the user has already granted blanket
+   * approval via that mode. This matches Loom's default guard level (which
+   * runs bypassPermissions because tool policy is enforced via Loom's own
+   * guard hook, not Codex's per-call approval UI).
+   */
+  handleServerRequest(method, rpcId, params) {
+    const isCommandApproval = method === "item/commandExecution/requestApproval";
+    const isFileApproval = method === "item/fileChange/requestApproval";
+    const isPermissionsApproval = method === "item/permissions/requestApproval";
+    const isMcpElicitation = method === "mcpServer/elicitation/request";
+    if (!isCommandApproval && !isFileApproval && !isPermissionsApproval && !isMcpElicitation) {
+      logger.log("agent", `codex unknown server request: ${method} (id=${rpcId})`);
+      this.write({ id: rpcId, result: {} });
+      return;
+    }
+    const requestId = params.itemId ?? params.id ?? `perm-${rpcId}`;
+    this.pendingServerRequests.set(requestId, { rpcId, method });
+    if (this.options.permissionMode === "bypassPermissions") {
+      this.respondToPermission(requestId, true);
+      return;
+    }
+    let message;
+    let toolName;
+    if (isMcpElicitation) {
+      const serverName = params.serverName ?? "mcp";
+      const toolDesc = params._meta?.tool_description ?? params.request?.message ?? "tool call";
+      message = `MCP (${serverName}): ${toolDesc}`;
+      toolName = `mcp:${serverName}`;
+    } else if (isPermissionsApproval) {
+      message = `Permissions: ${params.reason ?? "requested"}`;
+      toolName = "permissions";
+    } else if (isFileApproval) {
+      message = `File change: ${params.path ?? "unknown"}`;
+      toolName = "file_change";
+    } else {
+      message = `Command: ${params.command ?? "unknown"}`;
+      toolName = "shell";
+    }
+    this.enqueue({
+      type: "permission_needed",
+      message,
+      data: {
+        requestId,
+        toolName,
+        method,
+        command: params.command,
+        path: params.path,
+        serverName: params.serverName,
+        reason: params.reason,
+        itemId: params.itemId
+      },
+      timestamp: Date.now()
+    });
+  }
+  // ── Initialization handshake ────────────────────────────────────────────
+  async initialize() {
+    try {
+      await this.sendRpc("initialize", {
+        clientInfo: { name: "sna", title: "SNA SDK", version: "1.0.0" },
+        capabilities: { experimentalApi: true }
+      });
+      this.sendNotification("initialized");
+      const resumeInfo = extractResumeArg(this.options.extraArgs);
+      const resumeThreadId = this.options.resumeSessionId ?? resumeInfo?.threadId;
+      const extraArgPrompts = extractSystemPromptArgs(
+        resumeInfo ? resumeInfo.cleanArgs : this.options.extraArgs
+      );
+      const baseInstructions = this.options.systemPrompt ?? extraArgPrompts.baseInstructions;
+      const developerInstructions = this.options.appendSystemPrompt ?? extraArgPrompts.developerInstructions;
+      const sandbox = toCodexSandbox(this.options.permissionMode);
+      const threadParams = {
+        sandbox,
+        ...this.options.model ? { model: this.options.model } : {},
+        ...baseInstructions ? { baseInstructions } : {},
+        ...developerInstructions ? { developerInstructions } : {}
+      };
+      const hasInjectedHistory = !resumeThreadId && (this.options.history?.length ?? 0) > 0;
+      if (hasInjectedHistory) {
+        try {
+          await this.sendRpc("experimentalFeature/enablement/set", {
+            enablement: { "thread/resume.history": true }
+          });
+        } catch (err2) {
+          logger.log("agent", `codex: failed to enable thread/resume.history feature: ${err2}`);
+        }
+        const sessionId = this.options.env?.SNA_SESSION_ID ?? "default";
+        const responseItems = canonicalToCodexResponseItems(this.options.history, sessionId);
+        const syntheticThreadId = crypto.randomUUID();
+        const resumeResult = await this.sendRpc("thread/resume", {
+          threadId: syntheticThreadId,
+          history: responseItems,
+          ...baseInstructions ? { baseInstructions } : {},
+          ...developerInstructions ? { developerInstructions } : {},
+          ...this.options.model ? { model: this.options.model } : {},
+          sandbox
+        });
+        if (resumeResult?._error) {
+          logger.log("agent", `codex: thread/resume with history failed (${resumeResult.message ?? "unknown"}); falling back to fresh thread (history dropped)`);
+          const threadResult = await this.sendRpc("thread/start", threadParams);
+          this._threadId = threadResult?.threadId ?? threadResult?.thread?.id ?? null;
+        } else {
+          this._threadId = resumeResult?.thread?.id ?? syntheticThreadId;
+          logger.log("agent", `codex: injected ${this.options.history.length} history messages via thread/resume (thread=${this._threadId})`);
+        }
+      } else if (resumeThreadId) {
+        const resumeResult = await this.sendRpc("thread/resume", {
+          threadId: resumeThreadId,
+          ...baseInstructions ? { baseInstructions } : {},
+          ...developerInstructions ? { developerInstructions } : {}
+        });
+        if (resumeResult?._error) {
+          logger.log("agent", `codex: resume failed (${resumeResult.message ?? "unknown"}), starting new thread`);
+          const threadResult = await this.sendRpc("thread/start", threadParams);
+          this._threadId = threadResult?.threadId ?? threadResult?.thread?.id ?? null;
+        } else {
+          this._threadId = resumeResult?.thread?.id ?? resumeThreadId;
+          logger.log("agent", `codex: resumed thread ${this._threadId}`);
+        }
+      } else {
+        const threadResult = await this.sendRpc("thread/start", threadParams);
+        this._threadId = threadResult?.threadId ?? threadResult?.thread?.id ?? null;
+      }
+      this._sessionId = this._threadId;
+      this._ready = true;
+      if (!this._initEmitted) {
+        this._initEmitted = true;
+        this.enqueue({
+          type: "init",
+          message: `Codex ready (thread=${this._threadId})`,
+          data: { sessionId: this._threadId, provider: "codex" },
+          timestamp: Date.now()
+        });
+      }
+      if (this.options.prompt) {
+        this.startTurn(this.options.prompt);
+      }
+      for (const fn of this._pendingSend) fn();
+      this._pendingSend = [];
+    } catch (err2) {
+      logger.err("agent", `codex init failed:`, err2);
+      this.enqueue({
+        type: "error",
+        message: `Codex initialization failed: ${err2}`,
+        timestamp: Date.now()
+      });
+    }
+  }
+  startTurn(input) {
+    if (!this._threadId) return;
+    const contentBlocks = typeof input === "string" ? [{ type: "text", text: input }] : input.map((b) => {
+      if (b.type === "text") return { type: "text", text: b.text };
+      const src = b.source;
+      const url = `data:${src.media_type};base64,${src.data}`;
+      return { type: "image", url };
+    });
+    const turnParams = {
+      threadId: this._threadId,
+      input: contentBlocks
+    };
+    if (this._modelOverride) {
+      turnParams.model = this._modelOverride;
+      logger.log("agent", `codex: turn/start with model=${this._modelOverride}`);
+      this._modelOverride = null;
+    }
+    if (this._sandboxOverride) {
+      turnParams.sandboxPolicy = toCodexSandboxPolicy(this._sandboxOverride);
+      logger.log("agent", `codex: turn/start with sandboxPolicy=${turnParams.sandboxPolicy}`);
+      this._sandboxOverride = null;
+    }
+    this.sendRpc("turn/start", turnParams).then((result) => {
+      if (result?.turn?.id) this._currentTurnId = result.turn.id;
+    }).catch((err2) => {
+      logger.err("agent", "turn/start failed:", err2);
+    });
+  }
+  // ── Public AgentProcess API ─────────────────────────────────────────────
+  send(input) {
+    if (!this._alive) return;
+    if (!this._ready) {
+      this._pendingSend.push(() => this.startTurn(input));
+      return;
+    }
+    this.startTurn(input);
+  }
+  interrupt() {
+    if (!this._alive || !this._threadId) return;
+    this._interrupted = true;
+    const params = { threadId: this._threadId };
+    if (this._currentTurnId) params.turnId = this._currentTurnId;
+    this.sendRpc("turn/interrupt", params).then((result) => {
+      logger.log("agent", `codex: turn/interrupt response: ${JSON.stringify(result).slice(0, 300)}`);
+      this._interruptedEmitted = true;
+      this.enqueue({
+        type: "interrupted",
+        message: "Turn interrupted by user",
+        data: {
+          durationMs: result?.turn?.durationMs ?? result?.durationMs,
+          provider: "codex"
+        },
+        timestamp: Date.now()
+      });
+    }).catch((err2) => {
+      logger.err("agent", `codex: turn/interrupt failed:`, err2);
+      this.enqueue({
+        type: "interrupted",
+        message: "Turn interrupted",
+        data: { provider: "codex" },
+        timestamp: Date.now()
+      });
+    });
+  }
+  setModel(model) {
+    this._modelOverride = model;
+    logger.log("agent", `codex: model override set \u2192 ${model} (applied on next turn)`);
+  }
+  setPermissionMode(mode) {
+    this._sandboxOverride = mode;
+    logger.log("agent", `codex: sandbox override set \u2192 ${mode} (applied on next turn)`);
+  }
+  /**
+   * Respond to a pending permission request from Codex.
+   * Sends JSON-RPC response back via stdin to approve/deny the tool execution.
+   */
+  /**
+   * Respond to a pending permission request from Codex via JSON-RPC stdin.
+   *
+   * Each server-request method expects a distinct response schema (the field
+   * names and the enum values differ between command/file approvals, MCP
+   * elicitation, and generic permission grants). Sending the wrong shape
+   * looks like success to the SDK but Codex silently interprets it as
+   * "decline" — which is how MCP tool calls started showing up as
+   * "user rejected" even under bypassPermissions.
+   */
+  respondToPermission(requestId, approved) {
+    const pending = this.pendingServerRequests.get(requestId);
+    if (!pending) {
+      logger.log("agent", `codex: no pending server request for ${requestId}`);
+      return;
+    }
+    this.pendingServerRequests.delete(requestId);
+    const { rpcId, method } = pending;
+    let result;
+    switch (method) {
+      case "mcpServer/elicitation/request":
+        result = {
+          action: approved ? "accept" : "decline",
+          content: null,
+          _meta: null
+        };
+        break;
+      case "item/permissions/requestApproval":
+        result = { permissions: {}, scope: "turn" };
+        break;
+      case "item/commandExecution/requestApproval":
+      case "item/fileChange/requestApproval":
+      default:
+        result = { decision: approved ? "accept" : "decline" };
+        break;
+    }
+    this.write({ id: rpcId, result });
+    logger.log(
+      "agent",
+      `codex: permission ${approved ? "accept" : "decline"} (method=${method}, rpcId=${rpcId}, requestId=${requestId})`
+    );
+  }
+  kill() {
+    if (this._alive) {
+      this._alive = false;
+      this.proc.kill("SIGTERM");
+    }
+  }
+  on(event, handler) {
+    this.emitter.on(event, handler);
+  }
+  off(event, handler) {
+    this.emitter.off(event, handler);
+  }
+  // ── Event normalization ─────────────────────────────────────────────────
+  normalizeNotification(method, params) {
+    switch (method) {
+      // ── Thread lifecycle ─────────────────────────────────────────────
+      case "thread/started":
+        if (params.thread?.id) this._threadId = params.thread.id;
+        return null;
+      case "thread/closed":
+      case "thread/archived":
+        return null;
+      // ── Turn lifecycle ───────────────────────────────────────────────
+      case "turn/started":
+        if (params.turn?.id) this._currentTurnId = params.turn.id;
+        this._interrupted = false;
+        this._interruptedEmitted = false;
+        return null;
+      case "turn/completed": {
+        this._currentTurnId = null;
+        const turn = params.turn ?? params;
+        if (turn.status === "interrupted" && this._interruptedEmitted) {
+          this._interruptedEmitted = false;
+          this._lastUsage = null;
+          return null;
+        }
+        const usage = this._lastUsage ?? {};
+        const event = {
+          type: turn.status === "interrupted" ? "interrupted" : "complete",
+          message: turn.status === "failed" ? turn.error?.message ?? "Turn failed" : "Done",
+          data: {
+            durationMs: turn.durationMs ?? turn.duration_ms,
+            inputTokens: usage.inputTokens ?? 0,
+            outputTokens: usage.outputTokens ?? 0,
+            cacheReadTokens: usage.cachedInputTokens ?? 0,
+            provider: "codex"
+          },
+          timestamp: Date.now()
+        };
+        this._lastUsage = null;
+        return event;
+      }
+      // ── Item events ──────────────────────────────────────────────────
+      case "item/started": {
+        const item = params.item ?? params;
+        return this.normalizeItemStarted(item);
+      }
+      case "item/completed": {
+        const item = params.item ?? params;
+        return this.normalizeItemCompleted(item);
+      }
+      // ── Streaming deltas ─────────────────────────────────────────────
+      case "item/agentMessage/delta":
+        return {
+          type: "assistant_delta",
+          delta: params.delta ?? params.text ?? "",
+          index: 0,
+          timestamp: Date.now()
+        };
+      case "item/reasoning/summaryTextDelta":
+        return {
+          type: "thinking_delta",
+          message: params.delta ?? params.text ?? "",
+          timestamp: Date.now()
+        };
+      case "item/commandExecution/outputDelta":
+        return {
+          type: "tool_use",
+          message: "shell",
+          data: {
+            toolName: "shell",
+            id: params.itemId,
+            outputDelta: params.delta,
+            update: true
+          },
+          timestamp: Date.now()
+        };
+      // ── Approval requests (fallback for notifications without id) ───
+      // Server requests (with id) are handled in handleServerRequest().
+      case "item/commandExecution/requestApproval":
+      case "item/fileChange/requestApproval":
+        return null;
+      // handled as server request
+      case "item/fileChange/outputDelta":
+        return null;
+      // patch output — skip
+      // ── Token usage tracking ─────────────────────────────────────────
+      case "thread/tokenUsage/updated": {
+        const usage = params.tokenUsage ?? {};
+        const tu = usage.last ?? usage.total ?? {};
+        this._lastUsage = {
+          inputTokens: tu.inputTokens ?? tu.input_tokens ?? 0,
+          outputTokens: tu.outputTokens ?? tu.output_tokens ?? 0,
+          cachedInputTokens: tu.cachedInputTokens ?? tu.cached_input_tokens ?? 0
+        };
+        return null;
+      }
+      // ── Informational (no-op) ──────────────────────────────────────────
+      case "turn/diff/updated":
+      case "turn/plan/updated":
+      case "thread/name/updated":
+      case "thread/status/changed":
+      case "model/rerouted":
+      case "skills/changed":
+      case "mcpServer/startupStatus/updated":
+      case "account/rateLimits/updated":
+        return null;
+      // ── Error ────────────────────────────────────────────────────────
+      case "error":
+        return {
+          type: "error",
+          message: params.message ?? params.error ?? "Unknown codex error",
+          timestamp: Date.now()
+        };
+      default:
+        logger.log("agent", `codex unhandled notification: ${method}`, JSON.stringify(params).substring(0, 200));
+        return null;
+    }
+  }
+  normalizeItemStarted(item) {
+    switch (item.type) {
+      case "command_execution":
+      case "commandExecution":
+        return {
+          type: "tool_use",
+          message: "shell",
+          data: {
+            toolName: "shell",
+            id: item.id,
+            command: item.command,
+            streaming: true
+          },
+          timestamp: Date.now()
+        };
+      case "file_change":
+      case "fileChange":
+        return {
+          type: "tool_use",
+          message: "file_change",
+          data: {
+            toolName: "file_change",
+            id: item.id,
+            changes: item.changes,
+            streaming: true
+          },
+          timestamp: Date.now()
+        };
+      case "mcp_tool_call":
+      case "mcpToolCall":
+        return {
+          type: "tool_use",
+          message: `${item.server}:${item.tool}`,
+          data: {
+            toolName: `${item.server}:${item.tool}`,
+            id: item.id,
+            input: item.arguments,
+            streaming: true
+          },
+          timestamp: Date.now()
+        };
+      case "web_search":
+      case "webSearch":
+        return {
+          type: "tool_use",
+          message: "web_search",
+          data: { toolName: "web_search", id: item.id, query: item.query },
+          timestamp: Date.now()
+        };
+      case "userMessage":
+      case "user_message":
+        return null;
+      // echo of user input — skip
+      default:
+        return null;
+    }
+  }
+  normalizeItemCompleted(item) {
+    switch (item.type) {
+      case "agent_message":
+      case "agentMessage":
+        return {
+          type: "assistant",
+          message: item.text ?? "",
+          timestamp: Date.now()
+        };
+      case "reasoning":
+        return {
+          type: "thinking",
+          message: item.text ?? "",
+          timestamp: Date.now()
+        };
+      case "command_execution":
+      case "commandExecution":
+        return {
+          type: "tool_result",
+          message: item.aggregated_output ?? item.aggregatedOutput ?? "",
+          data: {
+            toolName: "shell",
+            id: item.id,
+            exitCode: item.exit_code ?? item.exitCode,
+            status: item.status,
+            isError: item.status === "failed" || item.status === "declined"
+          },
+          timestamp: Date.now()
+        };
+      case "file_change":
+      case "fileChange":
+        return {
+          type: "tool_result",
+          message: `File changes ${item.status}`,
+          data: {
+            toolName: "file_change",
+            id: item.id,
+            changes: item.changes,
+            status: item.status,
+            isError: item.status === "failed"
+          },
+          timestamp: Date.now()
+        };
+      case "mcp_tool_call":
+      case "mcpToolCall":
+        return {
+          type: "tool_result",
+          message: item.result ? JSON.stringify(item.result).slice(0, 500) : item.error?.message ?? "",
+          data: {
+            toolName: `${item.server}:${item.tool}`,
+            id: item.id,
+            isError: !!item.error || item.status === "failed"
+          },
+          timestamp: Date.now()
+        };
+      case "web_search":
+      case "webSearch":
+        return {
+          type: "tool_result",
+          message: "Web search completed",
+          data: { toolName: "web_search", id: item.id },
+          timestamp: Date.now()
+        };
+      case "todo_list":
+      case "todoList":
+        return null;
+      // internal tracking
+      case "error":
+        return {
+          type: "error",
+          message: item.message ?? "Item error",
+          timestamp: Date.now()
+        };
+      default:
+        return null;
+    }
+  }
+};
+_CodexProcess.DRAIN_INTERVAL_MS = 15;
+var CodexProcess = _CodexProcess;
 var CodexProvider = class {
   constructor() {
     this.name = "codex";
   }
   async isAvailable() {
-    return false;
+    try {
+      const result = resolveCodexCli();
+      if (result.source === "fallback") return false;
+      return result.version != null;
+    } catch {
+      return false;
+    }
   }
-  spawn(_options) {
-    throw new Error("Codex provider not yet implemented");
+  spawn(options) {
+    const codexPath = resolveCodexPath(options.cwd);
+    const args = ["app-server"];
+    const cleanEnv = { ...process.env, ...options.env };
+    const codexHome = options.configDir ?? path7.join(options.cwd, ".sna", "codex-home");
+    if (!fs6.existsSync(codexHome)) {
+      fs6.mkdirSync(codexHome, { recursive: true });
+    }
+    const realCodexHome = `${process.env.HOME}/.codex`;
+    for (const f of ["auth.json", "installation_id"]) {
+      const src = path7.join(realCodexHome, f);
+      const dst = path7.join(codexHome, f);
+      if (fs6.existsSync(src) && !fs6.existsSync(dst)) {
+        fs6.copyFileSync(src, dst);
+      }
+    }
+    const configTomlPath = path7.join(codexHome, "config.toml");
+    if (!fs6.existsSync(configTomlPath)) {
+      const realConfig = path7.join(realCodexHome, "config.toml");
+      if (fs6.existsSync(realConfig)) {
+        fs6.copyFileSync(realConfig, configTomlPath);
+      }
+    }
+    cleanEnv.CODEX_HOME = codexHome;
+    if (options.mcpServers && Object.keys(options.mcpServers).length > 0) {
+      const tomlLines = [];
+      for (const [name, cfg] of Object.entries(options.mcpServers)) {
+        if ("url" in cfg) {
+          tomlLines.push(`[mcp_servers.${name}]`);
+          tomlLines.push(`url = ${JSON.stringify(cfg.url)}`);
+          if (cfg.headers) {
+            tomlLines.push(`[mcp_servers.${name}.headers]`);
+            for (const [k, v] of Object.entries(cfg.headers)) {
+              tomlLines.push(`${k} = ${JSON.stringify(v)}`);
+            }
+          }
+        } else {
+          tomlLines.push(`[mcp_servers.${name}]`);
+          tomlLines.push(`command = ${JSON.stringify(cfg.command)}`);
+          if (cfg.args?.length) {
+            tomlLines.push(`args = ${JSON.stringify(cfg.args)}`);
+          }
+          if (cfg.cwd) {
+            tomlLines.push(`cwd = ${JSON.stringify(cfg.cwd)}`);
+          }
+          if (cfg.env && Object.keys(cfg.env).length > 0) {
+            tomlLines.push(`[mcp_servers.${name}.env]`);
+            for (const [k, v] of Object.entries(cfg.env)) {
+              tomlLines.push(`${k} = ${JSON.stringify(v)}`);
+            }
+          }
+        }
+        tomlLines.push("");
+      }
+      fs6.appendFileSync(configTomlPath, "\n" + tomlLines.join("\n"));
+      logger.log("agent", `codex: ${Object.keys(options.mcpServers).length} MCP servers injected`);
+    }
+    let pkgRoot = path7.dirname(fileURLToPath2(import.meta.url));
+    while (!fs6.existsSync(path7.join(pkgRoot, "package.json"))) {
+      const parent = path7.dirname(pkgRoot);
+      if (parent === pkgRoot) break;
+      pkgRoot = parent;
+    }
+    const preToolUseHooks = [];
+    if (options.permissionMode !== "bypassPermissions") {
+      const hookScript = path7.join(pkgRoot, "dist", "scripts", "hook.js");
+      const sessionId = options.env?.SNA_SESSION_ID ?? "default";
+      preToolUseHooks.push({
+        type: "command",
+        command: `node "${hookScript}" --session=${sessionId}`,
+        timeout: 300
+      });
+      logger.log("agent", `codex: permission hook \u2192 ${hookScript} --session=${sessionId}`);
+    }
+    if (options.allowedTools?.length || options.disallowedTools?.length) {
+      const filterScript = path7.join(pkgRoot, "dist", "scripts", "tool-filter.js");
+      const filterArgs = [];
+      if (options.allowedTools?.length) {
+        filterArgs.push(`--allowed=${options.allowedTools.join(",")}`);
+      } else if (options.disallowedTools?.length) {
+        filterArgs.push(`--disallowed=${options.disallowedTools.join(",")}`);
+      }
+      preToolUseHooks.push({
+        type: "command",
+        command: `node "${filterScript}" ${filterArgs.join(" ")}`
+      });
+      logger.log("agent", `codex: tool-filter hook \u2192 ${options.allowedTools ? `allowed=[${options.allowedTools}]` : `disallowed=[${options.disallowedTools}]`}`);
+    }
+    if (preToolUseHooks.length > 0) {
+      const hooksJson = {
+        hooks: {
+          PreToolUse: [{
+            matcher: ".*",
+            hooks: preToolUseHooks
+          }]
+        }
+      };
+      fs6.writeFileSync(path7.join(codexHome, "hooks.json"), JSON.stringify(hooksJson));
+      const existingConfig = fs6.readFileSync(configTomlPath, "utf8");
+      if (!existingConfig.includes("codex_hooks")) {
+        fs6.appendFileSync(configTomlPath, "\n[features]\ncodex_hooks = true\n");
+      }
+    }
+    logger.log("agent", `codex: CODEX_HOME=${codexHome}`);
+    const codexDir = path7.dirname(codexPath);
+    if (codexDir && codexDir !== ".") {
+      cleanEnv.PATH = `${codexDir}:${cleanEnv.PATH ?? ""}`;
+    }
+    const resumeInfo = extractResumeArg(options.extraArgs);
+    const sysInfo = extractSystemPromptArgs(resumeInfo ? resumeInfo.cleanArgs : options.extraArgs);
+    if (sysInfo.cleanArgs.length) {
+      args.push(...sysInfo.cleanArgs);
+    }
+    const proc = spawn3(codexPath, args, {
+      cwd: options.cwd,
+      env: cleanEnv,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    logger.log("agent", `spawned codex app-server (pid=${proc.pid}) \u2192 ${codexPath} ${args.join(" ")}`);
+    return new CodexProcess(proc, options);
   }
 };
 
@@ -1009,65 +2305,109 @@ function getProvider(name = "claude-code") {
   return provider2;
 }
 
-// src/server/history-builder.ts
-function buildHistoryFromDb(sessionId) {
+// src/history/canonical.ts
+function buildCanonicalFromDb(sessionId) {
   const db = getDb();
   const rows = db.prepare(
-    `SELECT role, content FROM chat_messages
-     WHERE session_id = ? AND role IN ('user', 'assistant')
-     ORDER BY id ASC`
+    `SELECT id, actor, kind, content, embeds, meta, created_at
+       FROM chat_messages
+      WHERE session_id = ?
+      ORDER BY id ASC`
   ).all(sessionId);
-  if (rows.length === 0) return [];
-  const merged = [];
-  for (const row of rows) {
-    const role = row.role;
-    if (!row.content?.trim()) continue;
-    const last = merged[merged.length - 1];
-    if (last && last.role === role) {
-      last.content += "\n\n" + row.content;
-    } else {
-      merged.push({ role, content: row.content });
+  const out = [];
+  for (const r of rows) {
+    if (r.kind === "status" || r.kind === "error") continue;
+    let embeds;
+    if (r.embeds) {
+      try {
+        embeds = JSON.parse(r.embeds);
+      } catch {
+      }
     }
+    let meta;
+    if (r.meta) {
+      try {
+        meta = JSON.parse(r.meta);
+      } catch {
+      }
+    }
+    out.push({
+      id: r.id,
+      actor: r.actor,
+      kind: r.kind,
+      content: r.content,
+      embeds,
+      meta,
+      createdAt: r.created_at
+    });
   }
-  return merged;
+  return out;
 }
 
 // src/server/image-store.ts
-import fs5 from "fs";
-import path6 from "path";
+import fs7 from "fs";
+import path8 from "path";
 import { createHash } from "crypto";
 function getImageDir() {
-  return path6.join(getConfig().dataDir, "images");
+  return path8.join(getConfig().dataDir, "images");
 }
 var MIME_TO_EXT = {
   "image/png": "png",
   "image/jpeg": "jpg",
   "image/gif": "gif",
   "image/webp": "webp",
-  "image/svg+xml": "svg"
+  "image/svg+xml": "svg",
+  "application/pdf": "pdf"
 };
-function saveImages(sessionId, images) {
-  const dir = path6.join(getImageDir(), sessionId);
-  fs5.mkdirSync(dir, { recursive: true });
-  return images.map((img) => {
-    const ext = MIME_TO_EXT[img.mimeType] ?? "bin";
-    const hash = createHash("sha256").update(img.base64).digest("hex").slice(0, 12);
-    const filename = `${hash}.${ext}`;
-    const filePath = path6.join(dir, filename);
-    if (!fs5.existsSync(filePath)) {
-      fs5.writeFileSync(filePath, Buffer.from(img.base64, "base64"));
+function saveEmbeds(sessionId, attachments) {
+  const dir = path8.join(getImageDir(), sessionId);
+  fs7.mkdirSync(dir, { recursive: true });
+  return attachments.map((att) => {
+    const ext = MIME_TO_EXT[att.mimeType] ?? "bin";
+    const id = createHash("sha256").update(att.base64).digest("hex").slice(0, 12);
+    const filename = `${id}.${ext}`;
+    const filePath = path8.join(dir, filename);
+    if (!fs7.existsSync(filePath)) {
+      fs7.writeFileSync(filePath, Buffer.from(att.base64, "base64"));
     }
-    return filename;
+    return {
+      id,
+      record: { mime_type: att.mimeType, path: filename }
+    };
   });
 }
 function resolveImagePath(sessionId, filename) {
   if (filename.includes("..") || filename.includes("/")) return null;
-  const filePath = path6.join(getImageDir(), sessionId, filename);
-  return fs5.existsSync(filePath) ? filePath : null;
+  const filePath = path8.join(getImageDir(), sessionId, filename);
+  return fs7.existsSync(filePath) ? filePath : null;
+}
+
+// src/db/chat-messages.ts
+function insertChatMessage(db, msg) {
+  const embedsJson = msg.embeds && Object.keys(msg.embeds).length > 0 ? JSON.stringify(msg.embeds) : null;
+  const metaJson = msg.meta && Object.keys(msg.meta).length > 0 ? JSON.stringify(msg.meta) : null;
+  const result = db.prepare(
+    `INSERT INTO chat_messages (session_id, actor, kind, content, embeds, meta, skill_name)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    msg.sessionId,
+    msg.actor,
+    msg.kind,
+    msg.content,
+    embedsJson,
+    metaJson,
+    msg.skillName ?? null
+  );
+  return Number(result.lastInsertRowid);
+}
+function updateChatMessageMeta(db, id, meta) {
+  db.prepare(
+    `UPDATE chat_messages SET meta = ?, updated_at = datetime('now') WHERE id = ?`
+  ).run(JSON.stringify(meta), id);
 }
 
 // src/core/completion.ts
-import { spawn as spawn3 } from "child_process";
+import { spawn as spawn4 } from "child_process";
 
 // src/lib/langfuse-tracer.ts
 var langfuseClient = null;
@@ -1126,6 +2466,13 @@ function traceCompletion(opts) {
 
 // src/core/completion.ts
 async function completion(opts) {
+  const providerName = opts.provider ?? getConfig().defaultProvider;
+  if (providerName === "codex") {
+    return completionCodex(opts);
+  }
+  return completionClaudeCode(opts);
+}
+function completionClaudeCode(opts) {
   const cwd = opts.cwd ?? process.cwd();
   const resolved = resolveClaudeCli({ cacheDir: void 0 });
   const claudeParts = resolved.path.split(/\s+/);
@@ -1155,10 +2502,10 @@ async function completion(opts) {
   delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
   const label = opts.label ?? "completion";
   const timeout = opts.timeout ?? 6e4;
-  logger.log("agent", `completion: ${label} model=${model ?? "default"} prompt="${opts.prompt.slice(0, 60)}..."`);
+  logger.log("agent", `completion: ${label} provider=claude-code model=${model ?? "default"} prompt="${opts.prompt.slice(0, 60)}..."`);
   const trace = traceCompletion({ label, model, input: opts.prompt });
   return new Promise((resolve, reject) => {
-    const proc = spawn3(claudePath, args, {
+    const proc = spawn4(claudePath, args, {
       cwd,
       env: cleanEnv,
       stdio: ["pipe", "pipe", "pipe"]
@@ -1218,6 +2565,113 @@ async function completion(opts) {
       resolve(result);
     });
     proc.stdin.end();
+  });
+}
+function completionCodex(opts) {
+  const cwd = opts.cwd ?? process.cwd();
+  const resolved = resolveCodexCli();
+  const codexPath = resolved.path;
+  const args = ["exec", "--json", "--ephemeral", "--full-auto"];
+  if (opts.model) args.push("--model", opts.model);
+  if (opts.extraArgs) args.push(...opts.extraArgs);
+  const instructions = [opts.systemPrompt, opts.appendSystemPrompt].filter(Boolean).join("\n\n");
+  if (instructions) {
+    args.push("-c", `developer_instructions=${JSON.stringify(instructions)}`);
+  }
+  const prompt = opts.prompt;
+  args.push(prompt);
+  const cleanEnv = { ...process.env, ...opts.env };
+  const codexDir = codexPath.includes("/") ? codexPath.slice(0, codexPath.lastIndexOf("/")) : "";
+  if (codexDir && codexDir !== ".") {
+    cleanEnv.PATH = `${codexDir}:${cleanEnv.PATH ?? ""}`;
+  }
+  const label = opts.label ?? "completion";
+  const timeout = opts.timeout ?? 6e4;
+  const model = opts.model ?? "codex-default";
+  logger.log("agent", `completion: ${label} provider=codex model=${model} prompt="${opts.prompt.slice(0, 60)}..."`);
+  const trace = traceCompletion({ label, model, input: opts.prompt });
+  const startTime = Date.now();
+  return new Promise((resolve, reject) => {
+    const proc = spawn4(codexPath, args, {
+      cwd,
+      env: cleanEnv,
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      proc.kill();
+      const err2 = new Error(`completion timed out after ${timeout}ms`);
+      trace?.error(err2);
+      reject(err2);
+    }, timeout);
+    proc.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    proc.on("error", (err2) => {
+      clearTimeout(timer);
+      trace?.error(err2);
+      reject(new Error(`completion spawn error: ${err2.message}`));
+    });
+    proc.stdin.end();
+    proc.on("close", (code) => {
+      clearTimeout(timer);
+      const durationMs = Date.now() - startTime;
+      const lines = stdout.trim().split("\n").filter((l) => l.trim());
+      const events = [];
+      for (const line of lines) {
+        try {
+          events.push(JSON.parse(line));
+        } catch {
+        }
+      }
+      let text = "";
+      for (const evt of events) {
+        if (evt.type === "item.completed" && evt.item?.type === "agent_message") {
+          text = evt.item.text ?? "";
+        }
+      }
+      let usage = { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 };
+      for (const evt of events) {
+        if (evt.type === "turn.completed" && evt.usage) {
+          usage = evt.usage;
+        }
+      }
+      const errorEvent = events.find((e) => e.type === "turn.failed" || e.type === "error");
+      if (errorEvent) {
+        const err2 = new Error(`completion error: ${errorEvent.error?.message ?? "unknown"}`);
+        trace?.error(err2);
+        reject(err2);
+        return;
+      }
+      if (!text && code !== 0) {
+        const err2 = new Error(`completion: codex exited with code ${code}: ${stderr.slice(0, 200)}`);
+        trace?.error(err2);
+        reject(err2);
+        return;
+      }
+      const result = {
+        text,
+        usage: {
+          inputTokens: usage.input_tokens,
+          outputTokens: usage.output_tokens,
+          cacheReadTokens: usage.cached_input_tokens,
+          cacheCreationTokens: 0
+        },
+        costUsd: 0,
+        // Codex doesn't return cost
+        durationMs,
+        durationApiMs: durationMs,
+        // no separate API duration
+        model: model ?? "codex"
+      };
+      logger.log("agent", `completion done: ${label} ${result.durationMs}ms in=${result.usage.inputTokens} out=${result.usage.outputTokens}`);
+      trace?.end(result);
+      resolve(result);
+    });
   });
 }
 
@@ -1374,7 +2828,13 @@ function createAgentRoutes(sessionManager2) {
       const db = getDb();
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
       if (body.prompt) {
-        db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, body.prompt, body.meta ? JSON.stringify(body.meta) : null);
+        insertChatMessage(db, {
+          sessionId,
+          actor: "user",
+          kind: "text",
+          content: body.prompt,
+          meta: body.meta
+        });
       }
       const skillMatch = body.prompt?.match(/^Execute the skill:\s*(\S+)/);
       if (skillMatch) {
@@ -1398,10 +2858,16 @@ function createAgentRoutes(sessionManager2) {
         configDir,
         env: { ...body.env, SNA_SESSION_ID: sessionId },
         history: body.history,
-        extraArgs
+        extraArgs,
+        providerOptions: body.providerOptions,
+        systemPrompt: body.systemPrompt,
+        appendSystemPrompt: body.appendSystemPrompt,
+        allowedTools: body.allowedTools,
+        disallowedTools: body.disallowedTools,
+        mcpServers: body.mcpServers
       });
       sessionManager2.setProcess(sessionId, proc);
-      sessionManager2.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, configDir, extraArgs });
+      sessionManager2.saveStartConfig(sessionId, { provider: providerName, modelProvider: body.modelProvider, model, permissionMode: permissionMode2, configDir, extraArgs, providerOptions: body.providerOptions });
       logger.log("route", `POST /start?session=${sessionId} \u2192 started`);
       return httpJson(c, "agent.start", {
         status: "started",
@@ -1428,21 +2894,35 @@ function createAgentRoutes(sessionManager2) {
       logger.err("err", `POST /send?session=${sessionId} \u2192 empty message`);
       return c.json({ status: "error", message: "message or images required" }, 400);
     }
-    const textContent = body.message ?? "(image)";
-    let meta = body.meta ? { ...body.meta } : {};
+    const userText = body.message ?? "";
+    const meta = body.meta ? { ...body.meta } : {};
+    const embeds = {};
+    let contentText = userText;
     if (body.images?.length) {
-      const filenames = saveImages(sessionId, body.images);
-      meta.images = filenames;
+      const saved = saveEmbeds(sessionId, body.images);
+      const refs = saved.map(({ id, record }) => {
+        embeds[id] = record;
+        return formatEmbedRef(id);
+      });
+      contentText = userText ? `${userText}
+${refs.join(" ")}` : refs.join(" ");
     }
     try {
       const db = getDb();
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
-      db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
+      insertChatMessage(db, {
+        sessionId,
+        actor: "user",
+        kind: "text",
+        content: contentText,
+        embeds: Object.keys(embeds).length > 0 ? embeds : void 0,
+        meta: Object.keys(meta).length > 0 ? meta : void 0
+      });
     } catch {
     }
     sessionManager2.pushEvent(sessionId, {
       type: "user_message",
-      message: textContent,
+      message: contentText,
       data: Object.keys(meta).length > 0 ? meta : void 0,
       timestamp: Date.now()
     });
@@ -1532,20 +3012,47 @@ function createAgentRoutes(sessionManager2) {
     const sessionId = getSessionId(c);
     const body = await c.req.json().catch(() => ({}));
     try {
-      const ccSessionId = sessionManager2.getSession(sessionId)?.ccSessionId;
+      const session = sessionManager2.getSession(sessionId);
+      const prevProvider = session?.lastStartConfig?.provider;
+      const ccSessionId = session?.ccSessionId;
       const { config } = sessionManager2.restartSession(sessionId, body, (cfg) => {
         const prov = getProvider(cfg.provider);
-        const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
+        const providerChanged = prevProvider && cfg.provider !== prevProvider;
+        const typedOpts = {
+          systemPrompt: body.systemPrompt,
+          appendSystemPrompt: body.appendSystemPrompt,
+          allowedTools: body.allowedTools,
+          disallowedTools: body.disallowedTools,
+          mcpServers: body.mcpServers
+        };
+        if (providerChanged) {
+          const history = buildCanonicalFromDb(sessionId);
+          logger.log("route", `restart: provider changed ${prevProvider} \u2192 ${cfg.provider}, using DB history (${history.length} msgs)`);
+          return prov.spawn({
+            cwd: sessionManager2.getSession(sessionId).cwd,
+            model: cfg.model,
+            permissionMode: cfg.permissionMode,
+            configDir: cfg.configDir,
+            env: { ...body.env, SNA_SESSION_ID: sessionId },
+            history: history.length > 0 ? history : void 0,
+            extraArgs: cfg.extraArgs,
+            providerOptions: cfg.providerOptions,
+            ...typedOpts
+          });
+        }
         return prov.spawn({
           cwd: sessionManager2.getSession(sessionId).cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode,
           configDir: cfg.configDir,
           env: { ...body.env, SNA_SESSION_ID: sessionId },
-          extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
+          resumeSessionId: ccSessionId ?? void 0,
+          extraArgs: cfg.extraArgs,
+          providerOptions: cfg.providerOptions,
+          ...typedOpts
         });
       });
-      logger.log("route", `POST /restart?session=${sessionId} \u2192 restarted`);
+      logger.log("route", `POST /restart?session=${sessionId} \u2192 restarted (${config.provider})`);
       return httpJson(c, "agent.restart", {
         status: "restarted",
         provider: config.provider,
@@ -1563,15 +3070,18 @@ function createAgentRoutes(sessionManager2) {
     if (session.process?.alive) {
       return c.json({ status: "error", message: "Session already running. Use agent.send instead." }, 400);
     }
-    const history = buildHistoryFromDb(sessionId);
+    const history = buildCanonicalFromDb(sessionId);
     if (history.length === 0 && !body.prompt) {
       return c.json({ status: "error", message: "No history in DB \u2014 nothing to resume." }, 400);
     }
     const providerName = body.provider ?? getConfig().defaultProvider;
+    const providerChanged = session.lastStartConfig && session.lastStartConfig.provider !== providerName;
     const model = body.model ?? session.lastStartConfig?.model ?? getConfig().model;
     const permissionMode2 = body.permissionMode ?? session.lastStartConfig?.permissionMode;
-    const configDir = body.configDir ?? session.lastStartConfig?.configDir;
-    const extraArgs = body.extraArgs ?? session.lastStartConfig?.extraArgs;
+    const configDir = providerChanged ? body.configDir : body.configDir ?? session.lastStartConfig?.configDir;
+    const extraArgs = providerChanged ? body.extraArgs : body.extraArgs ?? session.lastStartConfig?.extraArgs;
+    const providerOptions = providerChanged ? body.providerOptions : body.providerOptions ?? session.lastStartConfig?.providerOptions;
+    const modelProvider = body.modelProvider ?? (providerChanged ? void 0 : session.lastStartConfig?.modelProvider);
     const provider2 = getProvider(providerName);
     try {
       const proc = provider2.spawn({
@@ -1582,10 +3092,16 @@ function createAgentRoutes(sessionManager2) {
         configDir,
         env: { ...body.env, SNA_SESSION_ID: sessionId },
         history: history.length > 0 ? history : void 0,
-        extraArgs
+        extraArgs,
+        providerOptions,
+        systemPrompt: body.systemPrompt,
+        appendSystemPrompt: body.appendSystemPrompt,
+        allowedTools: body.allowedTools,
+        disallowedTools: body.disallowedTools,
+        mcpServers: body.mcpServers
       });
       sessionManager2.setProcess(sessionId, proc, "resumed");
-      sessionManager2.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, configDir, extraArgs });
+      sessionManager2.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, permissionMode: permissionMode2, configDir, extraArgs, providerOptions });
       logger.log("route", `POST /resume?session=${sessionId} \u2192 resumed (${history.length} history msgs)`);
       return httpJson(c, "agent.resume", {
         status: "resumed",
@@ -1632,8 +3148,8 @@ function createAgentRoutes(sessionManager2) {
       const db = getDb();
       const count = db.prepare("SELECT COUNT(*) as c FROM chat_messages WHERE session_id = ?").get(sessionId);
       messageCount = count?.c ?? 0;
-      const last = db.prepare("SELECT role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1").get(sessionId);
-      if (last) lastMessage = { role: last.role, content: last.content, created_at: last.created_at };
+      const last = db.prepare("SELECT actor, kind, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1").get(sessionId);
+      if (last) lastMessage = { actor: last.actor, kind: last.kind, content: last.content, created_at: last.created_at };
     } catch {
     }
     return httpJson(c, "agent.status", {
@@ -1678,7 +3194,7 @@ function createAgentRoutes(sessionManager2) {
 
 // src/server/routes/chat.ts
 import { Hono as Hono2 } from "hono";
-import fs6 from "fs";
+import fs8 from "fs";
 function createChatRoutes() {
   const app = new Hono2();
   app.get("/sessions", (c) => {
@@ -1749,22 +3265,22 @@ function createChatRoutes() {
   app.post("/sessions/:id/messages", async (c) => {
     const sessionId = c.req.param("id");
     const body = await c.req.json().catch(() => ({}));
-    if (!body.role) {
-      return c.json({ status: "error", message: "role is required" }, 400);
+    if (!body.actor || !body.kind) {
+      return c.json({ status: "error", message: "actor and kind are required" }, 400);
     }
     try {
       const db = getDb();
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, sessionId);
-      const result = db.prepare(
-        `INSERT INTO chat_messages (session_id, role, content, skill_name, meta) VALUES (?, ?, ?, ?, ?)`
-      ).run(
+      const id = insertChatMessage(db, {
         sessionId,
-        body.role,
-        body.content ?? "",
-        body.skill_name ?? null,
-        body.meta ? JSON.stringify(body.meta) : null
-      );
-      return httpJson(c, "chat.messages.create", { status: "created", id: Number(result.lastInsertRowid) });
+        actor: body.actor,
+        kind: body.kind,
+        content: body.content ?? "",
+        embeds: body.embeds,
+        meta: body.meta,
+        skillName: body.skill_name
+      });
+      return httpJson(c, "chat.messages.create", { status: "created", id });
     } catch (e) {
       return c.json({ status: "error", message: e.message }, 500);
     }
@@ -1796,7 +3312,7 @@ function createChatRoutes() {
       svg: "image/svg+xml"
     };
     const contentType = mimeMap[ext ?? ""] ?? "application/octet-stream";
-    const data = fs6.readFileSync(filePath);
+    const data = fs8.readFileSync(filePath);
     return new Response(data, { headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=31536000, immutable" } });
   });
   return app;
@@ -1948,6 +3464,17 @@ var SessionManager = class {
         this.setSessionState(sessionId, session, "processing");
       } else if (e.type === "complete" || e.type === "error" || e.type === "interrupted") {
         this.setSessionState(sessionId, session, "waiting");
+      }
+      if (e.type === "permission_needed" && e.data?.requestId && proc.respondToPermission) {
+        const requestId = e.data.requestId;
+        this.createPendingPermission(sessionId, {
+          tool_name: e.data.toolName,
+          command: e.data.command,
+          path: e.data.path,
+          requestId
+        }).then((approved) => {
+          proc.respondToPermission(requestId, approved);
+        });
       }
       const persisted = this.persistEvent(sessionId, e);
       if (persisted) {
@@ -2125,11 +3652,20 @@ var SessionManager = class {
     if (!session) throw new Error(`Session "${id}" not found`);
     const base = session.lastStartConfig;
     if (!base) throw new Error(`Session "${id}" has no previous start config`);
+    const nextProvider = overrides.provider ?? base.provider;
+    const providerChanged = nextProvider !== base.provider;
     const config = {
-      provider: overrides.provider ?? base.provider,
+      provider: nextProvider,
+      // modelProvider is attribution metadata, not runtime-specific. Caller
+      // (e.g. Loom) decides it via its model catalog and passes it in with
+      // the override. Drop the base value when the override is absent on a
+      // provider change, since the inherited modelProvider no longer matches.
+      modelProvider: overrides.modelProvider ?? (providerChanged ? void 0 : base.modelProvider),
       model: overrides.model ?? base.model,
       permissionMode: overrides.permissionMode ?? base.permissionMode,
-      extraArgs: overrides.extraArgs ?? base.extraArgs
+      configDir: providerChanged ? overrides.configDir : overrides.configDir ?? base.configDir,
+      extraArgs: providerChanged ? overrides.extraArgs : overrides.extraArgs ?? base.extraArgs,
+      providerOptions: providerChanged ? overrides.providerOptions : overrides.providerOptions ?? base.providerOptions
     };
     if (session.process?.alive) session.process.kill();
     const proc = spawnFn(config);
@@ -2226,50 +3762,126 @@ var SessionManager = class {
         `SELECT COUNT(*) as c FROM chat_messages WHERE session_id = ?`
       ).get(sessionId);
       const last = db.prepare(
-        `SELECT role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1`
+        `SELECT actor, kind, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1`
       ).get(sessionId);
       return {
         messageCount: count.c,
-        lastMessage: last ? { role: last.role, content: last.content, created_at: last.created_at } : null
+        lastMessage: last ? { actor: last.actor, kind: last.kind, content: last.content, created_at: last.created_at } : null
       };
     } catch {
       return { messageCount: 0, lastMessage: null };
     }
   }
-  /** Persist an agent event to chat_messages. Returns true if a row was inserted. */
+  /**
+   * Persist an agent event to chat_messages as a canonical (actor, kind) block.
+   * Returns true if a row was inserted. Streaming-only events (deltas) return
+   * false so the event cursor doesn't advance for them.
+   *
+   * Assistant-authored blocks (text / thinking / tool_use) are stamped with
+   * three-layer attribution — runtime (CLI), modelProvider (LLM API vendor),
+   * and model (specific slug) — pulled from session.lastStartConfig at emit
+   * time. If the user switches mid-session, subsequent rows carry the new
+   * attribution. Essential for auditing, Langfuse traces, UI badges, and
+   * adapters that need to know "who actually said this" when converting
+   * canonical back into a provider-native format.
+   *
+   * Event → (actor, kind) mapping:
+   *   assistant   → (assistant, text)           meta={runtime, modelProvider, model}
+   *   thinking    → (assistant, thinking)       meta={runtime, modelProvider, model, signature?}
+   *   tool_use    → (assistant, tool_use)       meta={runtime, modelProvider, model, id, input, name}
+   *   tool_result → (system,    tool_result)    meta={toolUseId, isError}
+   *   complete    → (system,    status)         meta={usage, model, ...}
+   *   error       → (system,    error)          meta={status:"error"}
+   */
   persistEvent(sessionId, e) {
     try {
       const db = getDb();
+      const session = this.sessions.get(sessionId);
+      const attr = {};
+      if (session?.lastStartConfig?.provider) attr.runtime = session.lastStartConfig.provider;
+      if (session?.lastStartConfig?.modelProvider) attr.modelProvider = session.lastStartConfig.modelProvider;
+      if (session?.lastStartConfig?.model) attr.model = session.lastStartConfig.model;
       switch (e.type) {
         case "assistant":
-          if (e.message) {
-            db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`).run(sessionId, e.message);
-            return true;
-          }
-          return false;
+          if (!e.message) return false;
+          insertChatMessage(db, {
+            sessionId,
+            actor: "assistant",
+            kind: "text",
+            content: e.message,
+            meta: Object.keys(attr).length > 0 ? attr : void 0
+          });
+          return true;
         case "thinking":
-          if (e.message) {
-            db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'thinking', ?)`).run(sessionId, e.message);
-            return true;
-          }
-          return false;
+          if (!e.message) return false;
+          insertChatMessage(db, {
+            sessionId,
+            actor: "assistant",
+            kind: "thinking",
+            content: e.message,
+            meta: {
+              ...attr,
+              ...e.data?.signature ? { signature: e.data.signature } : {}
+            }
+          });
+          return true;
         case "tool_use": {
           const toolName = e.data?.toolName ?? e.message ?? "tool";
-          if (e.data?.update) {
-            db.prepare(`UPDATE chat_messages SET meta = ? WHERE session_id = ? AND role = 'tool' AND content = ? AND meta LIKE ?`).run(JSON.stringify(e.data), sessionId, toolName, `%"id":"${e.data.id}"%`);
+          const toolUseId = e.data?.id ?? e.data?.toolUseId;
+          if (e.data?.update && toolUseId) {
+            const row = db.prepare(
+              `SELECT id, meta FROM chat_messages
+                WHERE session_id = ? AND actor = 'assistant' AND kind = 'tool_use'
+                  AND json_extract(meta, '$.id') = ?
+                ORDER BY id DESC LIMIT 1`
+            ).get(sessionId, toolUseId);
+            if (row) {
+              const mergedMeta = {
+                ...row.meta ? JSON.parse(row.meta) : {},
+                ...e.data,
+                id: toolUseId
+              };
+              updateChatMessageMeta(db, row.id, mergedMeta);
+            }
             return false;
           }
-          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool', ?, ?)`).run(sessionId, toolName, JSON.stringify(e.data ?? {}));
+          insertChatMessage(db, {
+            sessionId,
+            actor: "assistant",
+            kind: "tool_use",
+            content: toolName,
+            meta: { ...attr, ...e.data ?? {}, id: toolUseId, name: toolName }
+          });
           return true;
         }
-        case "tool_result":
-          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool_result', ?, ?)`).run(sessionId, e.message ?? "", JSON.stringify(e.data ?? {}));
+        case "tool_result": {
+          const toolUseId = e.data?.toolUseId ?? e.data?.id;
+          insertChatMessage(db, {
+            sessionId,
+            actor: "system",
+            kind: "tool_result",
+            content: e.message ?? "",
+            meta: { ...e.data ?? {}, toolUseId }
+          });
           return true;
+        }
         case "complete":
-          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'status', '', ?)`).run(sessionId, JSON.stringify({ status: "complete", ...e.data }));
+          insertChatMessage(db, {
+            sessionId,
+            actor: "system",
+            kind: "status",
+            content: "",
+            meta: { status: "complete", ...e.data ?? {} }
+          });
           return true;
         case "error":
-          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'error', ?, ?)`).run(sessionId, e.message ?? "Error", JSON.stringify({ status: "error" }));
+          insertChatMessage(db, {
+            sessionId,
+            actor: "system",
+            kind: "error",
+            content: e.message ?? "Error",
+            meta: { status: "error" }
+          });
           return true;
         default:
           return false;
@@ -2511,7 +4123,13 @@ function handleAgentStart(ws, msg, sm) {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
     if (msg.prompt) {
-      db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, msg.prompt, msg.meta ? JSON.stringify(msg.meta) : null);
+      insertChatMessage(db, {
+        sessionId,
+        actor: "user",
+        kind: "text",
+        content: msg.prompt,
+        meta: msg.meta
+      });
     }
     const skillMatch = msg.prompt?.match(/^Execute the skill:\s*(\S+)/);
     if (skillMatch) {
@@ -2525,6 +4143,8 @@ function handleAgentStart(ws, msg, sm) {
   const permissionMode2 = msg.permissionMode;
   const configDir = msg.configDir;
   const extraArgs = msg.extraArgs;
+  const providerOptions = msg.providerOptions;
+  const modelProvider = msg.modelProvider;
   try {
     const proc = provider2.spawn({
       cwd: session.cwd,
@@ -2534,10 +4154,16 @@ function handleAgentStart(ws, msg, sm) {
       configDir,
       env: { ...msg.env, SNA_SESSION_ID: sessionId },
       history: msg.history,
-      extraArgs
+      extraArgs,
+      providerOptions,
+      systemPrompt: msg.systemPrompt,
+      appendSystemPrompt: msg.appendSystemPrompt,
+      allowedTools: msg.allowedTools,
+      disallowedTools: msg.disallowedTools,
+      mcpServers: msg.mcpServers
     });
     sm.setProcess(sessionId, proc);
-    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, configDir, extraArgs });
+    sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, permissionMode: permissionMode2, configDir, extraArgs, providerOptions });
     wsReply(ws, msg, { status: "started", provider: provider2.name, sessionId: session.id });
   } catch (e) {
     replyError(ws, msg, e.message);
@@ -2553,21 +4179,35 @@ function handleAgentSend(ws, msg, sm) {
   if (!msg.message && !images?.length) {
     return replyError(ws, msg, "message or images required");
   }
-  const textContent = msg.message ?? "(image)";
-  let meta = msg.meta ? { ...msg.meta } : {};
+  const userText = msg.message ?? "";
+  const meta = msg.meta ? { ...msg.meta } : {};
+  const embeds = {};
+  let contentText = userText;
   if (images?.length) {
-    const filenames = saveImages(sessionId, images);
-    meta.images = filenames;
+    const saved = saveEmbeds(sessionId, images);
+    const refs = saved.map(({ id, record }) => {
+      embeds[id] = record;
+      return formatEmbedRef(id);
+    });
+    contentText = userText ? `${userText}
+${refs.join(" ")}` : refs.join(" ");
   }
   try {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
-    db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
+    insertChatMessage(db, {
+      sessionId,
+      actor: "user",
+      kind: "text",
+      content: contentText,
+      embeds: Object.keys(embeds).length > 0 ? embeds : void 0,
+      meta: Object.keys(meta).length > 0 ? meta : void 0
+    });
   } catch {
   }
   sm.pushEvent(sessionId, {
     type: "user_message",
-    message: textContent,
+    message: contentText,
     data: Object.keys(meta).length > 0 ? meta : void 0,
     timestamp: Date.now()
   });
@@ -2593,15 +4233,18 @@ function handleAgentResume(ws, msg, sm) {
   if (session.process?.alive) {
     return replyError(ws, msg, "Session already running. Use agent.send instead.");
   }
-  const history = buildHistoryFromDb(sessionId);
+  const history = buildCanonicalFromDb(sessionId);
   if (history.length === 0 && !msg.prompt) {
     return replyError(ws, msg, "No history in DB \u2014 nothing to resume.");
   }
   const providerName = msg.provider ?? session.lastStartConfig?.provider ?? getConfig().defaultProvider;
+  const providerChanged = session.lastStartConfig && session.lastStartConfig.provider !== providerName;
   const model = msg.model ?? session.lastStartConfig?.model ?? getConfig().model;
   const permissionMode2 = msg.permissionMode ?? session.lastStartConfig?.permissionMode;
-  const configDir = msg.configDir ?? session.lastStartConfig?.configDir;
-  const extraArgs = msg.extraArgs ?? session.lastStartConfig?.extraArgs;
+  const configDir = providerChanged ? msg.configDir : msg.configDir ?? session.lastStartConfig?.configDir;
+  const extraArgs = providerChanged ? msg.extraArgs : msg.extraArgs ?? session.lastStartConfig?.extraArgs;
+  const providerOptions = providerChanged ? msg.providerOptions : msg.providerOptions ?? session.lastStartConfig?.providerOptions;
+  const modelProvider = msg.modelProvider ?? (providerChanged ? void 0 : session.lastStartConfig?.modelProvider);
   const provider2 = getProvider(providerName);
   try {
     const proc = provider2.spawn({
@@ -2612,10 +4255,16 @@ function handleAgentResume(ws, msg, sm) {
       configDir,
       env: { ...msg.env, SNA_SESSION_ID: sessionId },
       history: history.length > 0 ? history : void 0,
-      extraArgs
+      extraArgs,
+      providerOptions,
+      systemPrompt: msg.systemPrompt,
+      appendSystemPrompt: msg.appendSystemPrompt,
+      allowedTools: msg.allowedTools,
+      disallowedTools: msg.disallowedTools,
+      mcpServers: msg.mcpServers
     });
     sm.setProcess(sessionId, proc, "resumed");
-    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode: permissionMode2, configDir, extraArgs });
+    sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, permissionMode: permissionMode2, configDir, extraArgs, providerOptions });
     wsReply(ws, msg, {
       status: "resumed",
       provider: providerName,
@@ -2629,26 +4278,54 @@ function handleAgentResume(ws, msg, sm) {
 function handleAgentRestart(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
   try {
-    const ccSessionId = sm.getSession(sessionId)?.ccSessionId;
+    const session = sm.getSession(sessionId);
+    const prevProvider = session?.lastStartConfig?.provider;
+    const ccSessionId = session?.ccSessionId;
+    const typedOpts = {
+      systemPrompt: msg.systemPrompt,
+      appendSystemPrompt: msg.appendSystemPrompt,
+      allowedTools: msg.allowedTools,
+      disallowedTools: msg.disallowedTools,
+      mcpServers: msg.mcpServers
+    };
     const { config } = sm.restartSession(
       sessionId,
       {
         provider: msg.provider,
+        modelProvider: msg.modelProvider,
         model: msg.model,
         permissionMode: msg.permissionMode,
         configDir: msg.configDir,
-        extraArgs: msg.extraArgs
+        extraArgs: msg.extraArgs,
+        providerOptions: msg.providerOptions
       },
       (cfg) => {
         const prov = getProvider(cfg.provider);
-        const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
+        const providerChanged = prevProvider && cfg.provider !== prevProvider;
+        if (providerChanged) {
+          const history = buildCanonicalFromDb(sessionId);
+          return prov.spawn({
+            cwd: sm.getSession(sessionId).cwd,
+            model: cfg.model,
+            permissionMode: cfg.permissionMode,
+            configDir: cfg.configDir,
+            env: { ...msg.env, SNA_SESSION_ID: sessionId },
+            history: history.length > 0 ? history : void 0,
+            extraArgs: cfg.extraArgs,
+            providerOptions: cfg.providerOptions,
+            ...typedOpts
+          });
+        }
         return prov.spawn({
           cwd: sm.getSession(sessionId).cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode,
           configDir: cfg.configDir,
           env: { ...msg.env, SNA_SESSION_ID: sessionId },
-          extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
+          resumeSessionId: ccSessionId ?? void 0,
+          extraArgs: cfg.extraArgs,
+          providerOptions: cfg.providerOptions,
+          ...typedOpts
         });
       }
     );
@@ -2691,8 +4368,8 @@ function handleAgentStatus(ws, msg, sm) {
     const db = getDb();
     const count = db.prepare("SELECT COUNT(*) as c FROM chat_messages WHERE session_id = ?").get(sessionId);
     messageCount = count?.c ?? 0;
-    const last = db.prepare("SELECT role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1").get(sessionId);
-    if (last) lastMessage = { role: last.role, content: last.content, created_at: last.created_at };
+    const last = db.prepare("SELECT actor, kind, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1").get(sessionId);
+    if (last) lastMessage = { actor: last.actor, kind: last.kind, content: last.content, created_at: last.created_at };
   } catch {
   }
   wsReply(ws, msg, {
@@ -2734,12 +4411,12 @@ function handleAgentSubscribe(ws, msg, sm, state) {
     try {
       const db = getDb();
       const rows = db.prepare(
-        `SELECT role, content, meta, created_at FROM chat_messages
+        `SELECT actor, kind, content, meta, created_at FROM chat_messages
          WHERE session_id = ? ORDER BY id ASC`
       ).all(sessionId);
       for (const row of rows) {
         cursor++;
-        const eventType = row.role === "user" ? "user_message" : row.role === "assistant" ? "assistant" : row.role === "thinking" ? "thinking" : row.role === "tool" ? "tool_use" : row.role === "tool_result" ? "tool_result" : row.role === "error" ? "error" : null;
+        const eventType = row.actor === "user" ? "user_message" : row.actor === "assistant" && row.kind === "text" ? "assistant" : row.actor === "assistant" && row.kind === "thinking" ? "thinking" : row.actor === "assistant" && row.kind === "tool_use" ? "tool_use" : row.actor === "system" && row.kind === "tool_result" ? "tool_result" : row.actor === "system" && row.kind === "error" ? "error" : null;
         if (!eventType) continue;
         const meta = row.meta ? JSON.parse(row.meta) : void 0;
         send(ws, {
@@ -2955,20 +4632,22 @@ function handleChatMessagesList(ws, msg) {
 function handleChatMessagesCreate(ws, msg) {
   const sessionId = msg.session;
   if (!sessionId) return replyError(ws, msg, "session is required");
-  if (!msg.role) return replyError(ws, msg, "role is required");
+  const actor = msg.actor;
+  const kind = msg.kind;
+  if (!actor || !kind) return replyError(ws, msg, "actor and kind are required");
   try {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, sessionId);
-    const result = db.prepare(
-      `INSERT INTO chat_messages (session_id, role, content, skill_name, meta) VALUES (?, ?, ?, ?, ?)`
-    ).run(
+    const id = insertChatMessage(db, {
       sessionId,
-      msg.role,
-      msg.content ?? "",
-      msg.skill_name ?? null,
-      msg.meta ? JSON.stringify(msg.meta) : null
-    );
-    wsReply(ws, msg, { status: "created", id: Number(result.lastInsertRowid) });
+      actor,
+      kind,
+      content: msg.content ?? "",
+      embeds: msg.embeds,
+      meta: msg.meta,
+      skillName: msg.skill_name ?? void 0
+    });
+    wsReply(ws, msg, { status: "created", id });
   } catch (e) {
     replyError(ws, msg, e.message);
   }
@@ -3026,8 +4705,8 @@ root.onError((err2, c) => {
 });
 root.use("*", async (c, next) => {
   const m = c.req.method;
-  const path7 = new URL(c.req.url).pathname;
-  logger.log("req", `${m.padEnd(6)} ${path7}`);
+  const path9 = new URL(c.req.url).pathname;
+  logger.log("req", `${m.padEnd(6)} ${path9}`);
   await next();
 });
 var sessionManager = new SessionManager({ maxSessions });

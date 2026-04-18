@@ -5,9 +5,11 @@ import {
 } from "../../core/providers/index.js";
 import { logger } from "../../lib/logger.js";
 import { getDb } from "../../db/schema.js";
-import { buildHistoryFromDb } from "../history-builder.js";
+import { buildCanonicalFromDb } from "../../history/canonical.js";
 import { httpJson } from "../api-types.js";
-import { saveImages } from "../image-store.js";
+import { saveEmbeds } from "../image-store.js";
+import { insertChatMessage } from "../../db/chat-messages.js";
+import { formatEmbedRef } from "../../history/embed-refs.js";
 import { getConfig } from "../../config.js";
 import { completion } from "../../core/completion.js";
 function getSessionId(c) {
@@ -162,7 +164,13 @@ function createAgentRoutes(sessionManager) {
       const db = getDb();
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
       if (body.prompt) {
-        db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, body.prompt, body.meta ? JSON.stringify(body.meta) : null);
+        insertChatMessage(db, {
+          sessionId,
+          actor: "user",
+          kind: "text",
+          content: body.prompt,
+          meta: body.meta
+        });
       }
       const skillMatch = body.prompt?.match(/^Execute the skill:\s*(\S+)/);
       if (skillMatch) {
@@ -186,10 +194,16 @@ function createAgentRoutes(sessionManager) {
         configDir,
         env: { ...body.env, SNA_SESSION_ID: sessionId },
         history: body.history,
-        extraArgs
+        extraArgs,
+        providerOptions: body.providerOptions,
+        systemPrompt: body.systemPrompt,
+        appendSystemPrompt: body.appendSystemPrompt,
+        allowedTools: body.allowedTools,
+        disallowedTools: body.disallowedTools,
+        mcpServers: body.mcpServers
       });
       sessionManager.setProcess(sessionId, proc);
-      sessionManager.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
+      sessionManager.saveStartConfig(sessionId, { provider: providerName, modelProvider: body.modelProvider, model, permissionMode, configDir, extraArgs, providerOptions: body.providerOptions });
       logger.log("route", `POST /start?session=${sessionId} \u2192 started`);
       return httpJson(c, "agent.start", {
         status: "started",
@@ -216,21 +230,35 @@ function createAgentRoutes(sessionManager) {
       logger.err("err", `POST /send?session=${sessionId} \u2192 empty message`);
       return c.json({ status: "error", message: "message or images required" }, 400);
     }
-    const textContent = body.message ?? "(image)";
-    let meta = body.meta ? { ...body.meta } : {};
+    const userText = body.message ?? "";
+    const meta = body.meta ? { ...body.meta } : {};
+    const embeds = {};
+    let contentText = userText;
     if (body.images?.length) {
-      const filenames = saveImages(sessionId, body.images);
-      meta.images = filenames;
+      const saved = saveEmbeds(sessionId, body.images);
+      const refs = saved.map(({ id, record }) => {
+        embeds[id] = record;
+        return formatEmbedRef(id);
+      });
+      contentText = userText ? `${userText}
+${refs.join(" ")}` : refs.join(" ");
     }
     try {
       const db = getDb();
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
-      db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
+      insertChatMessage(db, {
+        sessionId,
+        actor: "user",
+        kind: "text",
+        content: contentText,
+        embeds: Object.keys(embeds).length > 0 ? embeds : void 0,
+        meta: Object.keys(meta).length > 0 ? meta : void 0
+      });
     } catch {
     }
     sessionManager.pushEvent(sessionId, {
       type: "user_message",
-      message: textContent,
+      message: contentText,
       data: Object.keys(meta).length > 0 ? meta : void 0,
       timestamp: Date.now()
     });
@@ -320,20 +348,47 @@ function createAgentRoutes(sessionManager) {
     const sessionId = getSessionId(c);
     const body = await c.req.json().catch(() => ({}));
     try {
-      const ccSessionId = sessionManager.getSession(sessionId)?.ccSessionId;
+      const session = sessionManager.getSession(sessionId);
+      const prevProvider = session?.lastStartConfig?.provider;
+      const ccSessionId = session?.ccSessionId;
       const { config } = sessionManager.restartSession(sessionId, body, (cfg) => {
         const prov = getProvider(cfg.provider);
-        const resumeArgs = ccSessionId ? ["--resume", ccSessionId] : ["--resume"];
+        const providerChanged = prevProvider && cfg.provider !== prevProvider;
+        const typedOpts = {
+          systemPrompt: body.systemPrompt,
+          appendSystemPrompt: body.appendSystemPrompt,
+          allowedTools: body.allowedTools,
+          disallowedTools: body.disallowedTools,
+          mcpServers: body.mcpServers
+        };
+        if (providerChanged) {
+          const history = buildCanonicalFromDb(sessionId);
+          logger.log("route", `restart: provider changed ${prevProvider} \u2192 ${cfg.provider}, using DB history (${history.length} msgs)`);
+          return prov.spawn({
+            cwd: sessionManager.getSession(sessionId).cwd,
+            model: cfg.model,
+            permissionMode: cfg.permissionMode,
+            configDir: cfg.configDir,
+            env: { ...body.env, SNA_SESSION_ID: sessionId },
+            history: history.length > 0 ? history : void 0,
+            extraArgs: cfg.extraArgs,
+            providerOptions: cfg.providerOptions,
+            ...typedOpts
+          });
+        }
         return prov.spawn({
           cwd: sessionManager.getSession(sessionId).cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode,
           configDir: cfg.configDir,
           env: { ...body.env, SNA_SESSION_ID: sessionId },
-          extraArgs: [...cfg.extraArgs ?? [], ...resumeArgs]
+          resumeSessionId: ccSessionId ?? void 0,
+          extraArgs: cfg.extraArgs,
+          providerOptions: cfg.providerOptions,
+          ...typedOpts
         });
       });
-      logger.log("route", `POST /restart?session=${sessionId} \u2192 restarted`);
+      logger.log("route", `POST /restart?session=${sessionId} \u2192 restarted (${config.provider})`);
       return httpJson(c, "agent.restart", {
         status: "restarted",
         provider: config.provider,
@@ -351,15 +406,18 @@ function createAgentRoutes(sessionManager) {
     if (session.process?.alive) {
       return c.json({ status: "error", message: "Session already running. Use agent.send instead." }, 400);
     }
-    const history = buildHistoryFromDb(sessionId);
+    const history = buildCanonicalFromDb(sessionId);
     if (history.length === 0 && !body.prompt) {
       return c.json({ status: "error", message: "No history in DB \u2014 nothing to resume." }, 400);
     }
     const providerName = body.provider ?? getConfig().defaultProvider;
+    const providerChanged = session.lastStartConfig && session.lastStartConfig.provider !== providerName;
     const model = body.model ?? session.lastStartConfig?.model ?? getConfig().model;
     const permissionMode = body.permissionMode ?? session.lastStartConfig?.permissionMode;
-    const configDir = body.configDir ?? session.lastStartConfig?.configDir;
-    const extraArgs = body.extraArgs ?? session.lastStartConfig?.extraArgs;
+    const configDir = providerChanged ? body.configDir : body.configDir ?? session.lastStartConfig?.configDir;
+    const extraArgs = providerChanged ? body.extraArgs : body.extraArgs ?? session.lastStartConfig?.extraArgs;
+    const providerOptions = providerChanged ? body.providerOptions : body.providerOptions ?? session.lastStartConfig?.providerOptions;
+    const modelProvider = body.modelProvider ?? (providerChanged ? void 0 : session.lastStartConfig?.modelProvider);
     const provider = getProvider(providerName);
     try {
       const proc = provider.spawn({
@@ -370,10 +428,16 @@ function createAgentRoutes(sessionManager) {
         configDir,
         env: { ...body.env, SNA_SESSION_ID: sessionId },
         history: history.length > 0 ? history : void 0,
-        extraArgs
+        extraArgs,
+        providerOptions,
+        systemPrompt: body.systemPrompt,
+        appendSystemPrompt: body.appendSystemPrompt,
+        allowedTools: body.allowedTools,
+        disallowedTools: body.disallowedTools,
+        mcpServers: body.mcpServers
       });
       sessionManager.setProcess(sessionId, proc, "resumed");
-      sessionManager.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
+      sessionManager.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, permissionMode, configDir, extraArgs, providerOptions });
       logger.log("route", `POST /resume?session=${sessionId} \u2192 resumed (${history.length} history msgs)`);
       return httpJson(c, "agent.resume", {
         status: "resumed",
@@ -420,8 +484,8 @@ function createAgentRoutes(sessionManager) {
       const db = getDb();
       const count = db.prepare("SELECT COUNT(*) as c FROM chat_messages WHERE session_id = ?").get(sessionId);
       messageCount = count?.c ?? 0;
-      const last = db.prepare("SELECT role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1").get(sessionId);
-      if (last) lastMessage = { role: last.role, content: last.content, created_at: last.created_at };
+      const last = db.prepare("SELECT actor, kind, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1").get(sessionId);
+      if (last) lastMessage = { actor: last.actor, kind: last.kind, content: last.content, created_at: last.created_at };
     } catch {
     }
     return httpJson(c, "agent.status", {

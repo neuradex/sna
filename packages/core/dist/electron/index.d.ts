@@ -4,6 +4,9 @@ export { ResolveResult, cacheClaudePath, parseCommandVOutput, resolveClaudeCli, 
 import { LogLevel } from '../lib/logger.js';
 import { SessionManager } from '../server/session-manager.js';
 import '../core/providers/types.js';
+import '../history/types.js';
+import '../db/schema.js';
+import 'better-sqlite3';
 
 /**
  * @sna-sdk/core/electron — Electron launcher API

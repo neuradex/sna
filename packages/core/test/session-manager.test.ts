@@ -108,7 +108,7 @@ describe("SessionManager", () => {
     sm.createSession({ id: "cascade-test", label: "Test" });
 
     // Insert a user message
-    db.prepare("INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'user', ?)")
+    db.prepare("INSERT INTO chat_messages (session_id, actor, kind, content) VALUES (?, 'user', 'text', ?)")
       .run("cascade-test", "Hello");
 
     const before = db.prepare("SELECT COUNT(*) as count FROM chat_messages WHERE session_id = ?")

@@ -287,12 +287,23 @@ function startTurn(ss: SessionState, userMessage: string): void {
   ss.turnCounter++;
   const session = sm?.getSession(ss.sessionId);
 
+  // Three-layer execution attribution, all captured on the trace so Langfuse
+  // queries can filter/aggregate by runtime (CLI), modelProvider (vendor), or
+  // specific model. The SDK still names the CLI field `provider` internally;
+  // we rename it to `runtime` here to match the canonical vocabulary.
+  const runtime = session?.lastStartConfig?.provider ?? "unknown";
+  const modelProvider = session?.lastStartConfig?.modelProvider ?? "unknown";
+  const model = session?.lastStartConfig?.model ?? "unknown";
+
   const turnName = ss.label
     ? `${ss.label}/turn-${ss.turnCounter}`
     : `turn-${ss.turnCounter}`;
   const tags = [
     ..._baseTags,
     ...(ss.label ? [ss.label] : []),
+    `runtime:${runtime}`,
+    `modelProvider:${modelProvider}`,
+    `model:${model}`,
   ];
 
   const trace = langfuseClient.trace({
@@ -302,8 +313,10 @@ function startTurn(ss: SessionState, userMessage: string): void {
     input: userMessage,
     metadata: {
       label: ss.label,
+      runtime,
+      modelProvider,
+      model,
       cwd: session?.cwd,
-      model: session?.lastStartConfig?.model,
       turnIndex: ss.turnCounter,
     },
     tags,
@@ -423,8 +436,9 @@ function handleEvent(ss: SessionState, event: AgentEvent): void {
         turn.llmGeneration.end();
         turn.llmGeneration = null;
       } else {
-        // Fallback: no proxy generation, create standalone
-        turn.trace.generation({ name: "assistant", output: event.message }).end();
+        // No proxy generation (e.g. Codex provider) — create standalone.
+        // Keep it open so `complete` handler can attach usage data.
+        turn.llmGeneration = turn.trace.generation({ name: "assistant", output: event.message });
       }
       break;
     }
@@ -432,6 +446,29 @@ function handleEvent(ss: SessionState, event: AgentEvent): void {
     case "complete": {
       const turn = ss.currentTurn;
       if (!turn) break;
+      // Attach usage data to open generation (Codex fallback path).
+      // The `d.provider` on AgentEvent.data is the runtime (CLI); modelProvider
+      // comes from the session's lastStartConfig which tracks the vendor.
+      if (turn.llmGeneration && event.data) {
+        const d = event.data as Record<string, unknown>;
+        const session = sm?.getSession(ss.sessionId);
+        turn.llmGeneration.update({
+          model: (d.model as string | undefined) ?? session?.lastStartConfig?.model,
+          usage: {
+            input: d.inputTokens as number | undefined,
+            output: d.outputTokens as number | undefined,
+            total: ((d.inputTokens as number) ?? 0) + ((d.outputTokens as number) ?? 0),
+          },
+          metadata: {
+            runtime: (d.provider as string | undefined) ?? session?.lastStartConfig?.provider,
+            modelProvider: session?.lastStartConfig?.modelProvider,
+            durationMs: d.durationMs,
+            costUsd: d.costUsd,
+          },
+        });
+        turn.llmGeneration.end();
+        turn.llmGeneration = null;
+      }
       turn.trace.update({ metadata: event.data });
       endCurrentTurn(ss, "complete");
       try { langfuseClient?.flushAsync?.(); } catch { /* */ }

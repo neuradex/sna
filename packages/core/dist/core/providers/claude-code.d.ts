@@ -1,4 +1,7 @@
 import { AgentProvider, SpawnOptions, AgentProcess } from './types.js';
+import '../../history/types.js';
+import '../../db/schema.js';
+import 'better-sqlite3';
 
 /**
  * Parse `command -v claude` output to extract the executable path.

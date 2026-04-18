@@ -1,23 +1,38 @@
+import { EmbedRecord } from '../history/types.js';
+import '../db/schema.js';
+import 'better-sqlite3';
+
 /**
- * Image storage — saves base64 images to disk and serves them.
+ * Image/file storage — persists base64-encoded attachments to disk under
+ * `dataDir/images/{sessionId}/{sha256_prefix}.{ext}` and returns canonical
+ * EmbedRecord entries for session-manager to stash in `chat_messages.embeds`.
  *
- * Storage path: data/images/{sessionId}/{hash}.{ext}
- * Retrieve via: GET /chat/images/:sessionId/:filename
+ * Filenames are content-hashed so identical uploads dedup at the filesystem
+ * level automatically. The embed id used in inline refs (`![](embed://<id>)`)
+ * is the hash prefix — so referencing the same file twice writes the same id.
+ *
+ * Retrieve via HTTP: GET /chat/images/:sessionId/:filename
  */
-interface SavedImage {
-    filename: string;
-    path: string;
+
+interface SavedEmbed {
+    /** Short id used in inline refs: `![](embed://<id>)`. */
+    id: string;
+    /** Canonical embed record — what goes into the row's `embeds` JSON. */
+    record: EmbedRecord;
 }
 /**
- * Save base64 images to disk. Returns filenames for meta storage.
+ * Save base64 attachments to disk. Returns {id, record} per input, in order.
+ * Callers typically embed the id into content text via formatEmbedRef() and
+ * merge records into the chat_messages row's embeds column.
  */
-declare function saveImages(sessionId: string, images: Array<{
+declare function saveEmbeds(sessionId: string, attachments: Array<{
     base64: string;
     mimeType: string;
-}>): string[];
+}>): SavedEmbed[];
 /**
- * Resolve an image file path. Returns null if not found.
+ * Resolve an attachment file path given a session + filename from a URL.
+ * Returns null if missing or if traversal is attempted.
  */
 declare function resolveImagePath(sessionId: string, filename: string): string | null;
 
-export { type SavedImage, resolveImagePath, saveImages };
+export { type SavedEmbed, resolveImagePath, saveEmbeds };

@@ -9,14 +9,22 @@ interface ChatSession {
     cwd: string | null;
     created_at: string;
 }
+/** Block actor — who produced the content. */
+type ChatActor = "user" | "assistant" | "system";
+/** Block kind — what kind of content. Valid (actor, kind) pairs enforced at write time. */
+type ChatKind = "text" | "thinking" | "tool_use" | "tool_result" | "status" | "error";
 interface ChatMessage {
     id: number;
     session_id: string;
-    role: string;
+    actor: ChatActor;
+    kind: ChatKind;
     content: string;
+    /** JSON: { "<embedId>": { mime_type: string; path: string; ... } }. Null if no attachments. */
+    embeds: string | null;
     skill_name: string | null;
     meta: string | null;
     created_at: string;
+    updated_at: string;
 }
 interface SkillEvent {
     id: number;
@@ -28,4 +36,4 @@ interface SkillEvent {
     created_at: string;
 }
 
-export { type ChatMessage, type ChatSession, type SkillEvent, getDb };
+export { type ChatActor, type ChatKind, type ChatMessage, type ChatSession, type SkillEvent, getDb };

@@ -3,6 +3,9 @@ import * as hono from 'hono';
 import { Context } from 'hono';
 import { SessionManager } from '../session-manager.js';
 import '../../core/providers/types.js';
+import '../../history/types.js';
+import '../../db/schema.js';
+import 'better-sqlite3';
 
 /**
  * Create an emit route handler that broadcasts to WS subscribers.

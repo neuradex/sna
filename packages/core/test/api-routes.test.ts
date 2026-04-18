@@ -185,8 +185,8 @@ describe("HTTP API Routes", () => {
     it("POST + GET chat messages", async () => {
       const createRes = await req("POST", "/chat/sessions", { id: "msg-test" });
 
-      await req("POST", "/chat/sessions/msg-test/messages", { role: "user", content: "hello" });
-      await req("POST", "/chat/sessions/msg-test/messages", { role: "assistant", content: "hi" });
+      await req("POST", "/chat/sessions/msg-test/messages", { actor: "user", kind: "text", content: "hello" });
+      await req("POST", "/chat/sessions/msg-test/messages", { actor: "assistant", kind: "text", content: "hi" });
 
       const res = await req("GET", "/chat/sessions/msg-test/messages");
       const json = await res.json();
@@ -197,8 +197,8 @@ describe("HTTP API Routes", () => {
 
     it("GET chat messages with since cursor", async () => {
       await req("POST", "/chat/sessions", { id: "cursor-test" });
-      await req("POST", "/chat/sessions/cursor-test/messages", { role: "user", content: "1" });
-      await req("POST", "/chat/sessions/cursor-test/messages", { role: "user", content: "2" });
+      await req("POST", "/chat/sessions/cursor-test/messages", { actor: "user", kind: "text", content: "1" });
+      await req("POST", "/chat/sessions/cursor-test/messages", { actor: "user", kind: "text", content: "2" });
 
       const allRes = await req("GET", "/chat/sessions/cursor-test/messages");
       const all = await allRes.json();
@@ -212,7 +212,7 @@ describe("HTTP API Routes", () => {
 
     it("DELETE /chat/sessions/:id/messages clears messages", async () => {
       await req("POST", "/chat/sessions", { id: "clear-test" });
-      await req("POST", "/chat/sessions/clear-test/messages", { role: "user", content: "bye" });
+      await req("POST", "/chat/sessions/clear-test/messages", { actor: "user", kind: "text", content: "bye" });
 
       const delRes = await req("DELETE", "/chat/sessions/clear-test/messages");
       const json = await delRes.json();
@@ -270,8 +270,8 @@ describe("HTTP API Routes", () => {
       const { sessionId } = await createRes.json();
 
       await req("POST", `/chat/sessions`, { id: sessionId, label: "ResumeTest" });
-      await req("POST", `/chat/sessions/${sessionId}/messages`, { role: "user", content: "hello" });
-      await req("POST", `/chat/sessions/${sessionId}/messages`, { role: "assistant", content: "hi" });
+      await req("POST", `/chat/sessions/${sessionId}/messages`, { actor: "user", kind: "text", content: "hello" });
+      await req("POST", `/chat/sessions/${sessionId}/messages`, { actor: "assistant", kind: "text", content: "hi" });
 
       // Resume — will fail at spawn (no claude binary in test) but validates history loading
       const res = await req("POST", `/agent/resume?session=${sessionId}`);

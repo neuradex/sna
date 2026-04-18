@@ -11,8 +11,10 @@ export type { SnaConfig } from "./config.js";
 export const DEFAULT_SNA_PORT = 3099;
 export const DEFAULT_SNA_URL = `http://localhost:${DEFAULT_SNA_PORT}`;
 
-export type { SkillEvent, ChatSession, ChatMessage } from "./db/schema.js";
-export type { AgentEvent, AgentProcess, AgentProvider, SpawnOptions, HistoryMessage, ContentBlock } from "./core/providers/types.js";
+export type { SkillEvent, ChatSession, ChatMessage, ChatActor, ChatKind } from "./db/schema.js";
+export type { AgentEvent, AgentProcess, AgentProvider, SpawnOptions, ContentBlock } from "./core/providers/types.js";
+export type { CanonicalBlock, CanonicalMessage, EmbedRecord } from "./history/types.js";
+export { buildCanonicalFromDb } from "./history/canonical.js";
 export { completion } from "./core/completion.js";
 export type { CompletionOptions, CompletionResult } from "./core/completion.js";
 export type { Session, SessionInfo, SessionManagerOptions, SessionState } from "./server/session-manager.js";

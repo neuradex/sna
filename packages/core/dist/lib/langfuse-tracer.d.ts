@@ -1,5 +1,8 @@
 import { SessionManager } from '../server/session-manager.js';
 import '../core/providers/types.js';
+import '../history/types.js';
+import '../db/schema.js';
+import 'better-sqlite3';
 
 /**
  * langfuse-tracer.ts — Optional Langfuse tracing for SNA sessions.

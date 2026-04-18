@@ -41,6 +41,12 @@ export interface AgentProcess {
   setModel(model: string): void;
   /** Change permission mode at runtime via control message. No restart needed. */
   setPermissionMode(mode: string): void;
+  /**
+   * Respond to a permission request from the agent.
+   * Used by providers with bidirectional approval flow (e.g. Codex JSON-RPC).
+   * No-op for providers that handle permissions externally (e.g. Claude Code hooks).
+   */
+  respondToPermission?(requestId: string, approved: boolean): void;
   /** Kill the agent process. */
   kill(): void;
   /** Whether the process is still running. */
@@ -63,10 +69,13 @@ export type ContentBlock =
   | { type: "text"; text: string }
   | { type: "image"; source: { type: "base64"; media_type: string; data: string } };
 
-export interface HistoryMessage {
-  role: "user" | "assistant";
-  content: string;
-}
+/**
+ * MCP server definition — common format for all providers.
+ * Supports stdio (command+args) and HTTP (url) servers.
+ */
+export type McpServerConfig =
+  | { command: string; args?: string[]; env?: Record<string, string>; cwd?: string }
+  | { type: "http"; url: string; headers?: Record<string, string> };
 
 export interface SpawnOptions {
   cwd: string;
@@ -74,23 +83,86 @@ export interface SpawnOptions {
   model?: string;
   permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan";
   env?: Record<string, string>;
+
+  // ── Common options (provider-agnostic) ─────────────────────────────
+
   /**
-   * Override CLAUDE_CONFIG_DIR for this session.
-   * Isolates Claude config (permissions, theme, API keys, etc.) per session.
-   * If omitted, inherits the process-level CLAUDE_CONFIG_DIR or default (~/).
+   * Override the agent config directory for this session.
+   * Claude Code: CLAUDE_CONFIG_DIR
+   * Codex: CODEX_HOME
    */
   configDir?: string;
+
   /**
-   * Conversation history to inject before the first prompt.
-   * Written to stdin as NDJSON — Claude Code treats these as prior conversation turns.
-   * Must alternate user→assistant. Assistant content is auto-wrapped in array format.
+   * Native session ID to resume (provider-specific).
+   * Claude Code: CC session ID → --resume <id>
+   * Codex: thread ID → thread/resume API
    */
-  history?: HistoryMessage[];
-  /** @internal Set by provider when history was injected via JSONL resume. */
-  _historyViaResume?: boolean;
+  resumeSessionId?: string;
+
+  /**
+   * Replace the base system prompt.
+   * Claude Code: --system-prompt
+   * Codex: baseInstructions on thread/start
+   */
+  systemPrompt?: string;
+
+  /**
+   * Append to the system prompt (additive, for project-specific rules).
+   * Claude Code: --append-system-prompt
+   * Codex: developerInstructions on thread/start
+   */
+  appendSystemPrompt?: string;
+
+  /**
+   * Restrict the agent to only use these tools. Others are blocked.
+   * Claude Code: --allowedTools
+   * Codex: PreToolUse hook that denies unlisted tools
+   */
+  allowedTools?: string[];
+
+  /**
+   * Block specific tools. All others are allowed.
+   * Claude Code: --disallowedTools
+   * Codex: PreToolUse hook that denies listed tools
+   * If both allowedTools and disallowedTools are set, allowedTools takes precedence.
+   */
+  disallowedTools?: string[];
+
+  /**
+   * MCP servers to make available to the agent.
+   * Claude Code: --mcp-config JSON
+   * Codex: written to CODEX_HOME/config.toml [mcp_servers.*]
+   */
+  mcpServers?: Record<string, McpServerConfig>;
+
+  /**
+   * Canonical conversation history to seed the agent with before the first prompt.
+   * The provider's own history adapter converts these blocks into the native
+   * wire format (Claude JSONL resume file, Codex thread/resume(history=...)).
+   */
+  history?: import("../../history/types.js").CanonicalBlock[];
+
+  // ── Provider-specific options ──────────────────────────────────────
+
+  /**
+   * Provider-specific options passed through to the provider.
+   * Not interpreted by the framework — each provider defines its own shape.
+   *
+   * Claude Code:
+   *   settings?: object              — merged into the --settings JSON (hooks, permissions, etc.)
+   *   settingSources?: string[]      — --setting-sources (pass [""] to disable CLAUDE.md/skills/memory)
+   *   strictMcpConfig?: boolean      — --strict-mcp-config
+   *   maxTurns?: number              — --max-turns
+   *   disableSlashCommands?: boolean — --disable-slash-commands
+   * Codex: { config?: Record<string, string>, profile?: string }
+   */
+  providerOptions?: Record<string, unknown>;
+
   /**
    * Additional CLI flags passed directly to the agent binary.
-   * e.g. ["--system-prompt", "You are...", "--append-system-prompt", "Also...", "--mcp-config", "path"]
+   * Prefer typed fields above; use this only for flags not yet abstracted.
+   * @deprecated Prefer systemPrompt, appendSystemPrompt, resumeSessionId etc.
    */
   extraArgs?: string[];
 }

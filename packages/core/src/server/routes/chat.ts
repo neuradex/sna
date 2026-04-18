@@ -14,6 +14,7 @@
 import { Hono } from "hono";
 import fs from "fs";
 import { getDb } from "../../db/schema.js";
+import { insertChatMessage } from "../../db/chat-messages.js";
 import { httpJson } from "../api-types.js";
 import { resolveImagePath } from "../image-store.js";
 
@@ -108,30 +109,32 @@ export function createChatRoutes() {
   app.post("/sessions/:id/messages", async (c) => {
     const sessionId = c.req.param("id");
     const body = (await c.req.json().catch(() => ({}))) as {
-      role: string;
+      actor?: import("../../db/schema.js").ChatActor;
+      kind?: import("../../db/schema.js").ChatKind;
       content?: string;
+      embeds?: Record<string, import("../../history/types.js").EmbedRecord>;
       skill_name?: string;
       meta?: Record<string, unknown>;
     };
 
-    if (!body.role) {
-      return c.json({ status: "error", message: "role is required" }, 400);
+    if (!body.actor || !body.kind) {
+      return c.json({ status: "error", message: "actor and kind are required" }, 400);
     }
 
     try {
       const db = getDb();
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`)
         .run(sessionId, sessionId);
-      const result = db.prepare(
-        `INSERT INTO chat_messages (session_id, role, content, skill_name, meta) VALUES (?, ?, ?, ?, ?)`
-      ).run(
+      const id = insertChatMessage(db, {
         sessionId,
-        body.role,
-        body.content ?? "",
-        body.skill_name ?? null,
-        body.meta ? JSON.stringify(body.meta) : null,
-      );
-      return httpJson(c, "chat.messages.create", { status: "created", id: Number(result.lastInsertRowid) });
+        actor: body.actor,
+        kind: body.kind,
+        content: body.content ?? "",
+        embeds: body.embeds,
+        meta: body.meta,
+        skillName: body.skill_name,
+      });
+      return httpJson(c, "chat.messages.create", { status: "created", id });
     } catch (e: any) {
       return c.json({ status: "error", message: e.message }, 500);
     }
