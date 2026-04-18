@@ -187,12 +187,16 @@ function startTurn(ss, userMessage) {
   }
   ss.turnCounter++;
   const session = sm?.getSession(ss.sessionId);
-  const provider = session?.lastStartConfig?.provider ?? "unknown";
+  const runtime = session?.lastStartConfig?.provider ?? "unknown";
+  const modelProvider = session?.lastStartConfig?.modelProvider ?? "unknown";
+  const model = session?.lastStartConfig?.model ?? "unknown";
   const turnName = ss.label ? `${ss.label}/turn-${ss.turnCounter}` : `turn-${ss.turnCounter}`;
   const tags = [
     ..._baseTags,
     ...ss.label ? [ss.label] : [],
-    `provider:${provider}`
+    `runtime:${runtime}`,
+    `modelProvider:${modelProvider}`,
+    `model:${model}`
   ];
   const trace = langfuseClient.trace({
     name: turnName,
@@ -201,9 +205,10 @@ function startTurn(ss, userMessage) {
     input: userMessage,
     metadata: {
       label: ss.label,
-      provider,
+      runtime,
+      modelProvider,
+      model,
       cwd: session?.cwd,
-      model: session?.lastStartConfig?.model,
       turnIndex: ss.turnCounter
     },
     tags
@@ -314,14 +319,20 @@ function handleEvent(ss, event) {
       if (!turn) break;
       if (turn.llmGeneration && event.data) {
         const d = event.data;
+        const session = sm?.getSession(ss.sessionId);
         turn.llmGeneration.update({
-          model: d.model,
+          model: d.model ?? session?.lastStartConfig?.model,
           usage: {
             input: d.inputTokens,
             output: d.outputTokens,
             total: (d.inputTokens ?? 0) + (d.outputTokens ?? 0)
           },
-          metadata: { provider: d.provider, durationMs: d.durationMs, costUsd: d.costUsd }
+          metadata: {
+            runtime: d.provider ?? session?.lastStartConfig?.provider,
+            modelProvider: session?.lastStartConfig?.modelProvider,
+            durationMs: d.durationMs,
+            costUsd: d.costUsd
+          }
         });
         turn.llmGeneration.end();
         turn.llmGeneration = null;

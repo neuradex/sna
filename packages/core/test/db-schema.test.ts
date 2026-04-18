@@ -79,7 +79,7 @@ describe("DB Schema", () => {
 
     // Insert session + message
     db.prepare("INSERT INTO chat_sessions (id, label) VALUES ('cascade-test', 'Test')").run();
-    db.prepare("INSERT INTO chat_messages (session_id, role, content) VALUES ('cascade-test', 'user', 'hello')").run();
+    db.prepare("INSERT INTO chat_messages (session_id, actor, kind, content) VALUES ('cascade-test', 'user', 'text', 'hello')").run();
 
     // Upsert session (simulating persistSession)
     db.prepare(`
@@ -98,7 +98,7 @@ describe("DB Schema", () => {
     db.pragma("foreign_keys = ON");
 
     db.prepare("INSERT INTO chat_sessions (id, label) VALUES ('del-test', 'Test')").run();
-    db.prepare("INSERT INTO chat_messages (session_id, role, content) VALUES ('del-test', 'user', 'hello')").run();
+    db.prepare("INSERT INTO chat_messages (session_id, actor, kind, content) VALUES ('del-test', 'user', 'text', 'hello')").run();
     db.prepare("DELETE FROM chat_sessions WHERE id = 'del-test'").run();
 
     const count = db.prepare("SELECT COUNT(*) as c FROM chat_messages WHERE session_id = 'del-test'").get() as any;

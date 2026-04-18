@@ -5,8 +5,10 @@ import { logger } from "../lib/logger.js";
 import { runOnce } from "./routes/agent.js";
 import { completion } from "../core/completion.js";
 import { wsReply } from "./api-types.js";
-import { buildHistoryFromDb } from "./history-builder.js";
-import { saveImages } from "./image-store.js";
+import { buildCanonicalFromDb } from "../history/canonical.js";
+import { saveEmbeds } from "./image-store.js";
+import { insertChatMessage } from "../db/chat-messages.js";
+import { formatEmbedRef } from "../history/embed-refs.js";
 import { getConfig } from "../config.js";
 function send(ws, data) {
   if (ws.readyState === ws.OPEN) {
@@ -213,7 +215,13 @@ function handleAgentStart(ws, msg, sm) {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
     if (msg.prompt) {
-      db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, msg.prompt, msg.meta ? JSON.stringify(msg.meta) : null);
+      insertChatMessage(db, {
+        sessionId,
+        actor: "user",
+        kind: "text",
+        content: msg.prompt,
+        meta: msg.meta
+      });
     }
     const skillMatch = msg.prompt?.match(/^Execute the skill:\s*(\S+)/);
     if (skillMatch) {
@@ -227,6 +235,8 @@ function handleAgentStart(ws, msg, sm) {
   const permissionMode = msg.permissionMode;
   const configDir = msg.configDir;
   const extraArgs = msg.extraArgs;
+  const providerOptions = msg.providerOptions;
+  const modelProvider = msg.modelProvider;
   try {
     const proc = provider.spawn({
       cwd: session.cwd,
@@ -236,10 +246,16 @@ function handleAgentStart(ws, msg, sm) {
       configDir,
       env: { ...msg.env, SNA_SESSION_ID: sessionId },
       history: msg.history,
-      extraArgs
+      extraArgs,
+      providerOptions,
+      systemPrompt: msg.systemPrompt,
+      appendSystemPrompt: msg.appendSystemPrompt,
+      allowedTools: msg.allowedTools,
+      disallowedTools: msg.disallowedTools,
+      mcpServers: msg.mcpServers
     });
     sm.setProcess(sessionId, proc);
-    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
+    sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, permissionMode, configDir, extraArgs, providerOptions });
     wsReply(ws, msg, { status: "started", provider: provider.name, sessionId: session.id });
   } catch (e) {
     replyError(ws, msg, e.message);
@@ -255,21 +271,35 @@ function handleAgentSend(ws, msg, sm) {
   if (!msg.message && !images?.length) {
     return replyError(ws, msg, "message or images required");
   }
-  const textContent = msg.message ?? "(image)";
-  let meta = msg.meta ? { ...msg.meta } : {};
+  const userText = msg.message ?? "";
+  const meta = msg.meta ? { ...msg.meta } : {};
+  const embeds = {};
+  let contentText = userText;
   if (images?.length) {
-    const filenames = saveImages(sessionId, images);
-    meta.images = filenames;
+    const saved = saveEmbeds(sessionId, images);
+    const refs = saved.map(({ id, record }) => {
+      embeds[id] = record;
+      return formatEmbedRef(id);
+    });
+    contentText = userText ? `${userText}
+${refs.join(" ")}` : refs.join(" ");
   }
   try {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, session.label ?? sessionId);
-    db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`).run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
+    insertChatMessage(db, {
+      sessionId,
+      actor: "user",
+      kind: "text",
+      content: contentText,
+      embeds: Object.keys(embeds).length > 0 ? embeds : void 0,
+      meta: Object.keys(meta).length > 0 ? meta : void 0
+    });
   } catch {
   }
   sm.pushEvent(sessionId, {
     type: "user_message",
-    message: textContent,
+    message: contentText,
     data: Object.keys(meta).length > 0 ? meta : void 0,
     timestamp: Date.now()
   });
@@ -295,15 +325,18 @@ function handleAgentResume(ws, msg, sm) {
   if (session.process?.alive) {
     return replyError(ws, msg, "Session already running. Use agent.send instead.");
   }
-  const history = buildHistoryFromDb(sessionId);
+  const history = buildCanonicalFromDb(sessionId);
   if (history.length === 0 && !msg.prompt) {
     return replyError(ws, msg, "No history in DB \u2014 nothing to resume.");
   }
   const providerName = msg.provider ?? session.lastStartConfig?.provider ?? getConfig().defaultProvider;
+  const providerChanged = session.lastStartConfig && session.lastStartConfig.provider !== providerName;
   const model = msg.model ?? session.lastStartConfig?.model ?? getConfig().model;
   const permissionMode = msg.permissionMode ?? session.lastStartConfig?.permissionMode;
-  const configDir = msg.configDir ?? session.lastStartConfig?.configDir;
-  const extraArgs = msg.extraArgs ?? session.lastStartConfig?.extraArgs;
+  const configDir = providerChanged ? msg.configDir : msg.configDir ?? session.lastStartConfig?.configDir;
+  const extraArgs = providerChanged ? msg.extraArgs : msg.extraArgs ?? session.lastStartConfig?.extraArgs;
+  const providerOptions = providerChanged ? msg.providerOptions : msg.providerOptions ?? session.lastStartConfig?.providerOptions;
+  const modelProvider = msg.modelProvider ?? (providerChanged ? void 0 : session.lastStartConfig?.modelProvider);
   const provider = getProvider(providerName);
   try {
     const proc = provider.spawn({
@@ -314,10 +347,16 @@ function handleAgentResume(ws, msg, sm) {
       configDir,
       env: { ...msg.env, SNA_SESSION_ID: sessionId },
       history: history.length > 0 ? history : void 0,
-      extraArgs
+      extraArgs,
+      providerOptions,
+      systemPrompt: msg.systemPrompt,
+      appendSystemPrompt: msg.appendSystemPrompt,
+      allowedTools: msg.allowedTools,
+      disallowedTools: msg.disallowedTools,
+      mcpServers: msg.mcpServers
     });
     sm.setProcess(sessionId, proc, "resumed");
-    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
+    sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, permissionMode, configDir, extraArgs, providerOptions });
     wsReply(ws, msg, {
       status: "resumed",
       provider: providerName,
@@ -334,20 +373,29 @@ function handleAgentRestart(ws, msg, sm) {
     const session = sm.getSession(sessionId);
     const prevProvider = session?.lastStartConfig?.provider;
     const ccSessionId = session?.ccSessionId;
+    const typedOpts = {
+      systemPrompt: msg.systemPrompt,
+      appendSystemPrompt: msg.appendSystemPrompt,
+      allowedTools: msg.allowedTools,
+      disallowedTools: msg.disallowedTools,
+      mcpServers: msg.mcpServers
+    };
     const { config } = sm.restartSession(
       sessionId,
       {
         provider: msg.provider,
+        modelProvider: msg.modelProvider,
         model: msg.model,
         permissionMode: msg.permissionMode,
         configDir: msg.configDir,
-        extraArgs: msg.extraArgs
+        extraArgs: msg.extraArgs,
+        providerOptions: msg.providerOptions
       },
       (cfg) => {
         const prov = getProvider(cfg.provider);
         const providerChanged = prevProvider && cfg.provider !== prevProvider;
         if (providerChanged) {
-          const history = buildHistoryFromDb(sessionId);
+          const history = buildCanonicalFromDb(sessionId);
           return prov.spawn({
             cwd: sm.getSession(sessionId).cwd,
             model: cfg.model,
@@ -355,7 +403,9 @@ function handleAgentRestart(ws, msg, sm) {
             configDir: cfg.configDir,
             env: { ...msg.env, SNA_SESSION_ID: sessionId },
             history: history.length > 0 ? history : void 0,
-            extraArgs: cfg.extraArgs
+            extraArgs: cfg.extraArgs,
+            providerOptions: cfg.providerOptions,
+            ...typedOpts
           });
         }
         return prov.spawn({
@@ -365,7 +415,9 @@ function handleAgentRestart(ws, msg, sm) {
           configDir: cfg.configDir,
           env: { ...msg.env, SNA_SESSION_ID: sessionId },
           resumeSessionId: ccSessionId ?? void 0,
-          extraArgs: cfg.extraArgs
+          extraArgs: cfg.extraArgs,
+          providerOptions: cfg.providerOptions,
+          ...typedOpts
         });
       }
     );
@@ -408,8 +460,8 @@ function handleAgentStatus(ws, msg, sm) {
     const db = getDb();
     const count = db.prepare("SELECT COUNT(*) as c FROM chat_messages WHERE session_id = ?").get(sessionId);
     messageCount = count?.c ?? 0;
-    const last = db.prepare("SELECT role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1").get(sessionId);
-    if (last) lastMessage = { role: last.role, content: last.content, created_at: last.created_at };
+    const last = db.prepare("SELECT actor, kind, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1").get(sessionId);
+    if (last) lastMessage = { actor: last.actor, kind: last.kind, content: last.content, created_at: last.created_at };
   } catch {
   }
   wsReply(ws, msg, {
@@ -451,12 +503,12 @@ function handleAgentSubscribe(ws, msg, sm, state) {
     try {
       const db = getDb();
       const rows = db.prepare(
-        `SELECT role, content, meta, created_at FROM chat_messages
+        `SELECT actor, kind, content, meta, created_at FROM chat_messages
          WHERE session_id = ? ORDER BY id ASC`
       ).all(sessionId);
       for (const row of rows) {
         cursor++;
-        const eventType = row.role === "user" ? "user_message" : row.role === "assistant" ? "assistant" : row.role === "thinking" ? "thinking" : row.role === "tool" ? "tool_use" : row.role === "tool_result" ? "tool_result" : row.role === "error" ? "error" : null;
+        const eventType = row.actor === "user" ? "user_message" : row.actor === "assistant" && row.kind === "text" ? "assistant" : row.actor === "assistant" && row.kind === "thinking" ? "thinking" : row.actor === "assistant" && row.kind === "tool_use" ? "tool_use" : row.actor === "system" && row.kind === "tool_result" ? "tool_result" : row.actor === "system" && row.kind === "error" ? "error" : null;
         if (!eventType) continue;
         const meta = row.meta ? JSON.parse(row.meta) : void 0;
         send(ws, {
@@ -672,20 +724,22 @@ function handleChatMessagesList(ws, msg) {
 function handleChatMessagesCreate(ws, msg) {
   const sessionId = msg.session;
   if (!sessionId) return replyError(ws, msg, "session is required");
-  if (!msg.role) return replyError(ws, msg, "role is required");
+  const actor = msg.actor;
+  const kind = msg.kind;
+  if (!actor || !kind) return replyError(ws, msg, "actor and kind are required");
   try {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`).run(sessionId, sessionId);
-    const result = db.prepare(
-      `INSERT INTO chat_messages (session_id, role, content, skill_name, meta) VALUES (?, ?, ?, ?, ?)`
-    ).run(
+    const id = insertChatMessage(db, {
       sessionId,
-      msg.role,
-      msg.content ?? "",
-      msg.skill_name ?? null,
-      msg.meta ? JSON.stringify(msg.meta) : null
-    );
-    wsReply(ws, msg, { status: "created", id: Number(result.lastInsertRowid) });
+      actor,
+      kind,
+      content: msg.content ?? "",
+      embeds: msg.embeds,
+      meta: msg.meta,
+      skillName: msg.skill_name ?? void 0
+    });
+    wsReply(ws, msg, { status: "created", id });
   } catch (e) {
     replyError(ws, msg, e.message);
   }

@@ -3,5 +3,8 @@ import 'child_process';
 import 'http';
 import '../core/providers/claude-code.js';
 import '../core/providers/types.js';
+import '../history/types.js';
+import '../db/schema.js';
+import 'better-sqlite3';
 import '../lib/logger.js';
 import '../server/session-manager.js';

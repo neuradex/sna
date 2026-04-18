@@ -3,6 +3,9 @@ import { Context } from 'hono';
 import { WebSocket } from 'ws';
 import { SessionInfo } from './session-manager.js';
 import '../core/providers/types.js';
+import '../history/types.js';
+import '../db/schema.js';
+import 'better-sqlite3';
 
 interface ApiResponses {
     "sessions.create": {
@@ -62,7 +65,8 @@ interface ApiResponses {
         eventCount: number;
         messageCount: number;
         lastMessage: {
-            role: string;
+            actor: string;
+            kind: string;
             content: string;
             created_at: string;
         } | null;
@@ -71,6 +75,7 @@ interface ApiResponses {
             model: string;
             permissionMode?: string;
             extraArgs?: string[];
+            providerOptions?: Record<string, unknown>;
         } | null;
     };
     "agent.run-once": {

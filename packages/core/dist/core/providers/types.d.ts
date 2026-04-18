@@ -1,3 +1,7 @@
+import { CanonicalBlock } from '../../history/types.js';
+import '../../db/schema.js';
+import 'better-sqlite3';
+
 /**
  * Normalized event type emitted by all agent providers.
  *
@@ -59,10 +63,6 @@ type ContentBlock = {
         data: string;
     };
 };
-interface HistoryMessage {
-    role: "user" | "assistant";
-    content: string;
-}
 /**
  * MCP server definition — common format for all providers.
  * Supports stdio (command+args) and HTTP (url) servers.
@@ -127,16 +127,21 @@ interface SpawnOptions {
      */
     mcpServers?: Record<string, McpServerConfig>;
     /**
-     * Conversation history to inject before the first prompt.
-     * Claude Code: JSONL resume or recalled-conversation
-     * Codex: XML context prefix
+     * Canonical conversation history to seed the agent with before the first prompt.
+     * The provider's own history adapter converts these blocks into the native
+     * wire format (Claude JSONL resume file, Codex thread/resume(history=...)).
      */
-    history?: HistoryMessage[];
+    history?: CanonicalBlock[];
     /**
      * Provider-specific options passed through to the provider.
      * Not interpreted by the framework — each provider defines its own shape.
      *
-     * Claude Code: { settings?: object, maxTurns?: number, disableSlashCommands?: boolean }
+     * Claude Code:
+     *   settings?: object              — merged into the --settings JSON (hooks, permissions, etc.)
+     *   settingSources?: string[]      — --setting-sources (pass [""] to disable CLAUDE.md/skills/memory)
+     *   strictMcpConfig?: boolean      — --strict-mcp-config
+     *   maxTurns?: number              — --max-turns
+     *   disableSlashCommands?: boolean — --disable-slash-commands
      * Codex: { config?: Record<string, string>, profile?: string }
      */
     providerOptions?: Record<string, unknown>;
@@ -146,8 +151,6 @@ interface SpawnOptions {
      * @deprecated Prefer systemPrompt, appendSystemPrompt, resumeSessionId etc.
      */
     extraArgs?: string[];
-    /** @internal Set by provider when history was injected via JSONL resume. */
-    _historyViaResume?: boolean;
 }
 /**
  * Agent provider interface. Each backend (Claude Code, Codex, etc.)
@@ -161,4 +164,4 @@ interface AgentProvider {
     spawn(options: SpawnOptions): AgentProcess;
 }
 
-export type { AgentEvent, AgentProcess, AgentProvider, ContentBlock, HistoryMessage, McpServerConfig, SpawnOptions };
+export type { AgentEvent, AgentProcess, AgentProvider, ContentBlock, McpServerConfig, SpawnOptions };

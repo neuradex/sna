@@ -78,8 +78,8 @@ export interface ApiResponses {
     ccSessionId: string | null;
     eventCount: number;
     messageCount: number;
-    lastMessage: { role: string; content: string; created_at: string } | null;
-    config: { provider: string; model: string; permissionMode?: string; extraArgs?: string[] } | null;
+    lastMessage: { actor: string; kind: string; content: string; created_at: string } | null;
+    config: { provider: string; model: string; permissionMode?: string; extraArgs?: string[]; providerOptions?: Record<string, unknown> } | null;
   };
   "agent.run-once": {
     result: string;

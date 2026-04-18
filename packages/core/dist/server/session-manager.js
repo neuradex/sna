@@ -1,4 +1,5 @@
 import { getDb } from "../db/schema.js";
+import { insertChatMessage, updateChatMessageMeta } from "../db/chat-messages.js";
 import { getConfig } from "../config.js";
 class SessionManager {
   constructor(options = {}) {
@@ -333,11 +334,20 @@ class SessionManager {
     if (!session) throw new Error(`Session "${id}" not found`);
     const base = session.lastStartConfig;
     if (!base) throw new Error(`Session "${id}" has no previous start config`);
+    const nextProvider = overrides.provider ?? base.provider;
+    const providerChanged = nextProvider !== base.provider;
     const config = {
-      provider: overrides.provider ?? base.provider,
+      provider: nextProvider,
+      // modelProvider is attribution metadata, not runtime-specific. Caller
+      // (e.g. Loom) decides it via its model catalog and passes it in with
+      // the override. Drop the base value when the override is absent on a
+      // provider change, since the inherited modelProvider no longer matches.
+      modelProvider: overrides.modelProvider ?? (providerChanged ? void 0 : base.modelProvider),
       model: overrides.model ?? base.model,
       permissionMode: overrides.permissionMode ?? base.permissionMode,
-      extraArgs: overrides.extraArgs ?? base.extraArgs
+      configDir: providerChanged ? overrides.configDir : overrides.configDir ?? base.configDir,
+      extraArgs: providerChanged ? overrides.extraArgs : overrides.extraArgs ?? base.extraArgs,
+      providerOptions: providerChanged ? overrides.providerOptions : overrides.providerOptions ?? base.providerOptions
     };
     if (session.process?.alive) session.process.kill();
     const proc = spawnFn(config);
@@ -434,50 +444,126 @@ class SessionManager {
         `SELECT COUNT(*) as c FROM chat_messages WHERE session_id = ?`
       ).get(sessionId);
       const last = db.prepare(
-        `SELECT role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1`
+        `SELECT actor, kind, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1`
       ).get(sessionId);
       return {
         messageCount: count.c,
-        lastMessage: last ? { role: last.role, content: last.content, created_at: last.created_at } : null
+        lastMessage: last ? { actor: last.actor, kind: last.kind, content: last.content, created_at: last.created_at } : null
       };
     } catch {
       return { messageCount: 0, lastMessage: null };
     }
   }
-  /** Persist an agent event to chat_messages. Returns true if a row was inserted. */
+  /**
+   * Persist an agent event to chat_messages as a canonical (actor, kind) block.
+   * Returns true if a row was inserted. Streaming-only events (deltas) return
+   * false so the event cursor doesn't advance for them.
+   *
+   * Assistant-authored blocks (text / thinking / tool_use) are stamped with
+   * three-layer attribution — runtime (CLI), modelProvider (LLM API vendor),
+   * and model (specific slug) — pulled from session.lastStartConfig at emit
+   * time. If the user switches mid-session, subsequent rows carry the new
+   * attribution. Essential for auditing, Langfuse traces, UI badges, and
+   * adapters that need to know "who actually said this" when converting
+   * canonical back into a provider-native format.
+   *
+   * Event → (actor, kind) mapping:
+   *   assistant   → (assistant, text)           meta={runtime, modelProvider, model}
+   *   thinking    → (assistant, thinking)       meta={runtime, modelProvider, model, signature?}
+   *   tool_use    → (assistant, tool_use)       meta={runtime, modelProvider, model, id, input, name}
+   *   tool_result → (system,    tool_result)    meta={toolUseId, isError}
+   *   complete    → (system,    status)         meta={usage, model, ...}
+   *   error       → (system,    error)          meta={status:"error"}
+   */
   persistEvent(sessionId, e) {
     try {
       const db = getDb();
+      const session = this.sessions.get(sessionId);
+      const attr = {};
+      if (session?.lastStartConfig?.provider) attr.runtime = session.lastStartConfig.provider;
+      if (session?.lastStartConfig?.modelProvider) attr.modelProvider = session.lastStartConfig.modelProvider;
+      if (session?.lastStartConfig?.model) attr.model = session.lastStartConfig.model;
       switch (e.type) {
         case "assistant":
-          if (e.message) {
-            db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`).run(sessionId, e.message);
-            return true;
-          }
-          return false;
+          if (!e.message) return false;
+          insertChatMessage(db, {
+            sessionId,
+            actor: "assistant",
+            kind: "text",
+            content: e.message,
+            meta: Object.keys(attr).length > 0 ? attr : void 0
+          });
+          return true;
         case "thinking":
-          if (e.message) {
-            db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'thinking', ?)`).run(sessionId, e.message);
-            return true;
-          }
-          return false;
+          if (!e.message) return false;
+          insertChatMessage(db, {
+            sessionId,
+            actor: "assistant",
+            kind: "thinking",
+            content: e.message,
+            meta: {
+              ...attr,
+              ...e.data?.signature ? { signature: e.data.signature } : {}
+            }
+          });
+          return true;
         case "tool_use": {
           const toolName = e.data?.toolName ?? e.message ?? "tool";
-          if (e.data?.update) {
-            db.prepare(`UPDATE chat_messages SET meta = ? WHERE session_id = ? AND role = 'tool' AND content = ? AND meta LIKE ?`).run(JSON.stringify(e.data), sessionId, toolName, `%"id":"${e.data.id}"%`);
+          const toolUseId = e.data?.id ?? e.data?.toolUseId;
+          if (e.data?.update && toolUseId) {
+            const row = db.prepare(
+              `SELECT id, meta FROM chat_messages
+                WHERE session_id = ? AND actor = 'assistant' AND kind = 'tool_use'
+                  AND json_extract(meta, '$.id') = ?
+                ORDER BY id DESC LIMIT 1`
+            ).get(sessionId, toolUseId);
+            if (row) {
+              const mergedMeta = {
+                ...row.meta ? JSON.parse(row.meta) : {},
+                ...e.data,
+                id: toolUseId
+              };
+              updateChatMessageMeta(db, row.id, mergedMeta);
+            }
             return false;
           }
-          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool', ?, ?)`).run(sessionId, toolName, JSON.stringify(e.data ?? {}));
+          insertChatMessage(db, {
+            sessionId,
+            actor: "assistant",
+            kind: "tool_use",
+            content: toolName,
+            meta: { ...attr, ...e.data ?? {}, id: toolUseId, name: toolName }
+          });
           return true;
         }
-        case "tool_result":
-          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool_result', ?, ?)`).run(sessionId, e.message ?? "", JSON.stringify(e.data ?? {}));
+        case "tool_result": {
+          const toolUseId = e.data?.toolUseId ?? e.data?.id;
+          insertChatMessage(db, {
+            sessionId,
+            actor: "system",
+            kind: "tool_result",
+            content: e.message ?? "",
+            meta: { ...e.data ?? {}, toolUseId }
+          });
           return true;
+        }
         case "complete":
-          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'status', '', ?)`).run(sessionId, JSON.stringify({ status: "complete", ...e.data }));
+          insertChatMessage(db, {
+            sessionId,
+            actor: "system",
+            kind: "status",
+            content: "",
+            meta: { status: "complete", ...e.data ?? {} }
+          });
           return true;
         case "error":
-          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'error', ?, ?)`).run(sessionId, e.message ?? "Error", JSON.stringify({ status: "error" }));
+          insertChatMessage(db, {
+            sessionId,
+            actor: "system",
+            kind: "error",
+            content: e.message ?? "Error",
+            meta: { status: "error" }
+          });
           return true;
         default:
           return false;

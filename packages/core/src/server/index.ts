@@ -69,7 +69,7 @@ export { createChatRoutes } from "./routes/chat.js";
 export { SessionManager } from "./session-manager.js";
 export type { Session, SessionInfo, SessionManagerOptions, SessionLifecycleEvent, SessionLifecycleState, SessionConfigChangedEvent, StartConfig, AgentStatus } from "./session-manager.js";
 export { attachWebSocket } from "./ws.js";
-export { buildHistoryFromDb } from "./history-builder.js";
+export { buildCanonicalFromDb } from "../history/canonical.js";
 export { completion } from "../core/completion.js";
 export type { CompletionOptions, CompletionResult } from "../core/completion.js";
 

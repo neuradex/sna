@@ -1,4 +1,7 @@
-import { AgentProvider, SpawnOptions, AgentProcess, HistoryMessage } from './types.js';
+import { AgentProvider, SpawnOptions, AgentProcess } from './types.js';
+import '../../history/types.js';
+import '../../db/schema.js';
+import 'better-sqlite3';
 
 declare function validateCodexPath(codexPath: string): {
     ok: boolean;
@@ -15,13 +18,6 @@ declare function resolveCodexCli(opts?: {
 }): CodexResolveResult;
 /** @internal Exported for testing only. Maps SNA permissionMode → thread/start sandbox value (kebab-case). */
 declare function toCodexSandbox(mode?: string): string;
-/**
- * Pack conversation history into a context prefix for the first user message.
- * Codex doesn't support synthetic history injection like Claude Code's JSONL resume,
- * so we prepend it as structured context that the model can reference.
- */
-/** @internal Exported for testing only. */
-declare function buildHistoryContext(history: HistoryMessage[]): string;
 /**
  * Extract --resume <threadId> from extraArgs.
  * Returns the threadId and cleaned args, or null if not found.
@@ -49,4 +45,4 @@ declare class CodexProvider implements AgentProvider {
     spawn(options: SpawnOptions): AgentProcess;
 }
 
-export { CodexProvider, type CodexResolveResult, buildHistoryContext, cacheCodexPath, extractResumeArg, extractSystemPromptArgs, resolveCodexCli, toCodexSandbox, validateCodexPath };
+export { CodexProvider, type CodexResolveResult, cacheCodexPath, extractResumeArg, extractSystemPromptArgs, resolveCodexCli, toCodexSandbox, validateCodexPath };

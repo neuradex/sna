@@ -330,7 +330,7 @@ describe("WebSocket Handler", () => {
     send(ctx, "chat.sessions.create", { id: "ws-msg-test" });
     await waitForReply(ctx, ctx.rid.toString());
 
-    const createRid = send(ctx, "chat.messages.create", { session: "ws-msg-test", role: "user", content: "hello ws" });
+    const createRid = send(ctx, "chat.messages.create", { session: "ws-msg-test", actor: "user", kind: "text", content: "hello ws" });
     const created = await waitForReply(ctx, createRid);
     assert.equal(created.status, "created");
     assert.ok(created.id);
@@ -345,9 +345,9 @@ describe("WebSocket Handler", () => {
     send(ctx, "chat.sessions.create", { id: "ws-since-test" });
     await waitForReply(ctx, ctx.rid.toString());
 
-    send(ctx, "chat.messages.create", { session: "ws-since-test", role: "user", content: "msg1" });
+    send(ctx, "chat.messages.create", { session: "ws-since-test", actor: "user", kind: "text", content: "msg1" });
     await waitForReply(ctx, ctx.rid.toString());
-    send(ctx, "chat.messages.create", { session: "ws-since-test", role: "user", content: "msg2" });
+    send(ctx, "chat.messages.create", { session: "ws-since-test", actor: "user", kind: "text", content: "msg2" });
     await waitForReply(ctx, ctx.rid.toString());
 
     const allRid = send(ctx, "chat.messages.list", { session: "ws-since-test" });
@@ -363,7 +363,7 @@ describe("WebSocket Handler", () => {
   it("chat.messages.clear", async () => {
     send(ctx, "chat.sessions.create", { id: "ws-clear-test" });
     await waitForReply(ctx, ctx.rid.toString());
-    send(ctx, "chat.messages.create", { session: "ws-clear-test", role: "user", content: "bye" });
+    send(ctx, "chat.messages.create", { session: "ws-clear-test", actor: "user", kind: "text", content: "bye" });
     await waitForReply(ctx, ctx.rid.toString());
 
     const clearRid = send(ctx, "chat.messages.clear", { session: "ws-clear-test" });
@@ -433,9 +433,9 @@ describe("WebSocket Handler", () => {
     // Create session with messages in DB
     send(ctx, "chat.sessions.create", { id: "history-replay-test" });
     await waitForReply(ctx, ctx.rid.toString());
-    send(ctx, "chat.messages.create", { session: "history-replay-test", role: "user", content: "hello from DB" });
+    send(ctx, "chat.messages.create", { session: "history-replay-test", actor: "user", kind: "text", content: "hello from DB" });
     await waitForReply(ctx, ctx.rid.toString());
-    send(ctx, "chat.messages.create", { session: "history-replay-test", role: "assistant", content: "hi from DB" });
+    send(ctx, "chat.messages.create", { session: "history-replay-test", actor: "assistant", kind: "text", content: "hi from DB" });
     await waitForReply(ctx, ctx.rid.toString());
 
     // Subscribe with since=0 to get history

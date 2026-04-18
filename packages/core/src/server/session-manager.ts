@@ -7,16 +7,41 @@
 
 import type { AgentProcess, AgentEvent } from "../core/providers/types.js";
 import { getDb } from "../db/schema.js";
+import { insertChatMessage, updateChatMessageMeta } from "../db/chat-messages.js";
 import { getConfig } from "../config.js";
 
 export type SessionState = "idle" | "processing" | "waiting" | "permission";
 
 export interface StartConfig {
+  /**
+   * Runtime — the CLI/binary we spawn (e.g. "claude-code", "codex", "opencode").
+   * Dispatched via providers/index.ts getProvider(). Distinct from modelProvider:
+   * the same runtime can talk to multiple model providers (e.g. OpenCode with
+   * Anthropic or OpenAI backends), so this alone does not identify the LLM vendor.
+   */
   provider: string;
+  /**
+   * Model vendor / API backend (e.g. "anthropic", "openai", "google", "oss").
+   * Consumed only for attribution — stamped onto canonical rows so downstream
+   * code (Langfuse tracing, UI badges, cross-provider replay) can distinguish
+   * whose model produced each assistant turn.
+   */
+  modelProvider?: string;
+  /** Model slug within the modelProvider's catalog (e.g. "sonnet-4-6", "gpt-5.4"). */
   model: string;
   permissionMode?: string;
   configDir?: string;
+  /**
+   * Runtime-specific CLI flags. Inherited on same-runtime restart,
+   * dropped on cross-runtime restart (flags are not transferable).
+   * @deprecated Prefer providerOptions; extraArgs is kept for legacy callers.
+   */
   extraArgs?: string[];
+  /**
+   * Runtime-specific structured options. Inherited on same-runtime restart,
+   * dropped on cross-runtime restart (shapes differ per runtime).
+   */
+  providerOptions?: Record<string, unknown>;
 }
 
 export interface Session {
@@ -49,7 +74,7 @@ export interface SessionInfo {
   ccSessionId: string | null;
   eventCount: number;
   messageCount: number;
-  lastMessage: { role: string; content: string; created_at: string } | null;
+  lastMessage: { actor: string; kind: string; content: string; created_at: string } | null;
   createdAt: number;
   lastActivityAt: number;
 }
@@ -500,12 +525,26 @@ export class SessionManager {
     const base = session.lastStartConfig;
     if (!base) throw new Error(`Session "${id}" has no previous start config`);
 
-    // Merge: overrides win
+    // Merge strategy: overrides win. Provider-specific fields (extraArgs,
+    // providerOptions, configDir) are dropped when switching providers, since
+    // CLI flags and structured options are not transferable across runtimes.
+    // Inheriting them silently — as the prior implementation did — caused
+    // Codex to receive Claude-specific --settings flags and crash with exit 2.
+    const nextProvider = overrides.provider ?? base.provider;
+    const providerChanged = nextProvider !== base.provider;
+
     const config: StartConfig = {
-      provider: overrides.provider ?? base.provider,
+      provider: nextProvider,
+      // modelProvider is attribution metadata, not runtime-specific. Caller
+      // (e.g. Loom) decides it via its model catalog and passes it in with
+      // the override. Drop the base value when the override is absent on a
+      // provider change, since the inherited modelProvider no longer matches.
+      modelProvider: overrides.modelProvider ?? (providerChanged ? undefined : base.modelProvider),
       model: overrides.model ?? base.model,
       permissionMode: overrides.permissionMode ?? base.permissionMode,
-      extraArgs: overrides.extraArgs ?? base.extraArgs,
+      configDir: providerChanged ? overrides.configDir : (overrides.configDir ?? base.configDir),
+      extraArgs: providerChanged ? overrides.extraArgs : (overrides.extraArgs ?? base.extraArgs),
+      providerOptions: providerChanged ? overrides.providerOptions : (overrides.providerOptions ?? base.providerOptions),
     };
 
     // Kill existing
@@ -609,67 +648,131 @@ export class SessionManager {
   }
 
   /** Persist an agent event to chat_messages. */
-  private getMessageStats(sessionId: string): { messageCount: number; lastMessage: { role: string; content: string; created_at: string } | null } {
+  private getMessageStats(sessionId: string): { messageCount: number; lastMessage: { actor: string; kind: string; content: string; created_at: string } | null } {
     try {
       const db = getDb();
       const count = db.prepare(
         `SELECT COUNT(*) as c FROM chat_messages WHERE session_id = ?`
       ).get(sessionId) as { c: number };
       const last = db.prepare(
-        `SELECT role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1`
-      ).get(sessionId) as { role: string; content: string; created_at: string } | undefined;
+        `SELECT actor, kind, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1`
+      ).get(sessionId) as { actor: string; kind: string; content: string; created_at: string } | undefined;
       return {
         messageCount: count.c,
-        lastMessage: last ? { role: last.role, content: last.content, created_at: last.created_at } : null,
+        lastMessage: last ? { actor: last.actor, kind: last.kind, content: last.content, created_at: last.created_at } : null,
       };
     } catch {
       return { messageCount: 0, lastMessage: null };
     }
   }
 
-  /** Persist an agent event to chat_messages. Returns true if a row was inserted. */
+  /**
+   * Persist an agent event to chat_messages as a canonical (actor, kind) block.
+   * Returns true if a row was inserted. Streaming-only events (deltas) return
+   * false so the event cursor doesn't advance for them.
+   *
+   * Assistant-authored blocks (text / thinking / tool_use) are stamped with
+   * three-layer attribution — runtime (CLI), modelProvider (LLM API vendor),
+   * and model (specific slug) — pulled from session.lastStartConfig at emit
+   * time. If the user switches mid-session, subsequent rows carry the new
+   * attribution. Essential for auditing, Langfuse traces, UI badges, and
+   * adapters that need to know "who actually said this" when converting
+   * canonical back into a provider-native format.
+   *
+   * Event → (actor, kind) mapping:
+   *   assistant   → (assistant, text)           meta={runtime, modelProvider, model}
+   *   thinking    → (assistant, thinking)       meta={runtime, modelProvider, model, signature?}
+   *   tool_use    → (assistant, tool_use)       meta={runtime, modelProvider, model, id, input, name}
+   *   tool_result → (system,    tool_result)    meta={toolUseId, isError}
+   *   complete    → (system,    status)         meta={usage, model, ...}
+   *   error       → (system,    error)          meta={status:"error"}
+   */
   private persistEvent(sessionId: string, e: AgentEvent): boolean {
     try {
       const db = getDb();
+      const session = this.sessions.get(sessionId);
+      const attr: Record<string, unknown> = {};
+      // The SDK's internal field name for the CLI is `provider` (runtime
+      // dispatch key), but we surface it as `runtime` in the canonical meta
+      // to disambiguate from the LLM API vendor (`modelProvider`).
+      if (session?.lastStartConfig?.provider) attr.runtime = session.lastStartConfig.provider;
+      if (session?.lastStartConfig?.modelProvider) attr.modelProvider = session.lastStartConfig.modelProvider;
+      if (session?.lastStartConfig?.model) attr.model = session.lastStartConfig.model;
+
       switch (e.type) {
         case "assistant":
-          if (e.message) {
-            db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'assistant', ?)`)
-              .run(sessionId, e.message);
-            return true;
-          }
-          return false;
+          if (!e.message) return false;
+          insertChatMessage(db, {
+            sessionId, actor: "assistant", kind: "text", content: e.message,
+            meta: Object.keys(attr).length > 0 ? attr : undefined,
+          });
+          return true;
+
         case "thinking":
-          if (e.message) {
-            db.prepare(`INSERT INTO chat_messages (session_id, role, content) VALUES (?, 'thinking', ?)`)
-              .run(sessionId, e.message);
-            return true;
-          }
-          return false;
+          if (!e.message) return false;
+          insertChatMessage(db, {
+            sessionId, actor: "assistant", kind: "thinking", content: e.message,
+            meta: {
+              ...attr,
+              ...(e.data?.signature ? { signature: e.data.signature } : {}),
+            },
+          });
+          return true;
+
         case "tool_use": {
           const toolName = (e.data?.toolName as string) ?? e.message ?? "tool";
-          if (e.data?.update) {
-            // Update existing streaming tool_use with complete input (don't increment cursor)
-            db.prepare(`UPDATE chat_messages SET meta = ? WHERE session_id = ? AND role = 'tool' AND content = ? AND meta LIKE ?`)
-              .run(JSON.stringify(e.data), sessionId, toolName, `%"id":"${e.data.id}"%`);
+          const toolUseId = (e.data?.id ?? e.data?.toolUseId) as string | undefined;
+          // Streaming "update" event — refresh the still-open tool_use row's
+          // meta with the fully assembled input, don't create a new row.
+          // Note: the existing row already has {provider, model} from the
+          // initial insert, so the merge preserves attribution.
+          if (e.data?.update && toolUseId) {
+            const row = db.prepare(
+              `SELECT id, meta FROM chat_messages
+                WHERE session_id = ? AND actor = 'assistant' AND kind = 'tool_use'
+                  AND json_extract(meta, '$.id') = ?
+                ORDER BY id DESC LIMIT 1`,
+            ).get(sessionId, toolUseId) as { id: number; meta: string | null } | undefined;
+            if (row) {
+              const mergedMeta = {
+                ...(row.meta ? JSON.parse(row.meta) : {}),
+                ...(e.data as Record<string, unknown>),
+                id: toolUseId,
+              };
+              updateChatMessageMeta(db, row.id, mergedMeta);
+            }
             return false;
           }
-          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool', ?, ?)`)
-            .run(sessionId, toolName, JSON.stringify(e.data ?? {}));
+          insertChatMessage(db, {
+            sessionId, actor: "assistant", kind: "tool_use", content: toolName,
+            meta: { ...attr, ...(e.data ?? {}), id: toolUseId, name: toolName },
+          });
           return true;
         }
-        case "tool_result":
-          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'tool_result', ?, ?)`)
-            .run(sessionId, e.message ?? "", JSON.stringify(e.data ?? {}));
+
+        case "tool_result": {
+          const toolUseId = (e.data?.toolUseId ?? e.data?.id) as string | undefined;
+          insertChatMessage(db, {
+            sessionId, actor: "system", kind: "tool_result", content: e.message ?? "",
+            meta: { ...(e.data ?? {}), toolUseId },
+          });
           return true;
+        }
+
         case "complete":
-          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'status', '', ?)`)
-            .run(sessionId, JSON.stringify({ status: "complete", ...e.data }));
+          insertChatMessage(db, {
+            sessionId, actor: "system", kind: "status", content: "",
+            meta: { status: "complete", ...(e.data ?? {}) },
+          });
           return true;
+
         case "error":
-          db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'error', ?, ?)`)
-            .run(sessionId, e.message ?? "Error", JSON.stringify({ status: "error" }));
+          insertChatMessage(db, {
+            sessionId, actor: "system", kind: "error", content: e.message ?? "Error",
+            meta: { status: "error" },
+          });
           return true;
+
         default:
           return false;
       }

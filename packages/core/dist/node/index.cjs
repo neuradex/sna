@@ -40,6 +40,47 @@ var init_cjs_shims = __esm({
   }
 });
 
+// src/config.ts
+function fromEnv() {
+  const env = {};
+  if (process.env.SNA_PORT) env.port = parseInt(process.env.SNA_PORT, 10);
+  if (process.env.SNA_MODEL) env.model = process.env.SNA_MODEL;
+  if (process.env.SNA_PERMISSION_MODE) env.defaultPermissionMode = process.env.SNA_PERMISSION_MODE;
+  if (process.env.SNA_MAX_SESSIONS) env.maxSessions = parseInt(process.env.SNA_MAX_SESSIONS, 10);
+  if (process.env.SNA_DB_PATH) env.dbPath = process.env.SNA_DB_PATH;
+  if (process.env.SNA_DATA_DIR) env.dataDir = process.env.SNA_DATA_DIR;
+  if (process.env.SNA_PERMISSION_TIMEOUT_MS) env.permissionTimeoutMs = parseInt(process.env.SNA_PERMISSION_TIMEOUT_MS, 10);
+  return env;
+}
+function getConfig() {
+  return current;
+}
+var import_path, defaults, current;
+var init_config = __esm({
+  "src/config.ts"() {
+    "use strict";
+    init_cjs_shims();
+    import_path = __toESM(require("path"), 1);
+    defaults = {
+      port: 3099,
+      model: "claude-sonnet-4-6",
+      defaultProvider: "claude-code",
+      defaultPermissionMode: "default",
+      maxSessions: 5,
+      maxEventBuffer: 500,
+      permissionTimeoutMs: 0,
+      // app controls — no SDK-side timeout
+      runOnceTimeoutMs: 12e4,
+      pollIntervalMs: 500,
+      keepaliveIntervalMs: 15e3,
+      skillPollMs: 2e3,
+      dbPath: "data/sna.db",
+      dataDir: import_path.default.join(process.cwd(), "data")
+    };
+    current = { ...defaults, ...fromEnv() };
+  }
+});
+
 // src/lib/logger.ts
 function setOnLog(cb) {
   _onLog = cb;
@@ -83,14 +124,14 @@ function err(tag, ...args) {
     console.error(`${ts()} ${resolvedTag}`, ...args);
   }
 }
-var import_fs2, import_path2, LOG_PATH, _onLog, _logLevel, TAG_LEVELS, LEVEL_ORDER, tags, logger;
+var import_fs2, import_path3, LOG_PATH, _onLog, _logLevel, TAG_LEVELS, LEVEL_ORDER, tags, logger;
 var init_logger = __esm({
   "src/lib/logger.ts"() {
     "use strict";
     init_cjs_shims();
     import_fs2 = __toESM(require("fs"), 1);
-    import_path2 = __toESM(require("path"), 1);
-    LOG_PATH = process.env.SNA_LOG_PATH ?? import_path2.default.join(process.cwd(), ".dev.log");
+    import_path3 = __toESM(require("path"), 1);
+    LOG_PATH = process.env.SNA_LOG_PATH ?? import_path3.default.join(process.cwd(), ".dev.log");
     try {
       import_fs2.default.writeFileSync(LOG_PATH, "");
     } catch {
@@ -124,47 +165,6 @@ var init_logger = __esm({
   }
 });
 
-// src/config.ts
-function fromEnv() {
-  const env = {};
-  if (process.env.SNA_PORT) env.port = parseInt(process.env.SNA_PORT, 10);
-  if (process.env.SNA_MODEL) env.model = process.env.SNA_MODEL;
-  if (process.env.SNA_PERMISSION_MODE) env.defaultPermissionMode = process.env.SNA_PERMISSION_MODE;
-  if (process.env.SNA_MAX_SESSIONS) env.maxSessions = parseInt(process.env.SNA_MAX_SESSIONS, 10);
-  if (process.env.SNA_DB_PATH) env.dbPath = process.env.SNA_DB_PATH;
-  if (process.env.SNA_DATA_DIR) env.dataDir = process.env.SNA_DATA_DIR;
-  if (process.env.SNA_PERMISSION_TIMEOUT_MS) env.permissionTimeoutMs = parseInt(process.env.SNA_PERMISSION_TIMEOUT_MS, 10);
-  return env;
-}
-function getConfig() {
-  return current;
-}
-var import_path3, defaults, current;
-var init_config = __esm({
-  "src/config.ts"() {
-    "use strict";
-    init_cjs_shims();
-    import_path3 = __toESM(require("path"), 1);
-    defaults = {
-      port: 3099,
-      model: "claude-sonnet-4-6",
-      defaultProvider: "claude-code",
-      defaultPermissionMode: "default",
-      maxSessions: 5,
-      maxEventBuffer: 500,
-      permissionTimeoutMs: 0,
-      // app controls — no SDK-side timeout
-      runOnceTimeoutMs: 12e4,
-      pollIntervalMs: 500,
-      keepaliveIntervalMs: 15e3,
-      skillPollMs: 2e3,
-      dbPath: "data/sna.db",
-      dataDir: import_path3.default.join(process.cwd(), "data")
-    };
-    current = { ...defaults, ...fromEnv() };
-  }
-});
-
 // src/lib/langfuse-tracer.ts
 var init_langfuse_tracer = __esm({
   "src/lib/langfuse-tracer.ts"() {
@@ -187,7 +187,7 @@ init_cjs_shims();
 init_cjs_shims();
 var import_child_process3 = require("child_process");
 var import_url3 = require("url");
-var import_fs5 = __toESM(require("fs"), 1);
+var import_fs6 = __toESM(require("fs"), 1);
 
 // src/core/providers/claude-code.ts
 init_cjs_shims();
@@ -197,54 +197,179 @@ var import_fs3 = __toESM(require("fs"), 1);
 var import_path4 = __toESM(require("path"), 1);
 var import_url = require("url");
 
-// src/core/providers/cc-history-adapter.ts
+// src/history/claude-code.ts
 init_cjs_shims();
 var import_fs = __toESM(require("fs"), 1);
-var import_path = __toESM(require("path"), 1);
-function writeHistoryJsonl(history, opts) {
-  for (let i = 1; i < history.length; i++) {
-    if (history[i].role === history[i - 1].role) {
+var import_path2 = __toESM(require("path"), 1);
+init_config();
+
+// src/history/embed-refs.ts
+init_cjs_shims();
+var EMBED_REF_RE = /!\[[^\]]*\]\(embed:\/\/([^)\s]+)\)/g;
+function splitContentByEmbeds(content) {
+  const segments = [];
+  let lastIndex = 0;
+  EMBED_REF_RE.lastIndex = 0;
+  let m;
+  while ((m = EMBED_REF_RE.exec(content)) !== null) {
+    if (m.index > lastIndex) {
+      segments.push({ type: "text", text: content.slice(lastIndex, m.index) });
+    }
+    segments.push({ type: "embed", id: m[1] });
+    lastIndex = m.index + m[0].length;
+  }
+  if (lastIndex < content.length) {
+    segments.push({ type: "text", text: content.slice(lastIndex) });
+  }
+  return segments;
+}
+
+// src/history/claude-code.ts
+function renderTextWithEmbeds(content, embeds, sessionId) {
+  const segments = splitContentByEmbeds(content);
+  const out = [];
+  for (const seg of segments) {
+    if (seg.type === "text") {
+      if (seg.text.length > 0) out.push({ type: "text", text: seg.text });
+    } else {
+      const record = embeds?.[seg.id];
+      if (!record) continue;
+      const data = loadEmbedAsBase64(sessionId, record);
+      if (!data) continue;
+      out.push({
+        type: "image",
+        source: { type: "base64", media_type: record.mime_type, data }
+      });
+    }
+  }
+  return out;
+}
+function loadEmbedAsBase64(sessionId, record) {
+  const fullPath = import_path2.default.isAbsolute(record.path) ? record.path : import_path2.default.join(getConfig().dataDir, "images", sessionId, record.path);
+  try {
+    return import_fs.default.readFileSync(fullPath).toString("base64");
+  } catch {
+    return null;
+  }
+}
+function canonicalToAnthropicMessages(blocks, sessionId) {
+  const msgs = [];
+  let current2 = null;
+  const flushCurrent = () => {
+    if (current2 && current2.content.length > 0) msgs.push(current2);
+    current2 = null;
+  };
+  for (const b of blocks) {
+    if (b.actor === "user" && b.kind === "text") {
+      flushCurrent();
+      current2 = { role: "user", content: renderTextWithEmbeds(b.content, b.embeds, sessionId) };
+      flushCurrent();
+      continue;
+    }
+    if (b.actor === "assistant") {
+      if (!current2 || current2.role !== "assistant") {
+        flushCurrent();
+        current2 = { role: "assistant", content: [] };
+      }
+      if (b.kind === "text") {
+        current2.content.push(...renderTextWithEmbeds(b.content, b.embeds, sessionId));
+      } else if (b.kind === "thinking") {
+        const signature = typeof b.meta?.signature === "string" ? b.meta.signature : void 0;
+        current2.content.push({ type: "thinking", thinking: b.content, ...signature ? { signature } : {} });
+      } else if (b.kind === "tool_use") {
+        const id = b.meta?.id ?? `tool_${b.id ?? Math.random().toString(36).slice(2)}`;
+        const name = b.content || b.meta?.name || "tool";
+        const input = b.meta?.input ?? {};
+        current2.content.push({ type: "tool_use", id, name, input });
+      }
+      continue;
+    }
+    if (b.actor === "system" && b.kind === "tool_result") {
+      if (!current2 || current2.role !== "user") {
+        flushCurrent();
+        current2 = { role: "user", content: [] };
+      }
+      const toolUseId = b.meta?.toolUseId ?? "";
+      const isError = b.meta?.isError === true;
+      const inner = renderTextWithEmbeds(b.content, b.embeds, sessionId);
+      const resultContent = inner.length === 1 && inner[0].type === "text" ? inner[0].text : inner;
+      current2.content.push({
+        type: "tool_result",
+        tool_use_id: toolUseId,
+        content: resultContent,
+        ...isError ? { is_error: true } : {}
+      });
+      continue;
+    }
+  }
+  flushCurrent();
+  return repairOrphanToolUses(msgs);
+}
+function repairOrphanToolUses(msgs) {
+  const repaired = [];
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    repaired.push(m);
+    if (m.role !== "assistant") continue;
+    const toolUseIds = m.content.filter((b) => b.type === "tool_use").map((b) => b.id);
+    if (toolUseIds.length === 0) continue;
+    const next = msgs[i + 1];
+    const satisfied = /* @__PURE__ */ new Set();
+    if (next && next.role === "user") {
+      for (const b of next.content) {
+        if (b.type === "tool_result") satisfied.add(b.tool_use_id);
+      }
+    }
+    const missing = toolUseIds.filter((id) => !satisfied.has(id));
+    if (missing.length === 0) continue;
+    const syntheticResults = missing.map((id) => ({
+      type: "tool_result",
+      tool_use_id: id,
+      content: "(tool call did not produce a result; synthesized during history restore)",
+      is_error: true
+    }));
+    if (next && next.role === "user") {
+      next.content = [...syntheticResults, ...next.content];
+    } else {
+      repaired.push({ role: "user", content: syntheticResults });
+    }
+  }
+  return repaired;
+}
+function assertAlternating(msgs) {
+  for (let i = 1; i < msgs.length; i++) {
+    if (msgs[i].role === msgs[i - 1].role) {
       throw new Error(
-        `History validation failed: consecutive ${history[i].role} at index ${i - 1} and ${i}. Messages must alternate user\u2194assistant. Merge tool results into text before injecting.`
+        `Claude JSONL validation failed: consecutive ${msgs[i].role} at index ${i - 1} and ${i}. This usually means canonical blocks are mis-ordered (tool_result without a preceding tool_use, etc.).`
       );
     }
   }
+}
+function writeClaudeHistoryJsonl(blocks, opts) {
+  const msgs = canonicalToAnthropicMessages(blocks, opts.sessionId);
+  if (msgs.length === 0) return null;
+  assertAlternating(msgs);
   try {
-    const dir = import_path.default.join(opts.cwd, ".sna", "history");
+    const dir = import_path2.default.join(opts.cwd, ".sna", "history");
     import_fs.default.mkdirSync(dir, { recursive: true });
-    const sessionId = crypto.randomUUID();
-    const filePath = import_path.default.join(dir, `${sessionId}.jsonl`);
+    const syntheticSessionId = crypto.randomUUID();
+    const filePath = import_path2.default.join(dir, `${syntheticSessionId}.jsonl`);
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const lines = [];
     let prevUuid = null;
-    for (const msg of history) {
+    for (const m of msgs) {
       const uuid = crypto.randomUUID();
-      if (msg.role === "user") {
-        lines.push(JSON.stringify({
-          parentUuid: prevUuid,
-          isSidechain: false,
-          type: "user",
-          uuid,
-          timestamp: now,
-          cwd: opts.cwd,
-          sessionId,
-          message: { role: "user", content: msg.content }
-        }));
-      } else {
-        lines.push(JSON.stringify({
-          parentUuid: prevUuid,
-          isSidechain: false,
-          type: "assistant",
-          uuid,
-          timestamp: now,
-          cwd: opts.cwd,
-          sessionId,
-          message: {
-            role: "assistant",
-            content: [{ type: "text", text: msg.content }]
-          }
-        }));
-      }
+      lines.push(JSON.stringify({
+        parentUuid: prevUuid,
+        isSidechain: false,
+        type: m.role,
+        // "user" | "assistant"
+        uuid,
+        timestamp: now,
+        cwd: opts.cwd,
+        sessionId: syntheticSessionId,
+        message: { role: m.role, content: m.content }
+      }));
       prevUuid = uuid;
     }
     import_fs.default.writeFileSync(filePath, lines.join("\n") + "\n");
@@ -252,18 +377,6 @@ function writeHistoryJsonl(history, opts) {
   } catch {
     return null;
   }
-}
-function buildRecalledConversation(history) {
-  const xml = history.map((msg) => `<${msg.role}>${msg.content}</${msg.role}>`).join("\n");
-  return JSON.stringify({
-    type: "assistant",
-    message: {
-      role: "assistant",
-      content: [{ type: "text", text: `<recalled-conversation>
-${xml}
-</recalled-conversation>` }]
-    }
-  });
 }
 
 // src/core/providers/claude-code.ts
@@ -402,10 +515,6 @@ var _ClaudeCodeProcess = class _ClaudeCodeProcess {
       this._alive = false;
       this.emitter.emit("error", err2);
     });
-    if (options.history?.length && !options._historyViaResume) {
-      const line = buildRecalledConversation(options.history);
-      this.proc.stdin.write(line + "\n");
-    }
     if (options.prompt) {
       this.send(options.prompt);
     }
@@ -737,25 +846,34 @@ var ClaudeCodeProvider = class {
         }]
       };
     }
+    const mergeAppSettings = (appSettings) => {
+      if (appSettings.hooks && typeof appSettings.hooks === "object") {
+        const appHooks = appSettings.hooks;
+        for (const [event, hooks] of Object.entries(appHooks)) {
+          const cur = sdkSettings.hooks;
+          if (cur && cur[event]) {
+            cur[event] = [...cur[event], ...hooks];
+          } else {
+            sdkSettings.hooks = sdkSettings.hooks ?? {};
+            sdkSettings.hooks[event] = hooks;
+          }
+        }
+        const rest = { ...appSettings };
+        delete rest.hooks;
+        Object.assign(sdkSettings, rest);
+      } else {
+        Object.assign(sdkSettings, appSettings);
+      }
+    };
+    const po = options.providerOptions ?? {};
+    if (po.settings && typeof po.settings === "object") {
+      mergeAppSettings(po.settings);
+    }
     let extraArgsClean = options.extraArgs ? [...options.extraArgs] : [];
     const settingsIdx = extraArgsClean.indexOf("--settings");
     if (settingsIdx !== -1 && settingsIdx + 1 < extraArgsClean.length) {
       try {
-        const appSettings = JSON.parse(extraArgsClean[settingsIdx + 1]);
-        if (appSettings.hooks) {
-          for (const [event, hooks] of Object.entries(appSettings.hooks)) {
-            if (sdkSettings.hooks && sdkSettings.hooks[event]) {
-              sdkSettings.hooks[event] = [
-                ...sdkSettings.hooks[event],
-                ...hooks
-              ];
-            } else {
-              sdkSettings.hooks[event] = hooks;
-            }
-          }
-          delete appSettings.hooks;
-        }
-        Object.assign(sdkSettings, appSettings);
+        mergeAppSettings(JSON.parse(extraArgsClean[settingsIdx + 1]));
       } catch {
       }
       extraArgsClean.splice(settingsIdx, 2);
@@ -791,20 +909,25 @@ var ClaudeCodeProvider = class {
     if (options.disallowedTools?.length) {
       args.push("--disallowedTools", ...options.disallowedTools);
     }
-    if (options.providerOptions) {
-      const po = options.providerOptions;
-      if (typeof po.maxTurns === "number") args.push("--max-turns", String(po.maxTurns));
-      if (po.disableSlashCommands) args.push("--disable-slash-commands");
+    if (typeof po.maxTurns === "number") args.push("--max-turns", String(po.maxTurns));
+    if (po.disableSlashCommands) args.push("--disable-slash-commands");
+    if (po.strictMcpConfig) args.push("--strict-mcp-config");
+    if (Array.isArray(po.settingSources)) {
+      for (const src of po.settingSources) {
+        args.push("--setting-sources", src);
+      }
     }
     if (options.resumeSessionId) {
       args.push("--resume", options.resumeSessionId);
     }
-    if (!options.resumeSessionId && options.history?.length && options.prompt) {
-      const result = writeHistoryJsonl(options.history, { cwd: options.cwd });
+    if (!options.resumeSessionId && options.history?.length) {
+      const sessionId2 = options.env?.SNA_SESSION_ID ?? "default";
+      const result = writeClaudeHistoryJsonl(options.history, { cwd: options.cwd, sessionId: sessionId2 });
       if (result) {
         args.push(...result.extraArgs);
-        options._historyViaResume = true;
         logger.log("agent", `history via JSONL resume \u2192 ${result.filePath}`);
+      } else {
+        logger.log("agent", "history injection skipped (adapter returned null)");
       }
     }
     if (extraArgsClean.length > 0) {
@@ -837,7 +960,7 @@ var ClaudeCodeProvider = class {
 };
 
 // src/electron/index.ts
-var import_path7 = __toESM(require("path"), 1);
+var import_path8 = __toESM(require("path"), 1);
 var import_hono4 = require("hono");
 var import_cors = require("hono/cors");
 var import_node_server = require("@hono/node-server");
@@ -882,14 +1005,106 @@ init_cjs_shims();
 init_cjs_shims();
 var import_child_process2 = require("child_process");
 var import_events2 = require("events");
+var import_fs5 = __toESM(require("fs"), 1);
+var import_path7 = __toESM(require("path"), 1);
+var import_url2 = require("url");
+
+// src/history/codex.ts
+init_cjs_shims();
 var import_fs4 = __toESM(require("fs"), 1);
 var import_path6 = __toESM(require("path"), 1);
-var import_url2 = require("url");
+init_config();
+function loadEmbedAsDataUrl(sessionId, record) {
+  const fullPath = import_path6.default.isAbsolute(record.path) ? record.path : import_path6.default.join(getConfig().dataDir, "images", sessionId, record.path);
+  try {
+    const buf = import_fs4.default.readFileSync(fullPath);
+    return `data:${record.mime_type};base64,${buf.toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+function renderUserContent(content, embeds, sessionId) {
+  const out = [];
+  for (const seg of splitContentByEmbeds(content)) {
+    if (seg.type === "text") {
+      if (seg.text.length > 0) out.push({ type: "input_text", text: seg.text });
+    } else {
+      const record = embeds?.[seg.id];
+      if (!record) continue;
+      const dataUrl = loadEmbedAsDataUrl(sessionId, record);
+      if (!dataUrl) continue;
+      out.push({ type: "input_image", image_url: dataUrl });
+    }
+  }
+  return out;
+}
+function renderAssistantContent(content) {
+  return content.length > 0 ? [{ type: "output_text", text: content }] : [];
+}
+function renderToolOutputContent(content, embeds, sessionId) {
+  const segments = splitContentByEmbeds(content);
+  const parts = [];
+  for (const seg of segments) {
+    if (seg.type === "text") {
+      parts.push(seg.text);
+    } else {
+      const record = embeds?.[seg.id];
+      if (!record) continue;
+      const dataUrl = loadEmbedAsDataUrl(sessionId, record);
+      parts.push(dataUrl ? `![](${dataUrl})` : `(missing embed ${seg.id})`);
+    }
+  }
+  return parts.join("");
+}
+function canonicalToCodexResponseItems(blocks, sessionId) {
+  const out = [];
+  for (const b of blocks) {
+    if (b.actor === "user" && b.kind === "text") {
+      const content = renderUserContent(b.content, b.embeds, sessionId);
+      if (content.length > 0) out.push({ type: "message", role: "user", content });
+      continue;
+    }
+    if (b.actor === "assistant") {
+      if (b.kind === "text") {
+        const content = renderAssistantContent(b.content);
+        if (content.length > 0) out.push({ type: "message", role: "assistant", content });
+      } else if (b.kind === "thinking") {
+        if (b.content.length > 0) {
+          out.push({
+            type: "reasoning",
+            summary: [{ type: "summary_text", text: b.content }],
+            encrypted_content: b.meta?.signature ?? null
+          });
+        }
+      } else if (b.kind === "tool_use") {
+        const callId = b.meta?.id ?? `call_${b.id ?? Math.random().toString(36).slice(2)}`;
+        const name = b.content || b.meta?.name || "tool";
+        const input = b.meta?.input ?? {};
+        out.push({
+          type: "function_call",
+          name,
+          arguments: typeof input === "string" ? input : JSON.stringify(input),
+          call_id: callId
+        });
+      }
+      continue;
+    }
+    if (b.actor === "system" && b.kind === "tool_result") {
+      const callId = b.meta?.toolUseId ?? "";
+      const output = renderToolOutputContent(b.content, b.embeds, sessionId);
+      out.push({ type: "function_call_output", call_id: callId, output });
+      continue;
+    }
+  }
+  return out;
+}
+
+// src/core/providers/codex.ts
 init_logger();
 var SHELL2 = process.env.SHELL || "/bin/zsh";
 function validateCodexPath(codexPath) {
   try {
-    const codexDir = import_path6.default.dirname(codexPath);
+    const codexDir = import_path7.default.dirname(codexPath);
     const env = { ...process.env, PATH: `${codexDir}:${process.env.PATH ?? ""}` };
     const out = (0, import_child_process2.execSync)(`"${codexPath}" --version`, {
       encoding: "utf8",
@@ -903,10 +1118,10 @@ function validateCodexPath(codexPath) {
   }
 }
 function cacheCodexPath(codexPath, cacheDir) {
-  const dir = cacheDir ?? import_path6.default.join(process.cwd(), ".sna");
+  const dir = cacheDir ?? import_path7.default.join(process.cwd(), ".sna");
   try {
-    if (!import_fs4.default.existsSync(dir)) import_fs4.default.mkdirSync(dir, { recursive: true });
-    import_fs4.default.writeFileSync(import_path6.default.join(dir, "codex-path"), codexPath);
+    if (!import_fs5.default.existsSync(dir)) import_fs5.default.mkdirSync(dir, { recursive: true });
+    import_fs5.default.writeFileSync(import_path7.default.join(dir, "codex-path"), codexPath);
   } catch {
   }
 }
@@ -916,9 +1131,9 @@ function resolveCodexCli(opts) {
     const v = validateCodexPath(process.env.SNA_CODEX_COMMAND);
     return { path: process.env.SNA_CODEX_COMMAND, version: v.version, source: "env" };
   }
-  const cacheFile = cacheDir ? import_path6.default.join(cacheDir, "codex-path") : import_path6.default.join(process.cwd(), ".sna/codex-path");
+  const cacheFile = cacheDir ? import_path7.default.join(cacheDir, "codex-path") : import_path7.default.join(process.cwd(), ".sna/codex-path");
   try {
-    const cached = import_fs4.default.readFileSync(cacheFile, "utf8").trim();
+    const cached = import_fs5.default.readFileSync(cacheFile, "utf8").trim();
     if (cached) {
       const v = validateCodexPath(cached);
       if (v.ok) return { path: cached, version: v.version, source: "cache" };
@@ -956,7 +1171,7 @@ function resolveCodexCli(opts) {
   return { path: "codex", source: "fallback" };
 }
 function resolveCodexPath(cwd) {
-  const result = resolveCodexCli({ cacheDir: import_path6.default.join(cwd, ".sna") });
+  const result = resolveCodexCli({ cacheDir: import_path7.default.join(cwd, ".sna") });
   logger.log("agent", `codex path: ${result.source}=${result.path}${result.version ? ` (${result.version})` : ""}`);
   return result.path;
 }
@@ -979,20 +1194,6 @@ function toCodexSandboxPolicy(mode) {
     default:
       return "readOnly";
   }
-}
-function buildHistoryContext(history) {
-  const turns = history.map(
-    (msg) => `<${msg.role}>
-${msg.content}
-</${msg.role}>`
-  ).join("\n\n");
-  return `<conversation-history>
-The following is our previous conversation. Use it as context.
-
-${turns}
-</conversation-history>
-
-`;
 }
 function extractResumeArg(extraArgs) {
   if (!extraArgs) return null;
@@ -1038,7 +1239,14 @@ var _CodexProcess = class _CodexProcess {
     this._initEmitted = false;
     this.buffer = "";
     this.pendingResponses = /* @__PURE__ */ new Map();
-    /** Maps permission requestId → JSON-RPC server request id for approval responses. */
+    /**
+     * Maps permission requestId → the JSON-RPC server request that raised it.
+     * We remember the `method` because each approval kind wants a distinct
+     * response shape (decision vs action vs permissions object) and the field
+     * names differ — one-size-fits-all response writes would send the wrong
+     * JSON and Codex silently interprets that as "decline" (observed live:
+     * MCP tool calls always appearing as "user rejected").
+     */
     this.pendingServerRequests = /* @__PURE__ */ new Map();
     this._ready = false;
     this._pendingSend = [];
@@ -1179,29 +1387,69 @@ var _CodexProcess = class _CodexProcess {
   }
   /**
    * Handle a JSON-RPC server request (Codex asking the client for a decision).
-   * Stores the rpcId so we can respond later via respondToPermission().
+   * Stores the (rpcId, method) so we can later respond with the correct
+   * per-method schema via respondToPermission().
+   *
+   * Recognized methods:
+   *   item/commandExecution/requestApproval — shell command gate (decision enum)
+   *   item/fileChange/requestApproval       — file write gate (decision enum)
+   *   item/permissions/requestApproval      — session permission grant (permissions profile)
+   *   mcpServer/elicitation/request         — MCP tool / elicitation (action enum)
+   *
+   * When the session is in bypassPermissions mode we auto-accept every
+   * request without routing to the UI — the user has already granted blanket
+   * approval via that mode. This matches Loom's default guard level (which
+   * runs bypassPermissions because tool policy is enforced via Loom's own
+   * guard hook, not Codex's per-call approval UI).
    */
   handleServerRequest(method, rpcId, params) {
-    if (method === "item/commandExecution/requestApproval" || method === "item/fileChange/requestApproval") {
-      const requestId = params.itemId ?? params.id ?? `perm-${rpcId}`;
-      this.pendingServerRequests.set(requestId, rpcId);
-      const isFileChange = method.includes("fileChange");
-      this.enqueue({
-        type: "permission_needed",
-        message: isFileChange ? `File change: ${params.path ?? "unknown"}` : `Command: ${params.command ?? "unknown"}`,
-        data: {
-          requestId,
-          toolName: isFileChange ? "file_change" : "shell",
-          command: params.command,
-          path: params.path,
-          itemId: params.itemId
-        },
-        timestamp: Date.now()
-      });
+    const isCommandApproval = method === "item/commandExecution/requestApproval";
+    const isFileApproval = method === "item/fileChange/requestApproval";
+    const isPermissionsApproval = method === "item/permissions/requestApproval";
+    const isMcpElicitation = method === "mcpServer/elicitation/request";
+    if (!isCommandApproval && !isFileApproval && !isPermissionsApproval && !isMcpElicitation) {
+      logger.log("agent", `codex unknown server request: ${method} (id=${rpcId})`);
+      this.write({ id: rpcId, result: {} });
       return;
     }
-    logger.log("agent", `codex unknown server request: ${method} (id=${rpcId})`);
-    this.write({ id: rpcId, result: {} });
+    const requestId = params.itemId ?? params.id ?? `perm-${rpcId}`;
+    this.pendingServerRequests.set(requestId, { rpcId, method });
+    if (this.options.permissionMode === "bypassPermissions") {
+      this.respondToPermission(requestId, true);
+      return;
+    }
+    let message;
+    let toolName;
+    if (isMcpElicitation) {
+      const serverName = params.serverName ?? "mcp";
+      const toolDesc = params._meta?.tool_description ?? params.request?.message ?? "tool call";
+      message = `MCP (${serverName}): ${toolDesc}`;
+      toolName = `mcp:${serverName}`;
+    } else if (isPermissionsApproval) {
+      message = `Permissions: ${params.reason ?? "requested"}`;
+      toolName = "permissions";
+    } else if (isFileApproval) {
+      message = `File change: ${params.path ?? "unknown"}`;
+      toolName = "file_change";
+    } else {
+      message = `Command: ${params.command ?? "unknown"}`;
+      toolName = "shell";
+    }
+    this.enqueue({
+      type: "permission_needed",
+      message,
+      data: {
+        requestId,
+        toolName,
+        method,
+        command: params.command,
+        path: params.path,
+        serverName: params.serverName,
+        reason: params.reason,
+        itemId: params.itemId
+      },
+      timestamp: Date.now()
+    });
   }
   // ── Initialization handshake ────────────────────────────────────────────
   async initialize() {
@@ -1225,7 +1473,35 @@ var _CodexProcess = class _CodexProcess {
         ...baseInstructions ? { baseInstructions } : {},
         ...developerInstructions ? { developerInstructions } : {}
       };
-      if (resumeThreadId) {
+      const hasInjectedHistory = !resumeThreadId && (this.options.history?.length ?? 0) > 0;
+      if (hasInjectedHistory) {
+        try {
+          await this.sendRpc("experimentalFeature/enablement/set", {
+            enablement: { "thread/resume.history": true }
+          });
+        } catch (err2) {
+          logger.log("agent", `codex: failed to enable thread/resume.history feature: ${err2}`);
+        }
+        const sessionId = this.options.env?.SNA_SESSION_ID ?? "default";
+        const responseItems = canonicalToCodexResponseItems(this.options.history, sessionId);
+        const syntheticThreadId = crypto.randomUUID();
+        const resumeResult = await this.sendRpc("thread/resume", {
+          threadId: syntheticThreadId,
+          history: responseItems,
+          ...baseInstructions ? { baseInstructions } : {},
+          ...developerInstructions ? { developerInstructions } : {},
+          ...this.options.model ? { model: this.options.model } : {},
+          sandbox
+        });
+        if (resumeResult?._error) {
+          logger.log("agent", `codex: thread/resume with history failed (${resumeResult.message ?? "unknown"}); falling back to fresh thread (history dropped)`);
+          const threadResult = await this.sendRpc("thread/start", threadParams);
+          this._threadId = threadResult?.threadId ?? threadResult?.thread?.id ?? null;
+        } else {
+          this._threadId = resumeResult?.thread?.id ?? syntheticThreadId;
+          logger.log("agent", `codex: injected ${this.options.history.length} history messages via thread/resume (thread=${this._threadId})`);
+        }
+      } else if (resumeThreadId) {
         const resumeResult = await this.sendRpc("thread/resume", {
           threadId: resumeThreadId,
           ...baseInstructions ? { baseInstructions } : {},
@@ -1254,18 +1530,8 @@ var _CodexProcess = class _CodexProcess {
           timestamp: Date.now()
         });
       }
-      let prompt = this.options.prompt;
-      if (this.options.history?.length && prompt) {
-        const context = buildHistoryContext(this.options.history);
-        prompt = context + prompt;
-        logger.log("agent", `codex: injected ${this.options.history.length} history messages as context`);
-      } else if (this.options.history?.length && !prompt) {
-        const context = buildHistoryContext(this.options.history);
-        prompt = context + "Continue from where we left off. What would you like to do next?";
-        logger.log("agent", `codex: injected ${this.options.history.length} history messages (no prompt)`);
-      }
-      if (prompt) {
-        this.startTurn(prompt);
+      if (this.options.prompt) {
+        this.startTurn(this.options.prompt);
       }
       for (const fn of this._pendingSend) fn();
       this._pendingSend = [];
@@ -1280,12 +1546,6 @@ var _CodexProcess = class _CodexProcess {
   }
   startTurn(input) {
     if (!this._threadId) return;
-    const userText = typeof input === "string" ? input : input.filter((b) => b.type === "text").map((b) => b.text).join("\n");
-    this.enqueue({
-      type: "user_message",
-      message: userText,
-      timestamp: Date.now()
-    });
     const contentBlocks = typeof input === "string" ? [{ type: "text", text: input }] : input.map((b) => {
       if (b.type === "text") return { type: "text", text: b.text };
       const src = b.source;
@@ -1361,19 +1621,46 @@ var _CodexProcess = class _CodexProcess {
    * Sends JSON-RPC response back via stdin to approve/deny the tool execution.
    */
   /**
-   * Respond to a pending permission request from Codex.
-   * Codex expects: { id, result: { decision: "accept"|"decline" } }
+   * Respond to a pending permission request from Codex via JSON-RPC stdin.
+   *
+   * Each server-request method expects a distinct response schema (the field
+   * names and the enum values differ between command/file approvals, MCP
+   * elicitation, and generic permission grants). Sending the wrong shape
+   * looks like success to the SDK but Codex silently interprets it as
+   * "decline" — which is how MCP tool calls started showing up as
+   * "user rejected" even under bypassPermissions.
    */
   respondToPermission(requestId, approved) {
-    const rpcId = this.pendingServerRequests.get(requestId);
-    if (rpcId == null) {
+    const pending = this.pendingServerRequests.get(requestId);
+    if (!pending) {
       logger.log("agent", `codex: no pending server request for ${requestId}`);
       return;
     }
     this.pendingServerRequests.delete(requestId);
-    const decision = approved ? "accept" : "decline";
-    this.write({ id: rpcId, result: { decision } });
-    logger.log("agent", `codex: permission ${decision} (rpcId=${rpcId}, requestId=${requestId})`);
+    const { rpcId, method } = pending;
+    let result;
+    switch (method) {
+      case "mcpServer/elicitation/request":
+        result = {
+          action: approved ? "accept" : "decline",
+          content: null,
+          _meta: null
+        };
+        break;
+      case "item/permissions/requestApproval":
+        result = { permissions: {}, scope: "turn" };
+        break;
+      case "item/commandExecution/requestApproval":
+      case "item/fileChange/requestApproval":
+      default:
+        result = { decision: approved ? "accept" : "decline" };
+        break;
+    }
+    this.write({ id: rpcId, result });
+    logger.log(
+      "agent",
+      `codex: permission ${approved ? "accept" : "decline"} (method=${method}, rpcId=${rpcId}, requestId=${requestId})`
+    );
   }
   kill() {
     if (this._alive) {
@@ -1658,23 +1945,23 @@ var CodexProvider = class {
     const codexPath = resolveCodexPath(options.cwd);
     const args = ["app-server"];
     const cleanEnv = { ...process.env, ...options.env };
-    const codexHome = options.configDir ?? import_path6.default.join(options.cwd, ".sna", "codex-home");
-    if (!import_fs4.default.existsSync(codexHome)) {
-      import_fs4.default.mkdirSync(codexHome, { recursive: true });
+    const codexHome = options.configDir ?? import_path7.default.join(options.cwd, ".sna", "codex-home");
+    if (!import_fs5.default.existsSync(codexHome)) {
+      import_fs5.default.mkdirSync(codexHome, { recursive: true });
     }
     const realCodexHome = `${process.env.HOME}/.codex`;
     for (const f of ["auth.json", "installation_id"]) {
-      const src = import_path6.default.join(realCodexHome, f);
-      const dst = import_path6.default.join(codexHome, f);
-      if (import_fs4.default.existsSync(src) && !import_fs4.default.existsSync(dst)) {
-        import_fs4.default.copyFileSync(src, dst);
+      const src = import_path7.default.join(realCodexHome, f);
+      const dst = import_path7.default.join(codexHome, f);
+      if (import_fs5.default.existsSync(src) && !import_fs5.default.existsSync(dst)) {
+        import_fs5.default.copyFileSync(src, dst);
       }
     }
-    const configTomlPath = import_path6.default.join(codexHome, "config.toml");
-    if (!import_fs4.default.existsSync(configTomlPath)) {
-      const realConfig = import_path6.default.join(realCodexHome, "config.toml");
-      if (import_fs4.default.existsSync(realConfig)) {
-        import_fs4.default.copyFileSync(realConfig, configTomlPath);
+    const configTomlPath = import_path7.default.join(codexHome, "config.toml");
+    if (!import_fs5.default.existsSync(configTomlPath)) {
+      const realConfig = import_path7.default.join(realCodexHome, "config.toml");
+      if (import_fs5.default.existsSync(realConfig)) {
+        import_fs5.default.copyFileSync(realConfig, configTomlPath);
       }
     }
     cleanEnv.CODEX_HOME = codexHome;
@@ -1708,18 +1995,18 @@ var CodexProvider = class {
         }
         tomlLines.push("");
       }
-      import_fs4.default.appendFileSync(configTomlPath, "\n" + tomlLines.join("\n"));
+      import_fs5.default.appendFileSync(configTomlPath, "\n" + tomlLines.join("\n"));
       logger.log("agent", `codex: ${Object.keys(options.mcpServers).length} MCP servers injected`);
     }
-    let pkgRoot = import_path6.default.dirname((0, import_url2.fileURLToPath)(importMetaUrl));
-    while (!import_fs4.default.existsSync(import_path6.default.join(pkgRoot, "package.json"))) {
-      const parent = import_path6.default.dirname(pkgRoot);
+    let pkgRoot = import_path7.default.dirname((0, import_url2.fileURLToPath)(importMetaUrl));
+    while (!import_fs5.default.existsSync(import_path7.default.join(pkgRoot, "package.json"))) {
+      const parent = import_path7.default.dirname(pkgRoot);
       if (parent === pkgRoot) break;
       pkgRoot = parent;
     }
     const preToolUseHooks = [];
     if (options.permissionMode !== "bypassPermissions") {
-      const hookScript = import_path6.default.join(pkgRoot, "dist", "scripts", "hook.js");
+      const hookScript = import_path7.default.join(pkgRoot, "dist", "scripts", "hook.js");
       const sessionId = options.env?.SNA_SESSION_ID ?? "default";
       preToolUseHooks.push({
         type: "command",
@@ -1729,7 +2016,7 @@ var CodexProvider = class {
       logger.log("agent", `codex: permission hook \u2192 ${hookScript} --session=${sessionId}`);
     }
     if (options.allowedTools?.length || options.disallowedTools?.length) {
-      const filterScript = import_path6.default.join(pkgRoot, "dist", "scripts", "tool-filter.js");
+      const filterScript = import_path7.default.join(pkgRoot, "dist", "scripts", "tool-filter.js");
       const filterArgs = [];
       if (options.allowedTools?.length) {
         filterArgs.push(`--allowed=${options.allowedTools.join(",")}`);
@@ -1751,14 +2038,14 @@ var CodexProvider = class {
           }]
         }
       };
-      import_fs4.default.writeFileSync(import_path6.default.join(codexHome, "hooks.json"), JSON.stringify(hooksJson));
-      const existingConfig = import_fs4.default.readFileSync(configTomlPath, "utf8");
+      import_fs5.default.writeFileSync(import_path7.default.join(codexHome, "hooks.json"), JSON.stringify(hooksJson));
+      const existingConfig = import_fs5.default.readFileSync(configTomlPath, "utf8");
       if (!existingConfig.includes("codex_hooks")) {
-        import_fs4.default.appendFileSync(configTomlPath, "\n[features]\ncodex_hooks = true\n");
+        import_fs5.default.appendFileSync(configTomlPath, "\n[features]\ncodex_hooks = true\n");
       }
     }
     logger.log("agent", `codex: CODEX_HOME=${codexHome}`);
-    const codexDir = import_path6.default.dirname(codexPath);
+    const codexDir = import_path7.default.dirname(codexPath);
     if (codexDir && codexDir !== ".") {
       cleanEnv.PATH = `${codexDir}:${cleanEnv.PATH ?? ""}`;
     }
@@ -1786,12 +2073,15 @@ var providers = {
 // src/server/routes/agent.ts
 init_logger();
 
-// src/server/history-builder.ts
+// src/history/canonical.ts
 init_cjs_shims();
 
 // src/server/image-store.ts
 init_cjs_shims();
 init_config();
+
+// src/db/chat-messages.ts
+init_cjs_shims();
 
 // src/server/routes/agent.ts
 init_config();
@@ -1821,11 +2111,11 @@ init_config();
 init_logger();
 function resolveStandaloneScript() {
   const selfPath = (0, import_url3.fileURLToPath)(importMetaUrl);
-  let script = import_path7.default.resolve(import_path7.default.dirname(selfPath), "../server/standalone.js");
+  let script = import_path8.default.resolve(import_path8.default.dirname(selfPath), "../server/standalone.js");
   if (script.includes(".asar") && !script.includes(".asar.unpacked")) {
     script = script.replace(/(\.asar)([/\\])/, ".asar.unpacked$2");
   }
-  if (!import_fs5.default.existsSync(script)) {
+  if (!import_fs6.default.existsSync(script)) {
     throw new Error(
       `SNA standalone script not found: ${script}
 Ensure "@sna-sdk/core" is listed in asarUnpack in your electron-builder config.`
@@ -1836,14 +2126,14 @@ Ensure "@sna-sdk/core" is listed in asarUnpack in your electron-builder config.`
 function buildNodePath() {
   const resourcesPath = process.resourcesPath;
   if (!resourcesPath) return void 0;
-  const unpacked = import_path7.default.join(resourcesPath, "app.asar.unpacked", "node_modules");
-  if (!import_fs5.default.existsSync(unpacked)) return void 0;
+  const unpacked = import_path8.default.join(resourcesPath, "app.asar.unpacked", "node_modules");
+  if (!import_fs6.default.existsSync(unpacked)) return void 0;
   const existing = process.env.NODE_PATH;
-  return existing ? `${unpacked}${import_path7.default.delimiter}${existing}` : unpacked;
+  return existing ? `${unpacked}${import_path8.default.delimiter}${existing}` : unpacked;
 }
 async function startSnaServer(options) {
   const port = options.port ?? 3099;
-  const cwd = options.cwd ?? import_path7.default.dirname(options.dbPath);
+  const cwd = options.cwd ?? import_path8.default.dirname(options.dbPath);
   const readyTimeout = options.readyTimeout ?? 15e3;
   const { onLog } = options;
   const standaloneScript = resolveStandaloneScript();
@@ -1851,7 +2141,7 @@ async function startSnaServer(options) {
   let consumerModules;
   try {
     const bsPkg = require.resolve("better-sqlite3/package.json", { paths: [process.cwd()] });
-    consumerModules = import_path7.default.resolve(bsPkg, "../..");
+    consumerModules = import_path8.default.resolve(bsPkg, "../..");
   } catch {
   }
   const env = {

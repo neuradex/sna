@@ -10,20 +10,24 @@ const MIME_TO_EXT = {
   "image/jpeg": "jpg",
   "image/gif": "gif",
   "image/webp": "webp",
-  "image/svg+xml": "svg"
+  "image/svg+xml": "svg",
+  "application/pdf": "pdf"
 };
-function saveImages(sessionId, images) {
+function saveEmbeds(sessionId, attachments) {
   const dir = path.join(getImageDir(), sessionId);
   fs.mkdirSync(dir, { recursive: true });
-  return images.map((img) => {
-    const ext = MIME_TO_EXT[img.mimeType] ?? "bin";
-    const hash = createHash("sha256").update(img.base64).digest("hex").slice(0, 12);
-    const filename = `${hash}.${ext}`;
+  return attachments.map((att) => {
+    const ext = MIME_TO_EXT[att.mimeType] ?? "bin";
+    const id = createHash("sha256").update(att.base64).digest("hex").slice(0, 12);
+    const filename = `${id}.${ext}`;
     const filePath = path.join(dir, filename);
     if (!fs.existsSync(filePath)) {
-      fs.writeFileSync(filePath, Buffer.from(img.base64, "base64"));
+      fs.writeFileSync(filePath, Buffer.from(att.base64, "base64"));
     }
-    return filename;
+    return {
+      id,
+      record: { mime_type: att.mimeType, path: filename }
+    };
   });
 }
 function resolveImagePath(sessionId, filename) {
@@ -33,5 +37,5 @@ function resolveImagePath(sessionId, filename) {
 }
 export {
   resolveImagePath,
-  saveImages
+  saveEmbeds
 };

@@ -2,6 +2,9 @@ import * as hono_types from 'hono/types';
 import { Hono } from 'hono';
 import { SessionManager } from '../session-manager.js';
 import '../../core/providers/types.js';
+import '../../history/types.js';
+import '../../db/schema.js';
+import 'better-sqlite3';
 
 interface RunOnceOptions {
     message: string;

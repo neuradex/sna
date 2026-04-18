@@ -3,6 +3,7 @@ import { EventEmitter } from "events";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { canonicalToCodexResponseItems } from "../../history/codex.js";
 import { logger } from "../../lib/logger.js";
 const SHELL = process.env.SHELL || "/bin/zsh";
 function validateCodexPath(codexPath) {
@@ -98,20 +99,6 @@ function toCodexSandboxPolicy(mode) {
       return "readOnly";
   }
 }
-function buildHistoryContext(history) {
-  const turns = history.map(
-    (msg) => `<${msg.role}>
-${msg.content}
-</${msg.role}>`
-  ).join("\n\n");
-  return `<conversation-history>
-The following is our previous conversation. Use it as context.
-
-${turns}
-</conversation-history>
-
-`;
-}
 function extractResumeArg(extraArgs) {
   if (!extraArgs) return null;
   const idx = extraArgs.indexOf("--resume");
@@ -156,7 +143,14 @@ const _CodexProcess = class _CodexProcess {
     this._initEmitted = false;
     this.buffer = "";
     this.pendingResponses = /* @__PURE__ */ new Map();
-    /** Maps permission requestId → JSON-RPC server request id for approval responses. */
+    /**
+     * Maps permission requestId → the JSON-RPC server request that raised it.
+     * We remember the `method` because each approval kind wants a distinct
+     * response shape (decision vs action vs permissions object) and the field
+     * names differ — one-size-fits-all response writes would send the wrong
+     * JSON and Codex silently interprets that as "decline" (observed live:
+     * MCP tool calls always appearing as "user rejected").
+     */
     this.pendingServerRequests = /* @__PURE__ */ new Map();
     this._ready = false;
     this._pendingSend = [];
@@ -297,29 +291,69 @@ const _CodexProcess = class _CodexProcess {
   }
   /**
    * Handle a JSON-RPC server request (Codex asking the client for a decision).
-   * Stores the rpcId so we can respond later via respondToPermission().
+   * Stores the (rpcId, method) so we can later respond with the correct
+   * per-method schema via respondToPermission().
+   *
+   * Recognized methods:
+   *   item/commandExecution/requestApproval — shell command gate (decision enum)
+   *   item/fileChange/requestApproval       — file write gate (decision enum)
+   *   item/permissions/requestApproval      — session permission grant (permissions profile)
+   *   mcpServer/elicitation/request         — MCP tool / elicitation (action enum)
+   *
+   * When the session is in bypassPermissions mode we auto-accept every
+   * request without routing to the UI — the user has already granted blanket
+   * approval via that mode. This matches Loom's default guard level (which
+   * runs bypassPermissions because tool policy is enforced via Loom's own
+   * guard hook, not Codex's per-call approval UI).
    */
   handleServerRequest(method, rpcId, params) {
-    if (method === "item/commandExecution/requestApproval" || method === "item/fileChange/requestApproval") {
-      const requestId = params.itemId ?? params.id ?? `perm-${rpcId}`;
-      this.pendingServerRequests.set(requestId, rpcId);
-      const isFileChange = method.includes("fileChange");
-      this.enqueue({
-        type: "permission_needed",
-        message: isFileChange ? `File change: ${params.path ?? "unknown"}` : `Command: ${params.command ?? "unknown"}`,
-        data: {
-          requestId,
-          toolName: isFileChange ? "file_change" : "shell",
-          command: params.command,
-          path: params.path,
-          itemId: params.itemId
-        },
-        timestamp: Date.now()
-      });
+    const isCommandApproval = method === "item/commandExecution/requestApproval";
+    const isFileApproval = method === "item/fileChange/requestApproval";
+    const isPermissionsApproval = method === "item/permissions/requestApproval";
+    const isMcpElicitation = method === "mcpServer/elicitation/request";
+    if (!isCommandApproval && !isFileApproval && !isPermissionsApproval && !isMcpElicitation) {
+      logger.log("agent", `codex unknown server request: ${method} (id=${rpcId})`);
+      this.write({ id: rpcId, result: {} });
       return;
     }
-    logger.log("agent", `codex unknown server request: ${method} (id=${rpcId})`);
-    this.write({ id: rpcId, result: {} });
+    const requestId = params.itemId ?? params.id ?? `perm-${rpcId}`;
+    this.pendingServerRequests.set(requestId, { rpcId, method });
+    if (this.options.permissionMode === "bypassPermissions") {
+      this.respondToPermission(requestId, true);
+      return;
+    }
+    let message;
+    let toolName;
+    if (isMcpElicitation) {
+      const serverName = params.serverName ?? "mcp";
+      const toolDesc = params._meta?.tool_description ?? params.request?.message ?? "tool call";
+      message = `MCP (${serverName}): ${toolDesc}`;
+      toolName = `mcp:${serverName}`;
+    } else if (isPermissionsApproval) {
+      message = `Permissions: ${params.reason ?? "requested"}`;
+      toolName = "permissions";
+    } else if (isFileApproval) {
+      message = `File change: ${params.path ?? "unknown"}`;
+      toolName = "file_change";
+    } else {
+      message = `Command: ${params.command ?? "unknown"}`;
+      toolName = "shell";
+    }
+    this.enqueue({
+      type: "permission_needed",
+      message,
+      data: {
+        requestId,
+        toolName,
+        method,
+        command: params.command,
+        path: params.path,
+        serverName: params.serverName,
+        reason: params.reason,
+        itemId: params.itemId
+      },
+      timestamp: Date.now()
+    });
   }
   // ── Initialization handshake ────────────────────────────────────────────
   async initialize() {
@@ -343,7 +377,35 @@ const _CodexProcess = class _CodexProcess {
         ...baseInstructions ? { baseInstructions } : {},
         ...developerInstructions ? { developerInstructions } : {}
       };
-      if (resumeThreadId) {
+      const hasInjectedHistory = !resumeThreadId && (this.options.history?.length ?? 0) > 0;
+      if (hasInjectedHistory) {
+        try {
+          await this.sendRpc("experimentalFeature/enablement/set", {
+            enablement: { "thread/resume.history": true }
+          });
+        } catch (err) {
+          logger.log("agent", `codex: failed to enable thread/resume.history feature: ${err}`);
+        }
+        const sessionId = this.options.env?.SNA_SESSION_ID ?? "default";
+        const responseItems = canonicalToCodexResponseItems(this.options.history, sessionId);
+        const syntheticThreadId = crypto.randomUUID();
+        const resumeResult = await this.sendRpc("thread/resume", {
+          threadId: syntheticThreadId,
+          history: responseItems,
+          ...baseInstructions ? { baseInstructions } : {},
+          ...developerInstructions ? { developerInstructions } : {},
+          ...this.options.model ? { model: this.options.model } : {},
+          sandbox
+        });
+        if (resumeResult?._error) {
+          logger.log("agent", `codex: thread/resume with history failed (${resumeResult.message ?? "unknown"}); falling back to fresh thread (history dropped)`);
+          const threadResult = await this.sendRpc("thread/start", threadParams);
+          this._threadId = threadResult?.threadId ?? threadResult?.thread?.id ?? null;
+        } else {
+          this._threadId = resumeResult?.thread?.id ?? syntheticThreadId;
+          logger.log("agent", `codex: injected ${this.options.history.length} history messages via thread/resume (thread=${this._threadId})`);
+        }
+      } else if (resumeThreadId) {
         const resumeResult = await this.sendRpc("thread/resume", {
           threadId: resumeThreadId,
           ...baseInstructions ? { baseInstructions } : {},
@@ -372,18 +434,8 @@ const _CodexProcess = class _CodexProcess {
           timestamp: Date.now()
         });
       }
-      let prompt = this.options.prompt;
-      if (this.options.history?.length && prompt) {
-        const context = buildHistoryContext(this.options.history);
-        prompt = context + prompt;
-        logger.log("agent", `codex: injected ${this.options.history.length} history messages as context`);
-      } else if (this.options.history?.length && !prompt) {
-        const context = buildHistoryContext(this.options.history);
-        prompt = context + "Continue from where we left off. What would you like to do next?";
-        logger.log("agent", `codex: injected ${this.options.history.length} history messages (no prompt)`);
-      }
-      if (prompt) {
-        this.startTurn(prompt);
+      if (this.options.prompt) {
+        this.startTurn(this.options.prompt);
       }
       for (const fn of this._pendingSend) fn();
       this._pendingSend = [];
@@ -398,12 +450,6 @@ const _CodexProcess = class _CodexProcess {
   }
   startTurn(input) {
     if (!this._threadId) return;
-    const userText = typeof input === "string" ? input : input.filter((b) => b.type === "text").map((b) => b.text).join("\n");
-    this.enqueue({
-      type: "user_message",
-      message: userText,
-      timestamp: Date.now()
-    });
     const contentBlocks = typeof input === "string" ? [{ type: "text", text: input }] : input.map((b) => {
       if (b.type === "text") return { type: "text", text: b.text };
       const src = b.source;
@@ -479,19 +525,46 @@ const _CodexProcess = class _CodexProcess {
    * Sends JSON-RPC response back via stdin to approve/deny the tool execution.
    */
   /**
-   * Respond to a pending permission request from Codex.
-   * Codex expects: { id, result: { decision: "accept"|"decline" } }
+   * Respond to a pending permission request from Codex via JSON-RPC stdin.
+   *
+   * Each server-request method expects a distinct response schema (the field
+   * names and the enum values differ between command/file approvals, MCP
+   * elicitation, and generic permission grants). Sending the wrong shape
+   * looks like success to the SDK but Codex silently interprets it as
+   * "decline" — which is how MCP tool calls started showing up as
+   * "user rejected" even under bypassPermissions.
    */
   respondToPermission(requestId, approved) {
-    const rpcId = this.pendingServerRequests.get(requestId);
-    if (rpcId == null) {
+    const pending = this.pendingServerRequests.get(requestId);
+    if (!pending) {
       logger.log("agent", `codex: no pending server request for ${requestId}`);
       return;
     }
     this.pendingServerRequests.delete(requestId);
-    const decision = approved ? "accept" : "decline";
-    this.write({ id: rpcId, result: { decision } });
-    logger.log("agent", `codex: permission ${decision} (rpcId=${rpcId}, requestId=${requestId})`);
+    const { rpcId, method } = pending;
+    let result;
+    switch (method) {
+      case "mcpServer/elicitation/request":
+        result = {
+          action: approved ? "accept" : "decline",
+          content: null,
+          _meta: null
+        };
+        break;
+      case "item/permissions/requestApproval":
+        result = { permissions: {}, scope: "turn" };
+        break;
+      case "item/commandExecution/requestApproval":
+      case "item/fileChange/requestApproval":
+      default:
+        result = { decision: approved ? "accept" : "decline" };
+        break;
+    }
+    this.write({ id: rpcId, result });
+    logger.log(
+      "agent",
+      `codex: permission ${approved ? "accept" : "decline"} (method=${method}, rpcId=${rpcId}, requestId=${requestId})`
+    );
   }
   kill() {
     if (this._alive) {
@@ -896,7 +969,6 @@ class CodexProvider {
 }
 export {
   CodexProvider,
-  buildHistoryContext,
   cacheCodexPath,
   extractResumeArg,
   extractSystemPromptArgs,

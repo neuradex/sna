@@ -27,7 +27,7 @@ import { createAgentRoutes as createAgentRoutes2 } from "./routes/agent.js";
 import { createChatRoutes as createChatRoutes2 } from "./routes/chat.js";
 import { SessionManager as SessionManager2 } from "./session-manager.js";
 import { attachWebSocket } from "./ws.js";
-import { buildHistoryFromDb } from "./history-builder.js";
+import { buildCanonicalFromDb } from "../history/canonical.js";
 import { completion } from "../core/completion.js";
 function snaPortRoute(c) {
   const portFile = _path.join(process.cwd(), ".sna/sna-api.port");
@@ -41,7 +41,7 @@ function snaPortRoute(c) {
 export {
   SessionManager2 as SessionManager,
   attachWebSocket,
-  buildHistoryFromDb,
+  buildCanonicalFromDb,
   completion,
   createAgentRoutes2 as createAgentRoutes,
   createChatRoutes2 as createChatRoutes,

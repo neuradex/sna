@@ -2,6 +2,9 @@ import { WebSocketServer } from 'ws';
 import { Server } from 'http';
 import { SessionManager } from './session-manager.js';
 import '../core/providers/types.js';
+import '../history/types.js';
+import '../db/schema.js';
+import 'better-sqlite3';
 
 /**
  * WebSocket API — wraps all SNA HTTP functionality over a single WS connection.

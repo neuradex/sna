@@ -56,8 +56,11 @@ import { logger } from "../lib/logger.js";
 import { runOnce, type RunOnceOptions } from "./routes/agent.js";
 import { completion, type CompletionOptions } from "../core/completion.js";
 import { wsReply } from "./api-types.js";
-import { buildHistoryFromDb } from "./history-builder.js";
-import { saveImages } from "./image-store.js";
+import { buildCanonicalFromDb } from "../history/canonical.js";
+import { saveEmbeds } from "./image-store.js";
+import { insertChatMessage } from "../db/chat-messages.js";
+import { formatEmbedRef } from "../history/embed-refs.js";
+import type { EmbedRecord } from "../history/types.js";
 import { getConfig } from "../config.js";
 import type { SessionManager } from "./session-manager.js";
 
@@ -345,8 +348,11 @@ function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): vo
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`)
       .run(sessionId, session.label ?? sessionId);
     if (msg.prompt) {
-      db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`)
-        .run(sessionId, msg.prompt as string, msg.meta ? JSON.stringify(msg.meta) : null);
+      insertChatMessage(db, {
+        sessionId, actor: "user", kind: "text",
+        content: msg.prompt as string,
+        meta: msg.meta as Record<string, unknown> | undefined,
+      });
     }
     const skillMatch = (msg.prompt as string)?.match(/^Execute the skill:\s*(\S+)/);
     if (skillMatch) {
@@ -361,6 +367,8 @@ function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): vo
   const permissionMode = msg.permissionMode as string | undefined;
   const configDir = msg.configDir as string | undefined;
   const extraArgs = msg.extraArgs as string[] | undefined;
+  const providerOptions = msg.providerOptions as Record<string, unknown> | undefined;
+  const modelProvider = msg.modelProvider as string | undefined;
 
   try {
     const proc = provider.spawn({
@@ -372,9 +380,15 @@ function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): vo
       env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
       history: msg.history as any[] | undefined,
       extraArgs,
+      providerOptions,
+      systemPrompt: msg.systemPrompt as string | undefined,
+      appendSystemPrompt: msg.appendSystemPrompt as string | undefined,
+      allowedTools: msg.allowedTools as string[] | undefined,
+      disallowedTools: msg.disallowedTools as string[] | undefined,
+      mcpServers: msg.mcpServers as any,
     });
     sm.setProcess(sessionId, proc);
-    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
+    sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, permissionMode, configDir, extraArgs, providerOptions });
     wsReply(ws, msg, { status: "started", provider: provider.name, sessionId: session.id });
   } catch (e: any) {
     replyError(ws, msg, e.message);
@@ -393,24 +407,37 @@ function handleAgentSend(ws: WebSocket, msg: WsRequest, sm: SessionManager): voi
     return replyError(ws, msg, "message or images required");
   }
 
-  const textContent = (msg.message as string) ?? "(image)";
-  let meta: Record<string, unknown> = msg.meta ? { ...(msg.meta as Record<string, unknown>) } : {};
+  const userText = (msg.message as string) ?? "";
+  const meta: Record<string, unknown> = msg.meta ? { ...(msg.meta as Record<string, unknown>) } : {};
+  const embeds: Record<string, EmbedRecord> = {};
+  let contentText = userText;
   if (images?.length) {
-    const filenames = saveImages(sessionId, images);
-    meta.images = filenames;
+    const saved = saveEmbeds(sessionId, images);
+    const refs = saved.map(({ id, record }) => {
+      embeds[id] = record;
+      return formatEmbedRef(id);
+    });
+    // Append refs after the user's text (or alone if there was no text).
+    contentText = userText ? `${userText}\n${refs.join(" ")}` : refs.join(" ");
   }
   try {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`)
       .run(sessionId, session.label ?? sessionId);
-    db.prepare(`INSERT INTO chat_messages (session_id, role, content, meta) VALUES (?, 'user', ?, ?)`)
-      .run(sessionId, textContent, Object.keys(meta).length > 0 ? JSON.stringify(meta) : null);
+    insertChatMessage(db, {
+      sessionId,
+      actor: "user",
+      kind: "text",
+      content: contentText,
+      embeds: Object.keys(embeds).length > 0 ? embeds : undefined,
+      meta: Object.keys(meta).length > 0 ? meta : undefined,
+    });
   } catch { /* non-fatal */ }
 
   // Broadcast user message to agent.subscribe listeners (multi-client sync)
   sm.pushEvent(sessionId, {
     type: "user_message",
-    message: textContent,
+    message: contentText,
     data: Object.keys(meta).length > 0 ? meta : undefined,
     timestamp: Date.now(),
   });
@@ -441,16 +468,23 @@ function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManager): v
     return replyError(ws, msg, "Session already running. Use agent.send instead.");
   }
 
-  const history = buildHistoryFromDb(sessionId);
+  const history = buildCanonicalFromDb(sessionId);
   if (history.length === 0 && !msg.prompt) {
     return replyError(ws, msg, "No history in DB — nothing to resume.");
   }
 
   const providerName = (msg.provider as string) ?? session.lastStartConfig?.provider ?? getConfig().defaultProvider;
+  const providerChanged = session.lastStartConfig && session.lastStartConfig.provider !== providerName;
   const model = (msg.model as string) ?? session.lastStartConfig?.model ?? getConfig().model;
   const permissionMode = (msg.permissionMode as string) ?? session.lastStartConfig?.permissionMode;
-  const configDir = (msg.configDir as string) ?? session.lastStartConfig?.configDir;
-  const extraArgs = (msg.extraArgs as string[]) ?? session.lastStartConfig?.extraArgs;
+  const configDir = providerChanged ? (msg.configDir as string | undefined) : ((msg.configDir as string) ?? session.lastStartConfig?.configDir);
+  // Provider-specific fields: inherit only when provider is unchanged.
+  const extraArgs = providerChanged ? (msg.extraArgs as string[] | undefined) : ((msg.extraArgs as string[]) ?? session.lastStartConfig?.extraArgs);
+  const providerOptions = providerChanged
+    ? (msg.providerOptions as Record<string, unknown> | undefined)
+    : ((msg.providerOptions as Record<string, unknown> | undefined) ?? session.lastStartConfig?.providerOptions);
+  const modelProvider = (msg.modelProvider as string | undefined)
+    ?? (providerChanged ? undefined : session.lastStartConfig?.modelProvider);
   const provider = getProvider(providerName);
 
   try {
@@ -463,9 +497,15 @@ function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManager): v
       env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
       history: history.length > 0 ? history : undefined,
       extraArgs,
+      providerOptions,
+      systemPrompt: msg.systemPrompt as string | undefined,
+      appendSystemPrompt: msg.appendSystemPrompt as string | undefined,
+      allowedTools: msg.allowedTools as string[] | undefined,
+      disallowedTools: msg.disallowedTools as string[] | undefined,
+      mcpServers: msg.mcpServers as any,
     });
     sm.setProcess(sessionId, proc, "resumed");
-    sm.saveStartConfig(sessionId, { provider: providerName, model, permissionMode, configDir, extraArgs });
+    sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, permissionMode, configDir, extraArgs, providerOptions });
     wsReply(ws, msg, {
       status: "resumed",
       provider: providerName,
@@ -484,14 +524,24 @@ function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionManager): 
     const prevProvider = session?.lastStartConfig?.provider;
     const ccSessionId = session?.ccSessionId;
 
+    const typedOpts = {
+      systemPrompt: msg.systemPrompt as string | undefined,
+      appendSystemPrompt: msg.appendSystemPrompt as string | undefined,
+      allowedTools: msg.allowedTools as string[] | undefined,
+      disallowedTools: msg.disallowedTools as string[] | undefined,
+      mcpServers: msg.mcpServers as any,
+    };
+
     const { config } = sm.restartSession(
       sessionId,
       {
         provider: msg.provider as string | undefined,
+        modelProvider: msg.modelProvider as string | undefined,
         model: msg.model as string | undefined,
         permissionMode: msg.permissionMode as string | undefined,
         configDir: msg.configDir as string | undefined,
         extraArgs: msg.extraArgs as string[] | undefined,
+        providerOptions: msg.providerOptions as Record<string, unknown> | undefined,
       },
       (cfg) => {
         const prov = getProvider(cfg.provider);
@@ -499,7 +549,7 @@ function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionManager): 
 
         if (providerChanged) {
           // Cross-provider: inject DB history
-          const history = buildHistoryFromDb(sessionId);
+          const history = buildCanonicalFromDb(sessionId);
           return prov.spawn({
             cwd: sm.getSession(sessionId)!.cwd,
             model: cfg.model,
@@ -508,6 +558,8 @@ function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionManager): 
             env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
             history: history.length > 0 ? history : undefined,
             extraArgs: cfg.extraArgs,
+            providerOptions: cfg.providerOptions,
+            ...typedOpts,
           });
         }
 
@@ -520,6 +572,8 @@ function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionManager): 
           env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
           resumeSessionId: ccSessionId ?? undefined,
           extraArgs: cfg.extraArgs,
+          providerOptions: cfg.providerOptions,
+          ...typedOpts,
         });
       },
     );
@@ -562,13 +616,13 @@ function handleAgentStatus(ws: WebSocket, msg: WsRequest, sm: SessionManager): v
   const session = sm.getSession(sessionId);
   const alive = session?.process?.alive ?? false;
   let messageCount = 0;
-  let lastMessage: { role: string; content: string; created_at: string } | null = null;
+  let lastMessage: { actor: string; kind: string; content: string; created_at: string } | null = null;
   try {
     const db = getDb();
     const count = db.prepare("SELECT COUNT(*) as c FROM chat_messages WHERE session_id = ?").get(sessionId) as any;
     messageCount = count?.c ?? 0;
-    const last = db.prepare("SELECT role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1").get(sessionId) as any;
-    if (last) lastMessage = { role: last.role, content: last.content, created_at: last.created_at };
+    const last = db.prepare("SELECT actor, kind, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 1").get(sessionId) as any;
+    if (last) lastMessage = { actor: last.actor, kind: last.kind, content: last.content, created_at: last.created_at };
   } catch {}
   wsReply(ws, msg, {
     alive,
@@ -625,18 +679,19 @@ function handleAgentSubscribe(
     try {
       const db = getDb();
       const rows = db.prepare(
-        `SELECT role, content, meta, created_at FROM chat_messages
+        `SELECT actor, kind, content, meta, created_at FROM chat_messages
          WHERE session_id = ? ORDER BY id ASC`,
-      ).all(sessionId) as { role: string; content: string; meta: string | null; created_at: string }[];
+      ).all(sessionId) as { actor: string; kind: string; content: string; meta: string | null; created_at: string }[];
 
       for (const row of rows) {
         cursor++;
-        const eventType = row.role === "user" ? "user_message"
-          : row.role === "assistant" ? "assistant"
-          : row.role === "thinking" ? "thinking"
-          : row.role === "tool" ? "tool_use"
-          : row.role === "tool_result" ? "tool_result"
-          : row.role === "error" ? "error"
+        // Map (actor, kind) → event type for replay. status blocks are bookkeeping and skipped.
+        const eventType = row.actor === "user" ? "user_message"
+          : row.actor === "assistant" && row.kind === "text" ? "assistant"
+          : row.actor === "assistant" && row.kind === "thinking" ? "thinking"
+          : row.actor === "assistant" && row.kind === "tool_use" ? "tool_use"
+          : row.actor === "system" && row.kind === "tool_result" ? "tool_result"
+          : row.actor === "system" && row.kind === "error" ? "error"
           : null;
         if (!eventType) continue;
         const meta = row.meta ? JSON.parse(row.meta) : undefined;
@@ -902,21 +957,23 @@ function handleChatMessagesList(ws: WebSocket, msg: WsRequest): void {
 function handleChatMessagesCreate(ws: WebSocket, msg: WsRequest): void {
   const sessionId = msg.session as string;
   if (!sessionId) return replyError(ws, msg, "session is required");
-  if (!msg.role) return replyError(ws, msg, "role is required");
+  const actor = msg.actor as import("../db/schema.js").ChatActor | undefined;
+  const kind = msg.kind as import("../db/schema.js").ChatKind | undefined;
+  if (!actor || !kind) return replyError(ws, msg, "actor and kind are required");
   try {
     const db = getDb();
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`)
       .run(sessionId, sessionId);
-    const result = db.prepare(
-      `INSERT INTO chat_messages (session_id, role, content, skill_name, meta) VALUES (?, ?, ?, ?, ?)`,
-    ).run(
+    const id = insertChatMessage(db, {
       sessionId,
-      msg.role as string,
-      (msg.content as string) ?? "",
-      (msg.skill_name as string) ?? null,
-      msg.meta ? JSON.stringify(msg.meta) : null,
-    );
-    wsReply(ws, msg, { status: "created", id: Number(result.lastInsertRowid) });
+      actor,
+      kind,
+      content: (msg.content as string) ?? "",
+      embeds: msg.embeds as Record<string, import("../history/types.js").EmbedRecord> | undefined,
+      meta: msg.meta as Record<string, unknown> | undefined,
+      skillName: (msg.skill_name as string) ?? undefined,
+    });
+    wsReply(ws, msg, { status: "created", id });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }

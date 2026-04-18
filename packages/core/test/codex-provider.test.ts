@@ -9,12 +9,12 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   toCodexSandbox,
-  buildHistoryContext,
   extractResumeArg,
   extractSystemPromptArgs,
   validateCodexPath,
   // @ts-ignore — toCodexSandboxPolicy is not exported but we test via toCodexSandbox
 } from "../src/core/providers/codex.js";
+import { canonicalToCodexResponseItems } from "../src/history/codex.js";
 
 // ── toCodexSandbox ──────────────────────────────────────────────────────────
 
@@ -40,37 +40,71 @@ describe("toCodexSandbox", () => {
   });
 });
 
-// ── buildHistoryContext ─────────────────────────────────────────────────────
+// ── canonicalToCodexResponseItems ───────────────────────────────────────────
 
-describe("buildHistoryContext", () => {
-  it("wraps messages in conversation-history XML", () => {
-    const result = buildHistoryContext([
-      { role: "user", content: "Hello" },
-      { role: "assistant", content: "Hi there" },
+describe("canonicalToCodexResponseItems", () => {
+  it("maps user text → Message(role=user, input_text)", () => {
+    const items = canonicalToCodexResponseItems(
+      [{ actor: "user", kind: "text", content: "Hello" }],
+      "s1",
+    );
+    assert.deepEqual(items, [
+      { type: "message", role: "user", content: [{ type: "input_text", text: "Hello" }] },
     ]);
-    assert.ok(result.includes("<conversation-history>"));
-    assert.ok(result.includes("</conversation-history>"));
-    assert.ok(result.includes("<user>\nHello\n</user>"));
-    assert.ok(result.includes("<assistant>\nHi there\n</assistant>"));
   });
 
-  it("handles empty history", () => {
-    const result = buildHistoryContext([]);
-    assert.ok(result.includes("<conversation-history>"));
-    assert.ok(result.includes("</conversation-history>"));
+  it("maps assistant text → Message(role=assistant, output_text)", () => {
+    const items = canonicalToCodexResponseItems(
+      [{ actor: "assistant", kind: "text", content: "Hi there" }],
+      "s1",
+    );
+    assert.deepEqual(items, [
+      { type: "message", role: "assistant", content: [{ type: "output_text", text: "Hi there" }] },
+    ]);
   });
 
-  it("preserves message order", () => {
-    const result = buildHistoryContext([
-      { role: "user", content: "first" },
-      { role: "assistant", content: "second" },
-      { role: "user", content: "third" },
+  it("maps tool_use → FunctionCall with stringified args", () => {
+    const items = canonicalToCodexResponseItems(
+      [{
+        actor: "assistant", kind: "tool_use", content: "Bash",
+        meta: { id: "call_1", input: { command: "ls" } },
+      }],
+      "s1",
+    );
+    assert.deepEqual(items, [
+      { type: "function_call", name: "Bash", arguments: '{"command":"ls"}', call_id: "call_1" },
     ]);
-    const firstIdx = result.indexOf("first");
-    const secondIdx = result.indexOf("second");
-    const thirdIdx = result.indexOf("third");
-    assert.ok(firstIdx < secondIdx);
-    assert.ok(secondIdx < thirdIdx);
+  });
+
+  it("maps tool_result → FunctionCallOutput preserving call_id", () => {
+    const items = canonicalToCodexResponseItems(
+      [{
+        actor: "system", kind: "tool_result", content: "file1\nfile2",
+        meta: { toolUseId: "call_1" },
+      }],
+      "s1",
+    );
+    assert.deepEqual(items, [
+      { type: "function_call_output", call_id: "call_1", output: "file1\nfile2" },
+    ]);
+  });
+
+  it("preserves order across a multi-turn conversation with tools", () => {
+    const items = canonicalToCodexResponseItems(
+      [
+        { actor: "user", kind: "text", content: "list files" },
+        { actor: "assistant", kind: "text", content: "I'll check" },
+        { actor: "assistant", kind: "tool_use", content: "Bash",
+          meta: { id: "c1", input: { command: "ls" } } },
+        { actor: "system", kind: "tool_result", content: "a.txt\nb.txt", meta: { toolUseId: "c1" } },
+        { actor: "assistant", kind: "text", content: "Two files." },
+      ],
+      "s1",
+    );
+    assert.equal(items.length, 5);
+    assert.equal(items[0].type, "message");
+    assert.equal(items[2].type, "function_call");
+    assert.equal(items[3].type, "function_call_output");
   });
 });
 

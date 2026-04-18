@@ -3,7 +3,7 @@ import { EventEmitter } from "events";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { writeHistoryJsonl, buildRecalledConversation } from "./cc-history-adapter.js";
+import { writeClaudeHistoryJsonl } from "../../history/claude-code.js";
 import { logger } from "../../lib/logger.js";
 import { getConfig } from "../../config.js";
 const SHELL = process.env.SHELL || "/bin/zsh";
@@ -139,10 +139,6 @@ const _ClaudeCodeProcess = class _ClaudeCodeProcess {
       this._alive = false;
       this.emitter.emit("error", err);
     });
-    if (options.history?.length && !options._historyViaResume) {
-      const line = buildRecalledConversation(options.history);
-      this.proc.stdin.write(line + "\n");
-    }
     if (options.prompt) {
       this.send(options.prompt);
     }
@@ -474,25 +470,34 @@ class ClaudeCodeProvider {
         }]
       };
     }
+    const mergeAppSettings = (appSettings) => {
+      if (appSettings.hooks && typeof appSettings.hooks === "object") {
+        const appHooks = appSettings.hooks;
+        for (const [event, hooks] of Object.entries(appHooks)) {
+          const cur = sdkSettings.hooks;
+          if (cur && cur[event]) {
+            cur[event] = [...cur[event], ...hooks];
+          } else {
+            sdkSettings.hooks = sdkSettings.hooks ?? {};
+            sdkSettings.hooks[event] = hooks;
+          }
+        }
+        const rest = { ...appSettings };
+        delete rest.hooks;
+        Object.assign(sdkSettings, rest);
+      } else {
+        Object.assign(sdkSettings, appSettings);
+      }
+    };
+    const po = options.providerOptions ?? {};
+    if (po.settings && typeof po.settings === "object") {
+      mergeAppSettings(po.settings);
+    }
     let extraArgsClean = options.extraArgs ? [...options.extraArgs] : [];
     const settingsIdx = extraArgsClean.indexOf("--settings");
     if (settingsIdx !== -1 && settingsIdx + 1 < extraArgsClean.length) {
       try {
-        const appSettings = JSON.parse(extraArgsClean[settingsIdx + 1]);
-        if (appSettings.hooks) {
-          for (const [event, hooks] of Object.entries(appSettings.hooks)) {
-            if (sdkSettings.hooks && sdkSettings.hooks[event]) {
-              sdkSettings.hooks[event] = [
-                ...sdkSettings.hooks[event],
-                ...hooks
-              ];
-            } else {
-              sdkSettings.hooks[event] = hooks;
-            }
-          }
-          delete appSettings.hooks;
-        }
-        Object.assign(sdkSettings, appSettings);
+        mergeAppSettings(JSON.parse(extraArgsClean[settingsIdx + 1]));
       } catch {
       }
       extraArgsClean.splice(settingsIdx, 2);
@@ -528,20 +533,25 @@ class ClaudeCodeProvider {
     if (options.disallowedTools?.length) {
       args.push("--disallowedTools", ...options.disallowedTools);
     }
-    if (options.providerOptions) {
-      const po = options.providerOptions;
-      if (typeof po.maxTurns === "number") args.push("--max-turns", String(po.maxTurns));
-      if (po.disableSlashCommands) args.push("--disable-slash-commands");
+    if (typeof po.maxTurns === "number") args.push("--max-turns", String(po.maxTurns));
+    if (po.disableSlashCommands) args.push("--disable-slash-commands");
+    if (po.strictMcpConfig) args.push("--strict-mcp-config");
+    if (Array.isArray(po.settingSources)) {
+      for (const src of po.settingSources) {
+        args.push("--setting-sources", src);
+      }
     }
     if (options.resumeSessionId) {
       args.push("--resume", options.resumeSessionId);
     }
-    if (!options.resumeSessionId && options.history?.length && options.prompt) {
-      const result = writeHistoryJsonl(options.history, { cwd: options.cwd });
+    if (!options.resumeSessionId && options.history?.length) {
+      const sessionId2 = options.env?.SNA_SESSION_ID ?? "default";
+      const result = writeClaudeHistoryJsonl(options.history, { cwd: options.cwd, sessionId: sessionId2 });
       if (result) {
         args.push(...result.extraArgs);
-        options._historyViaResume = true;
         logger.log("agent", `history via JSONL resume \u2192 ${result.filePath}`);
+      } else {
+        logger.log("agent", "history injection skipped (adapter returned null)");
       }
     }
     if (extraArgsClean.length > 0) {
