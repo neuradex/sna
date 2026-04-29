@@ -1,6 +1,6 @@
 # @sna-sdk/react
 
-React bindings for [Skills-Native Applications](https://github.com/neuradex/sna) — hooks, components, and stores for building SNA frontends.
+React bindings for [SNA](https://github.com/neuradex/sna) — hooks, components, and a drop-in chat UI for talking to the SNA server.
 
 ## Install
 
@@ -12,136 +12,115 @@ npm install @sna-sdk/react @sna-sdk/core
 
 - `react` >= 18
 - `zustand` >= 4
+- `@radix-ui/react-tooltip` (only for `<SnaChatUI>`)
 
-## Usage
-
-### SnaProvider
-
-Pure context provider. No UI, no peer dependencies beyond React:
+## Provider setup
 
 ```tsx
 import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
 
-function App() {
-  return (
-    <SnaProvider>
-      <YourApp />
-    </SnaProvider>
-  );
-}
+<SnaProvider snaUrl="http://localhost:3099">
+  <YourApp />
+</SnaProvider>
 ```
 
-Props:
-- `children` — React children
-- `snaUrl?` — Override SDK server URL (auto-discovered by default)
-- `sessionId?` — Session ID for this provider scope (default: `"default"`)
+`SnaProvider` is a pure context provider — no UI, no peer deps beyond React. It auto-discovers the server URL via `/api/sna-port` if `snaUrl` is omitted; otherwise falls back to `http://localhost:3099`.
 
-### SnaChatUI
+| Prop | |
+|------|---|
+| `snaUrl?` | Override the server URL |
+| `sessionId?` | Default session id (default `"default"`) |
+| `hydrate?` | Hydrate chat-store on mount (default `true`) |
 
-Built-in chat panel with agent auto-start. Requires `@radix-ui/react-tooltip` as a peer dependency. Must be rendered inside `<SnaProvider>`:
+## Drop-in chat UI
 
 ```tsx
-import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
 import { SnaChatUI } from "@sna-sdk/react/components/sna-chat-ui";
 
-function App() {
-  return (
-    <SnaProvider>
-      <SnaChatUI dangerouslySkipPermissions>
-        <YourApp />
-      </SnaChatUI>
-    </SnaProvider>
-  );
-}
+<SnaProvider snaUrl={apiUrl}>
+  <SnaChatUI dangerouslySkipPermissions>
+    <YourApp />
+  </SnaChatUI>
+</SnaProvider>
 ```
 
-Props:
-- `children` — React children
-- `defaultOpen?` — Open chat panel on first visit (default: `false`)
-- `dangerouslySkipPermissions?` — Skip Claude permission prompts (default: `false`)
+`<SnaChatUI>` ships message bubbles, tool-use cards, collapsible thinking blocks, markdown rendering, and a permission dialog — wired to a session via context.
 
-### SnaSession
+| Prop | |
+|------|---|
+| `defaultOpen?` | Open chat panel on first visit (default `false`) |
+| `dangerouslySkipPermissions?` | Skip Claude permission prompts (default `false`) |
 
-Scopes a session ID for all descendant SNA hooks. Useful for multi-session apps:
+## Multi-session scoping
 
 ```tsx
-import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
 import { SnaSession } from "@sna-sdk/react/components/sna-session";
 
-function App() {
-  return (
-    <SnaProvider snaUrl={apiUrl}>
-      <SnaSession id="default"><HelperAgent /></SnaSession>
-      <SnaSession id={activeProjectSessionId}><ChatArea /></SnaSession>
-    </SnaProvider>
-  );
-}
+<SnaProvider snaUrl={apiUrl}>
+  <SnaSession id="default"><HelperAgent /></SnaSession>
+  <SnaSession id={activeProjectSessionId}><ChatArea /></SnaSession>
+</SnaProvider>
 ```
 
-Props:
-- `id` — Session ID for this scope
-- `children` — React children
+`SnaSession` overrides `sessionId` for all descendant hooks. Useful for multi-project IDEs or split panes.
 
-### useSkillEvents
-
-Subscribe to real-time skill events:
+## Hooks
 
 ```tsx
-import { useSkillEvents } from "@sna-sdk/react/hooks";
+import {
+  useAgent,
+  useSessionManager,
+  useResponsiveChat,
+} from "@sna-sdk/react/hooks";
+```
 
-function StatusBar() {
-  const { events, connected, isRunning } = useSkillEvents({
-    onComplete: (event) => console.log("Skill done:", event.message),
+### `useAgent`
+
+Subscribe to the agent event stream and send messages.
+
+```tsx
+const { connected, alive, start, send, kill } = useAgent({
+  sessionId: "default",
+  provider: "claude-code",
+  onAssistant:  (e) => append(e.message),
+  onToolResult: (e) => attach(e.data),
+  onComplete:   () => setBusy(false),
+  onError:      (e) => toast.error(e.message),
+});
+```
+
+### `useSessionManager`
+
+CRUD for sessions, with polling refresh.
+
+```tsx
+const { sessions, loading, createSession, killSession, deleteSession, refresh } =
+  useSessionManager();
+
+const handleNew = async () => {
+  const id = await createSession({
+    label: "loom-1",
+    cwd: "/path/to/project",
+    meta: { app: "loom" },
   });
-
-  return <div>{connected ? "Connected" : "Disconnected"}</div>;
-}
+};
 ```
 
-### useAgent
+### `useResponsiveChat`
 
-Manage agent sessions — subscribe to SSE events and send messages:
-
-```tsx
-import { useAgent } from "@sna-sdk/react/hooks";
-
-function Chat() {
-  const { connected, alive, start, send, kill } = useAgent({ sessionId: "default" });
-  // connected — SSE stream connected
-  // alive — agent process is running
-  // start(prompt?) — start the agent session
-  // send(message) — send a message to the agent
-  // kill() — kill the agent process
-}
-```
-
-### useSessionManager
-
-Manage multiple agent sessions via HTTP API:
-
-```tsx
-import { useSessionManager } from "@sna-sdk/react/hooks";
-
-function SessionList() {
-  const { sessions, loading, createSession, killSession, deleteSession, refresh } = useSessionManager();
-
-  const handleCreate = async () => {
-    const id = await createSession({ label: "my-project", cwd: "/path/to/project" });
-  };
-}
-```
+Helper that picks `"floating"` vs `"docked"` chat layout based on viewport width.
 
 ## Exports
 
 | Import path | Contents |
 |-------------|----------|
-| `@sna-sdk/react/components/sna-provider` | `SnaProvider` |
-| `@sna-sdk/react/components/sna-chat-ui` | `SnaChatUI` |
-| `@sna-sdk/react/components/sna-session` | `SnaSession` |
-| `@sna-sdk/react/components/chat` | `ChatPanel`, `ChatHeader`, `ChatInput`, message components |
-| `@sna-sdk/react/hooks` | `useSkillEvents`, `useAgent`, `useSessionManager`, `useSna`, `useSnaClient`, `useResponsiveChat` |
-| `@sna-sdk/react/stores/chat-store` | `useChatStore` (Zustand) |
-| `@sna-sdk/react/context` | `SnaContext`, `useSnaContext` |
+| `@sna-sdk/react/components/sna-provider`  | `SnaProvider` |
+| `@sna-sdk/react/components/sna-session`   | `SnaSession` |
+| `@sna-sdk/react/components/sna-chat-ui`   | `SnaChatUI` |
+| `@sna-sdk/react/components/chat`          | `ChatPanel`, `ChatHeader`, `ChatInput`, `MessageBubble`, etc. |
+| `@sna-sdk/react/hooks`                    | `useAgent`, `useSessionManager`, `useResponsiveChat`, … |
+| `@sna-sdk/react/stores/chat-store`        | `useChatStore` (Zustand) |
+| `@sna-sdk/react/context`                  | `SnaContext`, `useSnaContext` |
 
 ## Documentation
 

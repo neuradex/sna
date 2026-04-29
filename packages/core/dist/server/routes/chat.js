@@ -86,8 +86,7 @@ function createChatRoutes() {
         kind: body.kind,
         content: body.content ?? "",
         embeds: body.embeds,
-        meta: body.meta,
-        skillName: body.skill_name
+        meta: body.meta
       });
       return httpJson(c, "chat.messages.create", { status: "created", id });
     } catch (e) {

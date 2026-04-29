@@ -191,8 +191,10 @@ describe("HTTP API Routes", () => {
       const res = await req("GET", "/chat/sessions/msg-test/messages");
       const json = await res.json();
       assert.equal(json.messages.length, 2);
-      assert.equal(json.messages[0].role, "user");
-      assert.equal(json.messages[1].role, "assistant");
+      assert.equal(json.messages[0].actor, "user");
+      assert.equal(json.messages[0].kind, "text");
+      assert.equal(json.messages[1].actor, "assistant");
+      assert.equal(json.messages[1].kind, "text");
     });
 
     it("GET chat messages with since cursor", async () => {
@@ -221,19 +223,6 @@ describe("HTTP API Routes", () => {
       const listRes = await req("GET", "/chat/sessions/clear-test/messages");
       const list = await listRes.json();
       assert.equal(list.messages.length, 0);
-    });
-  });
-
-  describe("Emit route", () => {
-    it("POST /emit writes skill event", async () => {
-      const res = await req("POST", "/emit", { skill: "test-skill", type: "start", message: "Starting" });
-      const json = await res.json();
-      assert.ok(json.id);
-    });
-
-    it("POST /emit requires all fields", async () => {
-      const res = await req("POST", "/emit", { skill: "test" });
-      assert.equal(res.status, 400);
     });
   });
 

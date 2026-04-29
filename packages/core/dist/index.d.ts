@@ -1,18 +1,17 @@
 export { SnaConfig, getConfig, resetConfig, setConfig } from './config.js';
-export { ChatActor, ChatKind, ChatMessage, ChatSession, SkillEvent } from './db/schema.js';
+export { ChatActor, ChatKind, ChatMessage, ChatSession } from './db/schema.js';
 export { AgentEvent, AgentProcess, AgentProvider, ContentBlock, SpawnOptions } from './core/providers/types.js';
 export { CanonicalBlock, CanonicalMessage, EmbedRecord } from './history/types.js';
 export { buildCanonicalFromDb } from './history/canonical.js';
 export { CompletionOptions, CompletionResult, completion } from './core/completion.js';
 export { Session, SessionInfo, SessionManagerOptions, SessionState } from './server/session-manager.js';
-export { DispatchCloseOptions, DispatchEventType, DispatchOpenOptions, DispatchOpenResult, DispatchSendOptions, createHandle as createDispatchHandle, close as dispatchClose, open as dispatchOpen, send as dispatchSend } from './lib/dispatch.js';
 import 'better-sqlite3';
 
 /**
- * @sna-sdk/core — Skills-Native Application runtime.
+ * @sna-sdk/core — HTTP/WS server runtime for SNA.
  *
- * Server, providers, session management, database, and CLI.
- * No React dependency.
+ * Wraps Claude Code and Codex as backend processes. Server, providers,
+ * session manager, canonical history, and database. No React dependency.
  */
 
 declare const DEFAULT_SNA_PORT = 3099;

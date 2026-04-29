@@ -1,16 +1,10 @@
 {
   "name": "@sna-sdk/core",
   "version": "0.10.0",
-  "description": "Skills-Native Application runtime — server, providers, session management, database, and CLI",
+  "description": "HTTP/WebSocket server that wraps Claude Code and Codex as backend processes",
   "type": "module",
-  "bin": {
-    "sna": "bin/sna.js"
-  },
   "files": [
-    "bin/",
     "dist/",
-    "skills/",
-    "CLAUDE.md.template",
     "README.md"
   ],
   "exports": {
@@ -23,21 +17,6 @@
       "source": "./src/server/index.ts",
       "types": "./dist/server/index.d.ts",
       "default": "./dist/server/index.js"
-    },
-    "./server/routes/events": {
-      "source": "./src/server/routes/events.ts",
-      "types": "./dist/server/routes/events.d.ts",
-      "default": "./dist/server/routes/events.js"
-    },
-    "./server/routes/emit": {
-      "source": "./src/server/routes/emit.ts",
-      "types": "./dist/server/routes/emit.d.ts",
-      "default": "./dist/server/routes/emit.js"
-    },
-    "./server/routes/run": {
-      "source": "./src/server/routes/run.ts",
-      "types": "./dist/server/routes/run.d.ts",
-      "default": "./dist/server/routes/run.js"
     },
     "./server/routes/agent": {
       "source": "./src/server/routes/agent.ts",
@@ -58,16 +37,6 @@
       "source": "./src/core/providers/index.ts",
       "types": "./dist/core/providers/index.d.ts",
       "default": "./dist/core/providers/index.js"
-    },
-    "./lib/sna-run": {
-      "source": "./src/lib/sna-run.ts",
-      "types": "./dist/lib/sna-run.d.ts",
-      "default": "./dist/lib/sna-run.js"
-    },
-    "./testing": {
-      "source": "./src/testing/mock-api.ts",
-      "types": "./dist/testing/mock-api.d.ts",
-      "default": "./dist/testing/mock-api.js"
     },
     "./electron": {
       "source": "./src/electron/index.ts",
@@ -102,14 +71,14 @@
   "license": "MIT",
   "keywords": [
     "claude-code",
+    "codex",
     "sna",
-    "skills-native",
-    "hono"
+    "hono",
+    "websocket"
   ],
   "dependencies": {
     "@hono/node-server": "^1.19.11",
     "hono": "^4.12.7",
-    "js-yaml": "^4.1.0",
     "ws": "^8.20.0"
   },
   "peerDependencies": {
@@ -123,7 +92,6 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.1",
     "langfuse": "^3.38.20",

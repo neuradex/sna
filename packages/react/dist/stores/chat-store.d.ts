@@ -2,11 +2,10 @@ import * as zustand from 'zustand';
 
 interface ChatMessage {
     id: string;
-    role: "user" | "assistant" | "thinking" | "status" | "error" | "permission" | "tool" | "tool_result" | "skill";
+    role: "user" | "assistant" | "thinking" | "status" | "error" | "permission" | "tool" | "tool_result";
     content: string;
     timestamp: number;
-    skillName?: string;
-    /** Extra data for rich rendering (tool input, skill events, etc.) */
+    /** Extra data for rich rendering (tool input, animation flags, etc.) */
     meta?: Record<string, unknown>;
 }
 interface SessionChatState {

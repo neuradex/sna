@@ -6,7 +6,6 @@ class SessionManager {
     this.sessions = /* @__PURE__ */ new Map();
     this.eventListeners = /* @__PURE__ */ new Map();
     this.pendingPermissions = /* @__PURE__ */ new Map();
-    this.skillEventListeners = /* @__PURE__ */ new Set();
     this.permissionRequestListeners = /* @__PURE__ */ new Set();
     this.lifecycleListeners = /* @__PURE__ */ new Set();
     this.configChangedListeners = /* @__PURE__ */ new Set();
@@ -195,16 +194,6 @@ class SessionManager {
       set.delete(cb);
       if (set.size === 0) this.eventListeners.delete(sessionId);
     };
-  }
-  // ── Skill event pub/sub ────────────────────────────────────────
-  /** Subscribe to skill events broadcast. Returns unsubscribe function. */
-  onSkillEvent(cb) {
-    this.skillEventListeners.add(cb);
-    return () => this.skillEventListeners.delete(cb);
-  }
-  /** Broadcast a skill event to all subscribers (called after DB insert). */
-  broadcastSkillEvent(event) {
-    for (const cb of this.skillEventListeners) cb(event);
   }
   /** Push a synthetic event into a session's event stream (for user message broadcast). */
   /**

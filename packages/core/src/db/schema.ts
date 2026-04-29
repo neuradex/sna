@@ -8,10 +8,9 @@ function getDbPath(): string {
 }
 
 /**
- * Directory for isolated native dependencies.
- * `sna api:up` installs better-sqlite3 here, outside the host app's
- * node_modules tree. This prevents electron-rebuild from clobbering
- * the binary — the SNA API server always uses system Node.js.
+ * Legacy isolated native deps directory used by older builds.
+ * Newer builds prefer `nativeBinding` passed via `startSnaServer()`,
+ * but we still check this path for backward compatibility.
  */
 const NATIVE_DIR = path.join(process.cwd(), ".sna/native");
 
@@ -22,7 +21,7 @@ let _db: Database.Database | null = null;
  *
  * Resolution order:
  *   1. SNA_MODULES_PATH env — consumer's node_modules (set by Electron launcher for link: dev)
- *   2. .sna/native/ — isolated copy installed by `sna api:up` (legacy)
+ *   2. .sna/native/ — legacy isolated copy left by older builds
  *   3. Standard resolution — peer dep in consumer's node_modules (published install)
  */
 function loadBetterSqlite3(): typeof Database {
@@ -57,14 +56,9 @@ export function getDb(): Database.Database {
   return _db;
 }
 
-function migrateSkillEvents(db: Database.Database) {
-  const row = db.prepare(
-    "SELECT sql FROM sqlite_master WHERE type='table' AND name='skill_events'"
-  ).get() as { sql: string } | null;
-  // Old schema had a CHECK constraint with only 5 types — drop and recreate
-  if (row?.sql?.includes("CHECK(type IN")) {
-    db.exec("DROP TABLE IF EXISTS skill_events");
-  }
+/** Drop the legacy skill_events table from older databases. */
+function dropLegacySkillEvents(db: Database.Database) {
+  db.exec("DROP TABLE IF EXISTS skill_events");
 }
 
 function migrateChatSessionsMeta(db: Database.Database) {
@@ -177,6 +171,15 @@ function migrateChatMessagesCanonical(db: Database.Database) {
   })();
 }
 
+/** Drop the legacy skill_name column (skills are no longer first-class in the schema). */
+function migrateDropSkillName(db: Database.Database) {
+  const cols = db.prepare("PRAGMA table_info(chat_messages)").all() as { name: string }[];
+  if (cols.length === 0) return;
+  if (cols.some((c) => c.name === "skill_name")) {
+    db.exec("ALTER TABLE chat_messages DROP COLUMN skill_name");
+  }
+}
+
 function extToMime(ext: string): string {
   switch (ext.toLowerCase()) {
     case "png": return "image/png";
@@ -190,9 +193,10 @@ function extToMime(ext: string): string {
 }
 
 function initSchema(db: Database.Database) {
-  migrateSkillEvents(db);
+  dropLegacySkillEvents(db);
   migrateChatSessionsMeta(db);
   migrateChatMessagesCanonical(db);
+  migrateDropSkillName(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS chat_sessions (
       id         TEXT PRIMARY KEY,
@@ -220,7 +224,6 @@ function initSchema(db: Database.Database) {
       kind       TEXT NOT NULL DEFAULT 'text',
       content    TEXT NOT NULL DEFAULT '',
       embeds     TEXT,
-      skill_name TEXT,
       meta       TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -228,20 +231,6 @@ function initSchema(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session_kind ON chat_messages(session_id, kind);
-
-    CREATE TABLE IF NOT EXISTS skill_events (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT REFERENCES chat_sessions(id) ON DELETE SET NULL,
-      skill      TEXT NOT NULL,
-      type       TEXT NOT NULL,
-      message    TEXT NOT NULL,
-      data       TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_skill_events_skill ON skill_events(skill);
-    CREATE INDEX IF NOT EXISTS idx_skill_events_created ON skill_events(created_at);
-    CREATE INDEX IF NOT EXISTS idx_skill_events_session ON skill_events(session_id);
   `);
 }
 
@@ -268,19 +257,7 @@ export interface ChatMessage {
   content: string;
   /** JSON: { "<embedId>": { mime_type: string; path: string; ... } }. Null if no attachments. */
   embeds: string | null;
-  skill_name: string | null;
   meta: string | null;
   created_at: string;
   updated_at: string;
-}
-
-export interface SkillEvent {
-  id: number;
-  session_id: string | null;
-  skill: string;
-  type: "invoked" | "called" | "success" | "failed" | "permission_needed"
-      | "start" | "progress" | "milestone" | "complete" | "error";
-  message: string;
-  data: string | null;
-  created_at: string;
 }

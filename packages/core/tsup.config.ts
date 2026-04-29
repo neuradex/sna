@@ -14,8 +14,6 @@ export default defineConfig([
       "hono/cors",
       "@hono/node-server",
       "better-sqlite3",
-      "chalk",
-      "js-yaml",
       "ws",
     ],
   },

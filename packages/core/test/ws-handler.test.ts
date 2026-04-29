@@ -210,41 +210,6 @@ describe("WebSocket Handler", () => {
     assert.equal(push.config.model, "claude-opus-4-6");
   });
 
-  // ── Emit + skill event subscription ─────────────────
-
-  it("emit writes event and returns id", async () => {
-    const rid = send(ctx, "emit", { skill: "test-skill", eventType: "start", message: "Starting" });
-    const msg = await waitForReply(ctx, rid);
-    assert.ok(msg.id);
-  });
-
-  it("emit requires all fields", async () => {
-    const rid = send(ctx, "emit", { skill: "test" });
-    const msg = await waitForReply(ctx, rid);
-    assert.equal(msg.type, "error");
-  });
-
-  it("events.subscribe + emit → skill.event push", async () => {
-    const subRid = send(ctx, "events.subscribe");
-    await waitForReply(ctx, subRid);
-
-    const pushPromise = waitForPush(ctx, "skill.event");
-    send(ctx, "emit", { skill: "push-test", eventType: "milestone", message: "Done" });
-
-    const push = await pushPromise;
-    assert.equal(push.data.skill, "push-test");
-    assert.equal(push.data.type, "milestone");
-  });
-
-  it("events.unsubscribe", async () => {
-    const subRid = send(ctx, "events.subscribe");
-    await waitForReply(ctx, subRid);
-
-    const unsubRid = send(ctx, "events.unsubscribe");
-    const msg = await waitForReply(ctx, unsubRid);
-    assert.equal(msg.type, "events.unsubscribe");
-  });
-
   // ── Permission ──────────────────────────────────────
 
   it("permission.pending returns array", async () => {

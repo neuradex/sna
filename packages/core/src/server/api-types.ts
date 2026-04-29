@@ -94,11 +94,6 @@ export interface ApiResponses {
     model: string;
   };
 
-  // Skill events
-  "emit": {
-    id: number;
-  };
-
   // Permission
   "permission.respond": {
     status: "approved" | "denied";

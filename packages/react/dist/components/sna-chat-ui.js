@@ -3,7 +3,6 @@ import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 import { memo, useEffect, useState } from "react";
 import { ChatPanel } from "./chat/chat-panel.js";
 import { useChatStore } from "../stores/chat-store.js";
-import { useSkillEvents } from "../hooks/use-skill-events.js";
 import { useResponsiveChat } from "../hooks/use-responsive-chat.js";
 import { useSnaContext } from "../context.js";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
@@ -13,15 +12,6 @@ const StableChatPanel = memo(function StableChatPanel2({
 }) {
   return /* @__PURE__ */ jsx(ChatPanel, { onClose, sessionId });
 });
-function PermissionAutoOpen() {
-  const setOpen = useChatStore((s) => s.setOpen);
-  const chatOpen = useChatStore((s) => s.isOpen);
-  useSkillEvents({
-    enabled: !chatOpen,
-    onNeedPermission: () => setOpen(true)
-  });
-  return null;
-}
 function ConnectingOverlay() {
   return /* @__PURE__ */ jsx(
     "div",
@@ -142,8 +132,7 @@ function SnaChatUI({
       children,
       chatOpen && /* @__PURE__ */ jsx(StableChatPanel, { onClose: () => setChatOpen(false), sessionId: activeSessionId })
     ] }),
-    !chatOpen && /* @__PURE__ */ jsx(FloatingChatButton, { onClick: () => setChatOpen(true) }),
-    /* @__PURE__ */ jsx(PermissionAutoOpen, {})
+    !chatOpen && /* @__PURE__ */ jsx(FloatingChatButton, { onClick: () => setChatOpen(true) })
   ] });
 }
 export {

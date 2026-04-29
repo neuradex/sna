@@ -1,19 +1,21 @@
 # @sna-sdk/core
 
-Server runtime for [Skills-Native Applications](https://github.com/neuradex/sna) — where Claude Code is the runtime, not an external LLM API.
+HTTP/WebSocket server that wraps Claude Code and Codex as backend processes, plus the launcher API for embedding it inside another app.
 
-## What's included
+```
+Your app → SNA server → spawn(claude-code | codex) → events back over WS
+```
 
-- **Skill event pipeline** — emit, SSE streaming, and hook scripts
-- **Dispatch** — unified event dispatcher with validation, session lifecycle, and cleanup (`sna dispatch` CLI + programmatic API)
-- **SQLite database** — schema and `getDb()` for `skill_events`, `chat_sessions`, `chat_messages`
-- **Hono server factory** — `createSnaApp()` with events, emit, agent, chat, and run routes
-- **WebSocket API** — `attachWebSocket()` wrapping all HTTP routes over a single WS connection
-- **History management** — `agent.resume` auto-loads DB history, `agent.subscribe({ since: 0 })` unified history+realtime channel
-- **One-shot execution** — `POST /agent/run-once` for single-request LLM calls
-- **CLI** — `sna up/down/status`, `sna dispatch`, `sna gen client`, `sna tu` (mock API testing)
-- **Agent providers** — Claude Code and Codex process management
-- **Multi-session** — `SessionManager` with event pub/sub, permission management, and session metadata
+## What's inside
+
+- **HTTP server (`createSnaApp`)** — Hono app with `/agent/*`, `/chat/*`, `/health` routes. Single source of truth for response shapes via `server/api-types.ts`.
+- **WebSocket handler (`attachWebSocket`)** — Mounts at `/ws`. Wraps the full HTTP API plus push channels (`agent.event`, `sessions.snapshot`, `permission.request`, `session.lifecycle`).
+- **`SessionManager`** — Multi-session lifecycle, per-session event buffer, lifecycle/state/config pub/sub, permission-request bridging.
+- **Providers** — `ClaudeCodeProvider` and `CodexProvider` exposing a uniform `AgentProcess` interface (`send`, `setModel`, `setPermissionMode`, `interrupt`, `kill`, `respondToPermission`).
+- **Canonical conversation model** — `chat_messages` rows split a message into orthogonal `actor` × `kind` axes. `history/canonical.ts` rebuilds blocks; `history/{claude-code,codex}.ts` adapters convert canonical → native wire format for `--resume`.
+- **One-shot completion** — `completion({ prompt, model?, provider? })` for short single-prompt jobs.
+- **Launcher API** — `startSnaServer({ port, dbPath, ... })` from `@sna-sdk/core/node` or `@sna-sdk/core/electron`. Forks the standalone server, resolves native bindings, waits for ready.
+- **PreToolUse hook** — `scripts/hook.ts`, auto-injected by `ClaudeCodeProvider.spawn()`. No manual `.claude/settings.json` editing needed.
 
 ## Install
 
@@ -21,87 +23,90 @@ Server runtime for [Skills-Native Applications](https://github.com/neuradex/sna)
 npm install @sna-sdk/core
 ```
 
+Peer dependencies: `better-sqlite3` (required), `langfuse` (optional, for tracing).
+
 ## Usage
 
-### Dispatch skill events (recommended)
-
-```bash
-# CLI
-ID=$(sna dispatch open --skill my-skill)
-sna dispatch $ID start --message "Starting..."
-sna dispatch $ID milestone --message "Step done"
-sna dispatch $ID close --message "Done."
-```
-
-```typescript
-// Programmatic
-import { createDispatchHandle } from "@sna-sdk/core";
-
-const h = createDispatchHandle({ skill: "my-skill" });
-h.start("Starting...");
-h.milestone("Step done");
-await h.close();
-```
-
-### Emit skill events (legacy, deprecated)
-
-> Use `sna dispatch` instead. `emit.js` remains for backward compatibility.
-
-```bash
-node node_modules/@sna-sdk/core/dist/scripts/emit.js \
-  --skill my-skill --type start --message "Starting..."
-```
-
-Event types: `start` | `progress` | `milestone` | `complete` | `error`
-
-### Mount server routes
+### Embed the server
 
 ```ts
-import { createSnaApp, attachWebSocket } from "@sna-sdk/core/server";
+import { startSnaServer } from "@sna-sdk/core/node";
+
+const sna = await startSnaServer({
+  port: 3099,
+  dbPath: "./data/sna.db",
+  maxSessions: 20,
+});
+```
+
+For Electron, use `@sna-sdk/core/electron` and add `asarUnpack: ["node_modules/@sna-sdk/core/**"]`.
+
+### Mount the routes manually
+
+```ts
+import { createSnaApp, attachWebSocket, SessionManager } from "@sna-sdk/core/server";
 import { serve } from "@hono/node-server";
 
-const sna = createSnaApp();
-// HTTP: GET /health, GET /events (SSE), POST /emit, /agent/*, /chat/*
-const server = serve({ fetch: sna.fetch, port: 3099 });
-// WS: ws://localhost:3099/ws — all routes available over WebSocket
+const sessionManager = new SessionManager({ maxSessions: 10 });
+const app = createSnaApp({ sessionManager });
+const server = serve({ fetch: app.fetch, port: 3099 });
 attachWebSocket(server, sessionManager);
 ```
 
-### Access the database
+### One-shot completion
+
+```ts
+import { completion } from "@sna-sdk/core";
+
+const result = await completion({
+  prompt: "Summarize this in one sentence: ...",
+  model: "claude-haiku-4-5",
+  provider: "claude-code",
+  label: "summarizer",
+});
+// result.text, result.usage, result.costUsd, result.durationMs, result.model
+```
+
+### Direct DB access
 
 ```ts
 import { getDb } from "@sna-sdk/core/db/schema";
 
-const db = getDb(); // SQLite instance (data/sna.db)
+const db = getDb();
 ```
 
 ## Exports
 
 | Import path | Contents |
 |-------------|----------|
-| `@sna-sdk/core` | `DEFAULT_SNA_PORT`, `DEFAULT_SNA_URL`, `dispatchOpen`, `dispatchSend`, `dispatchClose`, `createDispatchHandle`, types (`AgentEvent`, `Session`, `SessionInfo`, `ChatSession`, `ChatMessage`, `SkillEvent`, etc.) |
-| `@sna-sdk/core/server` | `createSnaApp()`, `attachWebSocket()`, route handlers, `SessionManager` |
-| `@sna-sdk/core/server/routes/agent` | `createAgentRoutes()`, `runOnce()` |
-| `@sna-sdk/core/db/schema` | `getDb()`, `ChatSession`, `ChatMessage`, `SkillEvent` types |
-| `@sna-sdk/core/providers` | Agent provider factory, `ClaudeCodeProvider` |
-| `@sna-sdk/core/lib/sna-run` | `sna` object with `sna.run()` — awaitable skill invocation |
-| `@sna-sdk/core/testing` | `startMockAnthropicServer()` for testing without real API calls |
-| `@sna-sdk/core/electron` | `startSnaServer()` — launch SNA server from Electron main process (asar-aware) |
-| `@sna-sdk/core/node` | `startSnaServer()` — launch SNA server from Node.js (Next.js, Express, etc.) |
+| `@sna-sdk/core` | Default port/url, types (`AgentEvent`, `Session`, `SessionInfo`, `ChatSession`, `ChatMessage`, `CanonicalBlock`, `EmbedRecord`, …), `completion`, config helpers |
+| `@sna-sdk/core/server` | `createSnaApp`, `attachWebSocket`, `SessionManager`, route handlers |
+| `@sna-sdk/core/server/routes/agent` | `createAgentRoutes`, `runOnce` |
+| `@sna-sdk/core/server/routes/chat` | `createChatRoutes` |
+| `@sna-sdk/core/db/schema` | `getDb`, schema types |
+| `@sna-sdk/core/providers` | `getProvider`, `ClaudeCodeProvider`, `CodexProvider` |
+| `@sna-sdk/core/electron` | `startSnaServer` (Electron-aware launcher) |
+| `@sna-sdk/core/node` | `startSnaServer` (plain Node launcher) |
 
-**Environment Variables:**
-- `SNA_DB_PATH` — Override SQLite database location (default: `process.cwd()/data/sna.db`)
-- `SNA_CLAUDE_COMMAND` — Override claude binary path
-- `SNA_PORT` — API server port (default: 3099)
-- `SNA_SQLITE_NATIVE_BINDING` — Absolute path to `better_sqlite3.node` native binary; bypasses `bindings` module resolution for Electron packaged apps
-- `SNA_MAX_SESSIONS` — Maximum concurrent agent sessions (default: 5)
-- `SNA_PERMISSION_MODE` — Default permission mode for spawned agents (`acceptEdits` | `bypassPermissions` | `default`)
+## Environment variables
+
+| Var | Purpose |
+|-----|---------|
+| `SNA_PORT` | Server port (default 3099) |
+| `SNA_MODEL` | Default model |
+| `SNA_PERMISSION_MODE` | Default permission mode |
+| `SNA_MAX_SESSIONS` | Cap on alive subprocesses (default 5) |
+| `SNA_DB_PATH` | SQLite path (default `./data/sna.db`) |
+| `SNA_DATA_DIR` | Base dir for embeds/images |
+| `SNA_PERMISSION_TIMEOUT_MS` | Auto-deny after N ms (0 = app controls) |
+| `SNA_SQLITE_NATIVE_BINDING` | Absolute path to `better_sqlite3.node` (Electron packaged apps) |
+| `SNA_CLAUDE_COMMAND` | Override the Claude binary |
 
 ## Documentation
 
 - [Architecture](https://github.com/neuradex/sna/blob/main/docs/architecture.md)
-- [Skill Authoring](https://github.com/neuradex/sna/blob/main/docs/skill-authoring.md)
 - [App Setup](https://github.com/neuradex/sna/blob/main/docs/app-setup.md)
+- [Design Decisions](https://github.com/neuradex/sna/blob/main/docs/design-decisions.md)
 
 ## License
 

@@ -15,7 +15,6 @@ export interface InsertChatMessage {
   /** Embed dictionary keyed by embed id (same id used in `embed://` refs). */
   embeds?: Record<string, EmbedRecord>;
   meta?: Record<string, unknown>;
-  skillName?: string;
 }
 
 /** Insert a chat_messages row. Returns the autoincrement id. */
@@ -23,8 +22,8 @@ export function insertChatMessage(db: Database.Database, msg: InsertChatMessage)
   const embedsJson = msg.embeds && Object.keys(msg.embeds).length > 0 ? JSON.stringify(msg.embeds) : null;
   const metaJson = msg.meta && Object.keys(msg.meta).length > 0 ? JSON.stringify(msg.meta) : null;
   const result = db.prepare(
-    `INSERT INTO chat_messages (session_id, actor, kind, content, embeds, meta, skill_name)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO chat_messages (session_id, actor, kind, content, embeds, meta)
+     VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.sessionId,
     msg.actor,
@@ -32,7 +31,6 @@ export function insertChatMessage(db: Database.Database, msg: InsertChatMessage)
     msg.content,
     embedsJson,
     metaJson,
-    msg.skillName ?? null,
   );
   return Number(result.lastInsertRowid);
 }

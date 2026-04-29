@@ -5,7 +5,6 @@ import type { ChatMessage } from "../../stores/chat-store.js";
 import { MarkdownContent } from "./markdown-content.js";
 import { ThinkingCard } from "./thinking-card.js";
 import { ToolUseCard } from "./tool-use-card.js";
-import { SkillCard } from "./skill-card.js";
 import { Tooltip } from "./tooltip.js";
 
 interface MessageBubbleProps {
@@ -252,8 +251,5 @@ export function MessageBubble({ message, isLast = false }: MessageBubbleProps) {
           </span>
         </div>
       );
-
-    case "skill":
-      return <SkillCard message={message} />;
   }
 }

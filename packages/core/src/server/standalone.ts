@@ -1,11 +1,8 @@
 /**
- * standalone.ts — SNA internal API server
+ * standalone.ts — SNA standalone server entry point.
  *
- * Started automatically by `sna up`. Consumers never interact with this directly.
- *
- * Runs on SNA_PORT (default: 3099), separate from the consumer's app server.
- * All SNA routes are mounted here so consumers only need <SnaProvider> — no
- * route mounting required.
+ * Forked by `startSnaServer()` from `@sna-sdk/core/node` or `@sna-sdk/core/electron`.
+ * Runs on SNA_PORT (default: 3099) and exposes the full HTTP + WebSocket API.
  */
 
 import { serve } from "@hono/node-server";
@@ -26,7 +23,8 @@ try {
   if (err.message?.includes("NODE_MODULE_VERSION")) {
     console.error(`\n✗  better-sqlite3 was compiled for a different Node.js version.`);
     console.error(`   This usually happens when electron-rebuild overwrites the native binary.`);
-    console.error(`   Fix: run "sna api:up" which auto-installs an isolated copy in .sna/native/\n`);
+    console.error(`   Pass nativeBinding to startSnaServer({ nativeBinding }) so the server`);
+    console.error(`   loads the consumer app's electron-rebuilt copy instead.\n`);
   } else {
     console.error(`\n✗  Database initialization failed: ${err.message}\n`);
   }

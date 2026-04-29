@@ -18,7 +18,6 @@ import 'better-sqlite3';
  *   Server → Client:  { type: "agent.event", session: "abc", cursor: 42, event: {...} }  (push)
  *   Server → Client:  { type: "sessions.snapshot", sessions: [...] }                   (auto-push on connect + state change)
  *   Server → Client:  { type: "session.lifecycle", session: "abc", state: "killed" }   (auto-push)
- *   Server → Client:  { type: "skill.event", data: {...} }  (push)
  *
  * Message types:
  *   sessions.create   { label?, cwd?, meta? }
@@ -34,13 +33,6 @@ import 'better-sqlite3';
  *   agent.run-once    { message, model?, systemPrompt?, appendSystemPrompt?, permissionMode?, cwd?, timeout?, provider?, extraArgs? }
  *   agent.completion  { prompt, model?, label?, systemPrompt?, appendSystemPrompt?, timeout?, extraArgs?, env? }
  *
- *   events.subscribe  { since? }
- *   events.unsubscribe {}
- *   emit              { skill, eventType, message, data?, session? }
- *                     NOTE: WS uses `eventType` (not `type`) because `type` is reserved
- *                     as the WS protocol routing field. HTTP POST /emit uses `type` instead.
- *                     WS uses `session` (not `session_id`) consistent with all other WS ops.
- *
  *   permission.respond   { session?, approved }
  *   permission.pending   { session? }
  *   permission.subscribe {}              → pushes { type: "permission.request", session, request, createdAt }
@@ -48,10 +40,11 @@ import 'better-sqlite3';
  *
  *   chat.sessions.list    {}
  *   chat.sessions.create  { id?, label?, chatType?, meta? }
- *                         NOTE: WS uses `chatType` (not `type`) for the same reason as `eventType` above.
+ *                         NOTE: WS uses `chatType` (not `type`) because `type` is reserved
+ *                         as the WS protocol routing field.
  *   chat.sessions.remove  { session }
  *   chat.messages.list    { session, since? }
- *   chat.messages.create  { session, role, content?, skill_name?, meta? }
+ *   chat.messages.create  { session, actor, kind, content?, embeds?, meta? }
  *   chat.messages.clear   { session }
  */
 

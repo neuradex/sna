@@ -21,19 +21,9 @@ interface ChatMessage {
     content: string;
     /** JSON: { "<embedId>": { mime_type: string; path: string; ... } }. Null if no attachments. */
     embeds: string | null;
-    skill_name: string | null;
     meta: string | null;
     created_at: string;
     updated_at: string;
 }
-interface SkillEvent {
-    id: number;
-    session_id: string | null;
-    skill: string;
-    type: "invoked" | "called" | "success" | "failed" | "permission_needed" | "start" | "progress" | "milestone" | "complete" | "error";
-    message: string;
-    data: string | null;
-    created_at: string;
-}
 
-export { type ChatActor, type ChatKind, type ChatMessage, type ChatSession, type SkillEvent, getDb };
+export { type ChatActor, type ChatKind, type ChatMessage, type ChatSession, getDb };

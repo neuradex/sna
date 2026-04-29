@@ -15,7 +15,6 @@ interface InsertChatMessage {
     /** Embed dictionary keyed by embed id (same id used in `embed://` refs). */
     embeds?: Record<string, EmbedRecord>;
     meta?: Record<string, unknown>;
-    skillName?: string;
 }
 /** Insert a chat_messages row. Returns the autoincrement id. */
 declare function insertChatMessage(db: Database.Database, msg: InsertChatMessage): number;

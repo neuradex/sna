@@ -2,8 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useChatStore } from "../../stores/chat-store.js";
-import { useSkillEvents, type SkillEvent } from "../../hooks/use-skill-events.js";
-import { useAgent, type AgentEvent } from "../../hooks/use-agent.js";
+import { useAgent } from "../../hooks/use-agent.js";
 import { ChatHeader } from "./chat-header.js";
 import { MessageBubble } from "./message-bubble.js";
 import { ChatInput } from "./chat-input.js";
@@ -79,8 +78,6 @@ function injectStyles() {
   document.head.appendChild(style);
 }
 
-const TERMINAL_EVENT_TYPES = new Set(["success", "failed", "complete", "error"]);
-
 function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
@@ -101,8 +98,6 @@ export function ChatPanel({ onClose, sessionId: initialSessionId = "default" }: 
   const addMessage = (msg: Omit<import("../../stores/chat-store.js").ChatMessage, "id" | "timestamp">) => addMsg(msg, sessionId);
   const clearMsg = useChatStore((s) => s.clearMessages);
   const clearMessages = () => clearMsg(sessionId);
-  const markEvt = useChatStore((s) => s.markEventProcessed);
-  const markEventProcessed = (eventId: number) => markEvt(eventId, sessionId);
   const width = useChatStore((s) => s.width);
   const setWidth = useChatStore((s) => s.setWidth);
   const { mode } = useResponsiveChat();
@@ -245,69 +240,6 @@ export function ChatPanel({ onClose, sessionId: initialSessionId = "default" }: 
     },
   });
 
-  // Subscribe to skill events (from SQLite → SSE)
-  // Skill events accumulate milestones into a single "skill" card (updated in-place)
-  const skillMilestonesRef = useRef<Record<string, string[]>>({});
-
-  const { events, clearEvents } = useSkillEvents({
-    onCalled: (e) => {
-      if (!markEventProcessed(e.id)) return;
-      skillMilestonesRef.current[e.skill] = [];
-      addMessage({
-        role: "skill",
-        content: "",
-        skillName: e.skill,
-        meta: { status: "running", milestones: [] },
-      });
-    },
-    onMilestone: (e) => {
-      if (!markEventProcessed(e.id)) return;
-      const ms = skillMilestonesRef.current[e.skill] ?? [];
-      ms.push(e.message);
-      skillMilestonesRef.current[e.skill] = ms;
-      addMessage({
-        role: "skill",
-        content: e.message,
-        skillName: e.skill,
-        meta: { status: "running", milestones: [...ms] },
-      });
-    },
-    onProgress: (e) => {
-      if (!markEventProcessed(e.id)) return;
-      addMessage({ role: "status", content: e.message, skillName: e.skill });
-    },
-    onSuccess: (e) => {
-      if (!markEventProcessed(e.id)) return;
-      addMessage({
-        role: "skill",
-        content: e.message,
-        skillName: e.skill,
-        meta: { status: "complete", milestones: [...(skillMilestonesRef.current[e.skill] ?? [])] },
-      });
-    },
-    onFailed: (e) => {
-      if (!markEventProcessed(e.id)) return;
-      addMessage({
-        role: "skill",
-        content: e.message,
-        skillName: e.skill,
-        meta: { status: "failed", milestones: [...(skillMilestonesRef.current[e.skill] ?? [])] },
-      });
-    },
-    onNeedPermission: (e) => {
-      if (!markEventProcessed(e.id)) return;
-      addMessage({ role: "permission", content: e.message, skillName: e.skill });
-    },
-  });
-
-  const anyRunning = events.length > 0 && (() => {
-    const latestBySkill = events.reduce<Record<string, SkillEvent>>((acc, e) => {
-      acc[e.skill] = e;
-      return acc;
-    }, {});
-    return Object.values(latestBySkill).some((e) => !TERMINAL_EVENT_TYPES.has(e.type));
-  })();
-
   // Auto-scroll on any content change (new messages, typewriter, tool results)
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -366,7 +298,6 @@ export function ChatPanel({ onClose, sessionId: initialSessionId = "default" }: 
           onClose={onClose}
           onClear={async () => {
             clearMessages();
-            clearEvents();
             setThinking(true);
             setSessionUsage({
               contextUsed: 0, contextWindow: 0, totalCost: 0,
@@ -376,7 +307,7 @@ export function ChatPanel({ onClose, sessionId: initialSessionId = "default" }: 
             await agent.start();
             setThinking(false);
           }}
-          isRunning={thinking || (anyRunning ?? false)}
+          isRunning={thinking}
           sessionUsage={sessionUsage}
           onModelChange={(model) => {
             setSessionUsage((prev) => ({ ...prev, model }));
@@ -405,9 +336,9 @@ export function ChatPanel({ onClose, sessionId: initialSessionId = "default" }: 
           >
             {bgSessions.length === 0 && (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", textAlign: "center" }}>
-                <p style={{ color: "var(--sna-text-icon)", fontSize: 14, margin: 0 }}>No background tasks</p>
+                <p style={{ color: "var(--sna-text-icon)", fontSize: 14, margin: 0 }}>No background sessions</p>
                 <p style={{ color: "var(--sna-text-faint)", fontSize: 12, marginTop: 4, fontFamily: "var(--sna-font-mono)" }}>
-                  Skills run via the UI will appear here
+                  Background agent sessions will appear here
                 </p>
               </div>
             )}
@@ -550,10 +481,10 @@ export function ChatPanel({ onClose, sessionId: initialSessionId = "default" }: 
                   </svg>
                 </div>
                 <p style={{ color: "var(--sna-text-icon)", fontSize: 14, margin: 0 }}>
-                  {viewMode === "chat" ? "Run a skill or ask a question" : "Background session log"}
+                  {viewMode === "chat" ? "Ask the agent something" : "Background session log"}
                 </p>
                 <p style={{ color: "var(--sna-text-faint)", fontSize: 12, marginTop: 4, fontFamily: "var(--sna-font-mono)" }}>
-                  {viewMode === "chat" ? "Type /skill-name or ask in natural language" : "Waiting for events..."}
+                  {viewMode === "chat" ? "Type a question or instruction" : "Waiting for events..."}
                 </p>
               </div>
             )}

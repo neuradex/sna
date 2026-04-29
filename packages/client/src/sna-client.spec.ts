@@ -1456,106 +1456,6 @@ describe("agent.runOnce (WS)", () => {
   });
 });
 
-// ── EventsApi (WS) ────────────────────────────────────────────────
-
-describe("events API (WS)", () => {
-  it("subscribe sends events.subscribe and returns lastId", async () => {
-    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
-    sna.connect();
-    await waitFor(() => sna.connected);
-
-    installAutoResponder({ "events.subscribe": () => ({ lastId: 42 }) });
-
-    const res = await sna.events.subscribe({ since: 10 });
-    assert.equal(res.lastId, 42);
-  });
-
-  it("subscribe with no opts sends empty payload", async () => {
-    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
-    sna.connect();
-    await waitFor(() => sna.connected);
-
-    installAutoResponder({ "events.subscribe": () => ({ lastId: 0 }) });
-    const res = await sna.events.subscribe();
-    assert.equal(res.lastId, 0);
-  });
-
-  it("unsubscribe sends events.unsubscribe", async () => {
-    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
-    sna.connect();
-    await waitFor(() => sna.connected);
-
-    const captured: any[] = [];
-    mock.onMessage((ws, msg) => {
-      captured.push(msg);
-      mock.sendTo(ws, { type: msg.type, rid: msg.rid });
-    });
-
-    await sna.events.unsubscribe();
-    assert.equal(captured[0].type, "events.unsubscribe");
-  });
-
-  it("emit sends WS emit with eventType field (not type)", async () => {
-    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
-    sna.connect();
-    await waitFor(() => sna.connected);
-
-    const captured: any[] = [];
-    mock.onMessage((ws, msg) => {
-      captured.push(msg);
-      mock.sendTo(ws, { type: msg.type, rid: msg.rid, id: 99 });
-    });
-
-    const res = await sna.events.emit({
-      skill: "my-skill",
-      eventType: "milestone",
-      message: "Step done",
-      session: "default",
-    });
-    assert.equal(res.id, 99);
-    assert.equal(captured[0].type, "emit");
-    assert.equal(captured[0].skill, "my-skill");
-    assert.equal(captured[0].eventType, "milestone"); // WS uses eventType
-    assert.equal(captured[0].message, "Step done");
-    assert.equal(captured[0].session, "default");
-    // `type` field should NOT be present in the body (only as routing field)
-    assert.ok(!("type_field" in captured[0]) || captured[0].type === "emit");
-  });
-
-  it("onSkillEvent receives skill.event push", async () => {
-    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
-    sna.connect();
-    await waitFor(() => sna.connected);
-
-    const events: any[] = [];
-    sna.events.onSkillEvent((e) => events.push(e));
-
-    mock.broadcast({
-      type: "skill.event",
-      data: { id: 1, session_id: "default", skill: "form-fill", type: "complete", message: "Done", data: null, created_at: "2026-01-01" },
-    });
-
-    await waitFor(() => events.length > 0);
-    assert.equal(events[0].skill, "form-fill");
-    assert.equal(events[0].type, "complete");
-    assert.equal(events[0].message, "Done");
-  });
-
-  it("onSkillEvent unsubscribe stops receiving", async () => {
-    sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
-    sna.connect();
-    await waitFor(() => sna.connected);
-
-    const events: any[] = [];
-    const unsub = sna.events.onSkillEvent((e) => events.push(e));
-    unsub();
-
-    mock.broadcast({ type: "skill.event", data: { skill: "x", type: "start", message: "hi" } });
-    await sleep(100);
-    assert.equal(events.length, 0);
-  });
-});
-
 // ── ChatApi (WS) ─────────────────────────────────────────────────
 
 describe("chat API (WS)", () => {
@@ -1671,19 +1571,6 @@ describe("HTTP transport — new operations", () => {
     assert.equal(req.url, "/agent/run-once");
     assert.equal(req.body.message, "6 * 7");
     assert.equal(req.body.timeout, 5000);
-  });
-
-  it("events.emit — POST /emit with type field (not eventType)", async () => {
-    mock.queueHttpResponse(200, { id: 77 });
-    sna = httpClient();
-    const res = await sna.events.emit({ skill: "s", eventType: "complete", message: "done" });
-    assert.equal(res.id, 77);
-    const req = mock.httpRequests[0];
-    assert.equal(req.method, "POST");
-    assert.equal(req.url, "/emit");
-    assert.equal(req.body.type, "complete"); // HTTP uses `type`
-    assert.equal(req.body.skill, "s");
-    assert.ok(!("eventType" in req.body)); // `eventType` must NOT appear in HTTP body
   });
 
   it("chat.listSessions — GET /chat/sessions", async () => {

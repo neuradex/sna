@@ -1,7 +1,7 @@
 /**
  * @module @sna-sdk/client
  *
- * Dual-transport client for the SNA (Skills-Native Application) API server.
+ * Dual-transport client for the SNA API server.
  *
  * ## Transport model
  *
@@ -232,15 +232,6 @@ declare class SnaClient {
      * @see {@link AgentApi}
      */
     readonly agent: AgentApi;
-    /**
-     * Skill event streaming and emission APIs.
-     *
-     * Use this namespace to subscribe to skill events, emit events,
-     * and stream events via SSE.
-     *
-     * @see {@link EventsApi}
-     */
-    readonly events: EventsApi;
     /**
      * Chat session and message persistence APIs.
      *
@@ -489,16 +480,6 @@ interface RunOnceResult {
     result: string;
     usage: Record<string, unknown> | null;
 }
-/** A skill event row from the database. */
-interface SkillEvent {
-    id: number;
-    session_id: string | null;
-    skill: string;
-    type: string;
-    message: string;
-    data: string | null;
-    created_at: string;
-}
 /** A chat session row from the database. */
 interface ChatSession {
     id: string;
@@ -508,15 +489,31 @@ interface ChatSession {
     cwd: string | null;
     created_at: string;
 }
-/** A chat message row from the database. */
+/**
+ * A chat message row from the database.
+ *
+ * Each row is one canonical block. Two orthogonal axes describe it:
+ * - `actor` — who produced it (`user` / `assistant` / `system`)
+ * - `kind` — what kind of block (`text` / `thinking` / `tool_use` /
+ *   `tool_result` / `status` / `error`)
+ *
+ * Binary attachments live in `embeds` keyed by id; `content` may hold
+ * inline `![](embed://<id>)` refs.
+ */
 interface ChatMessage {
     id: number;
     session_id: string;
-    role: string;
+    actor: "user" | "assistant" | "system";
+    kind: "text" | "thinking" | "tool_use" | "tool_result" | "status" | "error";
     content: string;
-    skill_name: string | null;
+    embeds: Record<string, {
+        mime_type: string;
+        path: string;
+        meta?: Record<string, unknown>;
+    }> | null;
     meta: Record<string, unknown> | null;
     created_at: string;
+    updated_at: string;
 }
 /**
  * Session management APIs.
@@ -1358,123 +1355,6 @@ declare class AgentApi {
     _resubscribe(): void;
 }
 /**
- * Skill event streaming and emission APIs.
- *
- * Access via `sna.events`.
- *
- * Skill events are lightweight records written to the `skill_events`
- * SQLite table by skills (via `emit.js`) or by calling {@link emit}.
- * They are separate from agent events (which are model output events).
- *
- * @example
- * ```ts
- * // Subscribe to real-time skill events via WebSocket
- * sna.events.onSkillEvent(({ skill, type, message }) => {
- *   console.log(`[${skill}/${type}] ${message}`);
- * });
- * await sna.events.subscribe();
- * ```
- */
-declare class EventsApi {
-    private client;
-    constructor(client: SnaClient);
-    /**
-     * Subscribe to skill event pushes via WebSocket.
-     *
-     * After subscribing, `skill.event` push messages are delivered
-     * to handlers registered via {@link onSkillEvent}.
-     *
-     * @param opts.since - Start from this event ID. Defaults to the latest.
-     * @returns The last event ID at subscription time.
-     *
-     * @example
-     * ```ts
-     * sna.events.onSkillEvent((e) => console.log(e));
-     * const { lastId } = await sna.events.subscribe({ since: 0 });
-     * ```
-     */
-    subscribe(opts?: {
-        since?: number;
-    }): Promise<{
-        lastId: number;
-    }>;
-    /**
-     * Unsubscribe from skill event pushes.
-     *
-     * @example
-     * ```ts
-     * await sna.events.unsubscribe();
-     * ```
-     */
-    unsubscribe(): Promise<void>;
-    /**
-     * Emit a skill event.
-     *
-     * Writes the event to the `skill_events` table and broadcasts it
-     * to all connected WS subscribers.
-     *
-     * **Transport note:** WS uses `eventType` (not `type`) for this call
-     * because `type` is reserved as the WS protocol routing field.
-     * The client handles this automatically.
-     *
-     * @returns The assigned event row ID.
-     *
-     * @example
-     * ```ts
-     * await sna.events.emit({
-     *   skill: "my-skill",
-     *   eventType: "milestone",
-     *   message: "Step 1 complete",
-     *   session: "default",
-     * });
-     * ```
-     */
-    emit(opts: {
-        skill: string;
-        eventType: string;
-        message: string;
-        data?: string;
-        session?: string;
-    }): Promise<{
-        id: number;
-    }>;
-    /**
-     * Listen for skill event pushes.
-     *
-     * Fires when any skill event is pushed to this connection after
-     * calling {@link subscribe}.
-     *
-     * @param cb - Called for each skill event.
-     * @returns An unsubscribe function.
-     *
-     * @example
-     * ```ts
-     * const unsub = sna.events.onSkillEvent(({ skill, type, message }) => {
-     *   if (type === "complete") markDone(skill);
-     * });
-     * ```
-     */
-    onSkillEvent(cb: (event: SkillEvent) => void): () => void;
-    /**
-     * Stream skill events via SSE (HTTP-only).
-     *
-     * Returns an `AsyncIterable` of {@link SkillEvent} rows.
-     * Requires `http: true`. For WS streaming, use
-     * {@link subscribe} + {@link onSkillEvent}.
-     *
-     * @param since - Start from this event ID.
-     *
-     * @example
-     * ```ts
-     * for await (const event of sna.events.stream()) {
-     *   if (event.type === "complete") break;
-     *   console.log(event.skill, event.message);
-     * }
-     * ```
-     */
-    stream(since?: number): AsyncGenerator<SkillEvent>;
-}
-/**
  * Chat session and message persistence APIs.
  *
  * Access via `sna.chat`.
@@ -1562,26 +1442,36 @@ declare class ChatApi {
      * Add a message to a chat session.
      *
      * The session is auto-created with type `"main"` if it doesn't exist.
+     * Each message is one canonical block: an `actor` (`user` / `assistant` /
+     * `system`) crossed with a `kind` (`text` / `thinking` / `tool_use` /
+     * `tool_result` / `status` / `error`).
      *
      * @param session - The session ID.
-     * @param opts.role - Message role: `"user"`, `"assistant"`, `"thinking"`, etc.
-     * @param opts.content - Message text.
-     * @param opts.skill_name - Skill that generated this message, if any.
-     * @param opts.meta - Arbitrary metadata.
+     * @param opts.actor - Who produced the block.
+     * @param opts.kind - What kind of block.
+     * @param opts.content - Block text. May contain `![](embed://<id>)` refs.
+     * @param opts.embeds - Binary attachments keyed by embed id.
+     * @param opts.meta - Kind-specific structured overlay.
      * @returns The assigned message row ID.
      *
      * @example
      * ```ts
      * const { id } = await sna.chat.createMessage("thread-1", {
-     *   role: "user",
+     *   actor: "user",
+     *   kind: "text",
      *   content: "What is the capital of France?",
      * });
      * ```
      */
     createMessage(session: string, opts: {
-        role: string;
+        actor: "user" | "assistant" | "system";
+        kind: "text" | "thinking" | "tool_use" | "tool_result" | "status" | "error";
         content?: string;
-        skill_name?: string;
+        embeds?: Record<string, {
+            mime_type: string;
+            path: string;
+            meta?: Record<string, unknown>;
+        }>;
         meta?: Record<string, unknown>;
     }): Promise<{
         status: "created";

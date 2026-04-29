@@ -35,13 +35,8 @@ function getDb() {
   }
   return _db;
 }
-function migrateSkillEvents(db) {
-  const row = db.prepare(
-    "SELECT sql FROM sqlite_master WHERE type='table' AND name='skill_events'"
-  ).get();
-  if (row?.sql?.includes("CHECK(type IN")) {
-    db.exec("DROP TABLE IF EXISTS skill_events");
-  }
+function dropLegacySkillEvents(db) {
+  db.exec("DROP TABLE IF EXISTS skill_events");
 }
 function migrateChatSessionsMeta(db) {
   const cols = db.prepare("PRAGMA table_info(chat_sessions)").all();
@@ -128,6 +123,13 @@ function migrateChatMessagesCanonical(db) {
     }
   })();
 }
+function migrateDropSkillName(db) {
+  const cols = db.prepare("PRAGMA table_info(chat_messages)").all();
+  if (cols.length === 0) return;
+  if (cols.some((c) => c.name === "skill_name")) {
+    db.exec("ALTER TABLE chat_messages DROP COLUMN skill_name");
+  }
+}
 function extToMime(ext) {
   switch (ext.toLowerCase()) {
     case "png":
@@ -148,9 +150,10 @@ function extToMime(ext) {
   }
 }
 function initSchema(db) {
-  migrateSkillEvents(db);
+  dropLegacySkillEvents(db);
   migrateChatSessionsMeta(db);
   migrateChatMessagesCanonical(db);
+  migrateDropSkillName(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS chat_sessions (
       id         TEXT PRIMARY KEY,
@@ -178,7 +181,6 @@ function initSchema(db) {
       kind       TEXT NOT NULL DEFAULT 'text',
       content    TEXT NOT NULL DEFAULT '',
       embeds     TEXT,
-      skill_name TEXT,
       meta       TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -186,20 +188,6 @@ function initSchema(db) {
 
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session_kind ON chat_messages(session_id, kind);
-
-    CREATE TABLE IF NOT EXISTS skill_events (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT REFERENCES chat_sessions(id) ON DELETE SET NULL,
-      skill      TEXT NOT NULL,
-      type       TEXT NOT NULL,
-      message    TEXT NOT NULL,
-      data       TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_skill_events_skill ON skill_events(skill);
-    CREATE INDEX IF NOT EXISTS idx_skill_events_created ON skill_events(created_at);
-    CREATE INDEX IF NOT EXISTS idx_skill_events_session ON skill_events(session_id);
   `);
 }
 export {

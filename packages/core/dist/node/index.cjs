@@ -969,34 +969,10 @@ var import_node_server = require("@hono/node-server");
 init_cjs_shims();
 var import_hono3 = require("hono");
 
-// src/server/routes/events.ts
-init_cjs_shims();
-var import_streaming = require("hono/streaming");
-
-// src/db/schema.ts
-init_cjs_shims();
-var import_node_module = require("module");
-var import_path5 = __toESM(require("path"), 1);
-var NATIVE_DIR = import_path5.default.join(process.cwd(), ".sna/native");
-
-// src/server/routes/events.ts
-init_config();
-
-// src/server/routes/emit.ts
-init_cjs_shims();
-
-// src/server/api-types.ts
-init_cjs_shims();
-
-// src/server/routes/run.ts
-init_cjs_shims();
-var import_streaming2 = require("hono/streaming");
-var ROOT = process.cwd();
-
 // src/server/routes/agent.ts
 init_cjs_shims();
 var import_hono = require("hono");
-var import_streaming3 = require("hono/streaming");
+var import_streaming = require("hono/streaming");
 
 // src/core/providers/index.ts
 init_cjs_shims();
@@ -1006,16 +982,16 @@ init_cjs_shims();
 var import_child_process2 = require("child_process");
 var import_events2 = require("events");
 var import_fs5 = __toESM(require("fs"), 1);
-var import_path7 = __toESM(require("path"), 1);
+var import_path6 = __toESM(require("path"), 1);
 var import_url2 = require("url");
 
 // src/history/codex.ts
 init_cjs_shims();
 var import_fs4 = __toESM(require("fs"), 1);
-var import_path6 = __toESM(require("path"), 1);
+var import_path5 = __toESM(require("path"), 1);
 init_config();
 function loadEmbedAsDataUrl(sessionId, record) {
-  const fullPath = import_path6.default.isAbsolute(record.path) ? record.path : import_path6.default.join(getConfig().dataDir, "images", sessionId, record.path);
+  const fullPath = import_path5.default.isAbsolute(record.path) ? record.path : import_path5.default.join(getConfig().dataDir, "images", sessionId, record.path);
   try {
     const buf = import_fs4.default.readFileSync(fullPath);
     return `data:${record.mime_type};base64,${buf.toString("base64")}`;
@@ -1104,7 +1080,7 @@ init_logger();
 var SHELL2 = process.env.SHELL || "/bin/zsh";
 function validateCodexPath(codexPath) {
   try {
-    const codexDir = import_path7.default.dirname(codexPath);
+    const codexDir = import_path6.default.dirname(codexPath);
     const env = { ...process.env, PATH: `${codexDir}:${process.env.PATH ?? ""}` };
     const out = (0, import_child_process2.execSync)(`"${codexPath}" --version`, {
       encoding: "utf8",
@@ -1118,10 +1094,10 @@ function validateCodexPath(codexPath) {
   }
 }
 function cacheCodexPath(codexPath, cacheDir) {
-  const dir = cacheDir ?? import_path7.default.join(process.cwd(), ".sna");
+  const dir = cacheDir ?? import_path6.default.join(process.cwd(), ".sna");
   try {
     if (!import_fs5.default.existsSync(dir)) import_fs5.default.mkdirSync(dir, { recursive: true });
-    import_fs5.default.writeFileSync(import_path7.default.join(dir, "codex-path"), codexPath);
+    import_fs5.default.writeFileSync(import_path6.default.join(dir, "codex-path"), codexPath);
   } catch {
   }
 }
@@ -1131,7 +1107,7 @@ function resolveCodexCli(opts) {
     const v = validateCodexPath(process.env.SNA_CODEX_COMMAND);
     return { path: process.env.SNA_CODEX_COMMAND, version: v.version, source: "env" };
   }
-  const cacheFile = cacheDir ? import_path7.default.join(cacheDir, "codex-path") : import_path7.default.join(process.cwd(), ".sna/codex-path");
+  const cacheFile = cacheDir ? import_path6.default.join(cacheDir, "codex-path") : import_path6.default.join(process.cwd(), ".sna/codex-path");
   try {
     const cached = import_fs5.default.readFileSync(cacheFile, "utf8").trim();
     if (cached) {
@@ -1171,7 +1147,7 @@ function resolveCodexCli(opts) {
   return { path: "codex", source: "fallback" };
 }
 function resolveCodexPath(cwd) {
-  const result = resolveCodexCli({ cacheDir: import_path7.default.join(cwd, ".sna") });
+  const result = resolveCodexCli({ cacheDir: import_path6.default.join(cwd, ".sna") });
   logger.log("agent", `codex path: ${result.source}=${result.path}${result.version ? ` (${result.version})` : ""}`);
   return result.path;
 }
@@ -1945,21 +1921,21 @@ var CodexProvider = class {
     const codexPath = resolveCodexPath(options.cwd);
     const args = ["app-server"];
     const cleanEnv = { ...process.env, ...options.env };
-    const codexHome = options.configDir ?? import_path7.default.join(options.cwd, ".sna", "codex-home");
+    const codexHome = options.configDir ?? import_path6.default.join(options.cwd, ".sna", "codex-home");
     if (!import_fs5.default.existsSync(codexHome)) {
       import_fs5.default.mkdirSync(codexHome, { recursive: true });
     }
     const realCodexHome = `${process.env.HOME}/.codex`;
     for (const f of ["auth.json", "installation_id"]) {
-      const src = import_path7.default.join(realCodexHome, f);
-      const dst = import_path7.default.join(codexHome, f);
+      const src = import_path6.default.join(realCodexHome, f);
+      const dst = import_path6.default.join(codexHome, f);
       if (import_fs5.default.existsSync(src) && !import_fs5.default.existsSync(dst)) {
         import_fs5.default.copyFileSync(src, dst);
       }
     }
-    const configTomlPath = import_path7.default.join(codexHome, "config.toml");
+    const configTomlPath = import_path6.default.join(codexHome, "config.toml");
     if (!import_fs5.default.existsSync(configTomlPath)) {
-      const realConfig = import_path7.default.join(realCodexHome, "config.toml");
+      const realConfig = import_path6.default.join(realCodexHome, "config.toml");
       if (import_fs5.default.existsSync(realConfig)) {
         import_fs5.default.copyFileSync(realConfig, configTomlPath);
       }
@@ -1998,15 +1974,15 @@ var CodexProvider = class {
       import_fs5.default.appendFileSync(configTomlPath, "\n" + tomlLines.join("\n"));
       logger.log("agent", `codex: ${Object.keys(options.mcpServers).length} MCP servers injected`);
     }
-    let pkgRoot = import_path7.default.dirname((0, import_url2.fileURLToPath)(importMetaUrl));
-    while (!import_fs5.default.existsSync(import_path7.default.join(pkgRoot, "package.json"))) {
-      const parent = import_path7.default.dirname(pkgRoot);
+    let pkgRoot = import_path6.default.dirname((0, import_url2.fileURLToPath)(importMetaUrl));
+    while (!import_fs5.default.existsSync(import_path6.default.join(pkgRoot, "package.json"))) {
+      const parent = import_path6.default.dirname(pkgRoot);
       if (parent === pkgRoot) break;
       pkgRoot = parent;
     }
     const preToolUseHooks = [];
     if (options.permissionMode !== "bypassPermissions") {
-      const hookScript = import_path7.default.join(pkgRoot, "dist", "scripts", "hook.js");
+      const hookScript = import_path6.default.join(pkgRoot, "dist", "scripts", "hook.js");
       const sessionId = options.env?.SNA_SESSION_ID ?? "default";
       preToolUseHooks.push({
         type: "command",
@@ -2016,7 +1992,7 @@ var CodexProvider = class {
       logger.log("agent", `codex: permission hook \u2192 ${hookScript} --session=${sessionId}`);
     }
     if (options.allowedTools?.length || options.disallowedTools?.length) {
-      const filterScript = import_path7.default.join(pkgRoot, "dist", "scripts", "tool-filter.js");
+      const filterScript = import_path6.default.join(pkgRoot, "dist", "scripts", "tool-filter.js");
       const filterArgs = [];
       if (options.allowedTools?.length) {
         filterArgs.push(`--allowed=${options.allowedTools.join(",")}`);
@@ -2038,14 +2014,14 @@ var CodexProvider = class {
           }]
         }
       };
-      import_fs5.default.writeFileSync(import_path7.default.join(codexHome, "hooks.json"), JSON.stringify(hooksJson));
+      import_fs5.default.writeFileSync(import_path6.default.join(codexHome, "hooks.json"), JSON.stringify(hooksJson));
       const existingConfig = import_fs5.default.readFileSync(configTomlPath, "utf8");
       if (!existingConfig.includes("codex_hooks")) {
         import_fs5.default.appendFileSync(configTomlPath, "\n[features]\ncodex_hooks = true\n");
       }
     }
     logger.log("agent", `codex: CODEX_HOME=${codexHome}`);
-    const codexDir = import_path7.default.dirname(codexPath);
+    const codexDir = import_path6.default.dirname(codexPath);
     if (codexDir && codexDir !== ".") {
       cleanEnv.PATH = `${codexDir}:${cleanEnv.PATH ?? ""}`;
     }
@@ -2073,7 +2049,16 @@ var providers = {
 // src/server/routes/agent.ts
 init_logger();
 
+// src/db/schema.ts
+init_cjs_shims();
+var import_node_module = require("module");
+var import_path7 = __toESM(require("path"), 1);
+var NATIVE_DIR = import_path7.default.join(process.cwd(), ".sna/native");
+
 // src/history/canonical.ts
+init_cjs_shims();
+
+// src/server/api-types.ts
 init_cjs_shims();
 
 // src/server/image-store.ts

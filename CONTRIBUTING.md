@@ -1,104 +1,106 @@
 ## Contributing
 
-### Repository Structure
+### Repository layout
 
 ```
 sna/
 ├── packages/
-│   ├── core/    (@sna-sdk/core)  — Server runtime, DB, CLI, event pipeline, code generation
-│   └── react/   (@sna-sdk/react) — React hooks, components, stores, typed client
-├── docs/                          — SDK documentation (source of truth)
-├── plugins/sna-builder/           — Claude Code plugin for SNA development
-├── .claude-plugin/marketplace.json — Plugin marketplace definition
+│   ├── core/      (@sna-sdk/core)    — HTTP/WS server, providers, session manager, DB, launchers
+│   ├── client/    (@sna-sdk/client)  — Framework-agnostic TS client (HTTP + WebSocket)
+│   ├── react/     (@sna-sdk/react)   — React hooks, components, chat UI, Zustand stores
+│   └── testing/   (@sna-sdk/testing) — Mock Anthropic API + `sna-test` CLI
+├── docs/                              — SDK documentation (source of truth)
 └── pnpm-workspace.yaml
 ```
 
 ### Commands
 
 ```bash
-pnpm install                       # Install all dependencies
-cd packages/core && pnpm build     # Build core
-cd packages/react && pnpm build    # Build react
-sna gen client                     # Generate typed skill client
+pnpm install                       # Install all workspaces
+pnpm -r build                      # Build every package (tsup)
+cd packages/core && pnpm test      # Core tests (node:test, tsx)
+cd packages/client && pnpm test    # Client tests
 ```
 
-### Architecture
+### Architecture summary
 
-See [docs/architecture.md](docs/architecture.md) for full details.
+See [docs/architecture.md](docs/architecture.md) for the full picture. Quick map:
 
-#### DB Separation (CRITICAL)
+#### Server (`@sna-sdk/core`)
 
-SDK DB (`data/sna.db`):
-- `chat_sessions` — session management (id, label, type, meta, cwd, last_start_config, created_at)
-- `chat_messages` — chat history persistence
-- `skill_events` — skill execution state tracking (FK → chat_sessions)
+`createSnaApp({ sessionManager })` returns a Hono app exposing the full HTTP API; `attachWebSocket(server, sessionManager)` mounts the WS handler on `/ws`. The standalone entry (`server/standalone.ts`) wires both up and is what the launcher API forks.
 
-Application DB (`data/<app>.db`):
-- App-specific tables only
-- Applications MUST NOT define `skill_events`, `chat_sessions`, or `chat_messages`
+The `SessionManager` owns every running agent. Each `Session` carries a `process` (Claude Code or Codex subprocess), a per-session event buffer, the last `StartConfig`, and metadata. Listeners cover lifecycle, config changes, state changes, agent events, permission requests, and skill events.
 
-#### Event Pipeline (Dispatch)
+Providers (`core/providers/{claude-code,codex}.ts`) implement a common `AgentProvider` interface (`spawn`, `isAvailable`). The returned `AgentProcess` exposes `send`, `interrupt`, `setModel`, `setPermissionMode`, `respondToPermission`, `kill` — translating each into the runtime's native control message.
 
-All events flow through the unified dispatcher (`packages/core/src/lib/dispatch.ts`):
+#### Canonical conversation model
 
-```
-sna dispatch open → validate skill → create session
-sna dispatch <id> start/milestone/progress → write to sna.db
-sna dispatch <id> close → write complete/success → kill bg session
-```
+`db/schema.ts` stores chat blocks in `chat_messages` with two orthogonal axes:
 
-Programmatic usage:
-```typescript
-import { createDispatchHandle } from "@sna-sdk/core";
-const d = createDispatchHandle({ skill: "form-analyze" });
-d.start("Starting...");
-d.milestone("5 items found");
-await d.close();  // writes complete + kills bg agent process
-```
+- `actor`: `user` | `assistant` | `system`
+- `kind`: `text` | `thinking` | `tool_use` | `tool_result` | `status` | `error`
 
-Legacy `emit.js` is a thin wrapper around dispatch for backward compatibility.
+Binary attachments live in `embeds` JSON keyed by id; content text holds inline `![](embed://<id>)` refs. `chat_sessions` carries `meta`, `cwd`, and `last_start_config` so a session can be restored across restarts.
 
-#### Import Paths
+`history/canonical.ts` builds canonical blocks from the DB. Provider-specific adapters in `history/{claude-code,codex}.ts` translate canonical → native wire format (Claude JSONL `--resume` file, Codex thread/resume payload). This is what makes a single conversation portable across providers.
 
-- Server/DB/CLI: `@sna-sdk/core/*`
-- React hooks/components/stores: `@sna-sdk/react/*`
-- NEVER import from `sna/` (legacy package name)
+#### Transports
 
-### Tech Stack
+HTTP routes (`server/routes/{agent,chat}.ts`) cover state-changing ops with ordering guarantees. The WebSocket handler (`server/ws.ts`) wraps the same operations and adds push channels (`agent.event`, `sessions.snapshot`, `permission.request`, `session.lifecycle`).
 
-- TypeScript (strict) + Hono + better-sqlite3 + ws + React 19
-- tsup (library bundler) + pnpm 10
-- Tailwind CSS v4 + Zustand + Radix UI (tooltip)
+`server/api-types.ts` is the single source of truth for response shapes — both HTTP and WS use the typed helpers `httpJson` / `wsReply`, so drift between the two transports is a TypeScript error.
 
-### Key Files
+#### Permission flow
+
+The PreToolUse hook (`scripts/hook.ts`) runs before every Claude Code tool call, posts the request to the running SNA server, and blocks until the UI answers. Codex's JSON-RPC approval is bridged through the same path. Both surface as `permission_needed` events; consumers respond via `permission.respond`.
+
+`ClaudeCodeProvider.spawn` auto-injects the hook via `--settings`; consumers don't write `.claude/settings.json` themselves.
+
+#### Launcher API
+
+`@sna-sdk/core/electron` and `@sna-sdk/core/node` expose `startSnaServer({ port, dbPath, … })`. Both fork `dist/server/standalone.js` and resolve native modules and asar-unpacked paths. The Electron launcher additionally locates the consumer app's electron-rebuilt `better-sqlite3` and passes the binding path through.
+
+### Key files
 
 | File | Role |
 |------|------|
-| `packages/core/src/db/schema.ts` | SDK database (sna.db) — chat_sessions, chat_messages, skill_events |
-| `packages/core/src/lib/dispatch.ts` | Unified event dispatcher (open/send/close lifecycle) |
-| `packages/core/src/lib/parse-flags.ts` | Shared CLI flag parser |
-| `packages/core/src/scripts/hook.ts` | Permission request hook (via dispatch) |
-| `packages/core/src/scripts/sna.ts` | Lifecycle CLI (up, down, validate, dispatch, gen client) |
-| `packages/core/src/scripts/gen-client.ts` | Typed client + `.sna/skills.json` generator |
-| `packages/core/src/lib/skill-parser.ts` | SKILL.md frontmatter parser |
-| `packages/core/src/server/index.ts` | createSnaApp() Hono factory |
-| `packages/core/src/server/session-manager.ts` | Multi-session management, event pub/sub, permission flow |
-| `packages/core/src/server/history-builder.ts` | Build HistoryMessage[] from chat_messages DB |
-| `packages/core/src/core/providers/cc-history-adapter.ts` | JSONL resume + recalled-conversation fallback |
-| `packages/core/src/server/ws.ts` | WebSocket API wrapping all HTTP routes |
-| `packages/core/src/server/routes/agent.ts` | Agent lifecycle, sessions, run-once, permission routes |
-| `packages/core/src/server/routes/chat.ts` | Chat persistence CRUD routes |
-| `packages/react/src/hooks/use-skill-events.ts` | SSE subscription hook |
-| `packages/react/src/hooks/use-sna.ts` | Main hook (runSkill, runSkillInBackground) |
-| `packages/react/src/hooks/use-sna-client.ts` | Typed client hook (useSnaClient) |
-| `packages/react/src/hooks/use-session-manager.ts` | Session CRUD + polling (3s interval) |
-| `packages/react/src/components/sna-provider.tsx` | Root React provider |
-| `packages/react/src/components/sna-session.tsx` | Session scope provider (multi-session) |
+| `packages/core/src/server/index.ts` | `createSnaApp()` Hono factory |
+| `packages/core/src/server/session-manager.ts` | Multi-session manager + pub/sub |
+| `packages/core/src/server/ws.ts` | WebSocket handler wrapping all routes |
+| `packages/core/src/server/api-types.ts` | Shared HTTP/WS response shapes |
+| `packages/core/src/server/routes/agent.ts` | Agent lifecycle + run-once HTTP routes |
+| `packages/core/src/server/routes/chat.ts` | Chat persistence routes |
+| `packages/core/src/server/standalone.ts` | Standalone server entry (forked by launchers) |
+| `packages/core/src/db/schema.ts` | Canonical SQLite schema + migrations |
+| `packages/core/src/db/chat-messages.ts` | `insertChatMessage` etc. |
+| `packages/core/src/history/canonical.ts` | Build canonical blocks from DB |
+| `packages/core/src/history/claude-code.ts` | Canonical → Claude Code JSONL adapter |
+| `packages/core/src/history/codex.ts` | Canonical → Codex thread/resume adapter |
+| `packages/core/src/core/providers/claude-code.ts` | Claude Code spawn + event normalization |
+| `packages/core/src/core/providers/codex.ts` | Codex spawn + event normalization |
+| `packages/core/src/core/completion.ts` | One-shot `completion()` API |
+| `packages/core/src/electron/index.ts` | `startSnaServer()` launcher (Electron-aware) |
+| `packages/core/src/node/index.ts` | `startSnaServer()` launcher (plain Node) |
+| `packages/core/src/scripts/hook.ts` | PreToolUse permission hook |
+| `packages/client/src/sna-client.ts` | `SnaClient` (HTTP + WS) |
+| `packages/react/src/components/sna-provider.tsx` | Root context provider |
+| `packages/react/src/components/sna-chat-ui.tsx` | Drop-in chat panel |
+| `packages/react/src/hooks/use-agent.ts` | Agent event subscription + send |
+| `packages/react/src/hooks/use-session-manager.ts` | Session CRUD + polling |
+| `packages/testing/src/mock-api.ts` | Mock Anthropic Messages API |
+| `packages/testing/src/cli.ts` | `sna-test` CLI |
+
+### Tech stack
+
+- TypeScript (strict) + Hono + ws + better-sqlite3
+- React 19 + Zustand + Radix UI Tooltip (peer)
+- tsup (library bundler) + pnpm 10 workspaces
+- node:test for tests (run via `tsx`)
 
 ### Documentation
 
-- [Architecture](docs/architecture.md) — DB separation, event pipeline, package structure
-- [Skill Authoring](docs/skill-authoring.md) — How to write skills with typed args
-- [App Setup](docs/app-setup.md) — Frontend, server, Vite configuration, typed client
-- [Design Decisions](docs/design-decisions.md) — DB scope, locking, invoked status
-- [Testing](docs/testing.md) — Mock API, `sna tu` commands, `SNA_CLAUDE_COMMAND`, test modules
+- [Architecture](docs/architecture.md) — Server, session manager, canonical history, providers, permission flow
+- [App Setup](docs/app-setup.md) — Embedding the server, connecting via `SnaClient`, React integration
+- [Design Decisions](docs/design-decisions.md) — Why canonical-flat blocks, 3-layer attribution, dual transport
+- [Testing](docs/testing.md) — Mock Anthropic API, `sna-test` CLI, isolated Claude Code instances

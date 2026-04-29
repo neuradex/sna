@@ -4,6 +4,17 @@ let messageCounter = 0;
 function emptySession() {
   return { messages: [], processedEventIds: /* @__PURE__ */ new Set() };
 }
+function actorKindToRole(actor, kind) {
+  if (actor === "user") return "user";
+  if (actor === "assistant") {
+    if (kind === "thinking") return "thinking";
+    if (kind === "tool_use") return "tool";
+    return "assistant";
+  }
+  if (kind === "tool_result") return "tool_result";
+  if (kind === "error") return "error";
+  return "status";
+}
 function syncCreateSession(apiUrl, id, label, type) {
   if (!apiUrl) return;
   fetch(`${apiUrl}/chat/sessions`, {
@@ -141,10 +152,9 @@ const useChatStore = create()(
         const msgData = await msgRes.json();
         const messages = msgData.messages.map((m) => ({
           id: `db-${m.id}`,
-          role: m.role,
+          role: actorKindToRole(m.actor, m.kind),
           content: m.content,
           timestamp: new Date(m.created_at).getTime(),
-          skillName: m.skill_name ?? void 0,
           meta: m.meta ? JSON.parse(m.meta) : void 0
         }));
         if (messages.length > messageCounter) messageCounter = messages.length;

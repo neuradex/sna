@@ -10,7 +10,6 @@
  *   Server → Client:  { type: "agent.event", session: "abc", cursor: 42, event: {...} }  (push)
  *   Server → Client:  { type: "sessions.snapshot", sessions: [...] }                   (auto-push on connect + state change)
  *   Server → Client:  { type: "session.lifecycle", session: "abc", state: "killed" }   (auto-push)
- *   Server → Client:  { type: "skill.event", data: {...} }  (push)
  *
  * Message types:
  *   sessions.create   { label?, cwd?, meta? }
@@ -26,13 +25,6 @@
  *   agent.run-once    { message, model?, systemPrompt?, appendSystemPrompt?, permissionMode?, cwd?, timeout?, provider?, extraArgs? }
  *   agent.completion  { prompt, model?, label?, systemPrompt?, appendSystemPrompt?, timeout?, extraArgs?, env? }
  *
- *   events.subscribe  { since? }
- *   events.unsubscribe {}
- *   emit              { skill, eventType, message, data?, session? }
- *                     NOTE: WS uses `eventType` (not `type`) because `type` is reserved
- *                     as the WS protocol routing field. HTTP POST /emit uses `type` instead.
- *                     WS uses `session` (not `session_id`) consistent with all other WS ops.
- *
  *   permission.respond   { session?, approved }
  *   permission.pending   { session? }
  *   permission.subscribe {}              → pushes { type: "permission.request", session, request, createdAt }
@@ -40,10 +32,11 @@
  *
  *   chat.sessions.list    {}
  *   chat.sessions.create  { id?, label?, chatType?, meta? }
- *                         NOTE: WS uses `chatType` (not `type`) for the same reason as `eventType` above.
+ *                         NOTE: WS uses `chatType` (not `type`) because `type` is reserved
+ *                         as the WS protocol routing field.
  *   chat.sessions.remove  { session }
  *   chat.messages.list    { session, since? }
- *   chat.messages.create  { session, role, content?, skill_name?, meta? }
+ *   chat.messages.create  { session, actor, kind, content?, embeds?, meta? }
  *   chat.messages.clear   { session }
  */
 
@@ -74,8 +67,6 @@ interface WsRequest {
 
 interface ConnState {
   agentUnsubs: Map<string, () => void>;
-  skillEventUnsub: (() => void) | null;
-  skillPollTimer: ReturnType<typeof setInterval> | null;
   permissionUnsub: (() => void) | null;
   lifecycleUnsub: (() => void) | null;
   configChangedUnsub: (() => void) | null;
@@ -124,7 +115,7 @@ export function attachWebSocket(
 
   wss.on("connection", (ws) => {
     logger.log("ws", "client connected");
-    const state: ConnState = { agentUnsubs: new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null, stateChangedUnsub: null, metadataChangedUnsub: null };
+    const state: ConnState = { agentUnsubs: new Map(), permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null, stateChangedUnsub: null, metadataChangedUnsub: null };
 
     // Helper: push full session snapshot to this client
     const pushSnapshot = () => send(ws, { type: "sessions.snapshot", sessions: sessionManager.listSessions() });
@@ -173,12 +164,6 @@ export function attachWebSocket(
       logger.log("ws", "client disconnected");
       for (const unsub of state.agentUnsubs.values()) unsub();
       state.agentUnsubs.clear();
-      state.skillEventUnsub?.();
-      state.skillEventUnsub = null;
-      if (state.skillPollTimer) {
-        clearInterval(state.skillPollTimer);
-        state.skillPollTimer = null;
-      }
       state.permissionUnsub?.();
       state.permissionUnsub = null;
       state.lifecycleUnsub?.();
@@ -247,12 +232,6 @@ function handleMessage(
       return handleAgentUnsubscribe(ws, msg, state);
 
     // ── Skill events ──────────────────────────────────
-    case "events.subscribe":
-      return handleEventsSubscribe(ws, msg, sm, state);
-    case "events.unsubscribe":
-      return handleEventsUnsubscribe(ws, msg, state);
-    case "emit":
-      return handleEmit(ws, msg, sm);
 
     // ── Permission ────────────────────────────────────
     case "permission.respond":
@@ -353,11 +332,6 @@ function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): vo
         content: msg.prompt as string,
         meta: msg.meta as Record<string, unknown> | undefined,
       });
-    }
-    const skillMatch = (msg.prompt as string)?.match(/^Execute the skill:\s*(\S+)/);
-    if (skillMatch) {
-      db.prepare(`INSERT INTO skill_events (session_id, skill, type, message) VALUES (?, ?, 'invoked', ?)`)
-        .run(sessionId, skillMatch[1], `Skill ${skillMatch[1]} invoked`);
     }
   } catch { /* non-fatal */ }
 
@@ -757,104 +731,6 @@ function handleAgentUnsubscribe(ws: WebSocket, msg: WsRequest, state: ConnState)
   reply(ws, msg, {});
 }
 
-// ── Skill event handlers ──────────────────────────────────────────
-
-// Slower poll interval — only catches events from external sources (CLI, HTTP from other processes)
-
-function handleEventsSubscribe(ws: WebSocket, msg: WsRequest, sm: SessionManager, state: ConnState): void {
-  // Cleanup existing subscription
-  state.skillEventUnsub?.();
-  state.skillEventUnsub = null;
-  if (state.skillPollTimer) {
-    clearInterval(state.skillPollTimer);
-    state.skillPollTimer = null;
-  }
-
-  let lastId = typeof msg.since === "number" ? msg.since : -1;
-  if (lastId <= 0) {
-    try {
-      const db = getDb();
-      const row = db.prepare("SELECT MAX(id) as maxId FROM skill_events").get() as { maxId: number | null };
-      lastId = row.maxId ?? 0;
-    } catch {
-      lastId = 0;
-    }
-  }
-
-  // Instant push for events emitted through this server (WS emit + HTTP POST /emit)
-  state.skillEventUnsub = sm.onSkillEvent((event) => {
-    const eventId = event.id as number;
-    if (eventId > lastId) {
-      lastId = eventId;
-      send(ws, { type: "skill.event", data: event });
-    }
-  });
-
-  // Slower DB poll to catch events from external sources (CLI emit.js, other processes)
-  state.skillPollTimer = setInterval(() => {
-    try {
-      const db = getDb();
-      const rows = db.prepare(
-        `SELECT id, session_id, skill, type, message, data, created_at
-         FROM skill_events WHERE id > ? ORDER BY id ASC LIMIT 50`,
-      ).all(lastId) as any[];
-      for (const row of rows) {
-        if ((row as any).id > lastId) {
-          lastId = (row as any).id;
-          send(ws, { type: "skill.event", data: row });
-        }
-      }
-    } catch { /* DB not ready */ }
-  }, getConfig().skillPollMs);
-
-  reply(ws, msg, { lastId });
-}
-
-function handleEventsUnsubscribe(ws: WebSocket, msg: WsRequest, state: ConnState): void {
-  state.skillEventUnsub?.();
-  state.skillEventUnsub = null;
-  if (state.skillPollTimer) {
-    clearInterval(state.skillPollTimer);
-    state.skillPollTimer = null;
-  }
-  reply(ws, msg, {});
-}
-
-function handleEmit(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
-  const skill = msg.skill as string;
-  const eventType = msg.eventType as string;
-  const emitMessage = msg.message as string;
-  const data = msg.data as string | undefined;
-  const sessionId = msg.session as string | undefined;
-
-  if (!skill || !eventType || !emitMessage) {
-    return replyError(ws, msg, "skill, eventType, message are required");
-  }
-
-  try {
-    const db = getDb();
-    const result = db.prepare(
-      `INSERT INTO skill_events (session_id, skill, type, message, data) VALUES (?, ?, ?, ?, ?)`,
-    ).run(sessionId ?? null, skill, eventType, emitMessage, data ?? null);
-    const id = Number(result.lastInsertRowid);
-
-    // Broadcast to all WS skill event subscribers
-    sm.broadcastSkillEvent({
-      id,
-      session_id: sessionId ?? null,
-      skill,
-      type: eventType,
-      message: emitMessage,
-      data: data ?? null,
-      created_at: new Date().toISOString(),
-    });
-
-    wsReply(ws, msg, { id });
-  } catch (e: any) {
-    replyError(ws, msg, e.message);
-  }
-}
-
 // ── Permission handlers ───────────────────────────────────────────
 
 function handlePermissionRespond(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
@@ -971,7 +847,6 @@ function handleChatMessagesCreate(ws: WebSocket, msg: WsRequest): void {
       content: (msg.content as string) ?? "",
       embeds: msg.embeds as Record<string, import("../history/types.js").EmbedRecord> | undefined,
       meta: msg.meta as Record<string, unknown> | undefined,
-      skillName: (msg.skill_name as string) ?? undefined,
     });
     wsReply(ws, msg, { status: "created", id });
   } catch (e: any) {

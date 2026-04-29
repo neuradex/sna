@@ -107,7 +107,6 @@ export class SessionManager {
   private maxSessions: number;
   private eventListeners = new Map<string, Set<(cursor: number, event: AgentEvent) => void>>();
   private pendingPermissions = new Map<string, PendingPermission>();
-  private skillEventListeners = new Set<(event: Record<string, unknown>) => void>();
   private permissionRequestListeners = new Set<(sessionId: string, request: Record<string, unknown>, createdAt: number) => void>();
   private lifecycleListeners = new Set<(event: SessionLifecycleEvent) => void>();
   private configChangedListeners = new Set<(event: SessionConfigChangedEvent) => void>();
@@ -350,19 +349,6 @@ export class SessionManager {
       set!.delete(cb);
       if (set!.size === 0) this.eventListeners.delete(sessionId);
     };
-  }
-
-  // ── Skill event pub/sub ────────────────────────────────────────
-
-  /** Subscribe to skill events broadcast. Returns unsubscribe function. */
-  onSkillEvent(cb: (event: Record<string, unknown>) => void): () => void {
-    this.skillEventListeners.add(cb);
-    return () => this.skillEventListeners.delete(cb);
-  }
-
-  /** Broadcast a skill event to all subscribers (called after DB insert). */
-  broadcastSkillEvent(event: Record<string, unknown>): void {
-    for (const cb of this.skillEventListeners) cb(event);
   }
 
   /** Push a synthetic event into a session's event stream (for user message broadcast). */

@@ -97,7 +97,6 @@ declare class SessionManager {
     private maxSessions;
     private eventListeners;
     private pendingPermissions;
-    private skillEventListeners;
     private permissionRequestListeners;
     private lifecycleListeners;
     private configChangedListeners;
@@ -132,10 +131,6 @@ declare class SessionManager {
     setProcess(sessionId: string, proc: AgentProcess, lifecycleState?: SessionLifecycleState): void;
     /** Subscribe to real-time events for a session. Returns unsubscribe function. */
     onSessionEvent(sessionId: string, cb: (cursor: number, event: AgentEvent) => void): () => void;
-    /** Subscribe to skill events broadcast. Returns unsubscribe function. */
-    onSkillEvent(cb: (event: Record<string, unknown>) => void): () => void;
-    /** Broadcast a skill event to all subscribers (called after DB insert). */
-    broadcastSkillEvent(event: Record<string, unknown>): void;
     /** Push a synthetic event into a session's event stream (for user message broadcast). */
     /**
      * Push an externally-persisted event into the session.

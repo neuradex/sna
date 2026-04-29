@@ -706,7 +706,7 @@ __export(electron_exports, {
 });
 module.exports = __toCommonJS(electron_exports);
 init_cjs_shims();
-var import_child_process5 = require("child_process");
+var import_child_process4 = require("child_process");
 var import_url4 = require("url");
 var import_fs9 = __toESM(require("fs"), 1);
 
@@ -1493,386 +1493,31 @@ var import_node_server = require("@hono/node-server");
 init_cjs_shims();
 var import_hono3 = require("hono");
 
-// src/server/routes/events.ts
-init_cjs_shims();
-var import_streaming = require("hono/streaming");
-
-// src/db/schema.ts
-init_cjs_shims();
-var import_node_module = require("module");
-var import_fs4 = __toESM(require("fs"), 1);
-var import_path5 = __toESM(require("path"), 1);
-function getDbPath() {
-  return process.env.SNA_DB_PATH ?? import_path5.default.join(process.cwd(), "data/sna.db");
-}
-var NATIVE_DIR = import_path5.default.join(process.cwd(), ".sna/native");
-var _db = null;
-function loadBetterSqlite3() {
-  const modulesPath = process.env.SNA_MODULES_PATH;
-  if (modulesPath) {
-    const entry = import_path5.default.join(modulesPath, "better-sqlite3");
-    if (import_fs4.default.existsSync(entry)) {
-      const req2 = (0, import_node_module.createRequire)(import_path5.default.join(modulesPath, "noop.js"));
-      return req2("better-sqlite3");
-    }
-  }
-  const nativeEntry = import_path5.default.join(NATIVE_DIR, "node_modules", "better-sqlite3");
-  if (import_fs4.default.existsSync(nativeEntry)) {
-    const req2 = (0, import_node_module.createRequire)(import_path5.default.join(NATIVE_DIR, "noop.js"));
-    return req2("better-sqlite3");
-  }
-  const req = (0, import_node_module.createRequire)(importMetaUrl);
-  return req("better-sqlite3");
-}
-function getDb() {
-  if (!_db) {
-    const BetterSqlite3 = loadBetterSqlite3();
-    const dir = import_path5.default.dirname(getDbPath());
-    if (!import_fs4.default.existsSync(dir)) import_fs4.default.mkdirSync(dir, { recursive: true });
-    const nativeBinding = process.env.SNA_SQLITE_NATIVE_BINDING || void 0;
-    _db = nativeBinding ? new BetterSqlite3(getDbPath(), { nativeBinding }) : new BetterSqlite3(getDbPath());
-    _db.pragma("journal_mode = WAL");
-    initSchema(_db);
-  }
-  return _db;
-}
-function migrateSkillEvents(db) {
-  const row = db.prepare(
-    "SELECT sql FROM sqlite_master WHERE type='table' AND name='skill_events'"
-  ).get();
-  if (row?.sql?.includes("CHECK(type IN")) {
-    db.exec("DROP TABLE IF EXISTS skill_events");
-  }
-}
-function migrateChatSessionsMeta(db) {
-  const cols = db.prepare("PRAGMA table_info(chat_sessions)").all();
-  if (cols.length > 0 && !cols.some((c) => c.name === "meta")) {
-    db.exec("ALTER TABLE chat_sessions ADD COLUMN meta TEXT");
-  }
-  if (cols.length > 0 && !cols.some((c) => c.name === "cwd")) {
-    db.exec("ALTER TABLE chat_sessions ADD COLUMN cwd TEXT");
-  }
-  if (cols.length > 0 && !cols.some((c) => c.name === "last_start_config")) {
-    db.exec("ALTER TABLE chat_sessions ADD COLUMN last_start_config TEXT");
-  }
-}
-function migrateChatMessagesCanonical(db) {
-  const cols = db.prepare("PRAGMA table_info(chat_messages)").all();
-  if (cols.length === 0) return;
-  const hasRole = cols.some((c) => c.name === "role");
-  const hasActor = cols.some((c) => c.name === "actor");
-  const hasKind = cols.some((c) => c.name === "kind");
-  const hasEmbeds = cols.some((c) => c.name === "embeds");
-  const hasUpdatedAt = cols.some((c) => c.name === "updated_at");
-  if (!hasRole && hasActor && hasKind && hasEmbeds && hasUpdatedAt) return;
-  db.transaction(() => {
-    if (!hasActor) db.exec("ALTER TABLE chat_messages ADD COLUMN actor TEXT");
-    if (!hasKind) db.exec("ALTER TABLE chat_messages ADD COLUMN kind TEXT");
-    if (!hasEmbeds) db.exec("ALTER TABLE chat_messages ADD COLUMN embeds TEXT");
-    if (!hasUpdatedAt) db.exec("ALTER TABLE chat_messages ADD COLUMN updated_at TEXT");
-    if (hasRole) {
-      db.exec(`
-        UPDATE chat_messages SET
-          actor = CASE role
-            WHEN 'user' THEN 'user'
-            WHEN 'assistant' THEN 'assistant'
-            WHEN 'thinking' THEN 'assistant'
-            WHEN 'tool' THEN 'assistant'
-            WHEN 'tool_use' THEN 'assistant'
-            WHEN 'tool_result' THEN 'system'
-            WHEN 'status' THEN 'system'
-            WHEN 'error' THEN 'system'
-            ELSE 'system'
-          END,
-          kind = CASE role
-            WHEN 'user' THEN 'text'
-            WHEN 'assistant' THEN 'text'
-            WHEN 'thinking' THEN 'thinking'
-            WHEN 'tool' THEN 'tool_use'
-            WHEN 'tool_use' THEN 'tool_use'
-            WHEN 'tool_result' THEN 'tool_result'
-            WHEN 'status' THEN 'status'
-            WHEN 'error' THEN 'error'
-            ELSE 'text'
-          END
-        WHERE actor IS NULL OR kind IS NULL;
-      `);
-    }
-    db.exec(`UPDATE chat_messages SET updated_at = created_at WHERE updated_at IS NULL`);
-    const legacyImageRows = db.prepare(`
-      SELECT id, content, meta FROM chat_messages
-      WHERE meta IS NOT NULL AND meta LIKE '%"images"%' AND embeds IS NULL
-    `).all();
-    const updateEmbeds = db.prepare(`UPDATE chat_messages SET content = ?, embeds = ?, meta = ? WHERE id = ?`);
-    for (const row of legacyImageRows) {
-      try {
-        const meta = JSON.parse(row.meta);
-        const files = Array.isArray(meta.images) ? meta.images.filter((f) => typeof f === "string") : [];
-        if (files.length === 0) continue;
-        const embedEntries = {};
-        const refsSuffix = [];
-        for (const filename of files) {
-          const id = filename.replace(/\.[^.]+$/, "");
-          const ext = filename.match(/\.([^.]+)$/)?.[1] ?? "";
-          embedEntries[id] = { mime_type: extToMime(ext), path: filename };
-          refsSuffix.push(`![](embed://${id})`);
-        }
-        const newContent = row.content + (refsSuffix.length > 0 ? "\n" + refsSuffix.join(" ") : "");
-        delete meta.images;
-        const newMeta = Object.keys(meta).length > 0 ? JSON.stringify(meta) : null;
-        updateEmbeds.run(newContent, JSON.stringify(embedEntries), newMeta, row.id);
-      } catch {
-      }
-    }
-    if (hasRole) {
-      db.exec("ALTER TABLE chat_messages DROP COLUMN role");
-    }
-  })();
-}
-function extToMime(ext) {
-  switch (ext.toLowerCase()) {
-    case "png":
-      return "image/png";
-    case "jpg":
-    case "jpeg":
-      return "image/jpeg";
-    case "gif":
-      return "image/gif";
-    case "webp":
-      return "image/webp";
-    case "svg":
-      return "image/svg+xml";
-    case "pdf":
-      return "application/pdf";
-    default:
-      return "application/octet-stream";
-  }
-}
-function initSchema(db) {
-  migrateSkillEvents(db);
-  migrateChatSessionsMeta(db);
-  migrateChatMessagesCanonical(db);
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS chat_sessions (
-      id         TEXT PRIMARY KEY,
-      label      TEXT NOT NULL DEFAULT '',
-      type       TEXT NOT NULL DEFAULT 'main',
-      meta       TEXT,
-      cwd        TEXT,
-      last_start_config TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    -- Ensure default session always exists
-    INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES ('default', 'Chat', 'main');
-
-    -- Canonical chat_messages schema. Two orthogonal axes describe each block:
-    --   actor  WHO produced it:    'user' | 'assistant' | 'system'
-    --   kind   WHAT kind it is:    'text' | 'thinking' | 'tool_use' | 'tool_result' | 'status' | 'error'
-    --   content Textual body. May contain inline embed refs: ![](embed://<id>)
-    --   embeds  JSON { "<id>": { mime_type, path, ... } } \u2014 binary attachments referenced by content.
-    --   meta    Kind-specific structured overlay (usage, tool_use_id, input JSON, isError, ...)
-    CREATE TABLE IF NOT EXISTS chat_messages (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-      actor      TEXT NOT NULL DEFAULT 'user',
-      kind       TEXT NOT NULL DEFAULT 'text',
-      content    TEXT NOT NULL DEFAULT '',
-      embeds     TEXT,
-      skill_name TEXT,
-      meta       TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
-    CREATE INDEX IF NOT EXISTS idx_chat_messages_session_kind ON chat_messages(session_id, kind);
-
-    CREATE TABLE IF NOT EXISTS skill_events (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT REFERENCES chat_sessions(id) ON DELETE SET NULL,
-      skill      TEXT NOT NULL,
-      type       TEXT NOT NULL,
-      message    TEXT NOT NULL,
-      data       TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_skill_events_skill ON skill_events(skill);
-    CREATE INDEX IF NOT EXISTS idx_skill_events_created ON skill_events(created_at);
-    CREATE INDEX IF NOT EXISTS idx_skill_events_session ON skill_events(session_id);
-  `);
-}
-
-// src/server/routes/events.ts
-init_config();
-function eventsRoute(c) {
-  const sinceParam = c.req.query("since");
-  let lastId = sinceParam ? parseInt(sinceParam) : -1;
-  if (lastId <= 0) {
-    const db = getDb();
-    const row = db.prepare("SELECT MAX(id) as maxId FROM skill_events").get();
-    lastId = row.maxId ?? 0;
-  }
-  return (0, import_streaming.streamSSE)(c, async (stream) => {
-    let closed = false;
-    stream.onAbort(() => {
-      closed = true;
-    });
-    const keepaliveTimer = setInterval(async () => {
-      if (closed) {
-        clearInterval(keepaliveTimer);
-        return;
-      }
-      try {
-        await stream.writeSSE({ data: "", event: "keepalive" });
-      } catch {
-        closed = true;
-        clearInterval(keepaliveTimer);
-      }
-    }, getConfig().keepaliveIntervalMs);
-    while (!closed) {
-      try {
-        const db = getDb();
-        const rows = db.prepare(`
-          SELECT id, skill, type, message, data, created_at
-          FROM skill_events
-          WHERE id > ?
-          ORDER BY id ASC
-          LIMIT 50
-        `).all(lastId);
-        for (const row of rows) {
-          if (closed) break;
-          await stream.writeSSE({ data: JSON.stringify(row) });
-          lastId = row.id;
-        }
-      } catch {
-      }
-      await stream.sleep(getConfig().pollIntervalMs);
-    }
-    clearInterval(keepaliveTimer);
-  });
-}
-
-// src/server/routes/emit.ts
-init_cjs_shims();
-
-// src/server/api-types.ts
-init_cjs_shims();
-function httpJson(c, _op, data, status) {
-  return c.json(data, status);
-}
-function wsReply(ws, msg, data) {
-  if (ws.readyState !== ws.OPEN) return;
-  const out = { ...data, type: msg.type };
-  if (msg.rid != null) out.rid = msg.rid;
-  ws.send(JSON.stringify(out));
-}
-
-// src/server/routes/emit.ts
-function createEmitRoute(sessionManager) {
-  return async (c) => {
-    const body = await c.req.json();
-    const { skill, message, data } = body;
-    const type = body.type ?? body.eventType;
-    const session_id = c.req.query("session") ?? body.session_id ?? body.session ?? null;
-    if (!skill || !type || !message) {
-      return c.json({ error: "missing fields" }, 400);
-    }
-    const db = getDb();
-    const result = db.prepare(
-      `INSERT INTO skill_events (session_id, skill, type, message, data) VALUES (?, ?, ?, ?, ?)`
-    ).run(session_id, skill, type, message, data ?? null);
-    const id = Number(result.lastInsertRowid);
-    sessionManager.broadcastSkillEvent({
-      id,
-      session_id: session_id ?? null,
-      skill,
-      type,
-      message,
-      data: data ?? null,
-      created_at: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    return httpJson(c, "emit", { id });
-  };
-}
-
-// src/server/routes/run.ts
-init_cjs_shims();
-var import_child_process2 = require("child_process");
-var import_streaming2 = require("hono/streaming");
-var ROOT = process.cwd();
-function createRunRoute(commands) {
-  return function runRoute(c) {
-    const skill = c.req.query("skill") ?? "";
-    const cmd = commands[skill];
-    if (!cmd) {
-      return c.text(`data: unknown skill: ${skill}
-
-data: [done]
-
-`, 200, {
-        "Content-Type": "text/event-stream"
-      });
-    }
-    return (0, import_streaming2.streamSSE)(c, async (stream) => {
-      await stream.writeSSE({ data: `$ ${cmd.slice(1).join(" ")}` });
-      const child = (0, import_child_process2.spawn)(cmd[0], cmd.slice(1), {
-        cwd: ROOT,
-        env: { ...process.env, FORCE_COLOR: "0" }
-      });
-      const write = (chunk) => {
-        for (const line of chunk.toString().split("\n")) {
-          if (line.trim()) stream.writeSSE({ data: line });
-        }
-      };
-      child.stdout.on("data", write);
-      child.stderr.on("data", (chunk) => {
-        for (const line of chunk.toString().split("\n")) {
-          if (line.trim() && !line.startsWith(">")) stream.writeSSE({ data: line });
-        }
-      });
-      await new Promise((resolve) => {
-        child.on("close", async (code) => {
-          await stream.writeSSE({ data: `[exit ${code ?? 0}]` });
-          await stream.writeSSE({ data: "[done]" });
-          resolve();
-        });
-        child.on("error", async (err2) => {
-          await stream.writeSSE({ data: `Error: ${err2.message}` });
-          await stream.writeSSE({ data: "[done]" });
-          resolve();
-        });
-      });
-    });
-  };
-}
-
 // src/server/routes/agent.ts
 init_cjs_shims();
 var import_hono = require("hono");
-var import_streaming3 = require("hono/streaming");
+var import_streaming = require("hono/streaming");
 
 // src/core/providers/index.ts
 init_cjs_shims();
 
 // src/core/providers/codex.ts
 init_cjs_shims();
-var import_child_process3 = require("child_process");
+var import_child_process2 = require("child_process");
 var import_events2 = require("events");
-var import_fs6 = __toESM(require("fs"), 1);
-var import_path7 = __toESM(require("path"), 1);
+var import_fs5 = __toESM(require("fs"), 1);
+var import_path6 = __toESM(require("path"), 1);
 var import_url2 = require("url");
 
 // src/history/codex.ts
 init_cjs_shims();
-var import_fs5 = __toESM(require("fs"), 1);
-var import_path6 = __toESM(require("path"), 1);
+var import_fs4 = __toESM(require("fs"), 1);
+var import_path5 = __toESM(require("path"), 1);
 init_config();
 function loadEmbedAsDataUrl(sessionId, record) {
-  const fullPath = import_path6.default.isAbsolute(record.path) ? record.path : import_path6.default.join(getConfig().dataDir, "images", sessionId, record.path);
+  const fullPath = import_path5.default.isAbsolute(record.path) ? record.path : import_path5.default.join(getConfig().dataDir, "images", sessionId, record.path);
   try {
-    const buf = import_fs5.default.readFileSync(fullPath);
+    const buf = import_fs4.default.readFileSync(fullPath);
     return `data:${record.mime_type};base64,${buf.toString("base64")}`;
   } catch {
     return null;
@@ -1959,9 +1604,9 @@ init_logger();
 var SHELL2 = process.env.SHELL || "/bin/zsh";
 function validateCodexPath(codexPath) {
   try {
-    const codexDir = import_path7.default.dirname(codexPath);
+    const codexDir = import_path6.default.dirname(codexPath);
     const env = { ...process.env, PATH: `${codexDir}:${process.env.PATH ?? ""}` };
-    const out = (0, import_child_process3.execSync)(`"${codexPath}" --version`, {
+    const out = (0, import_child_process2.execSync)(`"${codexPath}" --version`, {
       encoding: "utf8",
       stdio: "pipe",
       timeout: 1e4,
@@ -1973,10 +1618,10 @@ function validateCodexPath(codexPath) {
   }
 }
 function cacheCodexPath(codexPath, cacheDir) {
-  const dir = cacheDir ?? import_path7.default.join(process.cwd(), ".sna");
+  const dir = cacheDir ?? import_path6.default.join(process.cwd(), ".sna");
   try {
-    if (!import_fs6.default.existsSync(dir)) import_fs6.default.mkdirSync(dir, { recursive: true });
-    import_fs6.default.writeFileSync(import_path7.default.join(dir, "codex-path"), codexPath);
+    if (!import_fs5.default.existsSync(dir)) import_fs5.default.mkdirSync(dir, { recursive: true });
+    import_fs5.default.writeFileSync(import_path6.default.join(dir, "codex-path"), codexPath);
   } catch {
   }
 }
@@ -1986,9 +1631,9 @@ function resolveCodexCli(opts) {
     const v = validateCodexPath(process.env.SNA_CODEX_COMMAND);
     return { path: process.env.SNA_CODEX_COMMAND, version: v.version, source: "env" };
   }
-  const cacheFile = cacheDir ? import_path7.default.join(cacheDir, "codex-path") : import_path7.default.join(process.cwd(), ".sna/codex-path");
+  const cacheFile = cacheDir ? import_path6.default.join(cacheDir, "codex-path") : import_path6.default.join(process.cwd(), ".sna/codex-path");
   try {
-    const cached = import_fs6.default.readFileSync(cacheFile, "utf8").trim();
+    const cached = import_fs5.default.readFileSync(cacheFile, "utf8").trim();
     if (cached) {
       const v = validateCodexPath(cached);
       if (v.ok) return { path: cached, version: v.version, source: "cache" };
@@ -2010,7 +1655,7 @@ function resolveCodexCli(opts) {
     }
   }
   try {
-    const raw = (0, import_child_process3.execSync)(`${SHELL2} -i -l -c "command -v codex" 2>/dev/null`, {
+    const raw = (0, import_child_process2.execSync)(`${SHELL2} -i -l -c "command -v codex" 2>/dev/null`, {
       encoding: "utf8",
       timeout: 5e3
     }).trim();
@@ -2026,7 +1671,7 @@ function resolveCodexCli(opts) {
   return { path: "codex", source: "fallback" };
 }
 function resolveCodexPath(cwd) {
-  const result = resolveCodexCli({ cacheDir: import_path7.default.join(cwd, ".sna") });
+  const result = resolveCodexCli({ cacheDir: import_path6.default.join(cwd, ".sna") });
   logger.log("agent", `codex path: ${result.source}=${result.path}${result.version ? ` (${result.version})` : ""}`);
   return result.path;
 }
@@ -2800,23 +2445,23 @@ var CodexProvider = class {
     const codexPath = resolveCodexPath(options.cwd);
     const args = ["app-server"];
     const cleanEnv = { ...process.env, ...options.env };
-    const codexHome = options.configDir ?? import_path7.default.join(options.cwd, ".sna", "codex-home");
-    if (!import_fs6.default.existsSync(codexHome)) {
-      import_fs6.default.mkdirSync(codexHome, { recursive: true });
+    const codexHome = options.configDir ?? import_path6.default.join(options.cwd, ".sna", "codex-home");
+    if (!import_fs5.default.existsSync(codexHome)) {
+      import_fs5.default.mkdirSync(codexHome, { recursive: true });
     }
     const realCodexHome = `${process.env.HOME}/.codex`;
     for (const f of ["auth.json", "installation_id"]) {
-      const src = import_path7.default.join(realCodexHome, f);
-      const dst = import_path7.default.join(codexHome, f);
-      if (import_fs6.default.existsSync(src) && !import_fs6.default.existsSync(dst)) {
-        import_fs6.default.copyFileSync(src, dst);
+      const src = import_path6.default.join(realCodexHome, f);
+      const dst = import_path6.default.join(codexHome, f);
+      if (import_fs5.default.existsSync(src) && !import_fs5.default.existsSync(dst)) {
+        import_fs5.default.copyFileSync(src, dst);
       }
     }
-    const configTomlPath = import_path7.default.join(codexHome, "config.toml");
-    if (!import_fs6.default.existsSync(configTomlPath)) {
-      const realConfig = import_path7.default.join(realCodexHome, "config.toml");
-      if (import_fs6.default.existsSync(realConfig)) {
-        import_fs6.default.copyFileSync(realConfig, configTomlPath);
+    const configTomlPath = import_path6.default.join(codexHome, "config.toml");
+    if (!import_fs5.default.existsSync(configTomlPath)) {
+      const realConfig = import_path6.default.join(realCodexHome, "config.toml");
+      if (import_fs5.default.existsSync(realConfig)) {
+        import_fs5.default.copyFileSync(realConfig, configTomlPath);
       }
     }
     cleanEnv.CODEX_HOME = codexHome;
@@ -2850,18 +2495,18 @@ var CodexProvider = class {
         }
         tomlLines.push("");
       }
-      import_fs6.default.appendFileSync(configTomlPath, "\n" + tomlLines.join("\n"));
+      import_fs5.default.appendFileSync(configTomlPath, "\n" + tomlLines.join("\n"));
       logger.log("agent", `codex: ${Object.keys(options.mcpServers).length} MCP servers injected`);
     }
-    let pkgRoot = import_path7.default.dirname((0, import_url2.fileURLToPath)(importMetaUrl));
-    while (!import_fs6.default.existsSync(import_path7.default.join(pkgRoot, "package.json"))) {
-      const parent = import_path7.default.dirname(pkgRoot);
+    let pkgRoot = import_path6.default.dirname((0, import_url2.fileURLToPath)(importMetaUrl));
+    while (!import_fs5.default.existsSync(import_path6.default.join(pkgRoot, "package.json"))) {
+      const parent = import_path6.default.dirname(pkgRoot);
       if (parent === pkgRoot) break;
       pkgRoot = parent;
     }
     const preToolUseHooks = [];
     if (options.permissionMode !== "bypassPermissions") {
-      const hookScript = import_path7.default.join(pkgRoot, "dist", "scripts", "hook.js");
+      const hookScript = import_path6.default.join(pkgRoot, "dist", "scripts", "hook.js");
       const sessionId = options.env?.SNA_SESSION_ID ?? "default";
       preToolUseHooks.push({
         type: "command",
@@ -2871,7 +2516,7 @@ var CodexProvider = class {
       logger.log("agent", `codex: permission hook \u2192 ${hookScript} --session=${sessionId}`);
     }
     if (options.allowedTools?.length || options.disallowedTools?.length) {
-      const filterScript = import_path7.default.join(pkgRoot, "dist", "scripts", "tool-filter.js");
+      const filterScript = import_path6.default.join(pkgRoot, "dist", "scripts", "tool-filter.js");
       const filterArgs = [];
       if (options.allowedTools?.length) {
         filterArgs.push(`--allowed=${options.allowedTools.join(",")}`);
@@ -2893,14 +2538,14 @@ var CodexProvider = class {
           }]
         }
       };
-      import_fs6.default.writeFileSync(import_path7.default.join(codexHome, "hooks.json"), JSON.stringify(hooksJson));
-      const existingConfig = import_fs6.default.readFileSync(configTomlPath, "utf8");
+      import_fs5.default.writeFileSync(import_path6.default.join(codexHome, "hooks.json"), JSON.stringify(hooksJson));
+      const existingConfig = import_fs5.default.readFileSync(configTomlPath, "utf8");
       if (!existingConfig.includes("codex_hooks")) {
-        import_fs6.default.appendFileSync(configTomlPath, "\n[features]\ncodex_hooks = true\n");
+        import_fs5.default.appendFileSync(configTomlPath, "\n[features]\ncodex_hooks = true\n");
       }
     }
     logger.log("agent", `codex: CODEX_HOME=${codexHome}`);
-    const codexDir = import_path7.default.dirname(codexPath);
+    const codexDir = import_path6.default.dirname(codexPath);
     if (codexDir && codexDir !== ".") {
       cleanEnv.PATH = `${codexDir}:${cleanEnv.PATH ?? ""}`;
     }
@@ -2909,7 +2554,7 @@ var CodexProvider = class {
     if (sysInfo.cleanArgs.length) {
       args.push(...sysInfo.cleanArgs);
     }
-    const proc = (0, import_child_process3.spawn)(codexPath, args, {
+    const proc = (0, import_child_process2.spawn)(codexPath, args, {
       cwd: options.cwd,
       env: cleanEnv,
       stdio: ["pipe", "pipe", "pipe"]
@@ -2932,6 +2577,201 @@ function getProvider(name = "claude-code") {
 
 // src/server/routes/agent.ts
 init_logger();
+
+// src/db/schema.ts
+init_cjs_shims();
+var import_node_module = require("module");
+var import_fs6 = __toESM(require("fs"), 1);
+var import_path7 = __toESM(require("path"), 1);
+function getDbPath() {
+  return process.env.SNA_DB_PATH ?? import_path7.default.join(process.cwd(), "data/sna.db");
+}
+var NATIVE_DIR = import_path7.default.join(process.cwd(), ".sna/native");
+var _db = null;
+function loadBetterSqlite3() {
+  const modulesPath = process.env.SNA_MODULES_PATH;
+  if (modulesPath) {
+    const entry = import_path7.default.join(modulesPath, "better-sqlite3");
+    if (import_fs6.default.existsSync(entry)) {
+      const req2 = (0, import_node_module.createRequire)(import_path7.default.join(modulesPath, "noop.js"));
+      return req2("better-sqlite3");
+    }
+  }
+  const nativeEntry = import_path7.default.join(NATIVE_DIR, "node_modules", "better-sqlite3");
+  if (import_fs6.default.existsSync(nativeEntry)) {
+    const req2 = (0, import_node_module.createRequire)(import_path7.default.join(NATIVE_DIR, "noop.js"));
+    return req2("better-sqlite3");
+  }
+  const req = (0, import_node_module.createRequire)(importMetaUrl);
+  return req("better-sqlite3");
+}
+function getDb() {
+  if (!_db) {
+    const BetterSqlite3 = loadBetterSqlite3();
+    const dir = import_path7.default.dirname(getDbPath());
+    if (!import_fs6.default.existsSync(dir)) import_fs6.default.mkdirSync(dir, { recursive: true });
+    const nativeBinding = process.env.SNA_SQLITE_NATIVE_BINDING || void 0;
+    _db = nativeBinding ? new BetterSqlite3(getDbPath(), { nativeBinding }) : new BetterSqlite3(getDbPath());
+    _db.pragma("journal_mode = WAL");
+    initSchema(_db);
+  }
+  return _db;
+}
+function dropLegacySkillEvents(db) {
+  db.exec("DROP TABLE IF EXISTS skill_events");
+}
+function migrateChatSessionsMeta(db) {
+  const cols = db.prepare("PRAGMA table_info(chat_sessions)").all();
+  if (cols.length > 0 && !cols.some((c) => c.name === "meta")) {
+    db.exec("ALTER TABLE chat_sessions ADD COLUMN meta TEXT");
+  }
+  if (cols.length > 0 && !cols.some((c) => c.name === "cwd")) {
+    db.exec("ALTER TABLE chat_sessions ADD COLUMN cwd TEXT");
+  }
+  if (cols.length > 0 && !cols.some((c) => c.name === "last_start_config")) {
+    db.exec("ALTER TABLE chat_sessions ADD COLUMN last_start_config TEXT");
+  }
+}
+function migrateChatMessagesCanonical(db) {
+  const cols = db.prepare("PRAGMA table_info(chat_messages)").all();
+  if (cols.length === 0) return;
+  const hasRole = cols.some((c) => c.name === "role");
+  const hasActor = cols.some((c) => c.name === "actor");
+  const hasKind = cols.some((c) => c.name === "kind");
+  const hasEmbeds = cols.some((c) => c.name === "embeds");
+  const hasUpdatedAt = cols.some((c) => c.name === "updated_at");
+  if (!hasRole && hasActor && hasKind && hasEmbeds && hasUpdatedAt) return;
+  db.transaction(() => {
+    if (!hasActor) db.exec("ALTER TABLE chat_messages ADD COLUMN actor TEXT");
+    if (!hasKind) db.exec("ALTER TABLE chat_messages ADD COLUMN kind TEXT");
+    if (!hasEmbeds) db.exec("ALTER TABLE chat_messages ADD COLUMN embeds TEXT");
+    if (!hasUpdatedAt) db.exec("ALTER TABLE chat_messages ADD COLUMN updated_at TEXT");
+    if (hasRole) {
+      db.exec(`
+        UPDATE chat_messages SET
+          actor = CASE role
+            WHEN 'user' THEN 'user'
+            WHEN 'assistant' THEN 'assistant'
+            WHEN 'thinking' THEN 'assistant'
+            WHEN 'tool' THEN 'assistant'
+            WHEN 'tool_use' THEN 'assistant'
+            WHEN 'tool_result' THEN 'system'
+            WHEN 'status' THEN 'system'
+            WHEN 'error' THEN 'system'
+            ELSE 'system'
+          END,
+          kind = CASE role
+            WHEN 'user' THEN 'text'
+            WHEN 'assistant' THEN 'text'
+            WHEN 'thinking' THEN 'thinking'
+            WHEN 'tool' THEN 'tool_use'
+            WHEN 'tool_use' THEN 'tool_use'
+            WHEN 'tool_result' THEN 'tool_result'
+            WHEN 'status' THEN 'status'
+            WHEN 'error' THEN 'error'
+            ELSE 'text'
+          END
+        WHERE actor IS NULL OR kind IS NULL;
+      `);
+    }
+    db.exec(`UPDATE chat_messages SET updated_at = created_at WHERE updated_at IS NULL`);
+    const legacyImageRows = db.prepare(`
+      SELECT id, content, meta FROM chat_messages
+      WHERE meta IS NOT NULL AND meta LIKE '%"images"%' AND embeds IS NULL
+    `).all();
+    const updateEmbeds = db.prepare(`UPDATE chat_messages SET content = ?, embeds = ?, meta = ? WHERE id = ?`);
+    for (const row of legacyImageRows) {
+      try {
+        const meta = JSON.parse(row.meta);
+        const files = Array.isArray(meta.images) ? meta.images.filter((f) => typeof f === "string") : [];
+        if (files.length === 0) continue;
+        const embedEntries = {};
+        const refsSuffix = [];
+        for (const filename of files) {
+          const id = filename.replace(/\.[^.]+$/, "");
+          const ext = filename.match(/\.([^.]+)$/)?.[1] ?? "";
+          embedEntries[id] = { mime_type: extToMime(ext), path: filename };
+          refsSuffix.push(`![](embed://${id})`);
+        }
+        const newContent = row.content + (refsSuffix.length > 0 ? "\n" + refsSuffix.join(" ") : "");
+        delete meta.images;
+        const newMeta = Object.keys(meta).length > 0 ? JSON.stringify(meta) : null;
+        updateEmbeds.run(newContent, JSON.stringify(embedEntries), newMeta, row.id);
+      } catch {
+      }
+    }
+    if (hasRole) {
+      db.exec("ALTER TABLE chat_messages DROP COLUMN role");
+    }
+  })();
+}
+function migrateDropSkillName(db) {
+  const cols = db.prepare("PRAGMA table_info(chat_messages)").all();
+  if (cols.length === 0) return;
+  if (cols.some((c) => c.name === "skill_name")) {
+    db.exec("ALTER TABLE chat_messages DROP COLUMN skill_name");
+  }
+}
+function extToMime(ext) {
+  switch (ext.toLowerCase()) {
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    case "svg":
+      return "image/svg+xml";
+    case "pdf":
+      return "application/pdf";
+    default:
+      return "application/octet-stream";
+  }
+}
+function initSchema(db) {
+  dropLegacySkillEvents(db);
+  migrateChatSessionsMeta(db);
+  migrateChatMessagesCanonical(db);
+  migrateDropSkillName(db);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      id         TEXT PRIMARY KEY,
+      label      TEXT NOT NULL DEFAULT '',
+      type       TEXT NOT NULL DEFAULT 'main',
+      meta       TEXT,
+      cwd        TEXT,
+      last_start_config TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Ensure default session always exists
+    INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES ('default', 'Chat', 'main');
+
+    -- Canonical chat_messages schema. Two orthogonal axes describe each block:
+    --   actor  WHO produced it:    'user' | 'assistant' | 'system'
+    --   kind   WHAT kind it is:    'text' | 'thinking' | 'tool_use' | 'tool_result' | 'status' | 'error'
+    --   content Textual body. May contain inline embed refs: ![](embed://<id>)
+    --   embeds  JSON { "<id>": { mime_type, path, ... } } \u2014 binary attachments referenced by content.
+    --   meta    Kind-specific structured overlay (usage, tool_use_id, input JSON, isError, ...)
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+      actor      TEXT NOT NULL DEFAULT 'user',
+      kind       TEXT NOT NULL DEFAULT 'text',
+      content    TEXT NOT NULL DEFAULT '',
+      embeds     TEXT,
+      meta       TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_session_kind ON chat_messages(session_id, kind);
+  `);
+}
 
 // src/history/canonical.ts
 init_cjs_shims();
@@ -2971,6 +2811,18 @@ function buildCanonicalFromDb(sessionId) {
     });
   }
   return out;
+}
+
+// src/server/api-types.ts
+init_cjs_shims();
+function httpJson(c, _op, data, status) {
+  return c.json(data, status);
+}
+function wsReply(ws, msg, data) {
+  if (ws.readyState !== ws.OPEN) return;
+  const out = { ...data, type: msg.type };
+  if (msg.rid != null) out.rid = msg.rid;
+  ws.send(JSON.stringify(out));
 }
 
 // src/server/image-store.ts
@@ -3019,16 +2871,15 @@ function insertChatMessage(db, msg) {
   const embedsJson = msg.embeds && Object.keys(msg.embeds).length > 0 ? JSON.stringify(msg.embeds) : null;
   const metaJson = msg.meta && Object.keys(msg.meta).length > 0 ? JSON.stringify(msg.meta) : null;
   const result = db.prepare(
-    `INSERT INTO chat_messages (session_id, actor, kind, content, embeds, meta, skill_name)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO chat_messages (session_id, actor, kind, content, embeds, meta)
+     VALUES (?, ?, ?, ?, ?, ?)`
   ).run(
     msg.sessionId,
     msg.actor,
     msg.kind,
     msg.content,
     embedsJson,
-    metaJson,
-    msg.skillName ?? null
+    metaJson
   );
   return Number(result.lastInsertRowid);
 }
@@ -3043,7 +2894,7 @@ init_config();
 
 // src/core/completion.ts
 init_cjs_shims();
-var import_child_process4 = require("child_process");
+var import_child_process3 = require("child_process");
 init_logger();
 init_config();
 init_langfuse_tracer();
@@ -3087,7 +2938,7 @@ function completionClaudeCode(opts) {
   logger.log("agent", `completion: ${label} provider=claude-code model=${model ?? "default"} prompt="${opts.prompt.slice(0, 60)}..."`);
   const trace = traceCompletion({ label, model, input: opts.prompt });
   return new Promise((resolve, reject) => {
-    const proc = (0, import_child_process4.spawn)(claudePath, args, {
+    const proc = (0, import_child_process3.spawn)(claudePath, args, {
       cwd,
       env: cleanEnv,
       stdio: ["pipe", "pipe", "pipe"]
@@ -3174,7 +3025,7 @@ function completionCodex(opts) {
   const trace = traceCompletion({ label, model, input: opts.prompt });
   const startTime = Date.now();
   return new Promise((resolve, reject) => {
-    const proc = (0, import_child_process4.spawn)(codexPath, args, {
+    const proc = (0, import_child_process3.spawn)(codexPath, args, {
       cwd,
       env: cleanEnv,
       stdio: ["pipe", "pipe", "pipe"]
@@ -3418,12 +3269,6 @@ function createAgentRoutes(sessionManager) {
           meta: body.meta
         });
       }
-      const skillMatch = body.prompt?.match(/^Execute the skill:\s*(\S+)/);
-      if (skillMatch) {
-        db.prepare(
-          `INSERT INTO skill_events (session_id, skill, type, message) VALUES (?, ?, 'invoked', ?)`
-        ).run(sessionId, skillMatch[1], `Skill ${skillMatch[1]} invoked`);
-      }
     } catch {
     }
     const providerName = body.provider ?? getConfig().defaultProvider;
@@ -3531,7 +3376,7 @@ ${refs.join(" ")}` : refs.join(" ");
     const session = sessionManager.getOrCreateSession(sessionId);
     const sinceParam = c.req.query("since");
     const sinceCursor = sinceParam ? parseInt(sinceParam, 10) : session.eventCounter;
-    return (0, import_streaming3.streamSSE)(c, async (stream) => {
+    return (0, import_streaming.streamSSE)(c, async (stream) => {
       const KEEPALIVE_MS = getConfig().keepaliveIntervalMs;
       const signal = c.req.raw.signal;
       const queue = [];
@@ -3860,8 +3705,7 @@ function createChatRoutes() {
         kind: body.kind,
         content: body.content ?? "",
         embeds: body.embeds,
-        meta: body.meta,
-        skillName: body.skill_name
+        meta: body.meta
       });
       return httpJson(c, "chat.messages.create", { status: "created", id });
     } catch (e) {
@@ -3909,7 +3753,6 @@ var SessionManager = class {
     this.sessions = /* @__PURE__ */ new Map();
     this.eventListeners = /* @__PURE__ */ new Map();
     this.pendingPermissions = /* @__PURE__ */ new Map();
-    this.skillEventListeners = /* @__PURE__ */ new Set();
     this.permissionRequestListeners = /* @__PURE__ */ new Set();
     this.lifecycleListeners = /* @__PURE__ */ new Set();
     this.configChangedListeners = /* @__PURE__ */ new Set();
@@ -4098,16 +3941,6 @@ var SessionManager = class {
       set.delete(cb);
       if (set.size === 0) this.eventListeners.delete(sessionId);
     };
-  }
-  // ── Skill event pub/sub ────────────────────────────────────────
-  /** Subscribe to skill events broadcast. Returns unsubscribe function. */
-  onSkillEvent(cb) {
-    this.skillEventListeners.add(cb);
-    return () => this.skillEventListeners.delete(cb);
-  }
-  /** Broadcast a skill event to all subscribers (called after DB insert). */
-  broadcastSkillEvent(event) {
-    for (const cb of this.skillEventListeners) cb(event);
   }
   /** Push a synthetic event into a session's event stream (for user message broadcast). */
   /**
@@ -4531,7 +4364,7 @@ function attachWebSocket(server, sessionManager) {
   });
   wss.on("connection", (ws) => {
     logger.log("ws", "client connected");
-    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null, stateChangedUnsub: null, metadataChangedUnsub: null };
+    const state = { agentUnsubs: /* @__PURE__ */ new Map(), permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null, stateChangedUnsub: null, metadataChangedUnsub: null };
     const pushSnapshot = () => send(ws, { type: "sessions.snapshot", sessions: sessionManager.listSessions() });
     pushSnapshot();
     state.lifecycleUnsub = sessionManager.onSessionLifecycle((event) => {
@@ -4566,12 +4399,6 @@ function attachWebSocket(server, sessionManager) {
       logger.log("ws", "client disconnected");
       for (const unsub of state.agentUnsubs.values()) unsub();
       state.agentUnsubs.clear();
-      state.skillEventUnsub?.();
-      state.skillEventUnsub = null;
-      if (state.skillPollTimer) {
-        clearInterval(state.skillPollTimer);
-        state.skillPollTimer = null;
-      }
       state.permissionUnsub?.();
       state.permissionUnsub = null;
       state.lifecycleUnsub?.();
@@ -4628,12 +4455,6 @@ function handleMessage(ws, msg, sm2, state) {
     case "agent.unsubscribe":
       return handleAgentUnsubscribe(ws, msg, state);
     // ── Skill events ──────────────────────────────────
-    case "events.subscribe":
-      return handleEventsSubscribe(ws, msg, sm2, state);
-    case "events.unsubscribe":
-      return handleEventsUnsubscribe(ws, msg, state);
-    case "emit":
-      return handleEmit(ws, msg, sm2);
     // ── Permission ────────────────────────────────────
     case "permission.respond":
       return handlePermissionRespond(ws, msg, sm2);
@@ -4718,10 +4539,6 @@ function handleAgentStart(ws, msg, sm2) {
         content: msg.prompt,
         meta: msg.meta
       });
-    }
-    const skillMatch = msg.prompt?.match(/^Execute the skill:\s*(\S+)/);
-    if (skillMatch) {
-      db.prepare(`INSERT INTO skill_events (session_id, skill, type, message) VALUES (?, ?, 'invoked', ?)`).run(sessionId, skillMatch[1], `Skill ${skillMatch[1]} invoked`);
     }
   } catch {
   }
@@ -5059,86 +4876,6 @@ function handleAgentUnsubscribe(ws, msg, state) {
   state.agentUnsubs.delete(sessionId);
   reply(ws, msg, {});
 }
-function handleEventsSubscribe(ws, msg, sm2, state) {
-  state.skillEventUnsub?.();
-  state.skillEventUnsub = null;
-  if (state.skillPollTimer) {
-    clearInterval(state.skillPollTimer);
-    state.skillPollTimer = null;
-  }
-  let lastId = typeof msg.since === "number" ? msg.since : -1;
-  if (lastId <= 0) {
-    try {
-      const db = getDb();
-      const row = db.prepare("SELECT MAX(id) as maxId FROM skill_events").get();
-      lastId = row.maxId ?? 0;
-    } catch {
-      lastId = 0;
-    }
-  }
-  state.skillEventUnsub = sm2.onSkillEvent((event) => {
-    const eventId = event.id;
-    if (eventId > lastId) {
-      lastId = eventId;
-      send(ws, { type: "skill.event", data: event });
-    }
-  });
-  state.skillPollTimer = setInterval(() => {
-    try {
-      const db = getDb();
-      const rows = db.prepare(
-        `SELECT id, session_id, skill, type, message, data, created_at
-         FROM skill_events WHERE id > ? ORDER BY id ASC LIMIT 50`
-      ).all(lastId);
-      for (const row of rows) {
-        if (row.id > lastId) {
-          lastId = row.id;
-          send(ws, { type: "skill.event", data: row });
-        }
-      }
-    } catch {
-    }
-  }, getConfig().skillPollMs);
-  reply(ws, msg, { lastId });
-}
-function handleEventsUnsubscribe(ws, msg, state) {
-  state.skillEventUnsub?.();
-  state.skillEventUnsub = null;
-  if (state.skillPollTimer) {
-    clearInterval(state.skillPollTimer);
-    state.skillPollTimer = null;
-  }
-  reply(ws, msg, {});
-}
-function handleEmit(ws, msg, sm2) {
-  const skill = msg.skill;
-  const eventType = msg.eventType;
-  const emitMessage = msg.message;
-  const data = msg.data;
-  const sessionId = msg.session;
-  if (!skill || !eventType || !emitMessage) {
-    return replyError(ws, msg, "skill, eventType, message are required");
-  }
-  try {
-    const db = getDb();
-    const result = db.prepare(
-      `INSERT INTO skill_events (session_id, skill, type, message, data) VALUES (?, ?, ?, ?, ?)`
-    ).run(sessionId ?? null, skill, eventType, emitMessage, data ?? null);
-    const id = Number(result.lastInsertRowid);
-    sm2.broadcastSkillEvent({
-      id,
-      session_id: sessionId ?? null,
-      skill,
-      type: eventType,
-      message: emitMessage,
-      data: data ?? null,
-      created_at: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    wsReply(ws, msg, { id });
-  } catch (e) {
-    replyError(ws, msg, e.message);
-  }
-}
 function handlePermissionRespond(ws, msg, sm2) {
   const sessionId = msg.session ?? "default";
   const approved = msg.approved === true;
@@ -5232,8 +4969,7 @@ function handleChatMessagesCreate(ws, msg) {
       kind,
       content: msg.content ?? "",
       embeds: msg.embeds,
-      meta: msg.meta,
-      skillName: msg.skill_name ?? void 0
+      meta: msg.meta
     });
     wsReply(ws, msg, { status: "created", id });
   } catch (e) {
@@ -5257,13 +4993,8 @@ function createSnaApp(options = {}) {
   const sessionManager = options.sessionManager ?? new SessionManager();
   const app = new import_hono3.Hono();
   app.get("/health", (c) => c.json({ ok: true, name: "sna", version: "1" }));
-  app.get("/events", eventsRoute);
-  app.post("/emit", createEmitRoute(sessionManager));
   app.route("/agent", createAgentRoutes(sessionManager));
   app.route("/chat", createChatRoutes());
-  if (options.runCommands) {
-    app.get("/run", createRunRoute(options.runCommands));
-  }
   return app;
 }
 
@@ -5320,7 +5051,7 @@ async function startSnaServer(options) {
     // Consumer overrides last so they can always win
     ...options.env ?? {}
   };
-  const proc = (0, import_child_process5.fork)(standaloneScript, [], {
+  const proc = (0, import_child_process4.fork)(standaloneScript, [], {
     cwd,
     env,
     stdio: "pipe"

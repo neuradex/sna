@@ -278,7 +278,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
 
     const provider = getProvider(body.provider ?? getConfig().defaultProvider);
 
-    // Persist initial prompt as user message + record invoked event
+    // Persist initial prompt as user message
     try {
       const db = getDb();
       db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type) VALUES (?, ?, 'main')`)
@@ -289,12 +289,6 @@ export function createAgentRoutes(sessionManager: SessionManager) {
           content: body.prompt,
           meta: body.meta,
         });
-      }
-      const skillMatch = body.prompt?.match(/^Execute the skill:\s*(\S+)/);
-      if (skillMatch) {
-        db.prepare(
-          `INSERT INTO skill_events (session_id, skill, type, message) VALUES (?, ?, 'invoked', ?)`
-        ).run(sessionId, skillMatch[1], `Skill ${skillMatch[1]} invoked`);
       }
     } catch { /* DB not ready — non-fatal */ }
 

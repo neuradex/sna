@@ -35,7 +35,7 @@ function attachWebSocket(server, sessionManager) {
   });
   wss.on("connection", (ws) => {
     logger.log("ws", "client connected");
-    const state = { agentUnsubs: /* @__PURE__ */ new Map(), skillEventUnsub: null, skillPollTimer: null, permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null, stateChangedUnsub: null, metadataChangedUnsub: null };
+    const state = { agentUnsubs: /* @__PURE__ */ new Map(), permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null, stateChangedUnsub: null, metadataChangedUnsub: null };
     const pushSnapshot = () => send(ws, { type: "sessions.snapshot", sessions: sessionManager.listSessions() });
     pushSnapshot();
     state.lifecycleUnsub = sessionManager.onSessionLifecycle((event) => {
@@ -70,12 +70,6 @@ function attachWebSocket(server, sessionManager) {
       logger.log("ws", "client disconnected");
       for (const unsub of state.agentUnsubs.values()) unsub();
       state.agentUnsubs.clear();
-      state.skillEventUnsub?.();
-      state.skillEventUnsub = null;
-      if (state.skillPollTimer) {
-        clearInterval(state.skillPollTimer);
-        state.skillPollTimer = null;
-      }
       state.permissionUnsub?.();
       state.permissionUnsub = null;
       state.lifecycleUnsub?.();
@@ -132,12 +126,6 @@ function handleMessage(ws, msg, sm, state) {
     case "agent.unsubscribe":
       return handleAgentUnsubscribe(ws, msg, state);
     // ── Skill events ──────────────────────────────────
-    case "events.subscribe":
-      return handleEventsSubscribe(ws, msg, sm, state);
-    case "events.unsubscribe":
-      return handleEventsUnsubscribe(ws, msg, state);
-    case "emit":
-      return handleEmit(ws, msg, sm);
     // ── Permission ────────────────────────────────────
     case "permission.respond":
       return handlePermissionRespond(ws, msg, sm);
@@ -222,10 +210,6 @@ function handleAgentStart(ws, msg, sm) {
         content: msg.prompt,
         meta: msg.meta
       });
-    }
-    const skillMatch = msg.prompt?.match(/^Execute the skill:\s*(\S+)/);
-    if (skillMatch) {
-      db.prepare(`INSERT INTO skill_events (session_id, skill, type, message) VALUES (?, ?, 'invoked', ?)`).run(sessionId, skillMatch[1], `Skill ${skillMatch[1]} invoked`);
     }
   } catch {
   }
@@ -563,86 +547,6 @@ function handleAgentUnsubscribe(ws, msg, state) {
   state.agentUnsubs.delete(sessionId);
   reply(ws, msg, {});
 }
-function handleEventsSubscribe(ws, msg, sm, state) {
-  state.skillEventUnsub?.();
-  state.skillEventUnsub = null;
-  if (state.skillPollTimer) {
-    clearInterval(state.skillPollTimer);
-    state.skillPollTimer = null;
-  }
-  let lastId = typeof msg.since === "number" ? msg.since : -1;
-  if (lastId <= 0) {
-    try {
-      const db = getDb();
-      const row = db.prepare("SELECT MAX(id) as maxId FROM skill_events").get();
-      lastId = row.maxId ?? 0;
-    } catch {
-      lastId = 0;
-    }
-  }
-  state.skillEventUnsub = sm.onSkillEvent((event) => {
-    const eventId = event.id;
-    if (eventId > lastId) {
-      lastId = eventId;
-      send(ws, { type: "skill.event", data: event });
-    }
-  });
-  state.skillPollTimer = setInterval(() => {
-    try {
-      const db = getDb();
-      const rows = db.prepare(
-        `SELECT id, session_id, skill, type, message, data, created_at
-         FROM skill_events WHERE id > ? ORDER BY id ASC LIMIT 50`
-      ).all(lastId);
-      for (const row of rows) {
-        if (row.id > lastId) {
-          lastId = row.id;
-          send(ws, { type: "skill.event", data: row });
-        }
-      }
-    } catch {
-    }
-  }, getConfig().skillPollMs);
-  reply(ws, msg, { lastId });
-}
-function handleEventsUnsubscribe(ws, msg, state) {
-  state.skillEventUnsub?.();
-  state.skillEventUnsub = null;
-  if (state.skillPollTimer) {
-    clearInterval(state.skillPollTimer);
-    state.skillPollTimer = null;
-  }
-  reply(ws, msg, {});
-}
-function handleEmit(ws, msg, sm) {
-  const skill = msg.skill;
-  const eventType = msg.eventType;
-  const emitMessage = msg.message;
-  const data = msg.data;
-  const sessionId = msg.session;
-  if (!skill || !eventType || !emitMessage) {
-    return replyError(ws, msg, "skill, eventType, message are required");
-  }
-  try {
-    const db = getDb();
-    const result = db.prepare(
-      `INSERT INTO skill_events (session_id, skill, type, message, data) VALUES (?, ?, ?, ?, ?)`
-    ).run(sessionId ?? null, skill, eventType, emitMessage, data ?? null);
-    const id = Number(result.lastInsertRowid);
-    sm.broadcastSkillEvent({
-      id,
-      session_id: sessionId ?? null,
-      skill,
-      type: eventType,
-      message: emitMessage,
-      data: data ?? null,
-      created_at: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    wsReply(ws, msg, { id });
-  } catch (e) {
-    replyError(ws, msg, e.message);
-  }
-}
 function handlePermissionRespond(ws, msg, sm) {
   const sessionId = msg.session ?? "default";
   const approved = msg.approved === true;
@@ -736,8 +640,7 @@ function handleChatMessagesCreate(ws, msg) {
       kind,
       content: msg.content ?? "",
       embeds: msg.embeds,
-      meta: msg.meta,
-      skillName: msg.skill_name ?? void 0
+      meta: msg.meta
     });
     wsReply(ws, msg, { status: "created", id });
   } catch (e) {

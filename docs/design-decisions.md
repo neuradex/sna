@@ -1,104 +1,67 @@
 ## Design Decisions
 
-### SDK DB scope (`sna.db`)
+### Canonical conversation, stored flat
 
-The SDK database (`data/sna.db`) manages two concerns:
+Anthropic's Messages API nests blocks inside a `content` array on each message. Codex's ResponseItem stream is a sibling-level array of differently-shaped items. Each runtime also has its own way of handling images, files, thinking, tool_use, and tool_result. SNA picks neither.
 
-```
-sna.db:
-  skill_events   — Skill execution state tracking + SSE delivery
-  chat_sessions  — Session management (main + background)
-  chat_messages  — Chat history persistence (replaces localStorage)
-```
+Instead, every block is one row in `chat_messages`, with two orthogonal axes:
 
-**`skill_events`** has a foreign key to `chat_sessions`:
-```sql
-skill_events:
-  id, session_id (FK → chat_sessions.id), skill, type, message, data, created_at
-```
+- `actor`: `user` | `assistant` | `system`
+- `kind`: `text` | `thinking` | `tool_use` | `tool_result` | `status` | `error`
 
-**Key rule:** Application DB is entirely separate. The SDK does not dictate what DB technology or ORM the application uses. Applications can use PostgreSQL, Supabase, SQLite, Prisma, Drizzle, or raw SQL — the SDK does not care.
+Why flat rather than nested:
 
-### Event dispatch: `sna dispatch` (primary) and `emit.js` (legacy)
+- **Streaming-friendly.** Each row corresponds to one block, so partial flushes are natural.
+- **Query-friendly.** "Find every tool_use for session X" is a normal SQL filter, not a JSON walk.
+- **Provider-neutral.** Grouping into Anthropic-style messages (or Codex ResponseItems) happens in the adapter layer, not the storage layer. Adding a new provider is a new adapter, not a new schema.
+- **Lossless.** Going union-of-features instead of intersection means each provider's quirks survive the round trip; going flat instead of nested means the union doesn't need a single canonical message-shape that fights both runtimes.
 
-`sna dispatch` is the primary path for emitting skill events. It provides:
-- Skill name validation against `.sna/skills.json` (fallback: SKILL.md existence)
-- Session-based lifecycle: `open` → `send` (called/start/milestone/progress) → `close`
-- Automatic emission of both canonical and legacy event types on close
-- Background session cleanup via API notification
+Binary attachments are stored in an `embeds` JSON column keyed by id; content text holds inline `![](embed://<id>)` refs. This mirrors Anthropic's "images live inside the message" semantics without forcing a JSON content array.
 
-`emit.js` is the legacy path, still available for backward compatibility. Both check for `SNA_SESSION_ID`:
+### 3-layer attribution
 
-- **Present** (running inside SDK-managed session): writes to `sna.db` with session FK, participates in the event pipeline
-- **Absent** (running outside SDK, e.g., terminal): console output only, skips DB write and lifecycle processing
+Three orthogonal axes, not one combined string:
 
-This ensures event emission never breaks when called outside the SDK, while fully participating when running inside it.
+| Layer | Field | Examples |
+|-------|-------|----------|
+| Runtime CLI | `provider` | `claude-code`, `codex` |
+| Model vendor | `modelProvider` | `anthropic`, `openai`, `google` |
+| Model slug | `model` | `claude-sonnet-4-6`, `gpt-5.4` |
 
-The SDK sets `SNA_SESSION_ID` when spawning agent processes:
-```
-SessionManager.spawn(sessionId) → env: SNA_SESSION_ID=<id> → Claude Code → sna dispatch / emit.js reads env
-```
+The same runtime can talk to multiple model vendors (OpenCode + Anthropic, OpenCode + OpenAI, OpenRouter shimming a third). Tracing, cost aggregation, and UI badges all key off these three values; collapsing them to one would force lossy disambiguation later.
 
-### Skill execution locking is application responsibility
+### Dual transport (HTTP + WebSocket)
 
-**Conclusion after analysis:** Mutual exclusion for skill execution belongs to the application, not the SDK.
+State-changing operations resolve only when the server has committed the change. That's an HTTP guarantee — Promise-completion semantics line up with `await`/`then`. Real-time push (event streams, lifecycle changes, permission requests) is asymmetric and unbounded — that's WebSocket's job.
 
-**Rationale:**
-- Locking requires domain knowledge (which resources conflict, at what granularity)
-- Domain knowledge lives in the application, not the SDK
-- The SDK cannot know application schema, relations, or business rules
-- Forcing schema declaration (Prisma, YAML, etc.) on applications is overreach — applications should be free to use any DB technology
+`SnaClient` wires both up so the consumer doesn't have to choose:
 
-**What the SDK provides:**
-- Session management (create, start, stop, list)
-- Event pipeline (invoked, start, milestone, complete)
-- `runSkillInBackground` as the execution mechanism
+- `await sna.sessions.create({ label })` — completes after the DB row exists.
+- `await sna.agent.start(id, { ... })` — completes after the subprocess is spawned.
+- `sna.agent.onEvent(handler)` — push-only, async, ordered per session.
 
-**What the application does:**
-- Checks for conflicts before calling `runSkillInBackground`
-- Manages its own locks using whatever mechanism fits (in-memory, DB, etc.)
+`server/api-types.ts` is the single source of truth for response shapes. `httpJson` and `wsReply` both consume it, so HTTP/WS drift is a TypeScript error.
 
-```ts
-// Application-level locking example
-const handleAnalyze = (sessionId: number) => {
-  if (isResourceBusy(sessionId)) {
-    toast.error("This session is being processed");
-    return;
-  }
-  markBusy(sessionId);
-  runSkillInBackground(`form-analyze ${sessionId}`);
-};
-```
+### Permission flow abstracted, not exposed
 
-### Skill execution status: `invoked` event (planned)
+Claude Code uses a PreToolUse hook (process-out-of-band, read stdin, write JSON to stdout). Codex uses JSON-RPC bidirectional approval (in-band, structured request/response). SNA hides both behind a single channel: `permission_needed` event → `permission.respond({ approved })`. Consumers register one callback regardless of provider.
 
-SDK records an `invoked` event immediately when a skill execution is requested, before the agent process starts.
+`ClaudeCodeProvider.spawn` auto-injects the hook script via `--settings`, so consumers never edit `.claude/settings.json` themselves. Safe tools (`Read`, `Glob`, `Grep`, `Agent`, `TodoRead`, `TodoWrite`) auto-allow without going through the dialog.
 
-**Current flow:**
-```
-User clicks → /agent/start → Claude boots → emit.js --type start → UI updates
-                              (seconds of silence)
-```
+### Configuration abstraction (hooks / MCP / policy)
 
-**Target flow:**
-```
-User clicks → /agent/start → SDK writes "invoked" → UI updates immediately → Claude boots → emit.js --type start
-```
+Hooks, MCP servers, allowed/disallowed tools, system prompts — each runtime accepts these in its own native format. SNA defines them once in cross-provider shape on `SpawnOptions`; per-provider adapters translate. A session can be restarted onto a different provider (`agent.restart`) without rewriting the configuration.
 
-- `invoked` = request accepted, about to execute
-- `start` = skill logic has begun (from emit.js inside the skill)
-- These are separate phases, not duplicates
+Provider-specific knobs that don't translate go in `providerOptions: Record<string, unknown>` — opaque to the framework, defined per provider.
 
-### Chat history persistence
+### Session state belongs to the SDK, not the runtime
 
-Chat messages are persisted server-side in `sna.db`. The `SessionManager` automatically saves agent events (assistant messages, tool use, tool results, completions, errors) to the `chat_messages` table. User messages are persisted when sent via `POST /agent/send` or `POST /agent/start`.
+Conversation history is the SDK's source of truth. Provider-native session ids (Claude's CC session id, Codex's thread id) are kept on `Session.ccSessionId` so `--resume` works, but they are *one of two* resume strategies — the other is rebuilding from canonical blocks via `agent.resume`. Switching providers mid-conversation works because the canonical store doesn't depend on either runtime's native shape.
 
-**Schema:**
-```sql
-chat_sessions (id, label, type, meta, created_at)
-chat_messages (id, session_id FK, role, content, skill_name, meta, created_at)
-```
+### Launcher API, not "is the app"
 
-The `meta` column on `chat_sessions` stores arbitrary JSON metadata for multi-app identification (e.g., `{ "app": "loom" }` allows apps sharing a single SNA server to identify and manage only their own sessions).
+The earlier shape of this project tried to own the entire app environment — `sna up` would install dependencies, manage `pnpm dev`, set up `.claude/settings.json`. That coupling fights the "library you embed" framing. The current recommendation is `startSnaServer({ port, dbPath, ... })`: forks the standalone server, resolves native bindings, waits for ready. The consumer app's web framework, lifecycle, and process supervision stay in the consumer app.
 
-**Frontend `useChatStore`** remains as a cache layer. On load, hydrate from DB via `GET /chat/sessions/:id/messages`.
+### Mock Anthropic API for tests
+
+Real LLM calls in CI burn budget. SNA ships `@sna-sdk/testing` with a mock Anthropic Messages API that implements the streaming SSE format. Set `ANTHROPIC_BASE_URL` to the mock and Claude Code thinks it's talking to the real API. The mock echoes user text reversed (`"hello"` → `"olleh"`) so test assertions are deterministic. `sna-test claude` wraps Claude Code with the mock + an isolated `CLAUDE_CONFIG_DIR`, so test runs don't pollute the dev account.

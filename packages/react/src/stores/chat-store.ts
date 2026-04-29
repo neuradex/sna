@@ -4,11 +4,10 @@ import { create } from "zustand";
 
 export interface ChatMessage {
   id: string;
-  role: "user" | "assistant" | "thinking" | "status" | "error" | "permission" | "tool" | "tool_result" | "skill";
+  role: "user" | "assistant" | "thinking" | "status" | "error" | "permission" | "tool" | "tool_result";
   content: string;
   timestamp: number;
-  skillName?: string;
-  /** Extra data for rich rendering (tool input, skill events, etc.) */
+  /** Extra data for rich rendering (tool input, animation flags, etc.) */
   meta?: Record<string, unknown>;
 }
 
@@ -59,6 +58,20 @@ let messageCounter = 0;
 
 function emptySession(): SessionChatState {
   return { messages: [], processedEventIds: new Set() };
+}
+
+/** Map canonical (actor, kind) pair into UI role. */
+function actorKindToRole(actor: string, kind: string): ChatMessage["role"] {
+  if (actor === "user") return "user";
+  if (actor === "assistant") {
+    if (kind === "thinking") return "thinking";
+    if (kind === "tool_use") return "tool";
+    return "assistant";
+  }
+  // actor === "system"
+  if (kind === "tool_result") return "tool_result";
+  if (kind === "error") return "error";
+  return "status";
 }
 
 function syncCreateSession(apiUrl: string, id: string, label?: string, type?: string) {
@@ -223,14 +236,13 @@ export const useChatStore = create<ChatState>()(
         );
         const msgData = await msgRes.json();
         const messages = (msgData.messages as Array<{
-          id: number; role: string; content: string;
-          skill_name: string | null; meta: string | null; created_at: string;
+          id: number; actor: string; kind: string; content: string;
+          meta: string | null; created_at: string;
         }>).map((m) => ({
           id: `db-${m.id}`,
-          role: m.role as ChatMessage["role"],
+          role: actorKindToRole(m.actor, m.kind),
           content: m.content,
           timestamp: new Date(m.created_at).getTime(),
-          skillName: m.skill_name ?? undefined,
           meta: m.meta ? JSON.parse(m.meta) : undefined,
         }));
         if (messages.length > messageCounter) messageCounter = messages.length;

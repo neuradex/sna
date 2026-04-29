@@ -1,163 +1,126 @@
 ## Testing Guide
 
-### Overview
+### Mock Anthropic API
 
-SNA SDK provides a mock Anthropic API server and test utilities for running tests without real API calls or affecting user accounts.
+`@sna-sdk/testing` ships a mock Anthropic Messages API that implements the streaming SSE format. Set `ANTHROPIC_BASE_URL` to the mock and Claude Code thinks it's talking to the real API.
 
 ```
-Real flow:     Claude Code → api.anthropic.com → real LLM → response
-Test flow:     Claude Code → localhost:mock    → reversed text → response
+Real flow:  Claude Code → api.anthropic.com  → real LLM        → response
+Test flow:  Claude Code → localhost:<mock>   → reversed text   → response
 ```
 
-### Test Utilities (`sna tu`)
+The mock echoes user text **reversed**:
+
+```
+"hello world"      → "dlrow olleh"
+"SNA SDK 테스트"    → "트스테 KDS ANS"
+```
+
+This is deterministic, fast, and cheap — perfect for integration tests that exercise Claude Code's wire format without burning real tokens.
+
+### `sna-test` CLI
+
+The `@sna-sdk/testing` package exposes a `sna-test` binary for manual testing. Each invocation creates a named "instance" under `.sna/test-instances/<name>/` with its own mock server, isolated `CLAUDE_CONFIG_DIR`, and JSONL request/response log.
 
 ```bash
-sna tu api:up       # Start mock Anthropic API server (random port)
-sna tu api:down     # Stop mock API server
-sna tu api:log      # Show request/response log
-sna tu api:log -f   # Follow log in real-time (tail -f)
-sna tu claude ...   # Run claude with mock API env vars
+sna-test claude [args...]      # Launch Claude Code with mock API + isolated config
+sna-test claude -p "prompt"    # Print mode (oneshot, non-interactive)
+sna-test ls                    # List instances
+sna-test logs <name> [-f]      # Show / follow API request/response log
+sna-test logs <name> --api     # Same as default — explicit
+sna-test rm <name|--all>       # Cleanup
 ```
 
-#### Quick Start
+#### Quick example
 
 ```bash
-# 1. Start mock server
-sna tu api:up
-# → Mock Anthropic API → http://localhost:56208 (log: .sna/mock-api.log)
+$ sna-test claude -p "hello world"
+  instance:  test-2026-04-29-001
+  Mock API ready on :56208
 
-# 2. Run claude against mock
-sna tu claude -p "hello world"
-# → dlrow olleh
+  dlrow olleh
 
-# 3. Check what Claude Code sent to the API
-sna tu api:log
-# [16:01:50.438] REQ model=test-mock stream=true messages=1 user="hello world"
-# [16:01:50.448] RES stream complete reply="dlrow olleh"
-
-# 4. Cleanup
-sna tu api:down
+$ sna-test logs test-2026-04-29-001
+  16:01:50.438  REQ  test-mock  messages=1  stream=true
+                user: hello world
+  16:01:50.448  RES  test-mock  stream=true
+                reply: dlrow olleh
 ```
 
-#### How It Works
+#### Why isolation matters
 
-`sna tu claude` wraps the real `claude` binary with:
+`sna-test claude` builds a fresh env that contains only `PATH`, `HOME`, `SHELL`, `TERM`, `LANG`, and the mock-specific overrides. It does NOT inherit the parent process's `ANTHROPIC_API_KEY`, OAuth tokens, or `CLAUDE_CONFIG_DIR`. This prevents:
 
-| Env Var | Value | Purpose |
-|---------|-------|---------|
-| `ANTHROPIC_BASE_URL` | `http://localhost:<mock-port>` | Redirect API calls to mock |
-| `ANTHROPIC_API_KEY` | `sk-test-mock-sna` | Fake API key (no real auth) |
-| `CLAUDE_CONFIG_DIR` | `.sna/mock-claude-config/` | Isolated config (no OAuth, no user data) |
+- OAuth conflicts ("Auth conflict" warnings)
+- Real API calls leaking through
+- Polluting your real Claude account history / analytics
 
-No other env vars from the parent process are passed. This prevents:
-- OAuth token conflicts (`Auth conflict` warning)
-- User account pollution (session history, analytics)
-- Accidental real API calls
+Each instance gets its own `claude-config/` with `customApiKeyResponses` pre-approved for the mock key, so the trust dialog doesn't pop up.
 
-#### Mock API Behavior
+### Programmatic mock server
 
-The mock server echoes user text **reversed**:
-- `"hello world"` → `"dlrow olleh"`
-- `"SNA SDK 테스트"` → `"트스테 KDS ANS"`
+For integration tests written in Node:
 
-This makes test assertions deterministic and easy to verify.
+```ts
+import { startMockAnthropicServer } from "@sna-sdk/testing";
 
-The mock implements the Anthropic Messages API streaming format:
-- `POST /v1/messages` with `stream: true`
-- SSE events: `message_start` → `content_block_start` → `content_block_delta` → `content_block_stop` → `message_delta` → `message_stop`
+const mock = await startMockAnthropicServer();
+// mock.port      — server port
+// mock.requests  — array of received request bodies
+// mock.onLog     — JSONL log callback
+// mock.close()   — shutdown
 
-#### Log Format
+process.env.ANTHROPIC_BASE_URL = `http://localhost:${mock.port}`;
+process.env.ANTHROPIC_API_KEY = "sk-test";
+process.env.CLAUDE_CONFIG_DIR = "/tmp/isolated-config";
 
-`.sna/mock-api.log` records every request and response:
+// ...spawn Claude Code or run integration logic...
 
-```
-[16:01:50.438] POST /v1/messages?beta=true application/json
-[16:01:50.447] REQ model=test-mock stream=true messages=1 user="hello world"
-[16:01:50.448] RES stream complete reply="dlrow olleh"
+mock.close();
 ```
 
-### `SNA_CLAUDE_COMMAND` Environment Variable
+`runOneshot()` is a convenience wrapper that boots a mock, runs `claude -p`, captures the response, and tears down.
 
-Override the claude binary used by the SDK. This is how tests swap in `sna tu claude` instead of the real `claude`.
+### Override the Claude binary
+
+Set `SNA_CLAUDE_COMMAND` to point the SDK at a different binary or wrapper command. Multi-word values are split — first word is the binary, rest are prefix args.
 
 ```bash
-# Default: SDK resolves claude from .sna/claude-path, known paths, or $PATH
-# Override:
-export SNA_CLAUDE_COMMAND="node --import tsx src/scripts/sna.ts tu claude"
+SNA_CLAUDE_COMMAND="node --import tsx my-wrapper.ts" pnpm test
 ```
 
 Resolution order in `ClaudeCodeProvider`:
-1. `SNA_CLAUDE_COMMAND` env var (highest priority)
+
+1. `SNA_CLAUDE_COMMAND` env var
 2. `.sna/claude-path` cached file
-3. Known paths (`/opt/homebrew/bin/claude`, etc.)
+3. Known paths (`/opt/homebrew/bin/claude`, `/usr/local/bin/claude`, `~/.local/bin/claude`)
 4. `which claude`
 
-Supports multi-word commands — split on whitespace, first word is the binary, rest are prefix args.
-
-### Running Tests
+### Running the SDK's own tests
 
 ```bash
 cd packages/core
-
-# All tests (123 tests, 7 modules)
 pnpm test
-
-# Individual modules
+# or individual modules:
 node --import tsx --test test/session-manager.test.ts
 node --import tsx --test test/db-schema.test.ts
-node --import tsx --test test/normalize-event.test.ts
 node --import tsx --test test/api-routes.test.ts
 node --import tsx --test test/api-parity.test.ts
 node --import tsx --test test/ws-handler.test.ts
 node --import tsx --test test/agent-integration.test.ts
-
-# With coverage
-node --import tsx --experimental-test-coverage --test test/**/*.test.ts
+node --import tsx --test test/normalize-event.test.ts
+node --import tsx --test test/claude-history-jsonl.test.ts
+node --import tsx --test test/claude-history-injection.test.ts
+node --import tsx --test test/codex-history-injection.test.ts
+node --import tsx --test test/codex-provider.test.ts
+node --import tsx --test test/claude-path-resolution.test.ts
 ```
 
-### Test Modules
+`packages/client` also has its own `pnpm test`.
 
-| Module | Tests | What It Covers |
-|--------|-------|----------------|
-| `session-manager` | 20 | Session CRUD, config persistence, CASCADE safety, pub/sub |
-| `db-schema` | 8 | Tables, columns, indexes, migration, CASCADE behavior |
-| `normalize-event` | 16 | init/interrupted/error parsing; streaming delta event sequences; assistant_delta type |
-| `api-routes` | 27 | All HTTP endpoints via Hono test client |
-| `api-parity` | 5 | HTTP/WS operation key match, typed helper usage |
-| `ws-handler` | 39 | All WS message types with real WS server + client |
-| `agent-integration` | 8 | Real Claude Code + mock API E2E pipeline |
+### CI considerations
 
-### Writing Integration Tests
-
-Use `startMockAnthropicServer()` from the SDK:
-
-```typescript
-import { startMockAnthropicServer } from "@sna-sdk/core/testing";
-
-const mock = await startMockAnthropicServer();
-// mock.port — server port
-// mock.requests — array of received requests
-// mock.close() — shutdown
-
-// Set env before spawning claude
-process.env.ANTHROPIC_BASE_URL = `http://localhost:${mock.port}`;
-process.env.ANTHROPIC_API_KEY = "sk-test";
-process.env.CLAUDE_CONFIG_DIR = "/tmp/isolated-config";
-```
-
-Or use `sna tu` commands for manual testing:
-
-```bash
-sna tu api:up
-sna tu claude -p --model claude-haiku-4-5-20251001 "your prompt"
-sna tu api:log
-sna tu api:down
-```
-
-### CI Considerations
-
-- `agent-integration` tests require the `claude` binary installed
-- If `claude` is not found, integration tests are **skipped** (not failed)
-- All other tests (115 of 123) run without `claude` installed
-- Mock API server uses random ports — no port conflicts in parallel runs
-- Each test module uses its own temp DB directory — no state leakage
+- Integration tests that need the real `claude` binary (`agent-integration.test.ts`) skip cleanly when it isn't on `$PATH` — they don't fail.
+- Mock API uses a random port per call — no port conflicts under parallel runs.
+- Each test module uses its own temp DB directory — no cross-test state leakage.
+- The user's environment expects sequential test execution by default; pass `--test-concurrency=1` if your runner defaults to parallel.

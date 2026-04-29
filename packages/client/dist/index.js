@@ -30,7 +30,6 @@ var SnaClient = class {
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? 0;
     this.sessions = new SessionsApi(this);
     this.agent = new AgentApi(this);
-    this.events = new EventsApi(this);
     this.chat = new ChatApi(this);
   }
   // ── Connection lifecycle ──────────────────────────────────────
@@ -1038,117 +1037,6 @@ var AgentApi = class {
     }
   }
 };
-var EventsApi = class {
-  constructor(client) {
-    this.client = client;
-  }
-  /**
-   * Subscribe to skill event pushes via WebSocket.
-   *
-   * After subscribing, `skill.event` push messages are delivered
-   * to handlers registered via {@link onSkillEvent}.
-   *
-   * @param opts.since - Start from this event ID. Defaults to the latest.
-   * @returns The last event ID at subscription time.
-   *
-   * @example
-   * ```ts
-   * sna.events.onSkillEvent((e) => console.log(e));
-   * const { lastId } = await sna.events.subscribe({ since: 0 });
-   * ```
-   */
-  async subscribe(opts) {
-    return this.client.request("events.subscribe", opts ?? {});
-  }
-  /**
-   * Unsubscribe from skill event pushes.
-   *
-   * @example
-   * ```ts
-   * await sna.events.unsubscribe();
-   * ```
-   */
-  async unsubscribe() {
-    await this.client.request("events.unsubscribe", {});
-  }
-  /**
-   * Emit a skill event.
-   *
-   * Writes the event to the `skill_events` table and broadcasts it
-   * to all connected WS subscribers.
-   *
-   * **Transport note:** WS uses `eventType` (not `type`) for this call
-   * because `type` is reserved as the WS protocol routing field.
-   * The client handles this automatically.
-   *
-   * @returns The assigned event row ID.
-   *
-   * @example
-   * ```ts
-   * await sna.events.emit({
-   *   skill: "my-skill",
-   *   eventType: "milestone",
-   *   message: "Step 1 complete",
-   *   session: "default",
-   * });
-   * ```
-   */
-  async emit(opts) {
-    if (this.client._httpUrl) {
-      const { eventType, ...rest } = opts;
-      return this.client._httpFetch("POST", "/emit", { ...rest, type: eventType });
-    }
-    return this.client.request("emit", opts);
-  }
-  /**
-   * Listen for skill event pushes.
-   *
-   * Fires when any skill event is pushed to this connection after
-   * calling {@link subscribe}.
-   *
-   * @param cb - Called for each skill event.
-   * @returns An unsubscribe function.
-   *
-   * @example
-   * ```ts
-   * const unsub = sna.events.onSkillEvent(({ skill, type, message }) => {
-   *   if (type === "complete") markDone(skill);
-   * });
-   * ```
-   */
-  onSkillEvent(cb) {
-    return this.client.onPush("skill.event", (msg) => {
-      cb(msg.data);
-    });
-  }
-  /**
-   * Stream skill events via SSE (HTTP-only).
-   *
-   * Returns an `AsyncIterable` of {@link SkillEvent} rows.
-   * Requires `http: true`. For WS streaming, use
-   * {@link subscribe} + {@link onSkillEvent}.
-   *
-   * @param since - Start from this event ID.
-   *
-   * @example
-   * ```ts
-   * for await (const event of sna.events.stream()) {
-   *   if (event.type === "complete") break;
-   *   console.log(event.skill, event.message);
-   * }
-   * ```
-   */
-  async *stream(since) {
-    if (!this.client._httpUrl) throw new Error("events.stream() requires http: true");
-    const base = this.client._httpUrl.replace(/\/$/, "");
-    const params = since !== void 0 ? `?since=${since}` : "";
-    const res = await fetch(`${base}/events${params}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    for await (const data of SnaClient._parseSse(res)) {
-      yield data;
-    }
-  }
-};
 var ChatApi = class {
   constructor(client) {
     this.client = client;
@@ -1229,18 +1117,23 @@ var ChatApi = class {
    * Add a message to a chat session.
    *
    * The session is auto-created with type `"main"` if it doesn't exist.
+   * Each message is one canonical block: an `actor` (`user` / `assistant` /
+   * `system`) crossed with a `kind` (`text` / `thinking` / `tool_use` /
+   * `tool_result` / `status` / `error`).
    *
    * @param session - The session ID.
-   * @param opts.role - Message role: `"user"`, `"assistant"`, `"thinking"`, etc.
-   * @param opts.content - Message text.
-   * @param opts.skill_name - Skill that generated this message, if any.
-   * @param opts.meta - Arbitrary metadata.
+   * @param opts.actor - Who produced the block.
+   * @param opts.kind - What kind of block.
+   * @param opts.content - Block text. May contain `![](embed://<id>)` refs.
+   * @param opts.embeds - Binary attachments keyed by embed id.
+   * @param opts.meta - Kind-specific structured overlay.
    * @returns The assigned message row ID.
    *
    * @example
    * ```ts
    * const { id } = await sna.chat.createMessage("thread-1", {
-   *   role: "user",
+   *   actor: "user",
+   *   kind: "text",
    *   content: "What is the capital of France?",
    * });
    * ```

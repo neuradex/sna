@@ -172,12 +172,6 @@ function createAgentRoutes(sessionManager) {
           meta: body.meta
         });
       }
-      const skillMatch = body.prompt?.match(/^Execute the skill:\s*(\S+)/);
-      if (skillMatch) {
-        db.prepare(
-          `INSERT INTO skill_events (session_id, skill, type, message) VALUES (?, ?, 'invoked', ?)`
-        ).run(sessionId, skillMatch[1], `Skill ${skillMatch[1]} invoked`);
-      }
     } catch {
     }
     const providerName = body.provider ?? getConfig().defaultProvider;

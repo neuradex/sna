@@ -2,7 +2,6 @@
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 import { useEffect, useRef, useState } from "react";
 import { useChatStore } from "../../stores/chat-store.js";
-import { useSkillEvents } from "../../hooks/use-skill-events.js";
 import { useAgent } from "../../hooks/use-agent.js";
 import { ChatHeader } from "./chat-header.js";
 import { MessageBubble } from "./message-bubble.js";
@@ -70,7 +69,6 @@ function injectStyles() {
   `;
   document.head.appendChild(style);
 }
-const TERMINAL_EVENT_TYPES = /* @__PURE__ */ new Set(["success", "failed", "complete", "error"]);
 function fmtTokens(n) {
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
   if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
@@ -87,8 +85,6 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
   const addMessage = (msg) => addMsg(msg, sessionId);
   const clearMsg = useChatStore((s) => s.clearMessages);
   const clearMessages = () => clearMsg(sessionId);
-  const markEvt = useChatStore((s) => s.markEventProcessed);
-  const markEventProcessed = (eventId) => markEvt(eventId, sessionId);
   const width = useChatStore((s) => s.width);
   const setWidth = useChatStore((s) => s.setWidth);
   const { mode } = useResponsiveChat();
@@ -213,64 +209,6 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
       addMessage({ role: "error", content: e.message ?? "Unknown error" });
     }
   });
-  const skillMilestonesRef = useRef({});
-  const { events, clearEvents } = useSkillEvents({
-    onCalled: (e) => {
-      if (!markEventProcessed(e.id)) return;
-      skillMilestonesRef.current[e.skill] = [];
-      addMessage({
-        role: "skill",
-        content: "",
-        skillName: e.skill,
-        meta: { status: "running", milestones: [] }
-      });
-    },
-    onMilestone: (e) => {
-      if (!markEventProcessed(e.id)) return;
-      const ms = skillMilestonesRef.current[e.skill] ?? [];
-      ms.push(e.message);
-      skillMilestonesRef.current[e.skill] = ms;
-      addMessage({
-        role: "skill",
-        content: e.message,
-        skillName: e.skill,
-        meta: { status: "running", milestones: [...ms] }
-      });
-    },
-    onProgress: (e) => {
-      if (!markEventProcessed(e.id)) return;
-      addMessage({ role: "status", content: e.message, skillName: e.skill });
-    },
-    onSuccess: (e) => {
-      if (!markEventProcessed(e.id)) return;
-      addMessage({
-        role: "skill",
-        content: e.message,
-        skillName: e.skill,
-        meta: { status: "complete", milestones: [...skillMilestonesRef.current[e.skill] ?? []] }
-      });
-    },
-    onFailed: (e) => {
-      if (!markEventProcessed(e.id)) return;
-      addMessage({
-        role: "skill",
-        content: e.message,
-        skillName: e.skill,
-        meta: { status: "failed", milestones: [...skillMilestonesRef.current[e.skill] ?? []] }
-      });
-    },
-    onNeedPermission: (e) => {
-      if (!markEventProcessed(e.id)) return;
-      addMessage({ role: "permission", content: e.message, skillName: e.skill });
-    }
-  });
-  const anyRunning = events.length > 0 && (() => {
-    const latestBySkill = events.reduce((acc, e) => {
-      acc[e.skill] = e;
-      return acc;
-    }, {});
-    return Object.values(latestBySkill).some((e) => !TERMINAL_EVENT_TYPES.has(e.type));
-  })();
   const scrollContainerRef = useRef(null);
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -325,7 +263,6 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
               onClose,
               onClear: async () => {
                 clearMessages();
-                clearEvents();
                 setThinking(true);
                 setSessionUsage({
                   contextUsed: 0,
@@ -338,7 +275,7 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
                 await agent.start();
                 setThinking(false);
               },
-              isRunning: thinking || (anyRunning ?? false),
+              isRunning: thinking,
               sessionUsage,
               onModelChange: (model) => {
                 setSessionUsage((prev) => ({ ...prev, model }));
@@ -369,8 +306,8 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
               },
               children: [
                 bgSessions.length === 0 && /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", textAlign: "center" }, children: [
-                  /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-text-icon)", fontSize: 14, margin: 0 }, children: "No background tasks" }),
-                  /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-text-faint)", fontSize: 12, marginTop: 4, fontFamily: "var(--sna-font-mono)" }, children: "Skills run via the UI will appear here" })
+                  /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-text-icon)", fontSize: 14, margin: 0 }, children: "No background sessions" }),
+                  /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-text-faint)", fontSize: 12, marginTop: 4, fontFamily: "var(--sna-font-mono)" }, children: "Background agent sessions will appear here" })
                 ] }),
                 bgSessions.map((bg) => {
                   const statusColor = bg.status === "running" ? "var(--sna-accent)" : bg.status === "complete" ? "var(--sna-success)" : bg.status === "failed" ? "var(--sna-error, #ef4444)" : "var(--sna-text-faint)";
@@ -538,8 +475,8 @@ function ChatPanel({ onClose, sessionId: initialSessionId = "default" }) {
                           ) })
                         }
                       ),
-                      /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-text-icon)", fontSize: 14, margin: 0 }, children: viewMode === "chat" ? "Run a skill or ask a question" : "Background session log" }),
-                      /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-text-faint)", fontSize: 12, marginTop: 4, fontFamily: "var(--sna-font-mono)" }, children: viewMode === "chat" ? "Type /skill-name or ask in natural language" : "Waiting for events..." })
+                      /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-text-icon)", fontSize: 14, margin: 0 }, children: viewMode === "chat" ? "Ask the agent something" : "Background session log" }),
+                      /* @__PURE__ */ jsx("p", { style: { color: "var(--sna-text-faint)", fontSize: 12, marginTop: 4, fontFamily: "var(--sna-font-mono)" }, children: viewMode === "chat" ? "Type a question or instruction" : "Waiting for events..." })
                     ]
                   }
                 ),

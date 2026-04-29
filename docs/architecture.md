@@ -1,264 +1,210 @@
 ## SNA Architecture
 
-### What is SNA?
-
-Skills-Native Application — a platform where **Claude Code is the runtime**, not an external LLM API. Skills (`.claude/skills/<name>/SKILL.md`) instruct Claude Code to execute scripts, reason over results, and emit real-time events to the frontend via SSE.
+SNA wraps Claude Code and Codex as backend processes and exposes them through a single HTTP/WebSocket API. Consumer apps treat the running agent like any other backend service: they create a session, send messages, and subscribe to events. They never spawn the CLI directly.
 
 ```
-Traditional:  your code → LLM API → parse → act
-SNA:          SKILL.md → Claude Code → scripts → SQLite → SSE → UI
+Consumer app  ──HTTP──▶  SNA server  ──spawn──▶  claude-code | codex
+              ◀──WS────              ◀──events─
 ```
 
-### Package Structure
+### Packages
 
 | Package | npm name | Role |
 |---------|----------|------|
-| `packages/core` | `@sna-sdk/core` | Server runtime, DB, CLI, providers, emit/hook scripts, code generation |
-| `packages/react` | `@sna-sdk/react` | React hooks, components, stores, typed client (no server-side code) |
+| `packages/core`    | `@sna-sdk/core`    | HTTP/WS server, session manager, providers, canonical history, SQLite, launchers |
+| `packages/client`  | `@sna-sdk/client`  | Framework-agnostic TS client (HTTP + WS) |
+| `packages/react`   | `@sna-sdk/react`   | React hooks, components, chat UI, Zustand stores |
+| `packages/testing` | `@sna-sdk/testing` | Mock Anthropic API + `sna-test` CLI |
 
-### DB Separation (IMPORTANT)
+### Server (`@sna-sdk/core`)
 
-SNA uses **two separate SQLite databases**:
+`createSnaApp({ sessionManager })` returns a Hono app with the full HTTP API. `attachWebSocket(server, sessionManager)` mounts the WS handler on `/ws`. Most consumers don't call these directly — `startSnaServer()` from `@sna-sdk/core/node` or `@sna-sdk/core/electron` forks `dist/server/standalone.js`, which wires everything up and waits for ready.
 
-| Database | Owner | Contents |
-|----------|-------|----------|
-| `data/sna.db` | `@sna-sdk/core` | `chat_sessions`, `chat_messages`, `skill_events` |
-| `data/<app>.db` | Application | App-specific tables (targets, sessions, etc.) |
+### Session manager
 
-**Schema:**
+Every running agent is a `Session` owned by `SessionManager`. Each session has:
+
+- `process` — the spawned `AgentProcess` (Claude Code or Codex), or `null` when idle
+- `eventBuffer` + `eventCounter` — append-only stream consumed by subscribers via `since`
+- `cwd`, `label`, `meta` — metadata persisted to `chat_sessions` so the SDK can be shared across apps. Use `meta.app: "loom"` (for example) to isolate sessions per consumer.
+- `lastStartConfig` — `{ provider, modelProvider, model, permissionMode, providerOptions, ... }`, used by `agent.restart` to bring the same config back
+- `state` — `idle` | `processing` | `waiting` | `permission`
+- `ccSessionId` — the runtime's own session id, captured from the `init` event so `--resume` works
+
+Listeners cover lifecycle (`started` / `resumed` / `killed` / `exited` / `crashed` / `restarted`), config changes, state changes, agent events, permission requests, and skill events. `SessionManagerOptions.maxSessions` caps the number of concurrently alive subprocesses.
+
+### Providers
+
+`core/providers/{claude-code,codex}.ts` implement a common `AgentProvider` interface:
+
+```ts
+interface AgentProvider {
+  readonly name: string;
+  isAvailable(): Promise<boolean>;
+  spawn(options: SpawnOptions): AgentProcess;
+}
+```
+
+The returned `AgentProcess` exposes a uniform control surface — `send`, `interrupt`, `setModel`, `setPermissionMode`, `respondToPermission`, `kill` — that each provider translates into its native control message.
+
+`SpawnOptions` covers the cross-provider knobs (`cwd`, `prompt`, `model`, `permissionMode`, `systemPrompt`, `appendSystemPrompt`, `allowedTools`, `disallowedTools`, `mcpServers`, `history`, `env`, `configDir`, `resumeSessionId`). Anything provider-specific goes in `providerOptions` (an opaque record). Use `getProvider("claude-code" | "codex")` from `@sna-sdk/core` to look one up.
+
+### Canonical conversation model
+
+`db/schema.ts` stores chat blocks in `chat_messages` with two orthogonal axes:
+
+- `actor`: `user` | `assistant` | `system`
+- `kind`: `text` | `thinking` | `tool_use` | `tool_result` | `status` | `error`
+
+Binary attachments live in an `embeds` JSON column keyed by id; content text holds inline `![](embed://<id>)` refs. `meta` carries kind-specific overlays (usage on `status`, `tool_use_id` on `tool_result`, `signature` on `thinking`, etc.).
 
 ```sql
-chat_sessions (id TEXT PK, label, type, meta, cwd, last_start_config, created_at)
-chat_messages (id INTEGER PK, session_id FK, role, content, skill_name, meta, created_at)
-skill_events  (id INTEGER PK, session_id FK nullable, skill, type, message, data, created_at)
+chat_sessions (id PK, label, type, meta, cwd, last_start_config, created_at)
+chat_messages (id PK, session_id FK, actor, kind, content, embeds, skill_name, meta, created_at, updated_at)
 ```
 
-**Rules:**
-- Applications MUST NOT define `skill_events`, `chat_sessions`, or `chat_messages` in their own DB
-- Applications MUST NOT write to `data/sna.db` directly
-- All skill event operations go through SDK scripts or SDK server routes
+`history/canonical.ts` reads these rows back into `CanonicalBlock[]`. Provider adapters in `history/{claude-code,codex}.ts` convert canonical blocks into the native wire format — Claude JSONL for `--resume`, Codex thread/resume payload — which is what lets a session switch providers (or models) without losing context.
 
-### Skill Event Pipeline (Dispatch)
+### 3-layer attribution
 
-All skill events flow through the unified dispatcher (`@sna-sdk/core/lib/dispatch`):
+Every assistant turn is stamped with three identifiers:
 
-```
-Skill execution
-  → dispatch.open({ skill }) — validate against .sna/skills.json
-  → dispatch.send(id, { type, message }) — write to data/sna.db
-  → dispatch.close(id) — write terminal events + kill bg agent process
-  → SDK standalone server reads data/sna.db
-  → GET /events (SSE) streams to frontend
-  → useSkillEvents hook (SDK react) updates UI
-```
+| Layer | Field | Examples |
+|-------|-------|----------|
+| Runtime CLI | `provider` | `claude-code`, `codex` |
+| Model vendor | `modelProvider` | `anthropic`, `openai`, `google` |
+| Model slug | `model` | `claude-sonnet-4-6`, `gpt-5.4` |
 
-#### CLI Usage
+Splitting these matters because the same runtime can talk to multiple model vendors (OpenCode + Anthropic, OpenCode + OpenAI, OpenRouter, ...). Tracing, UI badges, and cost aggregation all key off these three values.
 
-```bash
-ID=$(sna dispatch open --skill form-analyze)
-sna dispatch $ID start --message "Starting..."
-sna dispatch $ID milestone --message "5 items found"
-sna dispatch $ID close --message "Done"        # success → kills bg session
-sna dispatch $ID close --error "Failed"         # error → kills bg session
-```
+### Event protocol
 
-#### SDK (Programmatic) Usage
+Twelve normalized event types flow over the agent stream:
 
-```typescript
-import { createDispatchHandle } from "@sna-sdk/core";
+| Type | Meaning |
+|------|---------|
+| `init` | Session initialized; carries the provider's session id |
+| `thinking` | Extended thinking block, complete |
+| `thinking_delta` | Streaming thinking chunk |
+| `assistant` | Full assistant message |
+| `assistant_delta` | Streaming assistant token chunk |
+| `tool_use` | Agent is calling a tool |
+| `tool_result` | Tool returned a result |
+| `permission_needed` | Agent paused for approval |
+| `milestone` | Skill / app-level progress signal |
+| `user_message` | User message sent (multi-client sync) |
+| `interrupted` | Current turn was interrupted |
+| `error` | Error occurred |
+| `complete` | Agent finished |
 
-const d = createDispatchHandle({ skill: "form-analyze" });
-d.start("Starting...");
-d.milestone("5 items found");
-await d.close();  // or d.close({ error: "reason" })
-```
+The `*_delta` variants stream tokens for ChatGPT-style UIs; the non-delta version always fires once the block is complete.
 
-Workflow engine, hook script, and legacy `emit.js` all route through dispatch internally.
+### Transports
 
-#### Dispatch Lifecycle
+#### HTTP
 
-| Phase | What happens |
-|-------|-------------|
-| `open` | Validate skill against `.sna/skills.json` (fallback: SKILL.md), create in-memory session |
-| `send` | Write event to `skill_events` table. Valid types: `called`, `start`, `progress`, `milestone`, `permission_needed` |
-| `close` | Write terminal events (`complete`+`success` or `error`+`failed`), notify SNA API server to kill background agent process |
+| Method | Path | What it does |
+|--------|------|--------------|
+| `GET`    | `/health` | Health check |
+| `POST`   | `/agent/sessions` | Create a session |
+| `GET`    | `/agent/sessions` | List sessions |
+| `DELETE` | `/agent/sessions/:id` | Remove a session |
+| `POST`   | `/agent/start` | Start (spawn) agent in a session |
+| `POST`   | `/agent/send` | Send a message |
+| `POST`   | `/agent/resume` | Restart with canonical history rebuilt for the provider |
+| `POST`   | `/agent/restart` | Re-spawn with the same `lastStartConfig` |
+| `POST`   | `/agent/interrupt` | Interrupt current turn (process stays alive) |
+| `POST`   | `/agent/set-model` | Change model at runtime |
+| `POST`   | `/agent/set-permission-mode` | Change permission mode at runtime |
+| `POST`   | `/agent/kill` | Kill the agent in a session |
+| `GET`    | `/agent/status` | Session status snapshot |
+| `POST`   | `/agent/run-once` | One-shot: spawn → run → return result → cleanup |
+| `POST`   | `/agent/completion` | Lightweight one-shot completion (no session) |
+| `GET`    | `/agent/events` | SSE event stream |
+| `GET`    | `/chat/sessions` | List chat sessions |
+| `POST`   | `/chat/sessions/:id/messages` | Append a chat message |
+| `GET`    | `/chat/sessions/:id/messages` | List messages |
+| `DELETE` | `/chat/sessions/:id/messages` | Clear messages |
+| `GET`    | `/chat/images/:sessionId/:filename` | Serve an embed |
 
-#### Validation
+`server/api-types.ts` is the single source of truth for response shapes. `httpJson(c, op, data)` and `wsReply(ws, msg, data)` both consume it, so HTTP/WS drift is a TypeScript error.
 
-`sna gen client` generates `.sna/skills.json` — the skill registry. Dispatch validates skill names against this file on `open()`. If the file is missing, falls back to checking `.claude/skills/<name>/SKILL.md` existence.
+#### WebSocket (`/ws`)
 
-Run `sna validate` to check project health:
-- `.sna/skills.json` exists and skills match SKILL.md files
-- `.claude/settings.json` has the PreToolUse hook
-- `node_modules` installed
+A single connection covers everything. Request shape is `{ type, rid?, ...args }`; the server replies with `{ type, rid?, ...data }` or `{ type: "error", rid?, message }`. Push channels (no rid):
 
-### SDK Server
+| Push type | When |
+|-----------|------|
+| `agent.event` | Per-session event stream after `agent.subscribe` |
+| `sessions.snapshot` | On connect, on session create/remove, on state change |
+| `session.lifecycle` | `started` / `killed` / `exited` / `crashed` / `restarted` |
+| `session.config-changed` | After `set-model` / `set-permission-mode` |
+| `session.state-changed` | When agent state transitions |
+| `permission.request` | Agent needs approval (after `permission.subscribe`) |
 
-`@sna-sdk/core` provides a standalone Hono server started via CLI:
+`agent.subscribe({ session, since: 0 })` is a unified channel: it replays canonical history from `chat_messages` and continues with live events. There's no separate "list messages then subscribe" sequence.
 
-```bash
-sna api:up    # or: node node_modules/@sna-sdk/core/dist/scripts/sna.js api:up
-```
+### Permission flow
 
-CLI commands (`sna help` for full list):
+Claude Code uses a PreToolUse hook; Codex uses JSON-RPC bidirectional approval. SNA hides the difference behind one flow:
 
-Lifecycle:
-- `sna up` / `sna down` / `sna status` / `sna restart` — Service management
-- `sna init` — Initialize `.claude/settings.json` and skills
-- `sna validate` — Check project health (skills.json, hooks, deps)
+1. The agent tries to call a tool.
+2. Provider-specific glue posts a `permission_needed` request to the running server (Claude: hook script; Codex: rpc → provider).
+3. Server emits `permission.request` to subscribers and blocks the agent.
+4. UI calls `permission.respond({ session, approved })`.
+5. Server unblocks the agent.
 
-Tools:
-- `sna dispatch` — Unified event dispatcher (open/send/close)
-- `sna gen client` — Generate typed client + `.sna/skills.json`
-- `sna api:up` / `sna api:down` — Standalone API server
+`ClaudeCodeProvider.spawn` auto-injects the hook via `--settings`. Consumers don't write `.claude/settings.json` themselves. Safe tools (`Read`, `Glob`, `Grep`, `Agent`, `TodoRead`, `TodoWrite`) auto-allow without prompting.
 
-Testing:
-- `sna tu api:up` / `api:down` / `api:log` — Mock Anthropic API server
-- `sna tu claude` — Run claude with mock API (isolated env)
+### Runtime control
 
-This server provides:
+A session doesn't need to die to change shape:
 
-**HTTP Routes:**
-- `GET /health` — Health check
-- `GET /events` — SSE stream of skill_events
-- `POST /emit` — Write a skill event (broadcasts to WS subscribers)
-- `POST /agent/start` — Start an agent session (records `invoked` event)
-- `POST /agent/send` — Send message to agent (auto-persists to chat_messages)
-- `GET /agent/events` — Agent SSE stream
-- `POST /agent/run-once` — One-shot execution (spawn → run → return result → cleanup)
-- `POST /agent/resume` — Resume with DB history auto-injected (JSONL + `--resume <filepath>`)
-- `POST /agent/restart` — Kill + re-spawn with merged config + `--resume`
-- `POST /agent/interrupt` — Interrupt current turn (process stays alive)
-- `POST /agent/set-model` — Change model at runtime (no restart)
-- `POST /agent/set-permission-mode` — Change permission mode at runtime (no restart)
-- `POST /agent/sessions` — Create session (supports `meta` for multi-app identification)
-- `GET /agent/sessions` — List sessions (includes `state` and `meta` fields)
-- `DELETE /agent/sessions/:id` — Remove session
-- `POST /agent/kill` — Kill agent in a session
-- `GET /agent/status` — Check session status
-- `POST /agent/permission-request` — Hook submits permission request (blocks until UI responds)
-- `POST /agent/permission-respond` — UI approves/denies a pending permission
-- `GET /agent/permission-pending` — Poll for pending permission requests (always returns array)
-- `GET /chat/sessions` — List chat sessions
-- `POST /chat/sessions` — Create chat session
-- `DELETE /chat/sessions/:id` — Delete chat session
-- `GET /chat/sessions/:id/messages` — Get messages
-- `POST /chat/sessions/:id/messages` — Add message
-- `DELETE /chat/sessions/:id/messages` — Clear messages
-- `GET /chat/images/:sessionId/:filename` — Serve stored image files
+- `agent.set-model` — control message, no respawn
+- `agent.set-permission-mode` — control message, no respawn
+- `agent.interrupt` — cancel the current turn, process stays alive
+- `agent.restart` — kill + respawn with the same `lastStartConfig` (cross-runtime restarts drop runtime-specific flags)
+- `agent.resume` — rebuild canonical history → provider-native format → fresh process picks up where the last one left off
 
-**WebSocket API (`ws://host:port/ws`):**
-- Full bidirectional API wrapping all HTTP routes over a single connection
-- `ApiResponses` type contract enforces HTTP/WS response shape parity at compile time
-- Auto-push (no subscribe): `session.lifecycle`, `session.config-changed`, `session.state-changed`
-- `agent.subscribe({ since: 0 })` — unified channel: DB history replay + real-time events. No separate `chat.messages.list` needed
-- `permission.subscribe` — replays existing pending + subscribes to new. No separate `permission.pending` needed
-- `agent.event` stream includes `user_message` type for multi-client chat sync
-- `agentStatus: "idle" | "busy" | "disconnected"` in `sessions.list` and `agent.status`
-- `agent.resume` — auto-loads DB history via JSONL injection
-- Runtime config: `agent.set-model` and `agent.set-permission-mode` without restart
+### One-shot completion
 
-Applications discover the server URL via `/api/sna-port` or the default port (3099).
+`completion({ prompt, model?, provider?, systemPrompt?, ... })` skips the session machinery. Spawns `claude -p --output-format json` (or `codex exec --json`), parses the result, returns `{ text, usage, costUsd, durationMs, durationApiMs, model }`. Used for short single-prompt jobs — naming a chat, summarizing a doc — where multi-turn would be overkill.
 
-### Hook Script
+### Launcher API
 
-The PreToolUse hook enables the permission approval flow. It fires before every tool execution, submits a request to the SNA API, and waits for user approval from the UI.
+`startSnaServer(options)` is the recommended way to run the server inside another app:
 
-The SDK auto-injects the hook via `--settings` when spawning agents (unless `bypassPermissions` is set). The hook script path is resolved via `import.meta.url` relative to the SDK's own location, so it works correctly with pnpm link, monorepo setups, and any `cwd`. Session ID is passed as a `--session=<id>` CLI arg (with `SNA_SESSION_ID` env var as fallback).
-
-Safe tools (Read, Glob, Grep, Agent, TodoRead, TodoWrite) are auto-allowed without prompting.
-
-### Typed Client Generation
-
-`sna gen client` reads `sna.args` from SKILL.md frontmatter and generates a TypeScript client:
-
-```bash
-sna gen client --out src/sna-client.ts
-```
-
-See [Skill Authoring](skill-authoring.md) for frontmatter schema and [App Setup](app-setup.md) for usage.
-
-### History Management
-
-`agent.resume` automatically loads conversation history from the DB and injects it via JSONL resume:
-
-```
-agent.resume({ session, prompt })
-  → buildHistoryFromDb(sessionId)        // query chat_messages
-  → writeHistoryJsonl(history, { cwd })  // write .sna/history/<uuid>.jsonl
-  → claude --resume <filepath> prompt    // CC loads full multi-turn history
-  → single response, full context        // no duplicate turns
-```
-
-Two adapters in `cc-history-adapter.ts`:
-- **Primary**: JSONL file + `--resume <filepath>` — real multi-turn structure
-- **Fallback**: `<recalled-conversation>` XML in single assistant message — if file write fails
-
-`agent.start` also accepts a `history` parameter for manual injection.
-
-### Database Path
-
-Default: `process.cwd()/data/sna.db`. Override with `SNA_DB_PATH` env var for Electron apps or other environments where the project root is not persistent.
-
-**Relevant env vars:**
-- `SNA_DB_PATH` — absolute path to the SQLite database file
-- `SNA_SQLITE_NATIVE_BINDING` — absolute path to `better_sqlite3.node`; bypasses the `bindings` package for Electron packaged apps where `bindings` cannot traverse the asar bundle
-
-### Launcher API (Electron / Node.js)
-
-For Electron and Node.js applications that manage the SNA server lifecycle programmatically, the SDK provides a launcher API that handles `fork()`, path resolution, env setup, and ready detection.
-
-**Electron (asar-aware — auto-detects native binding and unpacked paths):**
-
-```javascript
-const { startSnaServer } = require("@sna-sdk/core/electron");
-
-const sna = await startSnaServer({
-  port: 3099,
-  dbPath: path.join(app.getPath("userData"), "sna.db"),
-  maxSessions: 20,
-  permissionMode: "acceptEdits",
-  onLog: (line) => console.log("[sna]", line),
-});
-
-// sna.process — ChildProcess ref
-// sna.port    — actual port
-// sna.stop()  — graceful shutdown (SIGTERM)
-```
-
-Electron packaging requirement — add to `electron-builder` config:
-```json
-{ "asarUnpack": ["node_modules/@sna-sdk/core/**"] }
-```
-
-**Node.js (Next.js, Express, Vite, etc.):**
-
-```javascript
-const { startSnaServer } = require("@sna-sdk/core/node");
+```ts
+import { startSnaServer } from "@sna-sdk/core/node"; // or /electron
 
 const sna = await startSnaServer({
   port: 3099,
   dbPath: path.join(process.cwd(), "data/sna.db"),
+  maxSessions: 20,
+  permissionMode: "acceptEdits",
+  onLog: (line) => console.log("[sna]", line),
 });
+// sna.process — ChildProcess
+// sna.port    — actual port
+// sna.stop()  — graceful SIGTERM
 ```
 
-Both launchers support the same `SnaServerOptions`: `port`, `dbPath`, `cwd`, `maxSessions`, `permissionMode`, `model`, `nativeBinding`, `env`, `readyTimeout`, `onLog`.
+The Electron variant additionally resolves asar-unpacked paths and locates the consumer app's electron-rebuilt `better-sqlite3`. Add `asarUnpack: ["node_modules/@sna-sdk/core/**"]` to electron-builder.
 
-### Test Utilities
+Supported `SnaServerOptions`: `port`, `dbPath`, `cwd`, `maxSessions`, `permissionMode`, `model`, `nativeBinding`, `env`, `readyTimeout`, `onLog`.
 
-`sna tu` provides a mock Anthropic API server for testing without real API calls. Set `SNA_CLAUDE_COMMAND` to override the claude binary (e.g., `sna tu claude` for isolated testing). See [Testing Guide](testing.md) for details.
+### Configuration
 
-### Application Responsibilities
+`@sna-sdk/core` exposes `getConfig()` / `setConfig()` from `config.ts`. Defaults are overridden by env vars, then by `setConfig()` calls, then by per-call parameters.
 
-Applications are responsible for:
-- App-specific DB tables and `getDb()` (their own database)
-- API routes for app-specific data
-- Skill definitions in `.claude/skills/`
-- Mounting/configuring the SDK (SnaProvider, hooks)
-- Skill execution locking (if needed — SDK does not manage this)
-
-Applications should NOT:
-- Define `skill_events`, `chat_sessions`, or `chat_messages` tables
-- Create their own emit/hook scripts
-- Create their own SSE events route
-- Write directly to `data/sna.db`
+| Env var | Purpose |
+|---------|---------|
+| `SNA_PORT` | Server port (default 3099) |
+| `SNA_MODEL` | Default model |
+| `SNA_PERMISSION_MODE` | Default permission mode |
+| `SNA_MAX_SESSIONS` | Cap on concurrent agent processes (default 5) |
+| `SNA_DB_PATH` | SQLite path (default `./data/sna.db`) |
+| `SNA_DATA_DIR` | Base dir for embeds/images |
+| `SNA_PERMISSION_TIMEOUT_MS` | Auto-deny after this many ms (0 = app controls) |
+| `SNA_SQLITE_NATIVE_BINDING` | Absolute path to `better_sqlite3.node` (Electron) |
+| `SNA_CLAUDE_COMMAND` | Override the Claude binary |

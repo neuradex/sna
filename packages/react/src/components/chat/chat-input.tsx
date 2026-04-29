@@ -43,7 +43,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
               handleSend();
             }
           }}
-          placeholder="Ask Claude or run a skill..."
+          placeholder="Ask the agent..."
           rows={1}
           disabled={disabled}
           style={{

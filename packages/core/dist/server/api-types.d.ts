@@ -95,9 +95,6 @@ interface ApiResponses {
         durationApiMs: number;
         model: string;
     };
-    "emit": {
-        id: number;
-    };
     "permission.respond": {
         status: "approved" | "denied";
     };

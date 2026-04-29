@@ -113,7 +113,6 @@ export function createChatRoutes() {
       kind?: import("../../db/schema.js").ChatKind;
       content?: string;
       embeds?: Record<string, import("../../history/types.js").EmbedRecord>;
-      skill_name?: string;
       meta?: Record<string, unknown>;
     };
 
@@ -132,7 +131,6 @@ export function createChatRoutes() {
         content: body.content ?? "",
         embeds: body.embeds,
         meta: body.meta,
-        skillName: body.skill_name,
       });
       return httpJson(c, "chat.messages.create", { status: "created", id });
     } catch (e: any) {

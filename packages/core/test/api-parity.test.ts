@@ -11,7 +11,6 @@ import path from "path";
 describe("API Parity", () => {
 
   it("api-types.ts exports ApiResponses with all expected operations", async () => {
-    // Read the source file and extract operation keys
     const src = fs.readFileSync(
       path.join(import.meta.dirname, "../src/server/api-types.ts"), "utf-8"
     );
@@ -21,7 +20,6 @@ describe("API Parity", () => {
       "agent.start", "agent.send", "agent.resume", "agent.restart", "agent.interrupt",
       "agent.set-model", "agent.set-permission-mode",
       "agent.kill", "agent.status", "agent.run-once",
-      "emit",
       "permission.respond", "permission.pending",
       "chat.sessions.list", "chat.sessions.create", "chat.sessions.remove",
       "chat.messages.list", "chat.messages.create", "chat.messages.clear",
@@ -38,9 +36,6 @@ describe("API Parity", () => {
     );
     const chatSrc = fs.readFileSync(
       path.join(import.meta.dirname, "../src/server/routes/chat.ts"), "utf-8"
-    );
-    const emitSrc = fs.readFileSync(
-      path.join(import.meta.dirname, "../src/server/routes/emit.ts"), "utf-8"
     );
 
     // Agent routes
@@ -63,9 +58,6 @@ describe("API Parity", () => {
     for (const op of chatOps) {
       assert.ok(chatSrc.includes(`httpJson(c, "${op}"`), `chat.ts should use httpJson for "${op}"`);
     }
-
-    // Emit route
-    assert.ok(emitSrc.includes(`httpJson(c, "emit"`), `emit.ts should use httpJson for "emit"`);
   });
 
   it("WS handlers use wsReply for all typed operations", async () => {
@@ -73,19 +65,8 @@ describe("API Parity", () => {
       path.join(import.meta.dirname, "../src/server/ws.ts"), "utf-8"
     );
 
-    const wsOps = [
-      "sessions.create", "sessions.list", "sessions.remove",
-      "agent.start", "agent.send", "agent.resume", "agent.kill", "agent.status",
-      "agent.run-once", "agent.restart", "agent.interrupt",
-      "agent.set-model", "agent.set-permission-mode",
-      "permission.respond", "permission.pending",
-      "chat.sessions.list", "chat.sessions.create", "chat.sessions.remove",
-      "chat.messages.list", "chat.messages.create", "chat.messages.clear",
-      "emit",
-    ];
-    for (const op of wsOps) {
-      assert.ok(wsSrc.includes(`wsReply(ws, msg,`), `ws.ts should use wsReply`);
-    }
+    // Spot-check that wsReply is used; the per-op presence is covered by the case test below.
+    assert.ok(wsSrc.includes("wsReply(ws, msg,"), "ws.ts should use wsReply");
   });
 
   it("WS handler has case for every HTTP operation", async () => {
@@ -98,7 +79,6 @@ describe("API Parity", () => {
       "agent.start", "agent.send", "agent.resume", "agent.restart", "agent.interrupt",
       "agent.set-model", "agent.set-permission-mode",
       "agent.kill", "agent.status", "agent.run-once",
-      "emit",
       "permission.respond", "permission.pending", "permission.subscribe", "permission.unsubscribe",
       "chat.sessions.list", "chat.sessions.create", "chat.sessions.remove",
       "chat.messages.list", "chat.messages.create", "chat.messages.clear",
@@ -121,7 +101,6 @@ describe("API Parity", () => {
       "session.config-changed",
       "session.state-changed",
       "permission.request",
-      "skill.event",
     ];
 
     for (const t of pushTypes) {

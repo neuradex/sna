@@ -22,14 +22,13 @@ describe("DB Schema", () => {
   beforeEach(() => { cleanup = setup(); });
   afterEach(() => { cleanup?.(); });
 
-  it("creates all three tables", async () => {
+  it("creates the canonical tables", async () => {
     const { getDb } = await import("../src/db/schema.js");
     const db = getDb();
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as { name: string }[];
     const names = tables.map(t => t.name).filter(n => !n.startsWith("sqlite_"));
     assert.ok(names.includes("chat_sessions"), "chat_sessions table");
     assert.ok(names.includes("chat_messages"), "chat_messages table");
-    assert.ok(names.includes("skill_events"), "skill_events table");
   });
 
   it("chat_sessions has all columns including new ones", async () => {
@@ -42,24 +41,24 @@ describe("DB Schema", () => {
     }
   });
 
-  it("chat_messages has all columns", async () => {
+  it("chat_messages has canonical columns", async () => {
     const { getDb } = await import("../src/db/schema.js");
     const db = getDb();
     const cols = db.prepare("PRAGMA table_info(chat_messages)").all() as { name: string }[];
     const names = cols.map(c => c.name);
-    for (const col of ["id", "session_id", "role", "content", "skill_name", "meta", "created_at"]) {
+    for (const col of ["id", "session_id", "actor", "kind", "content", "embeds", "meta", "created_at", "updated_at"]) {
       assert.ok(names.includes(col), `chat_messages should have column: ${col}`);
     }
+    // Legacy columns must NOT exist
+    assert.ok(!names.includes("role"), "chat_messages should NOT have legacy role column");
+    assert.ok(!names.includes("skill_name"), "chat_messages should NOT have legacy skill_name column");
   });
 
-  it("skill_events has all columns", async () => {
+  it("legacy skill_events table is dropped on init", async () => {
     const { getDb } = await import("../src/db/schema.js");
     const db = getDb();
-    const cols = db.prepare("PRAGMA table_info(skill_events)").all() as { name: string }[];
-    const names = cols.map(c => c.name);
-    for (const col of ["id", "session_id", "skill", "type", "message", "data", "created_at"]) {
-      assert.ok(names.includes(col), `skill_events should have column: ${col}`);
-    }
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='skill_events'").all();
+    assert.equal(tables.length, 0, "skill_events table should not exist");
   });
 
   it("default session exists", async () => {
@@ -111,8 +110,6 @@ describe("DB Schema", () => {
     const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all() as { name: string }[];
     const names = indexes.map(i => i.name);
     assert.ok(names.includes("idx_chat_messages_session"));
-    assert.ok(names.includes("idx_skill_events_skill"));
-    assert.ok(names.includes("idx_skill_events_created"));
-    assert.ok(names.includes("idx_skill_events_session"));
+    assert.ok(names.includes("idx_chat_messages_session_kind"));
   });
 });

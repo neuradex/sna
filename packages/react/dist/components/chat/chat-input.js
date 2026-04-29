@@ -37,7 +37,7 @@ function ChatInput({ onSend, disabled }) {
                   handleSend();
                 }
               },
-              placeholder: "Ask Claude or run a skill...",
+              placeholder: "Ask the agent...",
               rows: 1,
               disabled,
               style: {
