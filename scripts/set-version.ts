@@ -1,18 +1,11 @@
 /**
- * set-version.ts — Sync version across all packages, plugin, and marketplace.
+ * set-version.ts — Sync version across all SDK packages.
  *
  * Usage:
  *   tsx scripts/set-version.ts <version>
  *
- * Updates:
- *   - packages/core/package.json
- *   - packages/react/package.json
- *   - plugins/sna-builder/.claude-plugin/plugin.json
- *   - .claude-plugin/marketplace.json
- *
- * Validates:
- *   - semver format
- *   - version is higher than current
+ * Updates packages/{core,react,client,testing}/package.json. Validates
+ * semver format and that the new version is higher than current.
  */
 
 import fs from "fs";
@@ -78,15 +71,5 @@ updateJson("packages/core/package.json", (j) => { j.version = version; });
 updateJson("packages/react/package.json", (j) => { j.version = version; });
 updateJson("packages/client/package.json", (j) => { j.version = version; });
 updateJson("packages/testing/package.json", (j) => { j.version = version; });
-
-// plugin
-updateJson("plugins/sna-builder/.claude-plugin/plugin.json", (j) => { j.version = version; });
-
-// marketplace
-updateJson(".claude-plugin/marketplace.json", (j) => {
-  for (const plugin of j.plugins) {
-    plugin.version = version;
-  }
-});
 
 console.log(`\n✓ All set to ${version}`);
