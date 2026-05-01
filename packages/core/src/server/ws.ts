@@ -20,8 +20,17 @@
  *   agent.send        { session?, message, meta? }
  *   agent.kill        { session? }
  *   agent.status      { session? }
- *   agent.subscribe   { session?, since? }
+ *   agent.subscribe   { session?, since?, includeHistory?, tail? }
+ *                     Reply: { cursor, oldestCursor?, hasMore }
+ *                     - tail=N replays only the last N persisted messages then live-streams.
+ *                     - oldestCursor / hasMore let clients page older messages via agent.getMessages.
+ *                     - since / includeHistory keep the legacy "all-history" behavior.
  *   agent.unsubscribe { session? }
+ *   agent.getMessages { session, before?, limit? }
+ *                     Reply: { events: [{ cursor, event }], oldestCursor?, hasMore }
+ *                     Stateless reverse-paginated history fetch. `before` is the smallest
+ *                     cursor the client currently holds; returns the `limit` events
+ *                     immediately preceding it, in ascending cursor order.
  *   agent.run-once    { message, model?, systemPrompt?, appendSystemPrompt?, permissionMode?, cwd?, timeout?, provider?, extraArgs? }
  *   agent.completion  { prompt, model?, label?, systemPrompt?, appendSystemPrompt?, timeout?, extraArgs?, env? }
  *
@@ -230,6 +239,8 @@ function handleMessage(
       return handleAgentSubscribe(ws, msg, sm, state);
     case "agent.unsubscribe":
       return handleAgentUnsubscribe(ws, msg, state);
+    case "agent.getMessages":
+      return handleAgentGetMessages(ws, msg);
 
     // ── Skill events ──────────────────────────────────
 
@@ -632,6 +643,47 @@ async function handleAgentCompletion(ws: WebSocket, msg: WsRequest): Promise<voi
 
 // ── Agent event subscription handlers ─────────────────────────────
 
+interface ChatMessageRow {
+  actor: string;
+  kind: string;
+  content: string;
+  meta: string | null;
+  created_at: string;
+}
+
+/**
+ * Map a chat_messages row to a replayable AgentEvent. Returns null for rows
+ * that aren't surfaced as events (e.g. system bookkeeping). Callers that
+ * track ordinals must increment the cursor regardless of mappability —
+ * cursor == row ordinal, not event ordinal — otherwise live-event cursors
+ * (which derive from chat_messages COUNT(*)) will diverge from history cursors.
+ */
+function mapChatRowToEvent(row: ChatMessageRow): AgentEvent | null {
+  const eventType = row.actor === "user" ? "user_message"
+    : row.actor === "assistant" && row.kind === "text" ? "assistant"
+    : row.actor === "assistant" && row.kind === "thinking" ? "thinking"
+    : row.actor === "assistant" && row.kind === "tool_use" ? "tool_use"
+    : row.actor === "system" && row.kind === "tool_result" ? "tool_result"
+    : row.actor === "system" && row.kind === "error" ? "error"
+    : null;
+  if (!eventType) return null;
+  const meta = row.meta ? JSON.parse(row.meta) : undefined;
+  return {
+    type: eventType,
+    message: row.content,
+    data: meta,
+    timestamp: new Date(row.created_at).getTime(),
+  } as AgentEvent;
+}
+
+function countChatMessages(sessionId: string): number {
+  const db = getDb();
+  const row = db.prepare(
+    `SELECT COUNT(*) as c FROM chat_messages WHERE session_id = ?`,
+  ).get(sessionId) as { c: number } | undefined;
+  return row?.c ?? 0;
+}
+
 function handleAgentSubscribe(
   ws: WebSocket,
   msg: WsRequest,
@@ -644,49 +696,78 @@ function handleAgentSubscribe(
   // Unsubscribe existing for this session
   state.agentUnsubs.get(sessionId)?.();
 
-  // If since=0 (or includeHistory=true), replay DB history as events first
-  const includeHistory = msg.since === 0 || msg.includeHistory === true;
+  // Three replay modes:
+  //   tail:N        — last N persisted messages, then live (paginated client UI)
+  //   includeHistory — full history, then live (legacy default for clients
+  //                    that haven't adopted tail; also triggered by since=0)
+  //   default       — no history, live from current cursor
+  const tail = typeof msg.tail === "number" && msg.tail > 0 ? Math.floor(msg.tail) : null;
+  const includeHistory = tail === null && (msg.since === 0 || msg.includeHistory === true);
   let cursor = 0;
+  let oldestCursor: number | undefined;
+  let hasMore = false;
 
-  if (includeHistory) {
+  if (tail !== null) {
+    try {
+      const db = getDb();
+      const total = countChatMessages(sessionId);
+      const offset = Math.max(0, total - tail);
+      hasMore = offset > 0;
+
+      const rows = db.prepare(
+        `SELECT actor, kind, content, meta, created_at FROM chat_messages
+         WHERE session_id = ? ORDER BY id ASC LIMIT ? OFFSET ?`,
+      ).all(sessionId, tail, offset) as ChatMessageRow[];
+
+      cursor = offset;
+      if (rows.length > 0) oldestCursor = offset + 1;
+      for (const row of rows) {
+        cursor++;
+        const event = mapChatRowToEvent(row);
+        if (!event) continue;
+        send(ws, {
+          type: "agent.event",
+          session: sessionId,
+          cursor,
+          isHistory: true,
+          event,
+        });
+      }
+    } catch { /* DB not ready */ }
+
+    // Replay in-memory buffer events past `cursor` — same logic as legacy path.
+    if (cursor < session.eventCounter) {
+      const unpersisted = session.eventCounter - cursor;
+      const bufferSlice = session.eventBuffer.slice(-unpersisted);
+      for (const event of bufferSlice) {
+        cursor++;
+        send(ws, { type: "agent.event", session: sessionId, cursor, event });
+      }
+    }
+  } else if (includeHistory) {
     // Replay all persisted messages from DB
     try {
       const db = getDb();
       const rows = db.prepare(
         `SELECT actor, kind, content, meta, created_at FROM chat_messages
          WHERE session_id = ? ORDER BY id ASC`,
-      ).all(sessionId) as { actor: string; kind: string; content: string; meta: string | null; created_at: string }[];
+      ).all(sessionId) as ChatMessageRow[];
 
       for (const row of rows) {
         cursor++;
-        // Map (actor, kind) → event type for replay. status blocks are bookkeeping and skipped.
-        const eventType = row.actor === "user" ? "user_message"
-          : row.actor === "assistant" && row.kind === "text" ? "assistant"
-          : row.actor === "assistant" && row.kind === "thinking" ? "thinking"
-          : row.actor === "assistant" && row.kind === "tool_use" ? "tool_use"
-          : row.actor === "system" && row.kind === "tool_result" ? "tool_result"
-          : row.actor === "system" && row.kind === "error" ? "error"
-          : null;
-        if (!eventType) continue;
-        const meta = row.meta ? JSON.parse(row.meta) : undefined;
+        const event = mapChatRowToEvent(row);
+        if (!event) continue;
         send(ws, {
           type: "agent.event",
           session: sessionId,
           cursor,
           isHistory: true,
-          event: {
-            type: eventType,
-            message: row.content,
-            data: meta,
-            timestamp: new Date(row.created_at).getTime(),
-          },
+          event,
         });
       }
     } catch { /* DB not ready */ }
 
     // Replay in-memory buffer events that haven't been persisted to DB yet.
-    // These are events emitted since the last DB write (current turn in-flight).
-    // Only include events whose counter exceeds the history cursor to avoid duplicates.
     if (cursor < session.eventCounter) {
       const unpersisted = session.eventCounter - cursor;
       const bufferSlice = session.eventBuffer.slice(-unpersisted);
@@ -721,7 +802,78 @@ function handleAgentSubscribe(
   });
   state.agentUnsubs.set(sessionId, unsub);
 
-  reply(ws, msg, { cursor });
+  reply(ws, msg, {
+    cursor,
+    hasMore,
+    ...(oldestCursor !== undefined ? { oldestCursor } : {}),
+  });
+}
+
+/**
+ * Stateless reverse-paginated history fetch. Used by clients (e.g. Loom) to
+ * load older messages when the user scrolls up, without disturbing the live
+ * subscription. Cursors are chat_messages row ordinals — same numbering as
+ * agent.subscribe replay — so prepending these into the client buffer keeps
+ * dedup against live events working unchanged.
+ */
+function handleAgentGetMessages(ws: WebSocket, msg: WsRequest): void {
+  const sessionId = msg.session as string | undefined;
+  if (!sessionId) return replyError(ws, msg, "session is required");
+
+  const before = typeof msg.before === "number" && msg.before > 0 ? Math.floor(msg.before) : null;
+  const requestedLimit = typeof msg.limit === "number" && msg.limit > 0 ? Math.floor(msg.limit) : 50;
+  const limit = Math.min(requestedLimit, 200);
+
+  try {
+    const db = getDb();
+    const total = countChatMessages(sessionId);
+
+    // Compute the row range to read (ordinals are 1-based).
+    //   before == null: tail of history (last `limit` rows).
+    //   before > 0    : `limit` rows ending at ordinal (before - 1).
+    let offset: number;
+    let take: number;
+    if (before === null) {
+      offset = Math.max(0, total - limit);
+      take = Math.min(limit, total);
+    } else {
+      const upperOrdinalExclusive = before;
+      const available = upperOrdinalExclusive - 1;
+      take = Math.max(0, Math.min(limit, available));
+      offset = available - take;
+    }
+
+    if (take <= 0) {
+      return reply(ws, msg, { events: [], hasMore: false });
+    }
+
+    const rows = db.prepare(
+      `SELECT actor, kind, content, meta, created_at FROM chat_messages
+       WHERE session_id = ? ORDER BY id ASC LIMIT ? OFFSET ?`,
+    ).all(sessionId, take, offset) as ChatMessageRow[];
+
+    const events: Array<{ cursor: number; event: AgentEvent }> = [];
+    for (let i = 0; i < rows.length; i++) {
+      const cursor = offset + i + 1;
+      const event = mapChatRowToEvent(rows[i]);
+      if (!event) continue;
+      events.push({ cursor, event });
+    }
+
+    // hasMore reflects rows, not mapped events — clients can keep paging back
+    // even if the just-returned batch was filtered down to nothing by mapping.
+    const hasMore = offset > 0;
+    const oldestCursor = rows.length > 0 ? offset + 1 : undefined;
+
+    reply(ws, msg, {
+      events,
+      hasMore,
+      ...(oldestCursor !== undefined ? { oldestCursor } : {}),
+    });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "DB error";
+    replyError(ws, msg, message);
+  }
 }
 
 function handleAgentUnsubscribe(ws: WebSocket, msg: WsRequest, state: ConnState): void {

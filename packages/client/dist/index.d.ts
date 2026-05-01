@@ -1145,24 +1145,66 @@ declare class AgentApi {
      * @param opts - Subscription options.
      * @param opts.since - Start from this event cursor. `0` = from the beginning.
      * @param opts.includeHistory - If `true`, replay DB-persisted history as events.
-     * @returns The current cursor position.
+     * @param opts.tail - If set to N, replay only the last N persisted messages
+     *   before live-streaming. Lets clients open a session without paying for
+     *   full history; pair with {@link getMessages} to load older messages on
+     *   demand. Mutually exclusive with `since` / `includeHistory`.
+     * @returns Current cursor, plus `oldestCursor` and `hasMore` (when `tail`
+     *   was used) so callers can drive reverse pagination via {@link getMessages}.
      *
      * @example
      * ```ts
-     * // Subscribe to all events from the beginning
+     * // Subscribe with only the last 20 messages, then load older on scroll-up
      * sna.agent.onEvent(({ event }) => console.log(event));
-     * const { cursor } = await sna.agent.subscribe("default", {
-     *   since: 0,
-     *   includeHistory: true,
-     * });
-     * console.log(`Subscribed, cursor at ${cursor}`);
+     * const { cursor, oldestCursor, hasMore } = await sna.agent.subscribe("default", { tail: 20 });
+     * if (hasMore && oldestCursor !== undefined) {
+     *   const older = await sna.agent.getMessages("default", { before: oldestCursor, limit: 20 });
+     * }
      * ```
      */
     subscribe(session: string, opts?: {
         since?: number;
         includeHistory?: boolean;
+        tail?: number;
     }): Promise<{
         cursor: number;
+        oldestCursor?: number;
+        hasMore: boolean;
+    }>;
+    /**
+     * Fetch a paginated batch of older persisted messages for a session, in
+     * ascending cursor order. Stateless — does not affect the live subscription.
+     *
+     * Cursors returned here share the same numbering as {@link subscribe}, so
+     * deduplication against live events works without translation.
+     *
+     * @param session - Target session ID.
+     * @param opts - Pagination options.
+     * @param opts.before - Smallest cursor the client currently holds. Returns
+     *   the `limit` events immediately preceding it. Omit to fetch the tail.
+     * @param opts.limit - Max events to return (default 50, capped at 200).
+     * @returns Events with their cursors, plus `oldestCursor` and `hasMore`.
+     *
+     * @example
+     * ```ts
+     * // Load older messages when user scrolls to the top
+     * const { events, oldestCursor, hasMore } = await sna.agent.getMessages("default", {
+     *   before: currentOldestCursor,
+     *   limit: 20,
+     * });
+     * for (const { cursor, event } of events) prependToUi(cursor, event);
+     * ```
+     */
+    getMessages(session: string, opts?: {
+        before?: number;
+        limit?: number;
+    }): Promise<{
+        events: Array<{
+            cursor: number;
+            event: Record<string, unknown>;
+        }>;
+        oldestCursor?: number;
+        hasMore: boolean;
     }>;
     /**
      * Unsubscribe from agent events for a session.

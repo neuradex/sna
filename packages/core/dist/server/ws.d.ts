@@ -28,8 +28,17 @@ import 'better-sqlite3';
  *   agent.send        { session?, message, meta? }
  *   agent.kill        { session? }
  *   agent.status      { session? }
- *   agent.subscribe   { session?, since? }
+ *   agent.subscribe   { session?, since?, includeHistory?, tail? }
+ *                     Reply: { cursor, oldestCursor?, hasMore }
+ *                     - tail=N replays only the last N persisted messages then live-streams.
+ *                     - oldestCursor / hasMore let clients page older messages via agent.getMessages.
+ *                     - since / includeHistory keep the legacy "all-history" behavior.
  *   agent.unsubscribe { session? }
+ *   agent.getMessages { session, before?, limit? }
+ *                     Reply: { events: [{ cursor, event }], oldestCursor?, hasMore }
+ *                     Stateless reverse-paginated history fetch. `before` is the smallest
+ *                     cursor the client currently holds; returns the `limit` events
+ *                     immediately preceding it, in ascending cursor order.
  *   agent.run-once    { message, model?, systemPrompt?, appendSystemPrompt?, permissionMode?, cwd?, timeout?, provider?, extraArgs? }
  *   agent.completion  { prompt, model?, label?, systemPrompt?, appendSystemPrompt?, timeout?, extraArgs?, env? }
  *

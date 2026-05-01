@@ -432,6 +432,91 @@ describe("WebSocket Handler", () => {
     assert.equal(events[1].event.message, "hi from DB");
   });
 
+  it("agent.subscribe with tail replays only the last N messages", async () => {
+    send(ctx, "chat.sessions.create", { id: "tail-test" });
+    await waitForReply(ctx, ctx.rid.toString());
+    for (let i = 1; i <= 5; i++) {
+      send(ctx, "chat.messages.create", { session: "tail-test", actor: "user", kind: "text", content: `msg-${i}` });
+      await waitForReply(ctx, ctx.rid.toString());
+    }
+
+    const events: any[] = [];
+    const handler = (raw: any) => {
+      const msg = JSON.parse(raw.toString());
+      if (msg.type === "agent.event" && msg.session === "tail-test") events.push(msg);
+    };
+    ctx.ws.on("message", handler);
+
+    const rid = send(ctx, "agent.subscribe", { session: "tail-test", tail: 2 });
+    const reply = await waitForReply(ctx, rid);
+
+    // Allow event push to flush
+    await new Promise((r) => setTimeout(r, 200));
+    ctx.ws.off("message", handler);
+
+    assert.equal(events.length, 2, `Expected 2 tail events, got ${events.length}`);
+    assert.equal(events[0].event.message, "msg-4");
+    assert.equal(events[1].event.message, "msg-5");
+    assert.equal(events[0].cursor, 4);
+    assert.equal(events[1].cursor, 5);
+    assert.equal(reply.hasMore, true);
+    assert.equal(reply.oldestCursor, 4);
+    assert.equal(reply.cursor, 5);
+  });
+
+  it("agent.subscribe with tail >= total reports hasMore=false", async () => {
+    send(ctx, "chat.sessions.create", { id: "tail-small-test" });
+    await waitForReply(ctx, ctx.rid.toString());
+    send(ctx, "chat.messages.create", { session: "tail-small-test", actor: "user", kind: "text", content: "only" });
+    await waitForReply(ctx, ctx.rid.toString());
+
+    const rid = send(ctx, "agent.subscribe", { session: "tail-small-test", tail: 20 });
+    const reply = await waitForReply(ctx, rid);
+    assert.equal(reply.hasMore, false);
+    assert.equal(reply.oldestCursor, 1);
+  });
+
+  it("agent.getMessages paginates older history", async () => {
+    send(ctx, "chat.sessions.create", { id: "paginate-test" });
+    await waitForReply(ctx, ctx.rid.toString());
+    for (let i = 1; i <= 7; i++) {
+      send(ctx, "chat.messages.create", { session: "paginate-test", actor: "user", kind: "text", content: `m-${i}` });
+      await waitForReply(ctx, ctx.rid.toString());
+    }
+
+    // Tail of 3 leaves cursors 5..7 visible; backfill 1..4 in two pages.
+    const firstRid = send(ctx, "agent.getMessages", { session: "paginate-test", before: 5, limit: 3 });
+    const first = await waitForReply(ctx, firstRid);
+    assert.equal(first.events.length, 3);
+    assert.equal(first.events[0].cursor, 2);
+    assert.equal(first.events[2].cursor, 4);
+    assert.equal(first.events[2].event.message, "m-4");
+    assert.equal(first.hasMore, true);
+    assert.equal(first.oldestCursor, 2);
+
+    const secondRid = send(ctx, "agent.getMessages", { session: "paginate-test", before: first.oldestCursor, limit: 3 });
+    const second = await waitForReply(ctx, secondRid);
+    assert.equal(second.events.length, 1);
+    assert.equal(second.events[0].cursor, 1);
+    assert.equal(second.hasMore, false);
+  });
+
+  it("agent.getMessages with no before returns the tail", async () => {
+    send(ctx, "chat.sessions.create", { id: "tail-fetch-test" });
+    await waitForReply(ctx, ctx.rid.toString());
+    for (let i = 1; i <= 4; i++) {
+      send(ctx, "chat.messages.create", { session: "tail-fetch-test", actor: "user", kind: "text", content: `t-${i}` });
+      await waitForReply(ctx, ctx.rid.toString());
+    }
+
+    const rid = send(ctx, "agent.getMessages", { session: "tail-fetch-test", limit: 2 });
+    const reply = await waitForReply(ctx, rid);
+    assert.equal(reply.events.length, 2);
+    assert.equal(reply.events[0].cursor, 3);
+    assert.equal(reply.events[1].cursor, 4);
+    assert.equal(reply.hasMore, true);
+  });
+
   it("permission.subscribe replays existing pending", async () => {
     // No pending permissions exist, so pendingCount should be 0
     const rid = send(ctx, "permission.subscribe");
