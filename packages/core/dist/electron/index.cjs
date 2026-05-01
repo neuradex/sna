@@ -4454,6 +4454,8 @@ function handleMessage(ws, msg, sm2, state) {
       return handleAgentSubscribe(ws, msg, sm2, state);
     case "agent.unsubscribe":
       return handleAgentUnsubscribe(ws, msg, state);
+    case "agent.getMessages":
+      return handleAgentGetMessages(ws, msg);
     // ── Skill events ──────────────────────────────────
     // ── Permission ────────────────────────────────────
     case "permission.respond":
@@ -4806,13 +4808,68 @@ async function handleAgentCompletion(ws, msg) {
     replyError(ws, msg, e.message);
   }
 }
+function mapChatRowToEvent(row) {
+  const eventType = row.actor === "user" ? "user_message" : row.actor === "assistant" && row.kind === "text" ? "assistant" : row.actor === "assistant" && row.kind === "thinking" ? "thinking" : row.actor === "assistant" && row.kind === "tool_use" ? "tool_use" : row.actor === "system" && row.kind === "tool_result" ? "tool_result" : row.actor === "system" && row.kind === "error" ? "error" : null;
+  if (!eventType) return null;
+  const meta = row.meta ? JSON.parse(row.meta) : void 0;
+  return {
+    type: eventType,
+    message: row.content,
+    data: meta,
+    timestamp: new Date(row.created_at).getTime()
+  };
+}
+function countChatMessages(sessionId) {
+  const db = getDb();
+  const row = db.prepare(
+    `SELECT COUNT(*) as c FROM chat_messages WHERE session_id = ?`
+  ).get(sessionId);
+  return row?.c ?? 0;
+}
 function handleAgentSubscribe(ws, msg, sm2, state) {
   const sessionId = msg.session ?? "default";
   const session = sm2.getOrCreateSession(sessionId);
   state.agentUnsubs.get(sessionId)?.();
-  const includeHistory = msg.since === 0 || msg.includeHistory === true;
+  const tail = typeof msg.tail === "number" && msg.tail > 0 ? Math.floor(msg.tail) : null;
+  const includeHistory = tail === null && (msg.since === 0 || msg.includeHistory === true);
   let cursor = 0;
-  if (includeHistory) {
+  let oldestCursor;
+  let hasMore = false;
+  if (tail !== null) {
+    try {
+      const db = getDb();
+      const total = countChatMessages(sessionId);
+      const offset = Math.max(0, total - tail);
+      hasMore = offset > 0;
+      const rows = db.prepare(
+        `SELECT actor, kind, content, meta, created_at FROM chat_messages
+         WHERE session_id = ? ORDER BY id ASC LIMIT ? OFFSET ?`
+      ).all(sessionId, tail, offset);
+      cursor = offset;
+      if (rows.length > 0) oldestCursor = offset + 1;
+      for (const row of rows) {
+        cursor++;
+        const event = mapChatRowToEvent(row);
+        if (!event) continue;
+        send(ws, {
+          type: "agent.event",
+          session: sessionId,
+          cursor,
+          isHistory: true,
+          event
+        });
+      }
+    } catch {
+    }
+    if (cursor < session.eventCounter) {
+      const unpersisted = session.eventCounter - cursor;
+      const bufferSlice = session.eventBuffer.slice(-unpersisted);
+      for (const event of bufferSlice) {
+        cursor++;
+        send(ws, { type: "agent.event", session: sessionId, cursor, event });
+      }
+    }
+  } else if (includeHistory) {
     try {
       const db = getDb();
       const rows = db.prepare(
@@ -4821,20 +4878,14 @@ function handleAgentSubscribe(ws, msg, sm2, state) {
       ).all(sessionId);
       for (const row of rows) {
         cursor++;
-        const eventType = row.actor === "user" ? "user_message" : row.actor === "assistant" && row.kind === "text" ? "assistant" : row.actor === "assistant" && row.kind === "thinking" ? "thinking" : row.actor === "assistant" && row.kind === "tool_use" ? "tool_use" : row.actor === "system" && row.kind === "tool_result" ? "tool_result" : row.actor === "system" && row.kind === "error" ? "error" : null;
-        if (!eventType) continue;
-        const meta = row.meta ? JSON.parse(row.meta) : void 0;
+        const event = mapChatRowToEvent(row);
+        if (!event) continue;
         send(ws, {
           type: "agent.event",
           session: sessionId,
           cursor,
           isHistory: true,
-          event: {
-            type: eventType,
-            message: row.content,
-            data: meta,
-            timestamp: new Date(row.created_at).getTime()
-          }
+          event
         });
       }
     } catch {
@@ -4868,7 +4919,57 @@ function handleAgentSubscribe(ws, msg, sm2, state) {
     }
   });
   state.agentUnsubs.set(sessionId, unsub);
-  reply(ws, msg, { cursor });
+  reply(ws, msg, {
+    cursor,
+    hasMore,
+    ...oldestCursor !== void 0 ? { oldestCursor } : {}
+  });
+}
+function handleAgentGetMessages(ws, msg) {
+  const sessionId = msg.session;
+  if (!sessionId) return replyError(ws, msg, "session is required");
+  const before = typeof msg.before === "number" && msg.before > 0 ? Math.floor(msg.before) : null;
+  const requestedLimit = typeof msg.limit === "number" && msg.limit > 0 ? Math.floor(msg.limit) : 50;
+  const limit = Math.min(requestedLimit, 200);
+  try {
+    const db = getDb();
+    const total = countChatMessages(sessionId);
+    let offset;
+    let take;
+    if (before === null) {
+      offset = Math.max(0, total - limit);
+      take = Math.min(limit, total);
+    } else {
+      const upperOrdinalExclusive = before;
+      const available = upperOrdinalExclusive - 1;
+      take = Math.max(0, Math.min(limit, available));
+      offset = available - take;
+    }
+    if (take <= 0) {
+      return reply(ws, msg, { events: [], hasMore: false });
+    }
+    const rows = db.prepare(
+      `SELECT actor, kind, content, meta, created_at FROM chat_messages
+       WHERE session_id = ? ORDER BY id ASC LIMIT ? OFFSET ?`
+    ).all(sessionId, take, offset);
+    const events = [];
+    for (let i = 0; i < rows.length; i++) {
+      const cursor = offset + i + 1;
+      const event = mapChatRowToEvent(rows[i]);
+      if (!event) continue;
+      events.push({ cursor, event });
+    }
+    const hasMore = offset > 0;
+    const oldestCursor = rows.length > 0 ? offset + 1 : void 0;
+    reply(ws, msg, {
+      events,
+      hasMore,
+      ...oldestCursor !== void 0 ? { oldestCursor } : {}
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "DB error";
+    replyError(ws, msg, message);
+  }
 }
 function handleAgentUnsubscribe(ws, msg, state) {
   const sessionId = msg.session ?? "default";
