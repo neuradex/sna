@@ -1,6 +1,6 @@
 {
   "name": "@sna-sdk/core",
-  "version": "0.10.0",
+  "version": "0.11.2",
   "description": "HTTP/WebSocket server that wraps Claude Code and Codex as backend processes",
   "type": "module",
   "files": [
