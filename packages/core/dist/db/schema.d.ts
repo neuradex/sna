@@ -1,6 +1,8 @@
 import Database from 'better-sqlite3';
 
 declare function getDb(): Database.Database;
+/** Reset the DB singleton cache. Used by tests for isolation. */
+declare function resetDb(): void;
 interface ChatSession {
     id: string;
     label: string;
@@ -26,4 +28,4 @@ interface ChatMessage {
     updated_at: string;
 }
 
-export { type ChatActor, type ChatKind, type ChatMessage, type ChatSession, getDb };
+export { type ChatActor, type ChatKind, type ChatMessage, type ChatSession, getDb, resetDb };

@@ -155,6 +155,7 @@ export interface SpawnOptions {
    *   strictMcpConfig?: boolean      — --strict-mcp-config
    *   maxTurns?: number              — --max-turns
    *   disableSlashCommands?: boolean — --disable-slash-commands
+   *   omlxBaseUrl?: string           — route ANTHROPIC_BASE_URL to oMLX local LLM
    * Codex: { config?: Record<string, string>, profile?: string }
    */
   providerOptions?: Record<string, unknown>;

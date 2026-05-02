@@ -561,9 +561,9 @@ class ClaudeCodeProvider {
     if (options.configDir) {
       cleanEnv.CLAUDE_CONFIG_DIR = options.configDir;
     }
-    const omlxUrl = getConfig().omlxBaseUrl;
+    const omlxUrl = po.omlxBaseUrl ?? getConfig().omlxBaseUrl;
     if (omlxUrl) {
-      cleanEnv.ANTHROPIC_BASE_URL = omlxUrl;
+      cleanEnv.ANTHROPIC_BASE_URL = typeof omlxUrl === "string" ? omlxUrl : String(omlxUrl);
     } else {
       const proxyPort = getConfig().apiProxyPort;
       if (proxyPort) {

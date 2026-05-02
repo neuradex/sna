@@ -183,7 +183,7 @@ export class SessionManager {
       if (opts.cwd !== undefined) existing.cwd = opts.cwd;
       if (opts.meta !== undefined) existing.meta = opts.meta ?? null;
       existing.lastActivityAt = Date.now();
-      this.persistSession(id);
+      this.persistSession(existing);
       return existing;
     }
 
