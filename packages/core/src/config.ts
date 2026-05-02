@@ -74,6 +74,14 @@ export interface SnaConfig {
    * When set, claude-code provider injects ANTHROPIC_BASE_URL into agent env.
    */
   apiProxyPort?: number;
+
+  /**
+   * oMLX base URL for local LLM inference.
+   * When set, claude-code provider routes ANTHROPIC_BASE_URL to this endpoint.
+   * Example: "http://localhost:8080/v1"
+   * env: SNA_OMLX_BASE_URL
+   */
+  omlxBaseUrl?: string;
 }
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
@@ -105,6 +113,7 @@ function fromEnv(): Partial<SnaConfig> {
   if (process.env.SNA_DB_PATH) env.dbPath = process.env.SNA_DB_PATH;
   if (process.env.SNA_DATA_DIR) env.dataDir = process.env.SNA_DATA_DIR;
   if (process.env.SNA_PERMISSION_TIMEOUT_MS) env.permissionTimeoutMs = parseInt(process.env.SNA_PERMISSION_TIMEOUT_MS, 10);
+  if (process.env.SNA_OMLX_BASE_URL) env.omlxBaseUrl = process.env.SNA_OMLX_BASE_URL;
   return env;
 }
 

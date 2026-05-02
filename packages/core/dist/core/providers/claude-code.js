@@ -561,9 +561,14 @@ class ClaudeCodeProvider {
     if (options.configDir) {
       cleanEnv.CLAUDE_CONFIG_DIR = options.configDir;
     }
-    const proxyPort = getConfig().apiProxyPort;
-    if (proxyPort) {
-      cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
+    const omlxUrl = getConfig().omlxBaseUrl;
+    if (omlxUrl) {
+      cleanEnv.ANTHROPIC_BASE_URL = omlxUrl;
+    } else {
+      const proxyPort = getConfig().apiProxyPort;
+      if (proxyPort) {
+        cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
+      }
     }
     delete cleanEnv.CLAUDECODE;
     delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;

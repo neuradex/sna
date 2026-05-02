@@ -24,6 +24,7 @@ function fromEnv() {
   if (process.env.SNA_DB_PATH) env.dbPath = process.env.SNA_DB_PATH;
   if (process.env.SNA_DATA_DIR) env.dataDir = process.env.SNA_DATA_DIR;
   if (process.env.SNA_PERMISSION_TIMEOUT_MS) env.permissionTimeoutMs = parseInt(process.env.SNA_PERMISSION_TIMEOUT_MS, 10);
+  if (process.env.SNA_OMLX_BASE_URL) env.omlxBaseUrl = process.env.SNA_OMLX_BASE_URL;
   return env;
 }
 let current = { ...defaults, ...fromEnv() };

@@ -24,7 +24,7 @@ import { traceCompletion } from "../lib/langfuse-tracer.js";
 export interface CompletionOptions {
   /** The prompt to send. */
   prompt: string;
-  /** Provider: "claude-code" (default) or "codex". */
+  /** Provider: "claude-code" (default), "codex", or "omlx". */
   provider?: "claude-code" | "codex";
   /** Model to use. Falls back to config.model. */
   model?: string;
@@ -95,6 +95,7 @@ export async function completion(opts: CompletionOptions): Promise<CompletionRes
   if (providerName === "codex") {
     return completionCodex(opts);
   }
+  // "omlx" uses Claude Code CLI with oMLX as LLM backend
   return completionClaudeCode(opts);
 }
 

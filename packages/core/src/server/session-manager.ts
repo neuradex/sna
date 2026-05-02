@@ -167,7 +167,7 @@ export class SessionManager {
     } catch { /* non-fatal */ }
   }
 
-  /** Create a new session. Throws if session already exists or max sessions reached. */
+  /** Create a new session. Updates existing session fields if already present. */
   createSession(opts: {
     id?: string;
     label?: string;
@@ -176,8 +176,15 @@ export class SessionManager {
   } = {}): Session {
     const id = opts.id ?? crypto.randomUUID().slice(0, 8);
 
-    if (this.sessions.has(id)) {
-      throw new Error(`Session "${id}" already exists`);
+    const existing = this.sessions.get(id);
+    if (existing) {
+      // Update existing session fields
+      if (opts.label !== undefined) existing.label = opts.label;
+      if (opts.cwd !== undefined) existing.cwd = opts.cwd;
+      if (opts.meta !== undefined) existing.meta = opts.meta ?? null;
+      existing.lastActivityAt = Date.now();
+      this.persistSession(id);
+      return existing;
     }
 
     const aliveCount = Array.from(this.sessions.values())

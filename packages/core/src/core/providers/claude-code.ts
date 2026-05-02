@@ -715,10 +715,15 @@ export class ClaudeCodeProvider implements AgentProvider {
       cleanEnv.CLAUDE_CONFIG_DIR = options.configDir;
     }
 
-    // Route through API proxy when debug tracing is active
-    const proxyPort = getConfig().apiProxyPort;
-    if (proxyPort) {
-      cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
+    // Route API calls: oMLX local LLM takes priority, then debug proxy
+    const omlxUrl = getConfig().omlxBaseUrl;
+    if (omlxUrl) {
+      cleanEnv.ANTHROPIC_BASE_URL = omlxUrl;
+    } else {
+      const proxyPort = getConfig().apiProxyPort;
+      if (proxyPort) {
+        cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
+      }
     }
 
     delete cleanEnv.CLAUDECODE;

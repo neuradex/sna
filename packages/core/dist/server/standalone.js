@@ -48,6 +48,7 @@ function fromEnv() {
   if (process.env.SNA_DB_PATH) env.dbPath = process.env.SNA_DB_PATH;
   if (process.env.SNA_DATA_DIR) env.dataDir = process.env.SNA_DATA_DIR;
   if (process.env.SNA_PERMISSION_TIMEOUT_MS) env.permissionTimeoutMs = parseInt(process.env.SNA_PERMISSION_TIMEOUT_MS, 10);
+  if (process.env.SNA_OMLX_BASE_URL) env.omlxBaseUrl = process.env.SNA_OMLX_BASE_URL;
   return env;
 }
 var current = { ...defaults, ...fromEnv() };
@@ -866,9 +867,14 @@ var ClaudeCodeProvider = class {
     if (options.configDir) {
       cleanEnv.CLAUDE_CONFIG_DIR = options.configDir;
     }
-    const proxyPort = getConfig().apiProxyPort;
-    if (proxyPort) {
-      cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
+    const omlxUrl = getConfig().omlxBaseUrl;
+    if (omlxUrl) {
+      cleanEnv.ANTHROPIC_BASE_URL = omlxUrl;
+    } else {
+      const proxyPort = getConfig().apiProxyPort;
+      if (proxyPort) {
+        cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
+      }
     }
     delete cleanEnv.CLAUDECODE;
     delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
@@ -1950,7 +1956,8 @@ var CodexProvider = class {
 // src/core/providers/index.ts
 var providers = {
   "claude-code": new ClaudeCodeProvider(),
-  "codex": new CodexProvider()
+  "codex": new CodexProvider(),
+  "omlx": new ClaudeCodeProvider()
 };
 function getProvider(name = "claude-code") {
   const provider2 = providers[name];

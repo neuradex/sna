@@ -56,6 +56,11 @@ export function getDb(): Database.Database {
   return _db;
 }
 
+/** Reset the DB singleton cache. Used by tests for isolation. */
+export function resetDb(): void {
+  _db = null;
+}
+
 /** Drop the legacy skill_events table from older databases. */
 function dropLegacySkillEvents(db: Database.Database) {
   db.exec("DROP TABLE IF EXISTS skill_events");

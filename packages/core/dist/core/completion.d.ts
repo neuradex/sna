@@ -16,7 +16,7 @@
 interface CompletionOptions {
     /** The prompt to send. */
     prompt: string;
-    /** Provider: "claude-code" (default) or "codex". */
+    /** Provider: "claude-code" (default), "codex", or "omlx". */
     provider?: "claude-code" | "codex";
     /** Model to use. Falls back to config.model. */
     model?: string;

@@ -9,6 +9,7 @@ import { CodexProvider } from "./codex.js";
 const providers: Record<string, AgentProvider> = {
   "claude-code": new ClaudeCodeProvider(),
   "codex": new CodexProvider(),
+  "omlx": new ClaudeCodeProvider(),
 };
 
 /**

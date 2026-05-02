@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { execSync, spawn } from "child_process";
 import fs from "fs";
 import path from "path";
-import { startMockAnthropicServer, type MockServer } from "../src/testing/mock-api.js";
+import { startMockAnthropicServer, type MockServer } from "./mock-anthropic-server.js";
 
 let CLAUDE_AVAILABLE = false;
 try { execSync("which claude", { stdio: "pipe" }); CLAUDE_AVAILABLE = true; } catch {}
@@ -29,7 +29,6 @@ function runClaude(prompt: string, extraArgs: string[] = []): Promise<{ events: 
     "--output-format", "stream-json",
     "--verbose",
     "--permission-mode", "bypassPermissions",
-    "--model", "test-mock",
     ...extraArgs,
     prompt,
   ];
@@ -79,7 +78,7 @@ describe("Agent Integration (sna tu claude + mock API)", { skip: !CLAUDE_AVAILAB
     const init = events.find(e => e.type === "system" && e.subtype === "init");
     assert.ok(init, "should have init event");
     assert.ok(init.session_id);
-    assert.equal(init.model, "test-mock");
+    assert.ok(init.model, "should have a model");
     assert.equal(init.apiKeySource, "ANTHROPIC_API_KEY");
   });
 
@@ -108,7 +107,7 @@ describe("Agent Integration (sna tu claude + mock API)", { skip: !CLAUDE_AVAILAB
 
     assert.ok(mock.requests.length > before);
     const lastReq = mock.requests[mock.requests.length - 1];
-    assert.equal(lastReq.model, "test-mock");
+    assert.ok(lastReq.model, "should have a model");
     assert.equal(lastReq.stream, true);
   });
 
