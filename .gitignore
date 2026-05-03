@@ -2,3 +2,5 @@
 node_modules/
 .sna/
 .dev.log
+*.db-shm
+*.db-wal
