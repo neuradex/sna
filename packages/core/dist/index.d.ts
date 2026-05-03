@@ -1,9 +1,9 @@
 export { SnaConfig, getConfig, resetConfig, setConfig } from './config.js';
 export { ChatActor, ChatKind, ChatMessage, ChatSession } from './db/schema.js';
-export { AgentEvent, AgentProcess, AgentProvider, ContentBlock, SpawnOptions } from './core/providers/types.js';
+export { AgentEvent, AgentProcess, AgentProvider, CompleteOptions, CompletionResult, ContentBlock, SpawnOptions } from './core/providers/types.js';
 export { CanonicalBlock, CanonicalMessage, EmbedRecord } from './history/types.js';
 export { buildCanonicalFromDb } from './history/canonical.js';
-export { CompletionOptions, CompletionResult, completion } from './core/completion.js';
+export { CompletionOptions, completion } from './core/completion.js';
 export { Session, SessionInfo, SessionManagerOptions, SessionState } from './server/session-manager.js';
 import 'better-sqlite3';
 

@@ -1,8 +1,14 @@
+import { CompletionResult } from './providers/types.js';
+import '../history/types.js';
+import '../db/schema.js';
+import 'better-sqlite3';
+
 /**
  * completion.ts — Lightweight one-shot LLM completion.
  *
- * Spawns `claude -p --output-format json` and returns the result.
- * No session management, no event streaming, no stdin interaction.
+ * Delegates to the provider's `complete()` method via the unified
+ * AgentProvider interface.  Tracing and config resolution happen here;
+ * provider-specific spawning and parsing live in each provider class.
  *
  * @example
  * const { completion } = await import("sna");
@@ -13,18 +19,19 @@
  * });
  * // result.text, result.usage, result.costUsd, result.durationMs
  */
+
 interface CompletionOptions {
     /** The prompt to send. */
     prompt: string;
-    /** Provider: "claude-code" (default), "codex", or "omlx". */
-    provider?: "claude-code" | "codex";
+    /** Provider name. Falls back to config.defaultProvider. */
+    provider?: string;
     /** Model to use. Falls back to config.model. */
     model?: string;
     /** System prompt override. */
     systemPrompt?: string;
     /** Append to the default system prompt. */
     appendSystemPrompt?: string;
-    /** Working directory for the claude process. */
+    /** Working directory for the process. */
     cwd?: string;
     /** Extra environment variables. */
     env?: Record<string, string>;
@@ -35,25 +42,10 @@ interface CompletionOptions {
     /** Timeout in milliseconds. Default: 60000 (60s). */
     timeout?: number;
 }
-interface CompletionResult {
-    /** The response text. */
-    text: string;
-    /** Token usage breakdown. */
-    usage: {
-        inputTokens: number;
-        outputTokens: number;
-        cacheReadTokens: number;
-        cacheCreationTokens: number;
-    };
-    /** Total cost in USD. */
-    costUsd: number;
-    /** Total duration in milliseconds. */
-    durationMs: number;
-    /** API call duration in milliseconds. */
-    durationApiMs: number;
-    /** Model that was actually used. */
-    model: string;
-}
+
+/**
+ * Run a one-shot completion through the resolved provider.
+ */
 declare function completion(opts: CompletionOptions): Promise<CompletionResult>;
 
-export { type CompletionOptions, type CompletionResult, completion };
+export { type CompletionOptions, CompletionResult, completion };

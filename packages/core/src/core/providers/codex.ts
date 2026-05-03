@@ -3,7 +3,7 @@ import { EventEmitter } from "events";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import type { AgentProvider, AgentProcess, AgentEvent, SpawnOptions, ContentBlock } from "./types.js";
+import type { AgentProvider, AgentProcess, AgentEvent, SpawnOptions, ContentBlock, CompleteOptions, CompletionResult } from "./types.js";
 import { canonicalToCodexResponseItems } from "../../history/codex.js";
 import { logger } from "../../lib/logger.js";
 
@@ -1057,6 +1057,118 @@ export class CodexProvider implements AgentProvider {
     } catch {
       return false;
     }
+  }
+
+  async complete(options: CompleteOptions): Promise<CompletionResult> {
+    const cwd = options.cwd ?? process.cwd();
+    const resolved = resolveCodexCli();
+    const codexPath = resolved.path;
+
+    const args = ["exec", "--json", "--ephemeral", "--full-auto"];
+
+    if (options.model) args.push("--model", options.model);
+    if (options.extraArgs) args.push(...options.extraArgs);
+
+    const instructions = [options.systemPrompt, options.appendSystemPrompt].filter(Boolean).join("\n\n");
+    if (instructions) {
+      args.push("-c", `developer_instructions=${JSON.stringify(instructions)}`);
+    }
+
+    args.push(options.prompt);
+
+    const cleanEnv = { ...process.env, ...options.env } as Record<string, string>;
+    const codexDir = path.dirname(codexPath);
+    if (codexDir && codexDir !== ".") {
+      cleanEnv.PATH = `${codexDir}:${cleanEnv.PATH ?? ""}`;
+    }
+
+    const timeout = options.timeout ?? 60_000;
+    const model = options.model ?? "codex-default";
+
+    logger.log("agent", `complete: provider=codex model=${model} prompt="${options.prompt.slice(0, 60)}..."`);
+
+    const startTime = Date.now();
+
+    return new Promise<CompletionResult>((resolve, reject) => {
+      const proc = spawn(codexPath, args, {
+        cwd,
+        env: cleanEnv,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      let stdout = "";
+      let stderr = "";
+
+      const timer = setTimeout(() => {
+        proc.kill();
+        reject(new Error(`complete timed out after ${timeout}ms`));
+      }, timeout);
+
+      proc.stdout!.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+      proc.stderr!.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+
+      proc.on("error", (err) => {
+        clearTimeout(timer);
+        reject(new Error(`complete spawn error: ${err.message}`));
+      });
+
+      proc.stdin!.end();
+
+      proc.on("close", (code) => {
+        clearTimeout(timer);
+        const durationMs = Date.now() - startTime;
+
+        const lines = stdout.trim().split("\n").filter(l => l.trim());
+        const events: Array<{
+          type: string;
+          item?: { type: string; text?: string; id?: string };
+          usage?: { input_tokens: number; cached_input_tokens: number; output_tokens: number };
+          error?: { message: string };
+        }> = [];
+        for (const line of lines) {
+          try { events.push(JSON.parse(line)); } catch { /* skip */ }
+        }
+
+        let text = "";
+        for (const evt of events) {
+          if (evt.type === "item.completed" && evt.item?.type === "agent_message") {
+            text = evt.item.text ?? "";
+          }
+        }
+
+        let usage = { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 };
+        for (const evt of events) {
+          if (evt.type === "turn.completed" && evt.usage) {
+            usage = evt.usage;
+          }
+        }
+
+        const errorEvent = events.find(e => e.type === "turn.failed" || e.type === "error");
+        if (errorEvent) {
+          reject(new Error(`complete error: ${errorEvent.error?.message ?? "unknown"}`));
+          return;
+        }
+
+        if (!text && code !== 0) {
+          reject(new Error(`complete: codex exited with code ${code}: ${stderr.slice(0, 200)}`));
+          return;
+        }
+
+        resolve({
+          text,
+          usage: {
+            inputTokens: usage.input_tokens,
+            outputTokens: usage.output_tokens,
+            cacheReadTokens: usage.cached_input_tokens,
+            cacheCreationTokens: 0,
+          },
+          costUsd: 0,
+          durationMs,
+          durationApiMs: durationMs,
+          model,
+        });
+      });
+    });
   }
 
   spawn(options: SpawnOptions): AgentProcess {

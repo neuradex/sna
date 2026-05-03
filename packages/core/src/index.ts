@@ -13,7 +13,7 @@ export const DEFAULT_SNA_PORT = 3099;
 export const DEFAULT_SNA_URL = `http://localhost:${DEFAULT_SNA_PORT}`;
 
 export type { ChatSession, ChatMessage, ChatActor, ChatKind } from "./db/schema.js";
-export type { AgentEvent, AgentProcess, AgentProvider, SpawnOptions, ContentBlock } from "./core/providers/types.js";
+export type { AgentEvent, AgentProcess, AgentProvider, SpawnOptions, ContentBlock, CompleteOptions } from "./core/providers/types.js";
 export type { CanonicalBlock, CanonicalMessage, EmbedRecord } from "./history/types.js";
 export { buildCanonicalFromDb } from "./history/canonical.js";
 export { completion } from "./core/completion.js";
