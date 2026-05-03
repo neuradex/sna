@@ -797,7 +797,11 @@ var ClaudeCodeProvider = class {
     if (options.appendSystemPrompt) args.push("--append-system-prompt", options.appendSystemPrompt);
     if (options.extraArgs) args.push(...options.extraArgs);
     args.push(options.prompt);
-    const cleanEnv = buildClaudeEnv(claudePath, { env: options.env });
+    const po = options.providerOptions ?? {};
+    const cleanEnv = buildClaudeEnv(claudePath, {
+      env: options.env,
+      providerOmlxUrl: po.omlxBaseUrl
+    });
     const timeout = options.timeout ?? 6e4;
     const model = options.model ?? "unknown";
     logger.log("agent", `complete: provider=claude-code model=${model} prompt="${options.prompt.slice(0, 60)}..."`);
@@ -2518,7 +2522,8 @@ async function completion(opts) {
       cwd: opts.cwd,
       env: opts.env,
       extraArgs: opts.extraArgs,
-      timeout: opts.timeout
+      timeout: opts.timeout,
+      providerOptions: opts.providerOptions
     });
     logger.log("agent", `completion done: ${label} ${result.durationMs}ms cost=$${result.costUsd.toFixed(4)} in=${result.usage.inputTokens} out=${result.usage.outputTokens}`);
     trace?.end(result);
@@ -2552,7 +2557,8 @@ async function runOnce(sessionManager2, opts) {
     model: opts.model ?? cfg.model,
     permissionMode: opts.permissionMode ?? cfg.defaultPermissionMode,
     env: { ...opts.env, SNA_SESSION_ID: sessionId },
-    extraArgs
+    extraArgs,
+    providerOptions: opts.providerOptions
   });
   sessionManager2.setProcess(sessionId, proc);
   try {

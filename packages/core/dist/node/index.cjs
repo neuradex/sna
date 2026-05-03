@@ -868,7 +868,11 @@ var ClaudeCodeProvider = class {
     if (options.appendSystemPrompt) args.push("--append-system-prompt", options.appendSystemPrompt);
     if (options.extraArgs) args.push(...options.extraArgs);
     args.push(options.prompt);
-    const cleanEnv = buildClaudeEnv(claudePath, { env: options.env });
+    const po = options.providerOptions ?? {};
+    const cleanEnv = buildClaudeEnv(claudePath, {
+      env: options.env,
+      providerOmlxUrl: po.omlxBaseUrl
+    });
     const timeout = options.timeout ?? 6e4;
     const model = options.model ?? "unknown";
     logger.log("agent", `complete: provider=claude-code model=${model} prompt="${options.prompt.slice(0, 60)}..."`);
@@ -2321,6 +2325,7 @@ async function startSnaServer(options) {
     ...options.model ? { SNA_MODEL: options.model } : {},
     ...options.permissionTimeoutMs != null ? { SNA_PERMISSION_TIMEOUT_MS: String(options.permissionTimeoutMs) } : {},
     ...options.dataDir ? { SNA_DATA_DIR: options.dataDir } : {},
+    ...options.omlxBaseUrl ? { SNA_OMLX_BASE_URL: options.omlxBaseUrl } : {},
     ...options.nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: options.nativeBinding } : {},
     ...consumerModules ? { SNA_MODULES_PATH: consumerModules } : {},
     ...nodePath ? { NODE_PATH: nodePath } : {},

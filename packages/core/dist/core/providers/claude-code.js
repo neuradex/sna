@@ -491,7 +491,11 @@ class ClaudeCodeProvider {
     if (options.appendSystemPrompt) args.push("--append-system-prompt", options.appendSystemPrompt);
     if (options.extraArgs) args.push(...options.extraArgs);
     args.push(options.prompt);
-    const cleanEnv = buildClaudeEnv(claudePath, { env: options.env });
+    const po = options.providerOptions ?? {};
+    const cleanEnv = buildClaudeEnv(claudePath, {
+      env: options.env,
+      providerOmlxUrl: po.omlxBaseUrl
+    });
     const timeout = options.timeout ?? 6e4;
     const model = options.model ?? "unknown";
     logger.log("agent", `complete: provider=claude-code model=${model} prompt="${options.prompt.slice(0, 60)}..."`);

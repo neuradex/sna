@@ -18,7 +18,8 @@ async function completion(opts) {
       cwd: opts.cwd,
       env: opts.env,
       extraArgs: opts.extraArgs,
-      timeout: opts.timeout
+      timeout: opts.timeout,
+      providerOptions: opts.providerOptions
     });
     logger.log("agent", `completion done: ${label} ${result.durationMs}ms cost=$${result.costUsd.toFixed(4)} in=${result.usage.inputTokens} out=${result.usage.outputTokens}`);
     trace?.end(result);

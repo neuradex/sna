@@ -1392,7 +1392,11 @@ var ClaudeCodeProvider = class {
     if (options.appendSystemPrompt) args.push("--append-system-prompt", options.appendSystemPrompt);
     if (options.extraArgs) args.push(...options.extraArgs);
     args.push(options.prompt);
-    const cleanEnv = buildClaudeEnv(claudePath, { env: options.env });
+    const po = options.providerOptions ?? {};
+    const cleanEnv = buildClaudeEnv(claudePath, {
+      env: options.env,
+      providerOmlxUrl: po.omlxBaseUrl
+    });
     const timeout = options.timeout ?? 6e4;
     const model = options.model ?? "unknown";
     logger.log("agent", `complete: provider=claude-code model=${model} prompt="${options.prompt.slice(0, 60)}..."`);
@@ -3096,7 +3100,8 @@ async function completion(opts) {
       cwd: opts.cwd,
       env: opts.env,
       extraArgs: opts.extraArgs,
-      timeout: opts.timeout
+      timeout: opts.timeout,
+      providerOptions: opts.providerOptions
     });
     logger.log("agent", `completion done: ${label} ${result.durationMs}ms cost=$${result.costUsd.toFixed(4)} in=${result.usage.inputTokens} out=${result.usage.outputTokens}`);
     trace?.end(result);
@@ -3130,7 +3135,8 @@ async function runOnce(sessionManager, opts) {
     model: opts.model ?? cfg.model,
     permissionMode: opts.permissionMode ?? cfg.defaultPermissionMode,
     env: { ...opts.env, SNA_SESSION_ID: sessionId },
-    extraArgs
+    extraArgs,
+    providerOptions: opts.providerOptions
   });
   sessionManager.setProcess(sessionId, proc);
   try {
@@ -5151,6 +5157,7 @@ async function startSnaServer(options) {
     ...options.model ? { SNA_MODEL: options.model } : {},
     ...options.permissionTimeoutMs != null ? { SNA_PERMISSION_TIMEOUT_MS: String(options.permissionTimeoutMs) } : {},
     ...options.dataDir ? { SNA_DATA_DIR: options.dataDir } : {},
+    ...options.omlxBaseUrl ? { SNA_OMLX_BASE_URL: options.omlxBaseUrl } : {},
     ...options.nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: options.nativeBinding } : {},
     ...consumerModules ? { SNA_MODULES_PATH: consumerModules } : {},
     ...nodePath ? { NODE_PATH: nodePath } : {},
@@ -5226,7 +5233,8 @@ async function startSnaServerInProcess(options) {
     ...options.maxSessions != null ? { maxSessions: options.maxSessions } : {},
     ...options.permissionMode ? { defaultPermissionMode: options.permissionMode } : {},
     ...options.model ? { model: options.model } : {},
-    ...options.permissionTimeoutMs != null ? { permissionTimeoutMs: options.permissionTimeoutMs } : {}
+    ...options.permissionTimeoutMs != null ? { permissionTimeoutMs: options.permissionTimeoutMs } : {},
+    ...options.omlxBaseUrl ? { omlxBaseUrl: options.omlxBaseUrl } : {}
   });
   process.env.SNA_PORT = String(port);
   process.env.SNA_DB_PATH = options.dbPath;
@@ -5235,6 +5243,7 @@ async function startSnaServerInProcess(options) {
   if (options.model) process.env.SNA_MODEL = options.model;
   if (options.permissionTimeoutMs != null) process.env.SNA_PERMISSION_TIMEOUT_MS = String(options.permissionTimeoutMs);
   if (options.dataDir) process.env.SNA_DATA_DIR = options.dataDir;
+  if (options.omlxBaseUrl) process.env.SNA_OMLX_BASE_URL = options.omlxBaseUrl;
   if (options.nativeBinding) process.env.SNA_SQLITE_NATIVE_BINDING = options.nativeBinding;
   if (!process.env.SNA_MODULES_PATH) {
     try {

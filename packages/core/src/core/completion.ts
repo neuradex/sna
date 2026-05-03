@@ -42,6 +42,8 @@ export interface CompletionOptions {
   label?: string;
   /** Timeout in milliseconds. Default: 60000 (60s). */
   timeout?: number;
+  /** Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`). */
+  providerOptions?: Record<string, unknown>;
 }
 
 /** Re-export the canonical result type from the provider layer. */
@@ -70,6 +72,7 @@ export async function completion(opts: CompletionOptions): Promise<CompletionRes
       env: opts.env,
       extraArgs: opts.extraArgs,
       timeout: opts.timeout,
+      providerOptions: opts.providerOptions,
     });
 
     logger.log("agent", `completion done: ${label} ${result.durationMs}ms cost=$${result.costUsd.toFixed(4)} in=${result.usage.inputTokens} out=${result.usage.outputTokens}`);

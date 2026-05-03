@@ -17,6 +17,8 @@ interface RunOnceOptions {
     provider?: string;
     extraArgs?: string[];
     env?: Record<string, string>;
+    /** Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`). */
+    providerOptions?: Record<string, unknown>;
 }
 interface RunOnceResult {
     result: string;

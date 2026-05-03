@@ -202,6 +202,8 @@ export interface CompleteOptions {
   extraArgs?: string[];
   /** Timeout in milliseconds. Default: 60000. */
   timeout?: number;
+  /** Provider-specific options (e.g. `omlxBaseUrl` to override API endpoint). */
+  providerOptions?: Record<string, unknown>;
 }
 
 /** Normalized result from a one-shot completion. */

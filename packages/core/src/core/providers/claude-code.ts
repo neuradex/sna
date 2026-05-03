@@ -634,7 +634,11 @@ export class ClaudeCodeProvider implements AgentProvider {
     if (options.extraArgs) args.push(...options.extraArgs);
     args.push(options.prompt);
 
-    const cleanEnv = buildClaudeEnv(claudePath, { env: options.env });
+    const po = (options.providerOptions ?? {}) as Record<string, unknown>;
+    const cleanEnv = buildClaudeEnv(claudePath, {
+      env: options.env,
+      providerOmlxUrl: po.omlxBaseUrl as string | undefined,
+    });
 
     const timeout = options.timeout ?? 60_000;
     const model = options.model ?? "unknown";

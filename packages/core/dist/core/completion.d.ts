@@ -41,6 +41,8 @@ interface CompletionOptions {
     label?: string;
     /** Timeout in milliseconds. Default: 60000 (60s). */
     timeout?: number;
+    /** Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`). */
+    providerOptions?: Record<string, unknown>;
 }
 
 /**
