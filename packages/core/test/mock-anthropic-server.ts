@@ -44,13 +44,47 @@ export async function startMockAnthropicServer(): Promise<MockServer> {
 
       requests.push({ model: body.model, messages: body.messages, stream: body.stream });
 
-      // Extract last user message
+      // Extract last user message — Claude Code sends the user prompt as the
+      // last user message in the conversation.
       const lastUser = body.messages?.filter((m: any) => m.role === "user").pop();
-      const userText = typeof lastUser?.content === "string"
-        ? lastUser.content
-        : lastUser?.content?.find((b: any) => b.type === "text")?.text ?? "hello";
+      let userText: string | undefined;
 
-      const replyText = `Mock reply to: ${userText.slice(0, 100)}`;
+      if (typeof lastUser?.content === "string") {
+        userText = lastUser.content;
+      } else if (Array.isArray(lastUser?.content)) {
+        // Take the LAST text block from the user message (the prompt is last)
+        const textBlocks = lastUser.content.filter((b: any) => b.type === "text");
+        if (textBlocks.length > 0) {
+          userText = textBlocks[textBlocks.length - 1].text;
+        }
+      }
+
+      // Fallback: take the LAST text content from ANY message
+      if (!userText) {
+        for (let i = (body.messages ?? []).length - 1; i >= 0; i--) {
+          const msg = body.messages[i];
+          if (typeof msg.content === "string") {
+            userText = msg.content;
+            break;
+          } else if (Array.isArray(msg.content)) {
+            for (let j = msg.content.length - 1; j >= 0; j--) {
+              const block = msg.content[j];
+              if (block.type === "text" && block.text) {
+                userText = block.text;
+                break;
+              }
+            }
+            if (userText) break;
+          }
+        }
+      }
+
+      userText = userText ?? "hello";
+
+      // Reverse the user text for test verification
+      const reversedText = userText.split("").reverse().join("");
+      const replyText = reversedText.slice(0, 100);
+
       const messageId = `msg_mock_${Date.now()}`;
 
       if (body.stream) {

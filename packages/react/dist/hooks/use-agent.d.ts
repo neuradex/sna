@@ -10,6 +10,8 @@ interface UseAgentOptions {
     provider?: string;
     /** Permission mode for the agent */
     permissionMode?: string;
+    /** Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`). */
+    providerOptions?: Record<string, unknown>;
     onEvent?: (e: AgentEvent) => void;
     onThinking?: (e: AgentEvent) => void;
     onAssistant?: (e: AgentEvent) => void;
@@ -30,6 +32,12 @@ declare function useAgent(options?: UseAgentOptions): {
     start: (prompt?: string) => Promise<any>;
     send: (message: string) => Promise<any>;
     kill: () => Promise<void>;
+    completion: (opts: {
+        prompt: string;
+        model?: string;
+        systemPrompt?: string;
+        providerOptions?: Record<string, unknown>;
+    }) => Promise<any>;
 };
 
 export { useAgent };

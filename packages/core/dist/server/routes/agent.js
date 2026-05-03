@@ -34,7 +34,8 @@ async function runOnce(sessionManager, opts) {
     model: opts.model ?? cfg.model,
     permissionMode: opts.permissionMode ?? cfg.defaultPermissionMode,
     env: { ...opts.env, SNA_SESSION_ID: sessionId },
-    extraArgs
+    extraArgs,
+    providerOptions: opts.providerOptions
   });
   sessionManager.setProcess(sessionId, proc);
   try {

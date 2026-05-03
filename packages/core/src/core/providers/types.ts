@@ -155,6 +155,7 @@ export interface SpawnOptions {
    *   strictMcpConfig?: boolean      — --strict-mcp-config
    *   maxTurns?: number              — --max-turns
    *   disableSlashCommands?: boolean — --disable-slash-commands
+   *   omlxBaseUrl?: string           — route ANTHROPIC_BASE_URL to oMLX local LLM
    * Codex: { config?: Record<string, string>, profile?: string }
    */
   providerOptions?: Record<string, unknown>;
@@ -177,4 +178,51 @@ export interface AgentProvider {
   isAvailable(): Promise<boolean>;
   /** Spawn a new agent session. */
   spawn(options: SpawnOptions): AgentProcess;
+  /** One-shot completion (no session, no streaming). */
+  complete(options: CompleteOptions): Promise<CompletionResult>;
+}
+
+// ── One-shot completion types ────────────────────────────────────────────────
+
+/** Options for a one-shot completion call. */
+export interface CompleteOptions {
+  /** The prompt to send. */
+  prompt: string;
+  /** Model to use. */
+  model?: string;
+  /** System prompt override. */
+  systemPrompt?: string;
+  /** Append to the default system prompt. */
+  appendSystemPrompt?: string;
+  /** Working directory for the process. */
+  cwd?: string;
+  /** Extra environment variables. */
+  env?: Record<string, string>;
+  /** Additional CLI flags. */
+  extraArgs?: string[];
+  /** Timeout in milliseconds. Default: 60000. */
+  timeout?: number;
+  /** Provider-specific options (e.g. `omlxBaseUrl` to override API endpoint). */
+  providerOptions?: Record<string, unknown>;
+}
+
+/** Normalized result from a one-shot completion. */
+export interface CompletionResult {
+  /** The response text. */
+  text: string;
+  /** Token usage breakdown. */
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheCreationTokens: number;
+  };
+  /** Total cost in USD (0 if provider doesn't report cost). */
+  costUsd: number;
+  /** Total duration in milliseconds. */
+  durationMs: number;
+  /** API call duration in milliseconds. */
+  durationApiMs: number;
+  /** Model that was actually used. */
+  model: string;
 }

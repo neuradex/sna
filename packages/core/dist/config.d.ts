@@ -55,6 +55,13 @@ interface SnaConfig {
      * When set, claude-code provider injects ANTHROPIC_BASE_URL into agent env.
      */
     apiProxyPort?: number;
+    /**
+     * oMLX base URL for local LLM inference.
+     * When set, claude-code provider routes ANTHROPIC_BASE_URL to this endpoint.
+     * Example: "http://localhost:8080/v1"
+     * env: SNA_OMLX_BASE_URL
+     */
+    omlxBaseUrl?: string;
 }
 /** Get current config. Returns a frozen copy. */
 declare function getConfig(): Readonly<SnaConfig>;

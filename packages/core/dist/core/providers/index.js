@@ -4,7 +4,8 @@ import { ClaudeCodeProvider as ClaudeCodeProvider2 } from "./claude-code.js";
 import { CodexProvider as CodexProvider2 } from "./codex.js";
 const providers = {
   "claude-code": new ClaudeCodeProvider2(),
-  "codex": new CodexProvider2()
+  "codex": new CodexProvider2(),
+  "omlx": new ClaudeCodeProvider2()
 };
 function getProvider(name = "claude-code") {
   const provider = providers[name];

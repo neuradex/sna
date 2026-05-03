@@ -1,5 +1,5 @@
 import { AgentProvider } from './types.js';
-export { AgentEvent, AgentProcess, SpawnOptions } from './types.js';
+export { AgentEvent, AgentProcess, CompleteOptions, CompletionResult, SpawnOptions } from './types.js';
 export { ClaudeCodeProvider } from './claude-code.js';
 export { CodexProvider } from './codex.js';
 import '../../history/types.js';

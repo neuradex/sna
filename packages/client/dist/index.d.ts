@@ -448,6 +448,8 @@ interface CompletionOptions {
     timeout?: number;
     extraArgs?: string[];
     env?: Record<string, string>;
+    /** Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`). */
+    providerOptions?: Record<string, unknown>;
 }
 /** Result of a lightweight completion call. */
 interface CompletionResult {
@@ -474,6 +476,8 @@ interface RunOnceOptions {
     timeout?: number;
     provider?: string;
     extraArgs?: string[];
+    /** Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`). */
+    providerOptions?: Record<string, unknown>;
 }
 /** Result of a one-shot agent execution. */
 interface RunOnceResult {
@@ -977,6 +981,7 @@ declare class AgentApi {
         configDir?: string;
         prompt?: string;
         extraArgs?: string[];
+        providerOptions?: Record<string, unknown>;
     }): Promise<{
         status: "resumed";
         provider: string;

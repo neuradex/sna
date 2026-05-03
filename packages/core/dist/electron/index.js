@@ -56,6 +56,7 @@ async function startSnaServer(options) {
     ...options.model ? { SNA_MODEL: options.model } : {},
     ...options.permissionTimeoutMs != null ? { SNA_PERMISSION_TIMEOUT_MS: String(options.permissionTimeoutMs) } : {},
     ...options.dataDir ? { SNA_DATA_DIR: options.dataDir } : {},
+    ...options.omlxBaseUrl ? { SNA_OMLX_BASE_URL: options.omlxBaseUrl } : {},
     ...options.nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: options.nativeBinding } : {},
     ...consumerModules ? { SNA_MODULES_PATH: consumerModules } : {},
     ...nodePath ? { NODE_PATH: nodePath } : {},
@@ -131,7 +132,8 @@ async function startSnaServerInProcess(options) {
     ...options.maxSessions != null ? { maxSessions: options.maxSessions } : {},
     ...options.permissionMode ? { defaultPermissionMode: options.permissionMode } : {},
     ...options.model ? { model: options.model } : {},
-    ...options.permissionTimeoutMs != null ? { permissionTimeoutMs: options.permissionTimeoutMs } : {}
+    ...options.permissionTimeoutMs != null ? { permissionTimeoutMs: options.permissionTimeoutMs } : {},
+    ...options.omlxBaseUrl ? { omlxBaseUrl: options.omlxBaseUrl } : {}
   });
   process.env.SNA_PORT = String(port);
   process.env.SNA_DB_PATH = options.dbPath;
@@ -140,6 +142,7 @@ async function startSnaServerInProcess(options) {
   if (options.model) process.env.SNA_MODEL = options.model;
   if (options.permissionTimeoutMs != null) process.env.SNA_PERMISSION_TIMEOUT_MS = String(options.permissionTimeoutMs);
   if (options.dataDir) process.env.SNA_DATA_DIR = options.dataDir;
+  if (options.omlxBaseUrl) process.env.SNA_OMLX_BASE_URL = options.omlxBaseUrl;
   if (options.nativeBinding) process.env.SNA_SQLITE_NATIVE_BINDING = options.nativeBinding;
   if (!process.env.SNA_MODULES_PATH) {
     try {

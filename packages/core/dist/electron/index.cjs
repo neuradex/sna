@@ -50,6 +50,7 @@ function fromEnv() {
   if (process.env.SNA_DB_PATH) env.dbPath = process.env.SNA_DB_PATH;
   if (process.env.SNA_DATA_DIR) env.dataDir = process.env.SNA_DATA_DIR;
   if (process.env.SNA_PERMISSION_TIMEOUT_MS) env.permissionTimeoutMs = parseInt(process.env.SNA_PERMISSION_TIMEOUT_MS, 10);
+  if (process.env.SNA_OMLX_BASE_URL) env.omlxBaseUrl = process.env.SNA_OMLX_BASE_URL;
   return env;
 }
 function getConfig() {
@@ -706,7 +707,7 @@ __export(electron_exports, {
 });
 module.exports = __toCommonJS(electron_exports);
 init_cjs_shims();
-var import_child_process4 = require("child_process");
+var import_child_process3 = require("child_process");
 var import_url4 = require("url");
 var import_fs9 = __toESM(require("fs"), 1);
 
@@ -981,6 +982,31 @@ function resolveClaudePath(cwd) {
   const result = resolveClaudeCli({ cacheDir: import_path4.default.join(cwd, ".sna") });
   logger.log("agent", `claude path: ${result.source}=${result.path}${result.version ? ` (${result.version})` : ""}`);
   return result.path;
+}
+function buildClaudeEnv(claudePath, opts = {}) {
+  const cleanEnv = { ...process.env, ...opts.env };
+  if (opts.configDir) {
+    cleanEnv.CLAUDE_CONFIG_DIR = opts.configDir;
+  }
+  const config = getConfig();
+  const omlxUrl = opts.providerOmlxUrl ?? config.omlxBaseUrl;
+  if (omlxUrl) {
+    cleanEnv.ANTHROPIC_BASE_URL = typeof omlxUrl === "string" ? omlxUrl : String(omlxUrl);
+  } else {
+    const proxyPort = config.apiProxyPort;
+    if (proxyPort) {
+      cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
+    }
+  }
+  delete cleanEnv.CLAUDECODE;
+  delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
+  delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
+  delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
+  const claudeDir = import_path4.default.dirname(claudePath);
+  if (claudeDir && claudeDir !== ".") {
+    cleanEnv.PATH = `${claudeDir}:${cleanEnv.PATH ?? ""}`;
+  }
+  return cleanEnv;
 }
 var _ClaudeCodeProcess = class _ClaudeCodeProcess {
   constructor(proc, options) {
@@ -1348,6 +1374,85 @@ var ClaudeCodeProvider = class {
       return false;
     }
   }
+  async complete(options) {
+    const cwd = options.cwd ?? process.cwd();
+    const resolved = resolveClaudeCli({ cacheDir: void 0 });
+    const claudeParts = resolved.path.split(/\s+/);
+    const claudePath = claudeParts[0];
+    const claudePrefix = claudeParts.slice(1);
+    const args = [
+      ...claudePrefix,
+      "-p",
+      "--output-format",
+      "json",
+      "--no-session-persistence"
+    ];
+    if (options.model) args.push("--model", options.model);
+    if (options.systemPrompt) args.push("--system-prompt", options.systemPrompt);
+    if (options.appendSystemPrompt) args.push("--append-system-prompt", options.appendSystemPrompt);
+    if (options.extraArgs) args.push(...options.extraArgs);
+    args.push(options.prompt);
+    const po = options.providerOptions ?? {};
+    const cleanEnv = buildClaudeEnv(claudePath, {
+      env: options.env,
+      providerOmlxUrl: po.omlxBaseUrl
+    });
+    const timeout = options.timeout ?? 6e4;
+    const model = options.model ?? "unknown";
+    logger.log("agent", `complete: provider=claude-code model=${model} prompt="${options.prompt.slice(0, 60)}..."`);
+    return new Promise((resolve, reject) => {
+      const proc = (0, import_child_process.spawn)(claudePath, args, {
+        cwd,
+        env: cleanEnv,
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+      let stdout = "";
+      let stderr = "";
+      const timer = setTimeout(() => {
+        proc.kill();
+        reject(new Error(`complete timed out after ${timeout}ms`));
+      }, timeout);
+      proc.stdout.on("data", (chunk) => {
+        stdout += chunk.toString();
+      });
+      proc.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+      proc.on("error", (err2) => {
+        clearTimeout(timer);
+        reject(new Error(`complete spawn error: ${err2.message}`));
+      });
+      proc.on("close", (code) => {
+        clearTimeout(timer);
+        let parsed;
+        try {
+          parsed = JSON.parse(stdout);
+        } catch {
+          reject(new Error(`complete: failed to parse JSON (code=${code}): ${stdout.slice(0, 200)} ${stderr.slice(0, 200)}`));
+          return;
+        }
+        if (parsed.is_error) {
+          reject(new Error(`complete error: ${parsed.result}`));
+          return;
+        }
+        const modelKey = Object.keys(parsed.modelUsage)[0] ?? model;
+        resolve({
+          text: parsed.result,
+          usage: {
+            inputTokens: parsed.usage.input_tokens,
+            outputTokens: parsed.usage.output_tokens,
+            cacheReadTokens: parsed.usage.cache_read_input_tokens,
+            cacheCreationTokens: parsed.usage.cache_creation_input_tokens
+          },
+          costUsd: parsed.total_cost_usd,
+          durationMs: parsed.duration_ms,
+          durationApiMs: parsed.duration_api_ms,
+          model: modelKey
+        });
+      });
+      proc.stdin.end();
+    });
+  }
   spawn(options) {
     const claudeCommand = resolveClaudePath(options.cwd);
     const claudeParts = claudeCommand.split(/\s+/);
@@ -1457,22 +1562,11 @@ var ClaudeCodeProvider = class {
     if (extraArgsClean.length > 0) {
       args.push(...extraArgsClean);
     }
-    const cleanEnv = { ...process.env, ...options.env };
-    if (options.configDir) {
-      cleanEnv.CLAUDE_CONFIG_DIR = options.configDir;
-    }
-    const proxyPort = getConfig().apiProxyPort;
-    if (proxyPort) {
-      cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
-    }
-    delete cleanEnv.CLAUDECODE;
-    delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
-    delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
-    delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
-    const claudeDir = import_path4.default.dirname(claudePath);
-    if (claudeDir && claudeDir !== ".") {
-      cleanEnv.PATH = `${claudeDir}:${cleanEnv.PATH ?? ""}`;
-    }
+    const cleanEnv = buildClaudeEnv(claudePath, {
+      env: options.env,
+      configDir: options.configDir,
+      providerOmlxUrl: po.omlxBaseUrl
+    });
     const proc = (0, import_child_process.spawn)(claudePath, [...claudePrefix, ...args], {
       cwd: options.cwd,
       env: cleanEnv,
@@ -2441,6 +2535,98 @@ var CodexProvider = class {
       return false;
     }
   }
+  async complete(options) {
+    const cwd = options.cwd ?? process.cwd();
+    const resolved = resolveCodexCli();
+    const codexPath = resolved.path;
+    const args = ["exec", "--json", "--ephemeral", "--full-auto"];
+    if (options.model) args.push("--model", options.model);
+    if (options.extraArgs) args.push(...options.extraArgs);
+    const instructions = [options.systemPrompt, options.appendSystemPrompt].filter(Boolean).join("\n\n");
+    if (instructions) {
+      args.push("-c", `developer_instructions=${JSON.stringify(instructions)}`);
+    }
+    args.push(options.prompt);
+    const cleanEnv = { ...process.env, ...options.env };
+    const codexDir = import_path6.default.dirname(codexPath);
+    if (codexDir && codexDir !== ".") {
+      cleanEnv.PATH = `${codexDir}:${cleanEnv.PATH ?? ""}`;
+    }
+    const timeout = options.timeout ?? 6e4;
+    const model = options.model ?? "codex-default";
+    logger.log("agent", `complete: provider=codex model=${model} prompt="${options.prompt.slice(0, 60)}..."`);
+    const startTime = Date.now();
+    return new Promise((resolve, reject) => {
+      const proc = (0, import_child_process2.spawn)(codexPath, args, {
+        cwd,
+        env: cleanEnv,
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+      let stdout = "";
+      let stderr = "";
+      const timer = setTimeout(() => {
+        proc.kill();
+        reject(new Error(`complete timed out after ${timeout}ms`));
+      }, timeout);
+      proc.stdout.on("data", (chunk) => {
+        stdout += chunk.toString();
+      });
+      proc.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+      proc.on("error", (err2) => {
+        clearTimeout(timer);
+        reject(new Error(`complete spawn error: ${err2.message}`));
+      });
+      proc.stdin.end();
+      proc.on("close", (code) => {
+        clearTimeout(timer);
+        const durationMs = Date.now() - startTime;
+        const lines = stdout.trim().split("\n").filter((l) => l.trim());
+        const events = [];
+        for (const line of lines) {
+          try {
+            events.push(JSON.parse(line));
+          } catch {
+          }
+        }
+        let text = "";
+        for (const evt of events) {
+          if (evt.type === "item.completed" && evt.item?.type === "agent_message") {
+            text = evt.item.text ?? "";
+          }
+        }
+        let usage = { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 };
+        for (const evt of events) {
+          if (evt.type === "turn.completed" && evt.usage) {
+            usage = evt.usage;
+          }
+        }
+        const errorEvent = events.find((e) => e.type === "turn.failed" || e.type === "error");
+        if (errorEvent) {
+          reject(new Error(`complete error: ${errorEvent.error?.message ?? "unknown"}`));
+          return;
+        }
+        if (!text && code !== 0) {
+          reject(new Error(`complete: codex exited with code ${code}: ${stderr.slice(0, 200)}`));
+          return;
+        }
+        resolve({
+          text,
+          usage: {
+            inputTokens: usage.input_tokens,
+            outputTokens: usage.output_tokens,
+            cacheReadTokens: usage.cached_input_tokens,
+            cacheCreationTokens: 0
+          },
+          costUsd: 0,
+          durationMs,
+          durationApiMs: durationMs,
+          model
+        });
+      });
+    });
+  }
   spawn(options) {
     const codexPath = resolveCodexPath(options.cwd);
     const args = ["app-server"];
@@ -2567,7 +2753,8 @@ var CodexProvider = class {
 // src/core/providers/index.ts
 var providers = {
   "claude-code": new ClaudeCodeProvider(),
-  "codex": new CodexProvider()
+  "codex": new CodexProvider(),
+  "omlx": new ClaudeCodeProvider()
 };
 function getProvider(name = "claude-code") {
   const provider = providers[name];
@@ -2894,218 +3081,35 @@ init_config();
 
 // src/core/completion.ts
 init_cjs_shims();
-var import_child_process3 = require("child_process");
 init_logger();
 init_config();
 init_langfuse_tracer();
 async function completion(opts) {
   const providerName = opts.provider ?? getConfig().defaultProvider;
-  if (providerName === "codex") {
-    return completionCodex(opts);
-  }
-  return completionClaudeCode(opts);
-}
-function completionClaudeCode(opts) {
-  const cwd = opts.cwd ?? process.cwd();
-  const resolved = resolveClaudeCli({ cacheDir: void 0 });
-  const claudeParts = resolved.path.split(/\s+/);
-  const claudePath = claudeParts[0];
-  const claudePrefix = claudeParts.slice(1);
-  const args = [
-    ...claudePrefix,
-    "-p",
-    "--output-format",
-    "json",
-    "--no-session-persistence"
-  ];
   const model = opts.model ?? getConfig().model;
-  if (model) args.push("--model", model);
-  if (opts.systemPrompt) args.push("--system-prompt", opts.systemPrompt);
-  if (opts.appendSystemPrompt) args.push("--append-system-prompt", opts.appendSystemPrompt);
-  if (opts.extraArgs) args.push(...opts.extraArgs);
-  args.push(opts.prompt);
-  const cleanEnv = { ...process.env, ...opts.env };
-  const proxyPort = getConfig().apiProxyPort;
-  if (proxyPort) {
-    cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
-  }
-  delete cleanEnv.CLAUDECODE;
-  delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
-  delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
-  delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
   const label = opts.label ?? "completion";
-  const timeout = opts.timeout ?? 6e4;
-  logger.log("agent", `completion: ${label} provider=claude-code model=${model ?? "default"} prompt="${opts.prompt.slice(0, 60)}..."`);
+  logger.log("agent", `completion: ${label} provider=${providerName} model=${model ?? "default"} prompt="${opts.prompt.slice(0, 60)}..."`);
   const trace = traceCompletion({ label, model, input: opts.prompt });
-  return new Promise((resolve, reject) => {
-    const proc = (0, import_child_process3.spawn)(claudePath, args, {
-      cwd,
-      env: cleanEnv,
-      stdio: ["pipe", "pipe", "pipe"]
+  try {
+    const provider = getProvider(providerName);
+    const result = await provider.complete({
+      prompt: opts.prompt,
+      model,
+      systemPrompt: opts.systemPrompt,
+      appendSystemPrompt: opts.appendSystemPrompt,
+      cwd: opts.cwd,
+      env: opts.env,
+      extraArgs: opts.extraArgs,
+      timeout: opts.timeout,
+      providerOptions: opts.providerOptions
     });
-    let stdout = "";
-    let stderr = "";
-    const timer = setTimeout(() => {
-      proc.kill();
-      const err2 = new Error(`completion timed out after ${timeout}ms`);
-      trace?.error(err2);
-      reject(err2);
-    }, timeout);
-    proc.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    proc.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    proc.on("error", (err2) => {
-      clearTimeout(timer);
-      trace?.error(err2);
-      reject(new Error(`completion spawn error: ${err2.message}`));
-    });
-    proc.on("close", (code) => {
-      clearTimeout(timer);
-      let parsed;
-      try {
-        parsed = JSON.parse(stdout);
-      } catch {
-        const err2 = new Error(`completion: failed to parse JSON (code=${code}): ${stdout.slice(0, 200)} ${stderr.slice(0, 200)}`);
-        trace?.error(err2);
-        reject(err2);
-        return;
-      }
-      if (parsed.is_error) {
-        const err2 = new Error(`completion error: ${parsed.result}`);
-        trace?.error(err2);
-        reject(err2);
-        return;
-      }
-      const modelKey = Object.keys(parsed.modelUsage)[0] ?? model ?? "unknown";
-      const result = {
-        text: parsed.result,
-        usage: {
-          inputTokens: parsed.usage.input_tokens,
-          outputTokens: parsed.usage.output_tokens,
-          cacheReadTokens: parsed.usage.cache_read_input_tokens,
-          cacheCreationTokens: parsed.usage.cache_creation_input_tokens
-        },
-        costUsd: parsed.total_cost_usd,
-        durationMs: parsed.duration_ms,
-        durationApiMs: parsed.duration_api_ms,
-        model: modelKey
-      };
-      logger.log("agent", `completion done: ${label} ${result.durationMs}ms cost=$${result.costUsd.toFixed(4)} in=${result.usage.inputTokens} out=${result.usage.outputTokens}`);
-      trace?.end(result);
-      resolve(result);
-    });
-    proc.stdin.end();
-  });
-}
-function completionCodex(opts) {
-  const cwd = opts.cwd ?? process.cwd();
-  const resolved = resolveCodexCli();
-  const codexPath = resolved.path;
-  const args = ["exec", "--json", "--ephemeral", "--full-auto"];
-  if (opts.model) args.push("--model", opts.model);
-  if (opts.extraArgs) args.push(...opts.extraArgs);
-  const instructions = [opts.systemPrompt, opts.appendSystemPrompt].filter(Boolean).join("\n\n");
-  if (instructions) {
-    args.push("-c", `developer_instructions=${JSON.stringify(instructions)}`);
+    logger.log("agent", `completion done: ${label} ${result.durationMs}ms cost=$${result.costUsd.toFixed(4)} in=${result.usage.inputTokens} out=${result.usage.outputTokens}`);
+    trace?.end(result);
+    return result;
+  } catch (err2) {
+    trace?.error(err2 instanceof Error ? err2 : new Error(String(err2)));
+    throw err2;
   }
-  const prompt = opts.prompt;
-  args.push(prompt);
-  const cleanEnv = { ...process.env, ...opts.env };
-  const codexDir = codexPath.includes("/") ? codexPath.slice(0, codexPath.lastIndexOf("/")) : "";
-  if (codexDir && codexDir !== ".") {
-    cleanEnv.PATH = `${codexDir}:${cleanEnv.PATH ?? ""}`;
-  }
-  const label = opts.label ?? "completion";
-  const timeout = opts.timeout ?? 6e4;
-  const model = opts.model ?? "codex-default";
-  logger.log("agent", `completion: ${label} provider=codex model=${model} prompt="${opts.prompt.slice(0, 60)}..."`);
-  const trace = traceCompletion({ label, model, input: opts.prompt });
-  const startTime = Date.now();
-  return new Promise((resolve, reject) => {
-    const proc = (0, import_child_process3.spawn)(codexPath, args, {
-      cwd,
-      env: cleanEnv,
-      stdio: ["pipe", "pipe", "pipe"]
-    });
-    let stdout = "";
-    let stderr = "";
-    const timer = setTimeout(() => {
-      proc.kill();
-      const err2 = new Error(`completion timed out after ${timeout}ms`);
-      trace?.error(err2);
-      reject(err2);
-    }, timeout);
-    proc.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    proc.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    proc.on("error", (err2) => {
-      clearTimeout(timer);
-      trace?.error(err2);
-      reject(new Error(`completion spawn error: ${err2.message}`));
-    });
-    proc.stdin.end();
-    proc.on("close", (code) => {
-      clearTimeout(timer);
-      const durationMs = Date.now() - startTime;
-      const lines = stdout.trim().split("\n").filter((l) => l.trim());
-      const events = [];
-      for (const line of lines) {
-        try {
-          events.push(JSON.parse(line));
-        } catch {
-        }
-      }
-      let text = "";
-      for (const evt of events) {
-        if (evt.type === "item.completed" && evt.item?.type === "agent_message") {
-          text = evt.item.text ?? "";
-        }
-      }
-      let usage = { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 };
-      for (const evt of events) {
-        if (evt.type === "turn.completed" && evt.usage) {
-          usage = evt.usage;
-        }
-      }
-      const errorEvent = events.find((e) => e.type === "turn.failed" || e.type === "error");
-      if (errorEvent) {
-        const err2 = new Error(`completion error: ${errorEvent.error?.message ?? "unknown"}`);
-        trace?.error(err2);
-        reject(err2);
-        return;
-      }
-      if (!text && code !== 0) {
-        const err2 = new Error(`completion: codex exited with code ${code}: ${stderr.slice(0, 200)}`);
-        trace?.error(err2);
-        reject(err2);
-        return;
-      }
-      const result = {
-        text,
-        usage: {
-          inputTokens: usage.input_tokens,
-          outputTokens: usage.output_tokens,
-          cacheReadTokens: usage.cached_input_tokens,
-          cacheCreationTokens: 0
-        },
-        costUsd: 0,
-        // Codex doesn't return cost
-        durationMs,
-        durationApiMs: durationMs,
-        // no separate API duration
-        model: model ?? "codex"
-      };
-      logger.log("agent", `completion done: ${label} ${result.durationMs}ms in=${result.usage.inputTokens} out=${result.usage.outputTokens}`);
-      trace?.end(result);
-      resolve(result);
-    });
-  });
 }
 
 // src/server/routes/agent.ts
@@ -3131,7 +3135,8 @@ async function runOnce(sessionManager, opts) {
     model: opts.model ?? cfg.model,
     permissionMode: opts.permissionMode ?? cfg.defaultPermissionMode,
     env: { ...opts.env, SNA_SESSION_ID: sessionId },
-    extraArgs
+    extraArgs,
+    providerOptions: opts.providerOptions
   });
   sessionManager.setProcess(sessionId, proc);
   try {
@@ -3810,11 +3815,17 @@ var SessionManager = class {
     } catch {
     }
   }
-  /** Create a new session. Throws if session already exists or max sessions reached. */
+  /** Create a new session. Updates existing session fields if already present. */
   createSession(opts = {}) {
     const id = opts.id ?? crypto.randomUUID().slice(0, 8);
-    if (this.sessions.has(id)) {
-      throw new Error(`Session "${id}" already exists`);
+    const existing = this.sessions.get(id);
+    if (existing) {
+      if (opts.label !== void 0) existing.label = opts.label;
+      if (opts.cwd !== void 0) existing.cwd = opts.cwd;
+      if (opts.meta !== void 0) existing.meta = opts.meta ?? null;
+      existing.lastActivityAt = Date.now();
+      this.persistSession(existing);
+      return existing;
     }
     const aliveCount = Array.from(this.sessions.values()).filter((s) => s.process?.alive).length;
     if (aliveCount >= this.maxSessions) {
@@ -5146,13 +5157,14 @@ async function startSnaServer(options) {
     ...options.model ? { SNA_MODEL: options.model } : {},
     ...options.permissionTimeoutMs != null ? { SNA_PERMISSION_TIMEOUT_MS: String(options.permissionTimeoutMs) } : {},
     ...options.dataDir ? { SNA_DATA_DIR: options.dataDir } : {},
+    ...options.omlxBaseUrl ? { SNA_OMLX_BASE_URL: options.omlxBaseUrl } : {},
     ...options.nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: options.nativeBinding } : {},
     ...consumerModules ? { SNA_MODULES_PATH: consumerModules } : {},
     ...nodePath ? { NODE_PATH: nodePath } : {},
     // Consumer overrides last so they can always win
     ...options.env ?? {}
   };
-  const proc = (0, import_child_process4.fork)(standaloneScript, [], {
+  const proc = (0, import_child_process3.fork)(standaloneScript, [], {
     cwd,
     env,
     stdio: "pipe"
@@ -5221,7 +5233,8 @@ async function startSnaServerInProcess(options) {
     ...options.maxSessions != null ? { maxSessions: options.maxSessions } : {},
     ...options.permissionMode ? { defaultPermissionMode: options.permissionMode } : {},
     ...options.model ? { model: options.model } : {},
-    ...options.permissionTimeoutMs != null ? { permissionTimeoutMs: options.permissionTimeoutMs } : {}
+    ...options.permissionTimeoutMs != null ? { permissionTimeoutMs: options.permissionTimeoutMs } : {},
+    ...options.omlxBaseUrl ? { omlxBaseUrl: options.omlxBaseUrl } : {}
   });
   process.env.SNA_PORT = String(port);
   process.env.SNA_DB_PATH = options.dbPath;
@@ -5230,6 +5243,7 @@ async function startSnaServerInProcess(options) {
   if (options.model) process.env.SNA_MODEL = options.model;
   if (options.permissionTimeoutMs != null) process.env.SNA_PERMISSION_TIMEOUT_MS = String(options.permissionTimeoutMs);
   if (options.dataDir) process.env.SNA_DATA_DIR = options.dataDir;
+  if (options.omlxBaseUrl) process.env.SNA_OMLX_BASE_URL = options.omlxBaseUrl;
   if (options.nativeBinding) process.env.SNA_SQLITE_NATIVE_BINDING = options.nativeBinding;
   if (!process.env.SNA_MODULES_PATH) {
     try {

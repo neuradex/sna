@@ -107,7 +107,7 @@ declare class SessionManager {
     private restoreFromDb;
     /** Persist session metadata to DB. */
     private persistSession;
-    /** Create a new session. Throws if session already exists or max sessions reached. */
+    /** Create a new session. Updates existing session fields if already present. */
     createSession(opts?: {
         id?: string;
         label?: string;

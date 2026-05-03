@@ -119,6 +119,14 @@ interface SnaServerOptions {
         secretKey: string;
         baseUrl?: string;
     };
+    /**
+     * oMLX base URL for local LLM inference.
+     * When set, routes Claude Code's API calls to the oMLX endpoint
+     * instead of Anthropic's cloud API.
+     *
+     * @example "http://localhost:8000/v1"
+     */
+    omlxBaseUrl?: string;
 }
 interface SnaServerHandle {
     /** The forked child process. */

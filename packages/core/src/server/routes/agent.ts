@@ -51,6 +51,8 @@ export interface RunOnceOptions {
   provider?: string;
   extraArgs?: string[];
   env?: Record<string, string>;
+  /** Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`). */
+  providerOptions?: Record<string, unknown>;
 }
 
 export interface RunOnceResult {
@@ -89,6 +91,7 @@ export async function runOnce(
     permissionMode: (opts.permissionMode as any) ?? cfg.defaultPermissionMode,
     env: { ...opts.env, SNA_SESSION_ID: sessionId },
     extraArgs,
+    providerOptions: opts.providerOptions,
   });
 
   sessionManager.setProcess(sessionId, proc);

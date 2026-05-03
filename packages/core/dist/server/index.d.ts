@@ -6,13 +6,13 @@ export { createAgentRoutes } from './routes/agent.js';
 export { createChatRoutes } from './routes/chat.js';
 export { attachWebSocket } from './ws.js';
 export { buildCanonicalFromDb } from '../history/canonical.js';
-export { CompletionOptions, CompletionResult, completion } from '../core/completion.js';
-import '../core/providers/types.js';
+export { CompletionOptions, completion } from '../core/completion.js';
+export { CompletionResult } from '../core/providers/types.js';
+import 'ws';
+import 'http';
 import '../history/types.js';
 import '../db/schema.js';
 import 'better-sqlite3';
-import 'ws';
-import 'http';
 
 interface SnaAppOptions {
     /** Session manager for multi-session support. Auto-created if omitted. */

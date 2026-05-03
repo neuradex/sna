@@ -35,6 +35,9 @@ function getDb() {
   }
   return _db;
 }
+function resetDb() {
+  _db = null;
+}
 function dropLegacySkillEvents(db) {
   db.exec("DROP TABLE IF EXISTS skill_events");
 }
@@ -191,5 +194,6 @@ function initSchema(db) {
   `);
 }
 export {
-  getDb
+  getDb,
+  resetDb
 };

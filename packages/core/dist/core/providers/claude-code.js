@@ -82,6 +82,31 @@ function resolveClaudePath(cwd) {
   logger.log("agent", `claude path: ${result.source}=${result.path}${result.version ? ` (${result.version})` : ""}`);
   return result.path;
 }
+function buildClaudeEnv(claudePath, opts = {}) {
+  const cleanEnv = { ...process.env, ...opts.env };
+  if (opts.configDir) {
+    cleanEnv.CLAUDE_CONFIG_DIR = opts.configDir;
+  }
+  const config = getConfig();
+  const omlxUrl = opts.providerOmlxUrl ?? config.omlxBaseUrl;
+  if (omlxUrl) {
+    cleanEnv.ANTHROPIC_BASE_URL = typeof omlxUrl === "string" ? omlxUrl : String(omlxUrl);
+  } else {
+    const proxyPort = config.apiProxyPort;
+    if (proxyPort) {
+      cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
+    }
+  }
+  delete cleanEnv.CLAUDECODE;
+  delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
+  delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
+  delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
+  const claudeDir = path.dirname(claudePath);
+  if (claudeDir && claudeDir !== ".") {
+    cleanEnv.PATH = `${claudeDir}:${cleanEnv.PATH ?? ""}`;
+  }
+  return cleanEnv;
+}
 const _ClaudeCodeProcess = class _ClaudeCodeProcess {
   constructor(proc, options) {
     this.emitter = new EventEmitter();
@@ -448,6 +473,85 @@ class ClaudeCodeProvider {
       return false;
     }
   }
+  async complete(options) {
+    const cwd = options.cwd ?? process.cwd();
+    const resolved = resolveClaudeCli({ cacheDir: void 0 });
+    const claudeParts = resolved.path.split(/\s+/);
+    const claudePath = claudeParts[0];
+    const claudePrefix = claudeParts.slice(1);
+    const args = [
+      ...claudePrefix,
+      "-p",
+      "--output-format",
+      "json",
+      "--no-session-persistence"
+    ];
+    if (options.model) args.push("--model", options.model);
+    if (options.systemPrompt) args.push("--system-prompt", options.systemPrompt);
+    if (options.appendSystemPrompt) args.push("--append-system-prompt", options.appendSystemPrompt);
+    if (options.extraArgs) args.push(...options.extraArgs);
+    args.push(options.prompt);
+    const po = options.providerOptions ?? {};
+    const cleanEnv = buildClaudeEnv(claudePath, {
+      env: options.env,
+      providerOmlxUrl: po.omlxBaseUrl
+    });
+    const timeout = options.timeout ?? 6e4;
+    const model = options.model ?? "unknown";
+    logger.log("agent", `complete: provider=claude-code model=${model} prompt="${options.prompt.slice(0, 60)}..."`);
+    return new Promise((resolve, reject) => {
+      const proc = spawn(claudePath, args, {
+        cwd,
+        env: cleanEnv,
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+      let stdout = "";
+      let stderr = "";
+      const timer = setTimeout(() => {
+        proc.kill();
+        reject(new Error(`complete timed out after ${timeout}ms`));
+      }, timeout);
+      proc.stdout.on("data", (chunk) => {
+        stdout += chunk.toString();
+      });
+      proc.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+      proc.on("error", (err) => {
+        clearTimeout(timer);
+        reject(new Error(`complete spawn error: ${err.message}`));
+      });
+      proc.on("close", (code) => {
+        clearTimeout(timer);
+        let parsed;
+        try {
+          parsed = JSON.parse(stdout);
+        } catch {
+          reject(new Error(`complete: failed to parse JSON (code=${code}): ${stdout.slice(0, 200)} ${stderr.slice(0, 200)}`));
+          return;
+        }
+        if (parsed.is_error) {
+          reject(new Error(`complete error: ${parsed.result}`));
+          return;
+        }
+        const modelKey = Object.keys(parsed.modelUsage)[0] ?? model;
+        resolve({
+          text: parsed.result,
+          usage: {
+            inputTokens: parsed.usage.input_tokens,
+            outputTokens: parsed.usage.output_tokens,
+            cacheReadTokens: parsed.usage.cache_read_input_tokens,
+            cacheCreationTokens: parsed.usage.cache_creation_input_tokens
+          },
+          costUsd: parsed.total_cost_usd,
+          durationMs: parsed.duration_ms,
+          durationApiMs: parsed.duration_api_ms,
+          model: modelKey
+        });
+      });
+      proc.stdin.end();
+    });
+  }
   spawn(options) {
     const claudeCommand = resolveClaudePath(options.cwd);
     const claudeParts = claudeCommand.split(/\s+/);
@@ -557,22 +661,11 @@ class ClaudeCodeProvider {
     if (extraArgsClean.length > 0) {
       args.push(...extraArgsClean);
     }
-    const cleanEnv = { ...process.env, ...options.env };
-    if (options.configDir) {
-      cleanEnv.CLAUDE_CONFIG_DIR = options.configDir;
-    }
-    const proxyPort = getConfig().apiProxyPort;
-    if (proxyPort) {
-      cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
-    }
-    delete cleanEnv.CLAUDECODE;
-    delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
-    delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
-    delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
-    const claudeDir = path.dirname(claudePath);
-    if (claudeDir && claudeDir !== ".") {
-      cleanEnv.PATH = `${claudeDir}:${cleanEnv.PATH ?? ""}`;
-    }
+    const cleanEnv = buildClaudeEnv(claudePath, {
+      env: options.env,
+      configDir: options.configDir,
+      providerOmlxUrl: po.omlxBaseUrl
+    });
     const proc = spawn(claudePath, [...claudePrefix, ...args], {
       cwd: options.cwd,
       env: cleanEnv,
@@ -584,6 +677,7 @@ class ClaudeCodeProvider {
 }
 export {
   ClaudeCodeProvider,
+  buildClaudeEnv,
   cacheClaudePath,
   parseCommandVOutput,
   resolveClaudeCli,

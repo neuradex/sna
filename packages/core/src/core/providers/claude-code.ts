@@ -3,7 +3,7 @@ import { EventEmitter } from "events";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import type { AgentProvider, AgentProcess, AgentEvent, SpawnOptions } from "./types.js";
+import type { AgentProvider, AgentProcess, AgentEvent, SpawnOptions, CompleteOptions, CompletionResult } from "./types.js";
 import { writeClaudeHistoryJsonl } from "../../history/claude-code.js";
 import { logger } from "../../lib/logger.js";
 import { getConfig } from "../../config.js";
@@ -131,6 +131,62 @@ function resolveClaudePath(cwd: string): string {
   const result = resolveClaudeCli({ cacheDir: path.join(cwd, ".sna") });
   logger.log("agent", `claude path: ${result.source}=${result.path}${result.version ? ` (${result.version})` : ""}`);
   return result.path;
+}
+
+// ── Shared environment builder ──────────────────────────────────────────────
+
+/**
+ * Options for building a clean Claude Code process environment.
+ */
+export interface ClaudeEnvOptions {
+  /** Base environment variables to merge. */
+  env?: Record<string, string>;
+  /** Override config directory (sets CLAUDE_CONFIG_DIR). */
+  configDir?: string;
+  /** oMLX base URL from provider options (takes highest priority). */
+  providerOmlxUrl?: string;
+}
+
+/**
+ * Build a clean environment for a Claude Code process.
+ * Handles API routing (oMLX > proxy), inherited env cleanup, and PATH setup.
+ * Shared between the agent provider and the completion helper.
+ */
+export function buildClaudeEnv(
+  claudePath: string,
+  opts: ClaudeEnvOptions = {},
+): Record<string, string> {
+  const cleanEnv = { ...process.env, ...opts.env } as Record<string, string>;
+
+  if (opts.configDir) {
+    cleanEnv.CLAUDE_CONFIG_DIR = opts.configDir;
+  }
+
+  // Route API calls: providerOptions.omlxBaseUrl > config.omlxBaseUrl > debug proxy
+  const config = getConfig();
+  const omlxUrl = opts.providerOmlxUrl ?? config.omlxBaseUrl;
+  if (omlxUrl) {
+    cleanEnv.ANTHROPIC_BASE_URL = typeof omlxUrl === "string" ? omlxUrl : String(omlxUrl);
+  } else {
+    const proxyPort = config.apiProxyPort;
+    if (proxyPort) {
+      cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
+    }
+  }
+
+  // Clean up inherited Claude Code env vars
+  delete cleanEnv.CLAUDECODE;
+  delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
+  delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
+  delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
+
+  // Ensure the Claude binary's directory is in PATH so its shebang works.
+  const claudeDir = path.dirname(claudePath);
+  if (claudeDir && claudeDir !== ".") {
+    cleanEnv.PATH = `${claudeDir}:${cleanEnv.PATH ?? ""}`;
+  }
+
+  return cleanEnv;
 }
 
 // ── ClaudeCodeProcess ────────────────────────────────────────────────────────
@@ -558,6 +614,118 @@ export class ClaudeCodeProvider implements AgentProvider {
     }
   }
 
+  async complete(options: CompleteOptions): Promise<CompletionResult> {
+    const cwd = options.cwd ?? process.cwd();
+    const resolved = resolveClaudeCli({ cacheDir: undefined });
+    const claudeParts = resolved.path.split(/\s+/);
+    const claudePath = claudeParts[0]!;
+    const claudePrefix = claudeParts.slice(1);
+
+    const args = [
+      ...claudePrefix,
+      "-p",
+      "--output-format", "json",
+      "--no-session-persistence",
+    ];
+
+    if (options.model) args.push("--model", options.model);
+    if (options.systemPrompt) args.push("--system-prompt", options.systemPrompt);
+    if (options.appendSystemPrompt) args.push("--append-system-prompt", options.appendSystemPrompt);
+    if (options.extraArgs) args.push(...options.extraArgs);
+    args.push(options.prompt);
+
+    const po = (options.providerOptions ?? {}) as Record<string, unknown>;
+    const cleanEnv = buildClaudeEnv(claudePath, {
+      env: options.env,
+      providerOmlxUrl: po.omlxBaseUrl as string | undefined,
+    });
+
+    const timeout = options.timeout ?? 60_000;
+    const model = options.model ?? "unknown";
+
+    logger.log("agent", `complete: provider=claude-code model=${model} prompt="${options.prompt.slice(0, 60)}..."`);
+
+    return new Promise<CompletionResult>((resolve, reject) => {
+      const proc = spawn(claudePath, args, {
+        cwd,
+        env: cleanEnv,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      let stdout = "";
+      let stderr = "";
+
+      const timer = setTimeout(() => {
+        proc.kill();
+        reject(new Error(`complete timed out after ${timeout}ms`));
+      }, timeout);
+
+      proc.stdout!.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+      proc.stderr!.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+
+      proc.on("error", (err) => {
+        clearTimeout(timer);
+        reject(new Error(`complete spawn error: ${err.message}`));
+      });
+
+      proc.on("close", (code) => {
+        clearTimeout(timer);
+
+        let parsed: {
+          type: string;
+          subtype: string;
+          is_error: boolean;
+          result: string;
+          duration_ms: number;
+          duration_api_ms: number;
+          total_cost_usd: number;
+          usage: {
+            input_tokens: number;
+            output_tokens: number;
+            cache_read_input_tokens: number;
+            cache_creation_input_tokens: number;
+          };
+          modelUsage: Record<string, {
+            inputTokens: number;
+            outputTokens: number;
+            cacheReadInputTokens: number;
+            cacheCreationInputTokens: number;
+            costUSD: number;
+          }>;
+        };
+        try {
+          parsed = JSON.parse(stdout);
+        } catch {
+          reject(new Error(`complete: failed to parse JSON (code=${code}): ${stdout.slice(0, 200)} ${stderr.slice(0, 200)}`));
+          return;
+        }
+
+        if (parsed.is_error) {
+          reject(new Error(`complete error: ${parsed.result}`));
+          return;
+        }
+
+        const modelKey = Object.keys(parsed.modelUsage)[0] ?? model;
+
+        resolve({
+          text: parsed.result,
+          usage: {
+            inputTokens: parsed.usage.input_tokens,
+            outputTokens: parsed.usage.output_tokens,
+            cacheReadTokens: parsed.usage.cache_read_input_tokens,
+            cacheCreationTokens: parsed.usage.cache_creation_input_tokens,
+          },
+          costUsd: parsed.total_cost_usd,
+          durationMs: parsed.duration_ms,
+          durationApiMs: parsed.duration_api_ms,
+          model: modelKey,
+        });
+      });
+
+      proc.stdin!.end();
+    });
+  }
+
   spawn(options: SpawnOptions): AgentProcess {
     const claudeCommand = resolveClaudePath(options.cwd);
     // SNA_CLAUDE_COMMAND can be multi-word (e.g., "node sna.ts tu claude")
@@ -710,28 +878,11 @@ export class ClaudeCodeProvider implements AgentProvider {
       args.push(...extraArgsClean);
     }
 
-    const cleanEnv = { ...process.env, ...options.env } as Record<string, string>;
-    if (options.configDir) {
-      cleanEnv.CLAUDE_CONFIG_DIR = options.configDir;
-    }
-
-    // Route through API proxy when debug tracing is active
-    const proxyPort = getConfig().apiProxyPort;
-    if (proxyPort) {
-      cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
-    }
-
-    delete cleanEnv.CLAUDECODE;
-    delete cleanEnv.CLAUDE_CODE_ENTRYPOINT;
-    delete cleanEnv.CLAUDE_CODE_SESSION_ACCESS_TOKEN;
-    delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
-
-    // Ensure the Claude binary's directory is in PATH so its shebang (#!/usr/bin/env node) works.
-    // Critical for nvm/fnm/asdf installs where node isn't in Electron's default PATH.
-    const claudeDir = path.dirname(claudePath);
-    if (claudeDir && claudeDir !== ".") {
-      cleanEnv.PATH = `${claudeDir}:${cleanEnv.PATH ?? ""}`;
-    }
+    const cleanEnv = buildClaudeEnv(claudePath, {
+      env: options.env,
+      configDir: options.configDir,
+      providerOmlxUrl: po.omlxBaseUrl as string | undefined,
+    });
 
     const proc = spawn(claudePath, [...claudePrefix, ...args], {
       cwd: options.cwd,

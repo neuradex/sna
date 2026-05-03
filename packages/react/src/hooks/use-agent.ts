@@ -15,6 +15,8 @@ interface UseAgentOptions {
   provider?: string;
   /** Permission mode for the agent */
   permissionMode?: string;
+  /** Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`). */
+  providerOptions?: Record<string, unknown>;
 
   onEvent?: (e: AgentEvent) => void;
   onThinking?: (e: AgentEvent) => void;
@@ -38,6 +40,7 @@ export function useAgent(options: UseAgentOptions = {}) {
     baseUrl = `${ctx.apiUrl}/agent`,
     provider = "claude-code",
     permissionMode,
+    providerOptions,
   } = options;
 
   const sessionParam = `session=${encodeURIComponent(sessionId)}`;
@@ -144,14 +147,14 @@ export function useAgent(options: UseAgentOptions = {}) {
     const res = await fetch(`${baseUrl}/start?${sessionParam}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider, prompt, permissionMode }),
+      body: JSON.stringify({ provider, prompt, permissionMode, providerOptions }),
     });
     const data = await res.json();
     if (data.status === "started" || data.status === "already_running") {
       setAlive(true);
     }
     return data;
-  }, [baseUrl, sessionParam, provider, permissionMode]);
+  }, [baseUrl, sessionParam, provider, permissionMode, providerOptions]);
 
   // Kill agent
   const kill = useCallback(async () => {
@@ -159,5 +162,15 @@ export function useAgent(options: UseAgentOptions = {}) {
     await fetch(`${baseUrl}/kill?${sessionParam}`, { method: "POST" });
   }, [baseUrl, sessionParam]);
 
-  return { connected, alive, start, send, kill };
+  // One-shot completion
+  const completion = useCallback(async (opts: { prompt: string; model?: string; systemPrompt?: string; providerOptions?: Record<string, unknown> }) => {
+    const res = await fetch(`${baseUrl}/completion`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, ...opts }),
+    });
+    return res.json();
+  }, [baseUrl, provider]);
+
+  return { connected, alive, start, send, kill, completion };
 }

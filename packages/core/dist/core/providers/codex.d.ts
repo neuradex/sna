@@ -1,4 +1,4 @@
-import { AgentProvider, SpawnOptions, AgentProcess } from './types.js';
+import { AgentProvider, CompleteOptions, CompletionResult, SpawnOptions, AgentProcess } from './types.js';
 import '../../history/types.js';
 import '../../db/schema.js';
 import 'better-sqlite3';
@@ -42,6 +42,7 @@ declare function extractSystemPromptArgs(extraArgs?: string[]): {
 declare class CodexProvider implements AgentProvider {
     readonly name = "codex";
     isAvailable(): Promise<boolean>;
+    complete(options: CompleteOptions): Promise<CompletionResult>;
     spawn(options: SpawnOptions): AgentProcess;
 }
 

@@ -1,4 +1,4 @@
-export type { AgentProvider, AgentProcess, AgentEvent, SpawnOptions } from "./types.js";
+export type { AgentProvider, AgentProcess, AgentEvent, SpawnOptions, CompleteOptions, CompletionResult } from "./types.js";
 export { ClaudeCodeProvider } from "./claude-code.js";
 export { CodexProvider } from "./codex.js";
 
@@ -9,6 +9,7 @@ import { CodexProvider } from "./codex.js";
 const providers: Record<string, AgentProvider> = {
   "claude-code": new ClaudeCodeProvider(),
   "codex": new CodexProvider(),
+  "omlx": new ClaudeCodeProvider(),
 };
 
 /**

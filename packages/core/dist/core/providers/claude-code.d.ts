@@ -1,4 +1,4 @@
-import { AgentProvider, SpawnOptions, AgentProcess } from './types.js';
+import { AgentProvider, CompleteOptions, CompletionResult, SpawnOptions, AgentProcess } from './types.js';
 import '../../history/types.js';
 import '../../db/schema.js';
 import 'better-sqlite3';
@@ -34,10 +34,28 @@ interface ResolveResult {
 declare function resolveClaudeCli(opts?: {
     cacheDir?: string;
 }): ResolveResult;
+/**
+ * Options for building a clean Claude Code process environment.
+ */
+interface ClaudeEnvOptions {
+    /** Base environment variables to merge. */
+    env?: Record<string, string>;
+    /** Override config directory (sets CLAUDE_CONFIG_DIR). */
+    configDir?: string;
+    /** oMLX base URL from provider options (takes highest priority). */
+    providerOmlxUrl?: string;
+}
+/**
+ * Build a clean environment for a Claude Code process.
+ * Handles API routing (oMLX > proxy), inherited env cleanup, and PATH setup.
+ * Shared between the agent provider and the completion helper.
+ */
+declare function buildClaudeEnv(claudePath: string, opts?: ClaudeEnvOptions): Record<string, string>;
 declare class ClaudeCodeProvider implements AgentProvider {
     readonly name = "claude-code";
     isAvailable(): Promise<boolean>;
+    complete(options: CompleteOptions): Promise<CompletionResult>;
     spawn(options: SpawnOptions): AgentProcess;
 }
 
-export { ClaudeCodeProvider, type ResolveResult, cacheClaudePath, parseCommandVOutput, resolveClaudeCli, validateClaudePath };
+export { ClaudeCodeProvider, type ClaudeEnvOptions, type ResolveResult, buildClaudeEnv, cacheClaudePath, parseCommandVOutput, resolveClaudeCli, validateClaudePath };

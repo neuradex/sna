@@ -63,11 +63,17 @@ class SessionManager {
     } catch {
     }
   }
-  /** Create a new session. Throws if session already exists or max sessions reached. */
+  /** Create a new session. Updates existing session fields if already present. */
   createSession(opts = {}) {
     const id = opts.id ?? crypto.randomUUID().slice(0, 8);
-    if (this.sessions.has(id)) {
-      throw new Error(`Session "${id}" already exists`);
+    const existing = this.sessions.get(id);
+    if (existing) {
+      if (opts.label !== void 0) existing.label = opts.label;
+      if (opts.cwd !== void 0) existing.cwd = opts.cwd;
+      if (opts.meta !== void 0) existing.meta = opts.meta ?? null;
+      existing.lastActivityAt = Date.now();
+      this.persistSession(existing);
+      return existing;
     }
     const aliveCount = Array.from(this.sessions.values()).filter((s) => s.process?.alive).length;
     if (aliveCount >= this.maxSessions) {
