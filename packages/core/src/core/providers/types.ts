@@ -171,13 +171,25 @@ export interface SpawnOptions {
 /**
  * Agent provider interface. Each backend (Claude Code, Codex, etc.)
  * implements this to provide a unified spawn → events → send API.
+ *
+ * Providers that use daemon-style runtimes (Codex, OpenCode) must
+ * implement `prepareRuntime` and set `supportsRuntimePooling = true`.
+ * Stateless providers (Claude Code) set `supportsRuntimePooling = false`.
  */
 export interface AgentProvider {
   readonly name: string;
   /** Check if this provider's CLI is available on the system. */
   isAvailable(): Promise<boolean>;
+  /** Whether this provider uses a shared global runtime (daemon pool). */
+  readonly supportsRuntimePooling: boolean;
+  /**
+   * Prepare (or reuse) a global runtime for this provider.
+   * Called once per unique runtime config. Returns a handle that
+   * can be shared across sessions. Null for stateless providers.
+   */
+  prepareRuntime?(config: import("./runtime.js").RuntimeConfig): Promise<import("./runtime.js").RuntimeHandle>;
   /** Spawn a new agent session. */
-  spawn(options: SpawnOptions): AgentProcess;
+  spawn(options: SpawnOptions, runtimeHandle?: import("./runtime.js").RuntimeHandle): AgentProcess;
   /** One-shot completion (no session, no streaming). */
   complete(options: CompleteOptions): Promise<CompletionResult>;
 }

@@ -6,9 +6,11 @@
  */
 
 import type { AgentProcess, AgentEvent } from "../core/providers/types.js";
+import type { RuntimeHandle, RuntimeConfig } from "../core/providers/runtime.js";
 import { getDb } from "../db/schema.js";
 import { insertChatMessage, updateChatMessageMeta } from "../db/chat-messages.js";
 import { getConfig } from "../config.js";
+import { getProvider, getRuntimePool, SpawnOptionsSchema, RuntimeConfigSchema } from "../core/providers/index.js";
 
 export type SessionState = "idle" | "processing" | "waiting" | "permission";
 

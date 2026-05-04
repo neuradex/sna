@@ -603,6 +603,7 @@ class ClaudeCodeProcess implements AgentProcess {
 
 export class ClaudeCodeProvider implements AgentProvider {
   readonly name = "claude-code";
+  readonly supportsRuntimePooling = false; // Stateless per-session process
 
   async isAvailable(): Promise<boolean> {
     try {

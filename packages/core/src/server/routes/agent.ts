@@ -19,8 +19,10 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import {
   getProvider,
+  getRuntimePool,
   type AgentEvent,
 } from "../../core/providers/index.js";
+import type { RuntimeHandle } from "../../core/providers/runtime.js";
 import { logger } from "../../lib/logger.js";
 import { getDb } from "../../db/schema.js";
 import { SessionManager } from "../session-manager.js";
@@ -302,6 +304,20 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     const extraArgs = body.extraArgs;
 
     try {
+      // ── Runtime prepare (daemon pooling) ──────────────────────────
+      // For providers with supportsRuntimePooling=true (Codex, OpenCode),
+      // prepare a shared daemon first, then spawn the session thread on it.
+      let runtimeHandle: RuntimeHandle | undefined;
+      if (provider.supportsRuntimePooling) {
+        const runtimePool = getRuntimePool();
+        runtimeHandle = await runtimePool.prepare({
+          provider: providerName,
+          cwd: session.cwd,
+          configDir,
+          env: { ...body.env, SNA_SESSION_ID: sessionId },
+        }, provider);
+      }
+
       const proc = provider.spawn({
         cwd: session.cwd,
         prompt: body.prompt,
@@ -317,7 +333,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
         allowedTools: body.allowedTools,
         disallowedTools: body.disallowedTools,
         mcpServers: body.mcpServers as any,
-      });
+      }, runtimeHandle);
 
       sessionManager.setProcess(sessionId, proc);
       sessionManager.saveStartConfig(sessionId, { provider: providerName, modelProvider: body.modelProvider, model, permissionMode, configDir, extraArgs, providerOptions: body.providerOptions });
