@@ -88,15 +88,41 @@ export async function runOnce(
   if (opts.systemPrompt) extraArgs.push("--system-prompt", opts.systemPrompt);
   if (opts.appendSystemPrompt) extraArgs.push("--append-system-prompt", opts.appendSystemPrompt);
 
-  const proc = provider.spawn({
-    cwd: session.cwd,
-    prompt: opts.message,
-    model: opts.model ?? cfg.model,
-    permissionMode: (opts.permissionMode as any) ?? cfg.defaultPermissionMode,
-    env: { ...opts.env, SNA_SESSION_ID: sessionId },
-    extraArgs,
-    providerOptions: opts.providerOptions,
-  });
+  let proc: AgentProcess;
+
+  if (provider.supportsRuntimePooling) {
+    // Pooled mode: prepare runtime handle, then start a thread
+    const runtimeHandle = await getRuntimePool().prepare({
+      cwd: session.cwd,
+      configDir: opts.cwd,
+      env: { ...opts.env, SNA_SESSION_ID: sessionId },
+      model: opts.model ?? cfg.model,
+      permissionMode: (opts.permissionMode as any) ?? cfg.defaultPermissionMode,
+      settings: {
+        allowedTools: [],
+        disallowedTools: [],
+      },
+    }, provider);
+    proc = provider.startThread!({
+      runtimeHandle,
+      prompt: opts.message,
+      providerOptions: opts.providerOptions,
+      systemPrompt: opts.systemPrompt,
+      appendSystemPrompt: opts.appendSystemPrompt,
+      extraArgs,
+    });
+  } else {
+    // Non-pooled mode: spawn a new process
+    proc = provider.spawn({
+      cwd: session.cwd,
+      prompt: opts.message,
+      model: opts.model ?? cfg.model,
+      permissionMode: (opts.permissionMode as any) ?? cfg.defaultPermissionMode,
+      env: { ...opts.env, SNA_SESSION_ID: sessionId },
+      extraArgs,
+      providerOptions: opts.providerOptions,
+    });
+  }
 
   sessionManager.setProcess(sessionId, proc);
 
