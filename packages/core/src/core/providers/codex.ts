@@ -490,6 +490,14 @@ class CodexProcess implements AgentProcess {
    * guard hook, not Codex's per-call approval UI).
    */
   private handleServerRequest(method: string, rpcId: number, params: any): void {
+    // Filter: only process server requests for our thread (pooled daemon safety)
+    const reqThreadId = params?.threadId ?? params?.thread?.id ?? params?.thread_id;
+    if (reqThreadId && this._threadId && reqThreadId !== this._threadId) {
+      // Auto-respond with empty result so the daemon unblocks, but don't
+      // store in our pendingServerRequests (that belongs to another thread).
+      this.write({ id: rpcId, result: {} } as any);
+      return;
+    }
     const isCommandApproval = method === "item/commandExecution/requestApproval";
     const isFileApproval = method === "item/fileChange/requestApproval";
     const isPermissionsApproval = method === "item/permissions/requestApproval";
@@ -873,6 +881,11 @@ class CodexProcess implements AgentProcess {
   // ── Event normalization ─────────────────────────────────────────────────
 
   private normalizeNotification(method: string, params: any): AgentEvent | null {
+    // Filter: only process events for our thread (pooled daemon safety)
+    const eventThreadId = params?.thread?.id ?? params?.threadId ?? params?.thread_id;
+    if (eventThreadId && this._threadId && eventThreadId !== this._threadId) {
+      return null; // Event for another thread — skip
+    }
     switch (method) {
       // ── Thread lifecycle ─────────────────────────────────────────────
       case "thread/started":
