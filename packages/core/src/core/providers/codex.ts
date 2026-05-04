@@ -1379,7 +1379,7 @@ export class CodexProvider implements AgentProvider {
                 clearTimeout(readyTimeout);
                 logger.log("agent", `codex: runtime daemon ready (pid=${daemon.pid})`);
                 resolve({
-                  provider: config.provider,
+                  provider: this.name,
                   ready: true,
                   daemon,
                   activeThreadCount: 0,

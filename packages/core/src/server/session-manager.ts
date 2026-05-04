@@ -5,7 +5,7 @@
  * The default "default" session provides backward compatibility.
  */
 
-import type { AgentProcess, AgentEvent } from "../core/providers/types.js";
+import type { AgentProcess, AgentEvent, AgentProvider } from "../core/providers/types.js";
 import type { RuntimeHandle, RuntimeConfig } from "../core/providers/runtime.js";
 import { getDb } from "../db/schema.js";
 import { insertChatMessage, updateChatMessageMeta } from "../db/chat-messages.js";
@@ -543,7 +543,19 @@ export class SessionManager {
     };
 
     // Kill existing
-    if (session.process?.alive) session.process.kill();
+    if (session.process?.alive) {
+      const providerName = session.lastStartConfig?.provider;
+      if (providerName) {
+        const provider = getProvider(providerName);
+        if (provider.supportsRuntimePooling) {
+          session.process.closeThread();
+        } else {
+          session.process.kill();
+        }
+      } else {
+        session.process.kill();
+      }
+    }
 
     // Spawn with merged config + --resume
     const proc = spawnFn(config);
@@ -609,7 +621,20 @@ export class SessionManager {
     if (id === "default") return false;
     const session = this.sessions.get(id);
     if (!session) return false;
-    if (session.process?.alive) session.process.kill();
+    if (session.process?.alive) {
+      // For pooled providers, close only the thread; otherwise kill the process.
+      const providerName = session.lastStartConfig?.provider;
+      if (providerName) {
+        const provider = getProvider(providerName);
+        if (provider.supportsRuntimePooling) {
+          session.process.closeThread();
+        } else {
+          session.process.kill();
+        }
+      } else {
+        session.process.kill();
+      }
+    }
     // Cleanup listeners
     this.eventListeners.delete(id);
     this.pendingPermissions.delete(id);
@@ -776,21 +801,21 @@ export class SessionManager {
 
   /** Kill all sessions. Used during shutdown. */
   killAll(): void {
-    const pids: number[] = [];
     for (const session of this.sessions.values()) {
+      if (session.id === "default") continue;
       if (session.process?.alive) {
-        const pid = session.process.pid;
-        session.process.kill();
-        if (pid) pids.push(pid);
-      }
-    }
-    // Force-kill any survivors after a brief grace period
-    if (pids.length > 0) {
-      setTimeout(() => {
-        for (const pid of pids) {
-          try { process.kill(pid, "SIGKILL"); } catch { /* already dead */ }
+        const providerName = session.lastStartConfig?.provider;
+        if (providerName) {
+          const provider = getProvider(providerName);
+          if (provider.supportsRuntimePooling) {
+            session.process.closeThread();
+          } else {
+            session.process.kill();
+          }
+        } else {
+          session.process.kill();
         }
-      }, 1000);
+      }
     }
   }
 

@@ -48,14 +48,14 @@ export type RuntimePrepareFn = (
  * Sessions with the same config share a runtime handle.
  */
 export interface RuntimeConfig {
-  /** Provider name (claude-code, codex, opencode) */
-  provider: string;
   /** Working directory */
   cwd: string;
   /** Config home directory */
   configDir?: string;
   /** Model override */
   model?: string;
+  /** Model provider (anthropic, openai, etc.) — used for keying pooled runtimes */
+  modelProvider?: string;
   /** MCP server config hash */
   mcpConfigHash?: string;
   /** Hook/settings hash */
@@ -64,6 +64,10 @@ export interface RuntimeConfig {
   permissionMode?: string;
   /** Provider-specific options */
   providerOptions?: Record<string, unknown>;
+  /** MCP server config (raw, for providers that need it) */
+  mcp?: Record<string, unknown>;
+  /** Tool allow/disallow settings */
+  settings?: { allowedTools?: string[]; disallowedTools?: string[] };
   /** Environment variables */
   env?: Record<string, string>;
 }
@@ -92,7 +96,7 @@ export class RuntimePool {
     config: RuntimeConfig,
     provider: { prepareRuntime?: RuntimePrepareFn; name: string },
   ): Promise<RuntimeHandle> {
-    const key = this.computeKey(config);
+    const key = this.computeKey(config, provider.name);
 
     // Reuse existing handle if available
     const existing = this.handles.get(key);
@@ -105,7 +109,7 @@ export class RuntimePool {
     if (!provider.prepareRuntime) {
       // Stateless provider — return a no-op handle
       const handle: RuntimeHandle = {
-        provider: config.provider,
+        provider: provider.name,
         ready: true,
         activeThreadCount: 0,
         dispose: () => {},
@@ -116,7 +120,7 @@ export class RuntimePool {
     }
 
     const handle = await provider.prepareRuntime(config);
-    handle.provider = config.provider;
+    handle.provider = provider.name;
     if (!handle.activeThreadCount) {
       handle.activeThreadCount = 0;
     }
@@ -161,8 +165,8 @@ export class RuntimePool {
    *   - hooksHash: hash of hooks.json content (tool filters, permission hooks)
    *   - configHash: hash of config.toml content (MCP servers, feature flags)
    */
-  private computeKey(config: RuntimeConfig): string {
-    const parts: string[] = [config.provider, config.cwd];
+  private computeKey(config: RuntimeConfig, providerName: string): string {
+    const parts: string[] = [providerName, config.cwd];
 
     if (config.configDir) parts.push(`configDir=${config.configDir}`);
     if (config.model) parts.push(`model=${config.model}`);

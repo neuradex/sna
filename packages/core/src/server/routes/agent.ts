@@ -21,8 +21,10 @@ import {
   getProvider,
   getRuntimePool,
   type AgentEvent,
+  type AgentProcess,
 } from "../../core/providers/index.js";
-import type { RuntimeHandle } from "../../core/providers/runtime.js";
+import type { RuntimeHandle, RuntimeConfig } from "../../core/providers/runtime.js";
+import type { StartConfig } from "../session-manager.js";
 import { logger } from "../../lib/logger.js";
 import { getDb } from "../../db/schema.js";
 import { SessionManager } from "../session-manager.js";
@@ -311,7 +313,6 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       if (provider.supportsRuntimePooling) {
         const runtimePool = getRuntimePool();
         runtimeHandle = await runtimePool.prepare({
-          provider: providerName,
           cwd: session.cwd,
           configDir,
           env: { ...body.env, SNA_SESSION_ID: sessionId },
@@ -528,9 +529,62 @@ export function createAgentRoutes(sessionManager: SessionManager) {
 
     try {
       const session = sessionManager.getSession(sessionId);
-      const prevProvider = session?.lastStartConfig?.provider;
-      const ccSessionId = session?.ccSessionId;
+      if (!session) return c.json({ status: "error", message: "Session not found" }, 404);
 
+      const prevProvider = session.lastStartConfig?.provider;
+      const nextProvider = body.provider ?? prevProvider;
+      if (!nextProvider) return c.json({ status: "error", message: "Provider is required" }, 400);
+      const nextProv = getProvider(nextProvider);
+
+      // Handle pooled providers separately (they use runtime pool + startThread)
+      if (nextProv.supportsRuntimePooling) {
+        // Kill the existing thread (pooled-aware)
+        if (session.process?.alive) {
+          session.process.closeThread();
+        }
+
+        // Merge config
+        const base = session.lastStartConfig!;
+        const nextProviderChanged = prevProvider && nextProvider !== prevProvider;
+        const mergedConfig: StartConfig = {
+          provider: nextProvider,
+          modelProvider: body.modelProvider ?? (nextProviderChanged ? undefined : base.modelProvider),
+          model: body.model ?? base.model,
+          permissionMode: body.permissionMode ?? base.permissionMode,
+          configDir: nextProviderChanged ? body.configDir : (body.configDir ?? base.configDir),
+          extraArgs: nextProviderChanged ? body.extraArgs : (body.extraArgs ?? base.extraArgs),
+          providerOptions: nextProviderChanged ? body.providerOptions : (body.providerOptions ?? base.providerOptions),
+        };
+
+        const runtimeHandle = await getRuntimePool().prepare({
+            cwd: session.cwd,
+            model: mergedConfig.model,
+            permissionMode: mergedConfig.permissionMode as any,
+            configDir: mergedConfig.configDir,
+            modelProvider: mergedConfig.modelProvider,
+            mcp: body.mcpServers as any,
+            settings: {
+              allowedTools: body.allowedTools ?? [],
+              disallowedTools: body.disallowedTools ?? [],
+            },
+            env: body.env,
+          }, nextProv);
+
+        const proc = nextProv.startThread!({
+          runtimeHandle,
+          providerOptions: mergedConfig.providerOptions,
+          systemPrompt: body.systemPrompt,
+          appendSystemPrompt: body.appendSystemPrompt,
+          configDir: mergedConfig.configDir,
+          extraArgs: mergedConfig.extraArgs,
+        });
+        sessionManager.setProcess(sessionId, proc, "started");
+        sessionManager.saveStartConfig(sessionId, mergedConfig);
+        logger.log("route", `POST /restart?session=${sessionId} → restarted (pooled, ${nextProvider})`);
+        return httpJson(c, "agent.restart", { status: "restarted", provider: nextProvider, sessionId });
+      }
+
+      // Non-pooled: use restartSession with spawn callback
       const { config } = sessionManager.restartSession(sessionId, body, (cfg) => {
         const prov = getProvider(cfg.provider);
         const providerChanged = prevProvider && cfg.provider !== prevProvider;
@@ -551,7 +605,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
           const history = buildCanonicalFromDb(sessionId);
           logger.log("route", `restart: provider changed ${prevProvider} → ${cfg.provider}, using DB history (${history.length} msgs)`);
           return prov.spawn({
-            cwd: sessionManager.getSession(sessionId)!.cwd,
+            cwd: session.cwd,
             model: cfg.model,
             permissionMode: cfg.permissionMode as any,
             configDir: cfg.configDir,
@@ -565,17 +619,18 @@ export function createAgentRoutes(sessionManager: SessionManager) {
 
         // Same provider: native resume via resumeSessionId
         return prov.spawn({
-          cwd: sessionManager.getSession(sessionId)!.cwd,
+          cwd: session.cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode as any,
           configDir: cfg.configDir,
           env: { ...body.env, SNA_SESSION_ID: sessionId },
-          resumeSessionId: ccSessionId ?? undefined,
+          resumeSessionId: session.ccSessionId ?? undefined,
           extraArgs: cfg.extraArgs,
           providerOptions: cfg.providerOptions,
           ...typedOpts,
         });
       });
+
       logger.log("route", `POST /restart?session=${sessionId} → restarted (${config.provider})`);
       return httpJson(c, "agent.restart", {
         status: "restarted",
@@ -632,22 +687,51 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     const provider = getProvider(providerName);
 
     try {
-      const proc = provider.spawn({
-        cwd: session.cwd,
-        prompt: body.prompt,
-        model,
-        permissionMode: permissionMode as any,
-        configDir,
-        env: { ...body.env, SNA_SESSION_ID: sessionId },
-        history: history.length > 0 ? history : undefined,
-        extraArgs,
-        providerOptions,
-        systemPrompt: body.systemPrompt,
-        appendSystemPrompt: body.appendSystemPrompt,
-        allowedTools: body.allowedTools,
-        disallowedTools: body.disallowedTools,
-        mcpServers: body.mcpServers as any,
-      });
+      let proc: AgentProcess;
+      if (provider.supportsRuntimePooling) {
+        // Pooled mode: get or create a runtime handle, then start a new thread.
+        const runtimeHandle = await getRuntimePool().prepare({
+            cwd: session.cwd,
+            model,
+            permissionMode: permissionMode as any,
+            configDir,
+            modelProvider,
+            mcp: body.mcpServers as any,
+            settings: {
+              allowedTools: body.allowedTools ?? [],
+              disallowedTools: body.disallowedTools ?? [],
+            },
+            env: body.env,
+          }, provider);
+        proc = provider.startThread!({
+          history: history.length > 0 ? history : undefined,
+          prompt: body.prompt,
+          runtimeHandle,
+          providerOptions,
+          systemPrompt: body.systemPrompt,
+          appendSystemPrompt: body.appendSystemPrompt,
+          configDir,
+          extraArgs,
+        });
+      } else {
+        // Non-pooled mode: spawn a new process.
+        proc = provider.spawn({
+          cwd: session.cwd,
+          prompt: body.prompt,
+          model,
+          permissionMode: permissionMode as any,
+          configDir,
+          env: { ...body.env, SNA_SESSION_ID: sessionId },
+          history: history.length > 0 ? history : undefined,
+          extraArgs,
+          providerOptions,
+          systemPrompt: body.systemPrompt,
+          appendSystemPrompt: body.appendSystemPrompt,
+          allowedTools: body.allowedTools,
+          disallowedTools: body.disallowedTools,
+          mcpServers: body.mcpServers as any,
+        });
+      }
       sessionManager.setProcess(sessionId, proc, "resumed");
       sessionManager.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, permissionMode, configDir, extraArgs, providerOptions });
       logger.log("route", `POST /resume?session=${sessionId} → resumed (${history.length} history msgs)`);
@@ -691,8 +775,28 @@ export function createAgentRoutes(sessionManager: SessionManager) {
   // POST /kill
   app.post("/kill", async (c) => {
     const sessionId = getSessionId(c);
-    const killed = sessionManager.killSession(sessionId);
-    return httpJson(c, "agent.kill", { status: killed ? "killed" : "no_session" });
+    const session = sessionManager.getSession(sessionId);
+
+    if (!session?.process?.alive) {
+      return httpJson(c, "agent.kill", { status: "no_session" });
+    }
+
+    // For pooled providers (Codex, OpenCode), close only the thread.
+    // For non-pooled providers (Claude Code), kill the entire process.
+    const providerName = session.lastStartConfig?.provider;
+    if (providerName) {
+      const provider = getProvider(providerName);
+      if (provider.supportsRuntimePooling) {
+        session.process.closeThread();
+      } else {
+        session.process.kill();
+      }
+    } else {
+      // No provider info — fall back to kill (safe default)
+      session.process.kill();
+    }
+
+    return httpJson(c, "agent.kill", { status: "killed" });
   });
 
   // GET /status

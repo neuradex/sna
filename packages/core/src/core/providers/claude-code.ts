@@ -388,6 +388,11 @@ class ClaudeCodeProcess implements AgentProcess {
     }
   }
 
+  /** Non-pooled: same as kill(). */
+  closeThread(): void {
+    this.kill();
+  }
+
   on(event: string, handler: Function): void {
     this.emitter.on(event, handler as any);
   }

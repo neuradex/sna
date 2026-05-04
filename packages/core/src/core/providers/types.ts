@@ -49,6 +49,11 @@ export interface AgentProcess {
   respondToPermission?(requestId: string, approved: boolean): void;
   /** Kill the agent process. */
   kill(): void;
+  /**
+   * Close only the active thread on a pooled daemon (does NOT kill the daemon).
+   * No-op for non-pooled providers (same behavior as kill()).
+   */
+  closeThread(): void;
   /** Whether the process is still running. */
   readonly alive: boolean;
   /** OS process ID. */
@@ -168,6 +173,33 @@ export interface SpawnOptions {
   extraArgs?: string[];
 }
 
+/** Options for starting a thread on a pooled daemon. */
+export interface StartThreadOptions {
+  /** The shared runtime handle pointing to the daemon. */
+  runtimeHandle: import("./runtime.js").RuntimeHandle;
+
+  /** Canonical conversation history to seed the new thread. */
+  history?: import("../../history/types.js").CanonicalBlock[];
+
+  /** The initial prompt to send to the new thread. */
+  prompt?: string;
+
+  /** Provider-specific options passed through to the provider. */
+  providerOptions?: Record<string, unknown>;
+
+  /** Replace the base system prompt. */
+  systemPrompt?: string;
+
+  /** Append to the system prompt. */
+  appendSystemPrompt?: string;
+
+  /** Override the agent config directory for this session. */
+  configDir?: string;
+
+  /** Additional CLI flags. */
+  extraArgs?: string[];
+}
+
 /**
  * Agent provider interface. Each backend (Claude Code, Codex, etc.)
  * implements this to provide a unified spawn → events → send API.
@@ -190,6 +222,11 @@ export interface AgentProvider {
   prepareRuntime?(config: import("./runtime.js").RuntimeConfig): Promise<import("./runtime.js").RuntimeHandle>;
   /** Spawn a new agent session. */
   spawn(options: SpawnOptions, runtimeHandle?: import("./runtime.js").RuntimeHandle): AgentProcess;
+  /**
+   * Start a new thread on a pooled daemon.
+   * Only available for pooled providers.
+   */
+  startThread?(options: StartThreadOptions): AgentProcess;
   /** One-shot completion (no session, no streaming). */
   complete(options: CompleteOptions): Promise<CompletionResult>;
 }
