@@ -4,3 +4,4 @@ node_modules/
 .dev.log
 *.db-shm
 *.db-wal
+dist/
