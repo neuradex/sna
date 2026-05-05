@@ -173,33 +173,6 @@ export interface SpawnOptions {
   extraArgs?: string[];
 }
 
-/** Options for starting a thread on a pooled daemon. */
-export interface StartThreadOptions {
-  /** The shared runtime handle pointing to the daemon. */
-  runtimeHandle: import("./runtime.js").RuntimeHandle;
-
-  /** Canonical conversation history to seed the new thread. */
-  history?: import("../../history/types.js").CanonicalBlock[];
-
-  /** The initial prompt to send to the new thread. */
-  prompt?: string;
-
-  /** Provider-specific options passed through to the provider. */
-  providerOptions?: Record<string, unknown>;
-
-  /** Replace the base system prompt. */
-  systemPrompt?: string;
-
-  /** Append to the system prompt. */
-  appendSystemPrompt?: string;
-
-  /** Override the agent config directory for this session. */
-  configDir?: string;
-
-  /** Additional CLI flags. */
-  extraArgs?: string[];
-}
-
 /**
  * Agent provider interface. Each backend (Claude Code, Codex, etc.)
  * implements this to provide a unified spawn → events → send API.
@@ -220,13 +193,12 @@ export interface AgentProvider {
    * can be shared across sessions. Null for stateless providers.
    */
   prepareRuntime?(config: import("./runtime.js").RuntimeConfig): Promise<import("./runtime.js").RuntimeHandle>;
-  /** Spawn a new agent session. */
-  spawn(options: SpawnOptions, runtimeHandle?: import("./runtime.js").RuntimeHandle): AgentProcess;
   /**
-   * Start a new thread on a pooled daemon.
-   * Only available for pooled providers.
+   * Spawn an agent session. For pooled providers, pass `runtimeHandle`
+   * (from `prepareRuntime`) to start a thread on the shared daemon;
+   * omit it for stateless providers or legacy non-pooled spawn.
    */
-  startThread?(options: StartThreadOptions): AgentProcess;
+  spawn(options: SpawnOptions, runtimeHandle?: import("./runtime.js").RuntimeHandle): AgentProcess;
   /** One-shot completion (no session, no streaming). */
   complete(options: CompleteOptions): Promise<CompletionResult>;
 }

@@ -91,7 +91,7 @@ export async function runOnce(
   let proc: AgentProcess;
 
   if (provider.supportsRuntimePooling) {
-    // Pooled mode: prepare runtime handle, then start a thread
+    // Pooled mode: prepare runtime handle, then spawn a thread on it
     const runtimeHandle = await getRuntimePool().prepare({
       cwd: session.cwd,
       configDir: opts.cwd,
@@ -103,14 +103,18 @@ export async function runOnce(
         disallowedTools: [],
       },
     }, provider);
-    proc = provider.startThread!({
-      runtimeHandle,
+    proc = provider.spawn({
+      cwd: session.cwd,
       prompt: opts.message,
+      model: opts.model ?? cfg.model,
+      permissionMode: (opts.permissionMode as any) ?? cfg.defaultPermissionMode,
+      configDir: opts.cwd,
+      env: { ...opts.env, SNA_SESSION_ID: sessionId },
+      extraArgs,
       providerOptions: opts.providerOptions,
       systemPrompt: opts.systemPrompt,
       appendSystemPrompt: opts.appendSystemPrompt,
-      extraArgs,
-    });
+    }, runtimeHandle);
   } else {
     // Non-pooled mode: spawn a new process
     proc = provider.spawn({
@@ -341,6 +345,12 @@ export function createAgentRoutes(sessionManager: SessionManager) {
         runtimeHandle = await runtimePool.prepare({
           cwd: session.cwd,
           configDir,
+          model,
+          permissionMode: permissionMode as any,
+          settings: {
+            allowedTools: body.allowedTools ?? [],
+            disallowedTools: body.disallowedTools ?? [],
+          },
           env: { ...body.env, SNA_SESSION_ID: sessionId },
         }, provider);
       }
@@ -562,7 +572,18 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       if (!nextProvider) return c.json({ status: "error", message: "Provider is required" }, 400);
       const nextProv = getProvider(nextProvider);
 
-      // Handle pooled providers separately (they use runtime pool + startThread)
+      // Typed SpawnOptions fields are forwarded from the request body directly
+      // — they are not part of StartConfig persistence because they describe
+      // the current spawn, not the session's identity.
+      const typedOpts = {
+        systemPrompt: body.systemPrompt,
+        appendSystemPrompt: body.appendSystemPrompt,
+        allowedTools: body.allowedTools,
+        disallowedTools: body.disallowedTools,
+        mcpServers: body.mcpServers as any,
+      };
+
+      // Handle pooled providers separately (runtime pool + spawn(handle))
       if (nextProv.supportsRuntimePooling) {
         // Kill the existing thread (pooled-aware)
         if (session.process?.alive) {
@@ -596,14 +617,16 @@ export function createAgentRoutes(sessionManager: SessionManager) {
             env: body.env,
           }, nextProv);
 
-        const proc = nextProv.startThread!({
-          runtimeHandle,
-          providerOptions: mergedConfig.providerOptions,
-          systemPrompt: body.systemPrompt,
-          appendSystemPrompt: body.appendSystemPrompt,
+        const proc = nextProv.spawn({
+          cwd: session.cwd,
+          model: mergedConfig.model,
+          permissionMode: mergedConfig.permissionMode as any,
           configDir: mergedConfig.configDir,
+          env: { ...body.env, SNA_SESSION_ID: sessionId },
           extraArgs: mergedConfig.extraArgs,
-        });
+          providerOptions: mergedConfig.providerOptions,
+          ...typedOpts,
+        }, runtimeHandle);
         sessionManager.setProcess(sessionId, proc, "started");
         sessionManager.saveStartConfig(sessionId, mergedConfig);
         logger.log("route", `POST /restart?session=${sessionId} → restarted (pooled, ${nextProvider})`);
@@ -614,17 +637,6 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       const { config } = sessionManager.restartSession(sessionId, body, (cfg) => {
         const prov = getProvider(cfg.provider);
         const providerChanged = prevProvider && cfg.provider !== prevProvider;
-
-        // Typed SpawnOptions fields are forwarded from the request body directly
-        // — they are not part of StartConfig persistence because they describe
-        // the current spawn, not the session's identity.
-        const typedOpts = {
-          systemPrompt: body.systemPrompt,
-          appendSystemPrompt: body.appendSystemPrompt,
-          allowedTools: body.allowedTools,
-          disallowedTools: body.disallowedTools,
-          mcpServers: body.mcpServers as any,
-        };
 
         if (providerChanged) {
           // Cross-provider: inject DB history
@@ -715,7 +727,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     try {
       let proc: AgentProcess;
       if (provider.supportsRuntimePooling) {
-        // Pooled mode: get or create a runtime handle, then start a new thread.
+        // Pooled mode: get or create a runtime handle, then spawn a thread on it.
         const runtimeHandle = await getRuntimePool().prepare({
             cwd: session.cwd,
             model,
@@ -729,16 +741,22 @@ export function createAgentRoutes(sessionManager: SessionManager) {
             },
             env: body.env,
           }, provider);
-        proc = provider.startThread!({
-          history: history.length > 0 ? history : undefined,
+        proc = provider.spawn({
+          cwd: session.cwd,
           prompt: body.prompt,
-          runtimeHandle,
+          model,
+          permissionMode: permissionMode as any,
+          configDir,
+          env: { ...body.env, SNA_SESSION_ID: sessionId },
+          history: history.length > 0 ? history : undefined,
+          extraArgs,
           providerOptions,
           systemPrompt: body.systemPrompt,
           appendSystemPrompt: body.appendSystemPrompt,
-          configDir,
-          extraArgs,
-        });
+          allowedTools: body.allowedTools,
+          disallowedTools: body.disallowedTools,
+          mcpServers: body.mcpServers as any,
+        }, runtimeHandle);
       } else {
         // Non-pooled mode: spawn a new process.
         proc = provider.spawn({

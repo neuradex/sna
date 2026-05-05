@@ -478,27 +478,38 @@ async function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManag
 
   try {
     if (provider.supportsRuntimePooling) {
-      // Pooled path: prepare runtime + start thread
+      // Pooled path: prepare runtime + spawn thread on it
       const runtimePool = getRuntimePool();
       const runtimeHandle = await runtimePool.prepare({
         cwd: session.cwd,
         model,
         configDir,
         permissionMode: permissionMode as any,
+        modelProvider,
+        mcp: msg.mcpServers as any,
         settings: {
-          allowedTools: [],
-          disallowedTools: [],
+          allowedTools: (msg.allowedTools as string[]) ?? [],
+          disallowedTools: (msg.disallowedTools as string[]) ?? [],
         },
         env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
       }, provider);
-      const thread = provider.startThread!({
-        runtimeHandle,
+      const proc = provider.spawn({
+        cwd: session.cwd,
         prompt: msg.prompt as string | undefined,
-        providerOptions: msg.providerOptions as Record<string, unknown> | undefined,
+        model,
+        permissionMode: permissionMode as any,
+        configDir,
+        env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
         history: history.length > 0 ? history : undefined,
         extraArgs,
-      });
-      sm.setProcess(sessionId, thread as unknown as AgentProcess, "resumed");
+        providerOptions,
+        systemPrompt: msg.systemPrompt as string | undefined,
+        appendSystemPrompt: msg.appendSystemPrompt as string | undefined,
+        allowedTools: msg.allowedTools as string[] | undefined,
+        disallowedTools: msg.disallowedTools as string[] | undefined,
+        mcpServers: msg.mcpServers as any,
+      }, runtimeHandle);
+      sm.setProcess(sessionId, proc, "resumed");
       sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, permissionMode, configDir, extraArgs, providerOptions });
       wsReply(ws, msg, {
         status: "resumed",
@@ -558,7 +569,7 @@ async function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionMana
       mcpServers: msg.mcpServers as any,
     };
 
-    // Handle pooled providers separately (they use runtime pool + startThread)
+    // Handle pooled providers separately (runtime pool + spawn(handle))
     if (nextProv.supportsRuntimePooling) {
       // Kill the existing thread (pooled-aware)
       if (session.process?.alive) {
@@ -584,21 +595,25 @@ async function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionMana
         model: mergedConfig.model,
         permissionMode: mergedConfig.permissionMode as any,
         configDir: mergedConfig.configDir,
+        modelProvider: mergedConfig.modelProvider,
+        mcp: msg.mcpServers as any,
         settings: {
-          allowedTools: (msg.allowedTools as string[]) ?? ([] as unknown as string[]),
-          disallowedTools: (msg.disallowedTools as string[]) ?? ([] as unknown as string[]),
+          allowedTools: (msg.allowedTools as string[]) ?? [],
+          disallowedTools: (msg.disallowedTools as string[]) ?? [],
         },
         env: msg.env as Record<string, string>,
       }, nextProv);
 
-      const proc = nextProv.startThread!({
-        runtimeHandle,
-        providerOptions: mergedConfig.providerOptions,
-        systemPrompt: msg.systemPrompt as string | undefined,
-        appendSystemPrompt: msg.appendSystemPrompt as string | undefined,
+      const proc = nextProv.spawn({
+        cwd: session.cwd,
+        model: mergedConfig.model,
+        permissionMode: mergedConfig.permissionMode as any,
         configDir: mergedConfig.configDir,
+        env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
         extraArgs: mergedConfig.extraArgs,
-      });
+        providerOptions: mergedConfig.providerOptions,
+        ...typedOpts,
+      }, runtimeHandle);
       sm.setProcess(sessionId, proc, "started");
       sm.saveStartConfig(sessionId, mergedConfig);
       wsReply(ws, msg, { status: "restarted", provider: nextProvider, sessionId });
