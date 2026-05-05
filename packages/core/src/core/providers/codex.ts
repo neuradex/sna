@@ -242,6 +242,8 @@ class CodexProcess implements AgentProcess {
   private _interruptedEmitted = false;
   /** Current active turnId — needed for turn/interrupt. */
   private _currentTurnId: string | null = null;
+  /** Active threadId — needed for thread/close. */
+  private _activeThreadId: string | null = null;
 
   /** Accumulated token usage from tokenUsage/updated notifications. */
   private _lastUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } | null = null;
@@ -297,7 +299,7 @@ class CodexProcess implements AgentProcess {
   get pid() { return this.proc.pid ?? null; }
   get sessionId() { return this._sessionId; }
 
-  constructor(proc: ChildProcess, private options: SpawnOptions) {
+  constructor(proc: ChildProcess, private options: SpawnOptions, private pooled: boolean = false) {
     this.proc = proc;
 
     proc.stdout!.on("data", (chunk: Buffer) => {
@@ -335,8 +337,88 @@ class CodexProcess implements AgentProcess {
       this.emitter.emit("error", err);
     });
 
-    // Start initialization handshake
-    this.initialize();
+    // When using a pooled daemon, skip the initialize handshake —
+    // the daemon was already initialized during prepareRuntime().
+    // We only need to create/start a thread for this session.
+    if (this.pooled) {
+      this._ready = true;
+      // Start a thread for this session
+      this.startThread();
+    } else {
+      // Start initialization handshake
+      this.initialize();
+    }
+  }
+
+  /**
+   * Start a thread on a pooled daemon (no re-initialize).
+   * Called when using a shared app-server runtime.
+   */
+  private async startThread(): Promise<void> {
+    try {
+      // Start or resume thread on the pooled daemon
+      const resumeThreadId = this.options.resumeSessionId;
+      const baseInstructions = this.options.systemPrompt;
+      const developerInstructions = this.options.appendSystemPrompt;
+      const sandbox = toCodexSandbox(this.options.permissionMode);
+
+      const threadParams: Record<string, unknown> = {
+        sandbox,
+        ...(this.options.model ? { model: this.options.model } : {}),
+        ...(baseInstructions ? { baseInstructions } : {}),
+        ...(developerInstructions ? { developerInstructions } : {}),
+      };
+
+      if (resumeThreadId) {
+        const resumeResult = await this.sendRpc("thread/resume", {
+          threadId: resumeThreadId,
+          ...(baseInstructions ? { baseInstructions } : {}),
+          ...(developerInstructions ? { developerInstructions } : {}),
+        });
+        if (resumeResult?._error) {
+          logger.log("agent", `codex: resume on pooled daemon failed, starting new thread`);
+          const threadResult = await this.sendRpc("thread/start", threadParams);
+          this._threadId = threadResult?.threadId ?? threadResult?.thread?.id ?? null;
+        } else {
+          this._threadId = resumeResult?.thread?.id ?? resumeThreadId;
+          logger.log("agent", `codex: resumed thread ${this._threadId} on pooled daemon`);
+        }
+      } else {
+        const threadResult = await this.sendRpc("thread/start", threadParams);
+        this._threadId = threadResult?.threadId ?? threadResult?.thread?.id ?? null;
+        logger.log("agent", `codex: created thread ${this._threadId} on pooled daemon`);
+      }
+
+      this._sessionId = this._threadId;
+      this._activeThreadId = this._threadId;
+      this._ready = true;
+
+      if (!this._initEmitted) {
+        this._initEmitted = true;
+        this.enqueue({
+          type: "init",
+          message: `Codex ready (thread=${this._threadId}, pooled)`,
+          data: { sessionId: this._threadId, provider: "codex", pooled: true },
+          timestamp: Date.now(),
+        });
+      }
+
+      // Send initial prompt if provided
+      if (this.options.prompt) {
+        this.startTurn(this.options.prompt);
+      }
+
+      // Drain any messages queued while initializing
+      for (const fn of this._pendingSend) fn();
+      this._pendingSend = [];
+    } catch (err) {
+      logger.err("agent", `codex thread start on pooled daemon failed:`, err);
+      this.enqueue({
+        type: "error",
+        message: `Codex thread start failed: ${err}`,
+        timestamp: Date.now(),
+      });
+    }
   }
 
   // ── JSON-RPC communication ──────────────────────────────────────────────
@@ -408,6 +490,14 @@ class CodexProcess implements AgentProcess {
    * guard hook, not Codex's per-call approval UI).
    */
   private handleServerRequest(method: string, rpcId: number, params: any): void {
+    // Filter: only process server requests for our thread (pooled daemon safety)
+    const reqThreadId = params?.threadId ?? params?.thread?.id ?? params?.thread_id;
+    if (reqThreadId && this._threadId && reqThreadId !== this._threadId) {
+      // Auto-respond with empty result so the daemon unblocks, but don't
+      // store in our pendingServerRequests (that belongs to another thread).
+      this.write({ id: rpcId, result: {} } as any);
+      return;
+    }
     const isCommandApproval = method === "item/commandExecution/requestApproval";
     const isFileApproval = method === "item/fileChange/requestApproval";
     const isPermissionsApproval = method === "item/permissions/requestApproval";
@@ -553,6 +643,7 @@ class CodexProcess implements AgentProcess {
       }
 
       this._sessionId = this._threadId;
+      this._activeThreadId = this._threadId;
       this._ready = true;
 
       if (!this._initEmitted) {
@@ -743,10 +834,39 @@ class CodexProcess implements AgentProcess {
     );
   }
 
+  /**
+   * Close only the active thread on a pooled daemon (does NOT kill the daemon).
+   * Called when a session ends but the shared app-server should persist.
+   */
+  closeThread(): void {
+    if (!this._alive) return;
+    if (!this.pooled) {
+      // Non-pooled: nothing to close, just kill the process
+      this._alive = false;
+      this.proc.kill("SIGTERM");
+      return;
+    }
+    // Pooled: close the active thread, keep the daemon alive
+    this._alive = false;
+    const threadId = this._activeThreadId ?? this._threadId;
+    if (threadId) {
+      this.sendRpc("thread/close", { threadId }).catch((err) => {
+        logger.err("agent", `codex: thread/close failed:`, err);
+      });
+      logger.log("agent", `codex: closed thread ${threadId} on pooled daemon`);
+    }
+  }
+
   kill(): void {
     if (this._alive) {
       this._alive = false;
-      this.proc.kill("SIGTERM");
+      if (this.pooled) {
+        // Pooled mode: only close the thread, keep the daemon alive
+        this.closeThread();
+      } else {
+        // Non-pooled: kill the entire process
+        this.proc.kill("SIGTERM");
+      }
     }
   }
 
@@ -761,6 +881,11 @@ class CodexProcess implements AgentProcess {
   // ── Event normalization ─────────────────────────────────────────────────
 
   private normalizeNotification(method: string, params: any): AgentEvent | null {
+    // Filter: only process events for our thread (pooled daemon safety)
+    const eventThreadId = params?.thread?.id ?? params?.threadId ?? params?.thread_id;
+    if (eventThreadId && this._threadId && eventThreadId !== this._threadId) {
+      return null; // Event for another thread — skip
+    }
     switch (method) {
       // ── Thread lifecycle ─────────────────────────────────────────────
       case "thread/started":
@@ -1048,6 +1173,7 @@ class CodexProcess implements AgentProcess {
 
 export class CodexProvider implements AgentProvider {
   readonly name = "codex";
+  readonly supportsRuntimePooling = true; // Daemon-style: app-server pool
 
   async isAvailable(): Promise<boolean> {
     try {
@@ -1171,7 +1297,141 @@ export class CodexProvider implements AgentProvider {
     });
   }
 
-  spawn(options: SpawnOptions): AgentProcess {
+  // ── Runtime pooling (daemon-style) ──────────────────────────────────
+
+  /**
+   * Prepare a global Codex app-server runtime.
+   *
+   * Lifecycle:
+   *   1. Spawn `codex app-server` (single daemon process)
+   *   2. Initialize JSON-RPC handshake (initialize → initialized)
+   *   3. Return a RuntimeHandle with the daemon process
+   *
+   * Multiple sessions share this single daemon; each session gets its
+   * own thread via thread/start on top of the shared app-server.
+   *
+   * Per-session hooks (permissions, tool filters) are written to the
+   * CODEX_HOME on a per-session basis — the daemon itself is shared.
+   * The CODEX_HOME is keyed by configDir or cwd for isolation.
+   */
+  async prepareRuntime(config: import("./runtime.js").RuntimeConfig): Promise<import("./runtime.js").RuntimeHandle> {
+    const codexPath = resolveCodexPath(config.cwd);
+    const codexParts = codexPath.split(/\s+/);
+    const codexBinary = codexParts[0]!;
+    const codexPrefix = codexParts.slice(1);
+
+    // Each runtime config gets its own CODEX_HOME for hook/config isolation
+    const codexHome = config.configDir ?? path.join(config.cwd, ".sna", "codex-home");
+    if (!fs.existsSync(codexHome)) {
+      fs.mkdirSync(codexHome, { recursive: true });
+    }
+
+    // Copy auth credentials from real ~/.codex if not already present
+    const realCodexHome = `${process.env.HOME}/.codex`;
+    for (const f of ["auth.json", "installation_id"]) {
+      const src = path.join(realCodexHome, f);
+      const dst = path.join(codexHome, f);
+      if (fs.existsSync(src) && !fs.existsSync(dst)) {
+        fs.copyFileSync(src, dst);
+      }
+    }
+    const configTomlPath = path.join(codexHome, "config.toml");
+    if (!fs.existsSync(configTomlPath)) {
+      const realConfig = path.join(realCodexHome, "config.toml");
+      if (fs.existsSync(realConfig)) {
+        fs.copyFileSync(realConfig, configTomlPath);
+      }
+    }
+
+    const cleanEnv: Record<string, string> = { ...process.env, ...config.env } as Record<string, string>;
+    cleanEnv.CODEX_HOME = codexHome;
+
+    // Ensure codex binary dir is in PATH
+    const codexDir = path.dirname(codexBinary);
+    if (codexDir && codexDir !== ".") {
+      cleanEnv.PATH = `${codexDir}:${cleanEnv.PATH ?? ""}`;
+    }
+
+    logger.log("agent", `codex: preparing runtime (CODEX_HOME=${codexHome})`);
+
+    // Spawn the app-server daemon
+    const daemon = spawn(codexBinary, [...codexPrefix, "app-server"], {
+      cwd: config.cwd,
+      env: cleanEnv,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    // Health check: wait for JSON-RPC `initialize` response from the daemon.
+    // The daemon responds with {id: ..., result: {...}} to our initialize request.
+    // We use a buffer to collect stdout and parse JSON-RPC messages.
+    let daemonReady = false;
+    const readyTimeout = setTimeout(() => {
+      if (!daemonReady) {
+        logger.err("agent", "codex: runtime prepare timed out waiting for initialize response");
+        daemon.kill("SIGTERM");
+      }
+    }, 10_000);
+
+    // Buffer to collect stdout for JSON-RPC parsing
+    let stdoutBuffer = "";
+
+    return new Promise<import("./runtime.js").RuntimeHandle>((resolve, reject) => {
+      daemon.stdout!.on("data", (chunk: Buffer) => {
+        stdoutBuffer += chunk.toString();
+        const lines = stdoutBuffer.split("\n");
+        stdoutBuffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const msg = JSON.parse(line);
+            // The daemon responds to our initialize request with {id, result}
+            if (msg.id != null && !msg.method && msg.result !== undefined) {
+              if (!daemonReady) {
+                daemonReady = true;
+                clearTimeout(readyTimeout);
+                logger.log("agent", `codex: runtime daemon ready (pid=${daemon.pid})`);
+                resolve({
+                  provider: this.name,
+                  ready: true,
+                  daemon,
+                  activeThreadCount: 0,
+                  dispose: () => {
+                    try { daemon.kill("SIGTERM"); } catch { /* already dead */ }
+                  },
+                });
+              }
+            }
+          } catch { /* non-JSON, ignore */ }
+        }
+      });
+
+      daemon.stderr!.on("data", () => { /* debug output — ignore */ });
+
+      daemon.on("error", (err) => {
+        clearTimeout(readyTimeout);
+        reject(new Error(`codex runtime prepare failed: ${err.message}`));
+      });
+
+      daemon.on("exit", (code) => {
+        clearTimeout(readyTimeout);
+        if (!daemonReady) {
+          reject(new Error(`codex runtime daemon exited with code ${code}`));
+        }
+      });
+    });
+  }
+
+  spawn(options: SpawnOptions, runtimeHandle?: import("./runtime.js").RuntimeHandle): AgentProcess {
+    // If a runtime handle was provided (daemon pooled), reuse it.
+    // Otherwise spawn a new app-server (legacy path, e.g. for run-once).
+    if (runtimeHandle && runtimeHandle.daemon) {
+      const daemon = runtimeHandle.daemon as ChildProcess;
+      logger.log("agent", `codex: using pooled runtime (pid=${daemon.pid}), spawning thread`);
+      return new CodexProcess(daemon, options, true /* pooled */);
+    }
+
+    // Legacy path: spawn a new app-server (no pooling)
     const codexPath = resolveCodexPath(options.cwd);
 
     const args = ["app-server"];

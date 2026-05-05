@@ -455,7 +455,8 @@ export async function startSnaServerInProcess(
   // Create session manager (no default agent spawn)
   const sessionManager = new SessionManager({ maxSessions: config.maxSessions });
 
-  root.route("/", createSnaApp({ sessionManager }));
+  const snaApp = await createSnaApp({ sessionManager });
+  root.route("/", snaApp);
 
   // Start HTTP server
   const httpServer = serve({ fetch: root.fetch, port }, () => {

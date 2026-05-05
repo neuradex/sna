@@ -1,21 +1,19 @@
 /**
  * createSnaApp — factory that returns a Hono app with all SNA core routes.
  *
+ * This is the unified app factory used by both standalone and in-process modes.
+ * It delegates to createOpenApiApp which includes OpenAPI spec generation and
+ * Swagger UI at /docs.
+ *
  * @example
- * import { Hono } from "hono";
  * import { createSnaApp, attachWebSocket, SessionManager } from "@sna-sdk/core/server";
  *
  * const sessionManager = new SessionManager({ maxSessions: 10 });
- * const app = createSnaApp({ sessionManager });
+ * const app = await createSnaApp({ sessionManager });
  * const server = serve({ fetch: app.fetch, port: 3099 });
  * attachWebSocket(server, sessionManager);
  */
 
-import _fs from "fs";
-import _path from "path";
-import { Hono } from "hono";
-import { createAgentRoutes } from "./routes/agent.js";
-import { createChatRoutes } from "./routes/chat.js";
 import { SessionManager } from "./session-manager.js";
 
 export interface SnaAppOptions {
@@ -23,20 +21,9 @@ export interface SnaAppOptions {
   sessionManager?: SessionManager;
 }
 
-export function createSnaApp(options: SnaAppOptions = {}) {
-  const sessionManager = options.sessionManager ?? new SessionManager();
-  const app = new Hono();
-
-  // Health check — used by consumers to verify this is an SNA server
-  app.get("/health", (c) => c.json({ ok: true, name: "sna", version: "1" }));
-
-  // Agent routes (stdio spawn → SSE)
-  app.route("/agent", createAgentRoutes(sessionManager));
-
-  // Chat persistence routes
-  app.route("/chat", createChatRoutes());
-
-  return app;
+export async function createSnaApp(options: SnaAppOptions = {}) {
+  const { createOpenApiApp } = await import("./routes/openapi.js");
+  return createOpenApiApp(options);
 }
 
 export { createAgentRoutes } from "./routes/agent.js";
@@ -65,11 +52,14 @@ export type { CompletionOptions, CompletionResult } from "../core/completion.js"
  * import { snaPortRoute } from "@sna-sdk/core/server";
  * app.get("/api/sna-port", snaPortRoute);
  */
+import fs from "fs";
+import path from "path";
+
 export function snaPortRoute(c: any) {
-  const portFile = _path.join(process.cwd(), ".sna/sna-api.port");
+  const portFile = path.join(process.cwd(), ".sna/sna-api.port");
   try {
-    const port = _fs.readFileSync(portFile, "utf8").trim();
-    return c.json({ port });
+    const port = fs.readFileSync(portFile, "utf8").trim();
+    return c.json({ port: parseInt(port, 10) });
   } catch {
     return c.json({ port: null, error: "SNA API not running" }, 503);
   }

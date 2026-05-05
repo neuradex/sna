@@ -388,6 +388,11 @@ class ClaudeCodeProcess implements AgentProcess {
     }
   }
 
+  /** Non-pooled: same as kill(). */
+  closeThread(): void {
+    this.kill();
+  }
+
   on(event: string, handler: Function): void {
     this.emitter.on(event, handler as any);
   }
@@ -603,6 +608,7 @@ class ClaudeCodeProcess implements AgentProcess {
 
 export class ClaudeCodeProvider implements AgentProvider {
   readonly name = "claude-code";
+  readonly supportsRuntimePooling = false; // Stateless per-session process
 
   async isAvailable(): Promise<boolean> {
     try {

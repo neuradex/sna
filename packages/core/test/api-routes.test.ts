@@ -27,7 +27,7 @@ describe("HTTP API Routes", () => {
     const { createSnaApp } = await import("../src/server/index.js");
     const { SessionManager } = await import("../src/server/session-manager.js");
     const sm = new SessionManager();
-    app = createSnaApp({ sessionManager: sm });
+    app = await createSnaApp({ sessionManager: sm });
   });
 
   afterEach(() => { cleanup?.(); });
