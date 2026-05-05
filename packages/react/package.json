@@ -1,6 +1,6 @@
 {
   "name": "@sna-sdk/react",
-  "version": "0.11.3",
+  "version": "0.11.4",
   "description": "Skills-Native Application React bindings — hooks, components, and stores",
   "type": "module",
   "files": [
