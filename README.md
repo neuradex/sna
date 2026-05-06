@@ -1,18 +1,18 @@
-# SNA — Claude Code & Codex as a Backend Runtime
+# SNA — Claude Code, Codex & OpenCode as a Backend Runtime
 
-**An HTTP/WebSocket server that wraps Claude Code and Codex as background processes, so consumer apps can use them as a backend runtime.**
+**An HTTP/WebSocket server that wraps Claude Code, Codex, and OpenCode as background processes, so consumer apps can use them as a backend runtime.**
 
 ```
-Your app → @sna-sdk/client → SNA server → spawn(claude-code | codex) → events back over WS
+Your app → @sna-sdk/client → SNA server → spawn(claude-code | codex | opencode) → events back over WS
 ```
 
-The SDK normalizes both runtimes into a single API surface: one canonical conversation model, one event protocol, one permission flow, one set of runtime controls. Consumer apps don't need to know which agent is running underneath, and a session can switch providers mid-conversation without losing context.
+The SDK normalizes all three runtimes into a single API surface: one canonical conversation model, one event protocol, one permission flow, one set of runtime controls. Consumer apps don't need to know which agent is running underneath, and a session can switch providers mid-conversation without losing context.
 
 ## Packages
 
 | Package | npm name | Role |
 |---------|----------|------|
-| `packages/core` | `@sna-sdk/core` | HTTP/WS server, session manager, providers (Claude Code, Codex), canonical history, SQLite, launchers |
+| `packages/core` | `@sna-sdk/core` | HTTP/WS server, session manager, providers (Claude Code, Codex, OpenCode), canonical history, SQLite, launchers |
 | `packages/client` | `@sna-sdk/client` | TypeScript client. Dual transport (HTTP for ordering, WS for push). Framework-agnostic. |
 | `packages/react` | `@sna-sdk/react` | React bindings — hooks (`useAgent`, `useSessionManager`, `useSnaClient`, …) and a drop-in chat UI |
 | `packages/testing` | `@sna-sdk/testing` | Mock Anthropic Messages API + `sna-test` CLI for running Claude Code in an isolated test env |

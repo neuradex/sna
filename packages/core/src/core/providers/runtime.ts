@@ -31,6 +31,18 @@ export interface RuntimeHandle {
   readonly daemon?: ChildProcess;
   /** Count of active threads on the daemon (0 = no active sessions) */
   activeThreadCount: number;
+  /**
+   * HTTP base URL of the runtime daemon, when it speaks HTTP rather than
+   * stdio JSON-RPC (e.g. OpenCode's `opencode serve`). Codex/Claude Code
+   * leave this undefined.
+   */
+  readonly httpUrl?: string;
+  /**
+   * Optional shared secret for the runtime daemon. Currently unused — kept
+   * here so that providers can add basic auth without breaking the
+   * RuntimeHandle contract later.
+   */
+  readonly password?: string;
   /** Cleanup resources when SNA shuts down */
   dispose(): void;
 }
@@ -170,7 +182,19 @@ export class RuntimePool {
 
     if (config.configDir) parts.push(`configDir=${config.configDir}`);
     if (config.model) parts.push(`model=${config.model}`);
-    if (config.mcpConfigHash) parts.push(`mcp=${config.mcpConfigHash}`);
+    // Prefer an explicit hash; otherwise derive one from `mcp` so daemons
+    // with different MCP server sets (e.g. OpenCode pooled runtimes) are
+    // not silently shared.
+    let mcpHash = config.mcpConfigHash;
+    if (!mcpHash && config.mcp && Object.keys(config.mcp).length > 0) {
+      // Top-level key sort gives a stable string under arbitrary insertion
+      // order. Inner objects are stringified normally — any nested change
+      // (env, args, headers) flips the hash.
+      const sorted: Record<string, unknown> = {};
+      for (const k of Object.keys(config.mcp).sort()) sorted[k] = config.mcp[k];
+      mcpHash = JSON.stringify(sorted);
+    }
+    if (mcpHash) parts.push(`mcp=${mcpHash}`);
     if (config.settingsHash) parts.push(`settings=${config.settingsHash}`);
     if (config.permissionMode) parts.push(`perm=${config.permissionMode}`);
 
@@ -190,6 +214,19 @@ export class RuntimePool {
     // needs separate daemons because it's per-CODEX_HOME.
     if (config.providerOptions?.configHash) {
       parts.push(`configHash=${config.providerOptions.configHash}`);
+    }
+
+    // OpenCode-specific: caller-provided external server URL routes all
+    // sessions to that pre-existing daemon (skips internal spawn).
+    if (config.providerOptions?.serverUrl) {
+      parts.push(`serverUrl=${config.providerOptions.serverUrl}`);
+    }
+
+    // OpenCode-specific: hash of opencode.json overrides (model defaults,
+    // MCP, permissions). Different overrides need different daemons because
+    // OpenCode binds the config at startup via OPENCODE_CONFIG_CONTENT.
+    if (config.providerOptions?.opencodeConfigHash) {
+      parts.push(`opencodeCfg=${config.providerOptions.opencodeConfigHash}`);
     }
 
     return parts.join("|");

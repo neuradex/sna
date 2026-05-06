@@ -347,6 +347,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
           configDir,
           model,
           permissionMode: permissionMode as any,
+          mcp: body.mcpServers as any,
           settings: {
             allowedTools: body.allowedTools ?? [],
             disallowedTools: body.disallowedTools ?? [],

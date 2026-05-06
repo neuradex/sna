@@ -2,3 +2,4 @@
 *.log
 .dev.log
 .test-data*/
+data

@@ -32,7 +32,7 @@ See [docs/architecture.md](docs/architecture.md) for the full picture. Quick map
 
 The `SessionManager` owns every running agent. Each `Session` carries a `process` (Claude Code or Codex subprocess), a per-session event buffer, the last `StartConfig`, and metadata. Listeners cover lifecycle, config changes, state changes, agent events, permission requests, and skill events.
 
-Providers (`core/providers/{claude-code,codex}.ts`) implement a common `AgentProvider` interface (`spawn`, `isAvailable`). The returned `AgentProcess` exposes `send`, `interrupt`, `setModel`, `setPermissionMode`, `respondToPermission`, `kill` — translating each into the runtime's native control message.
+Providers (`core/providers/{claude-code,codex,opencode}.ts`) implement a common `AgentProvider` interface (`spawn`, `isAvailable`). The returned `AgentProcess` exposes `send`, `interrupt`, `setModel`, `setPermissionMode`, `respondToPermission`, `kill` — translating each into the runtime's native control message. Codex and OpenCode are daemon-pooled (see `runtime.ts` / `RuntimeHandle`); Claude Code is stateless per-session.
 
 #### Canonical conversation model
 
@@ -43,7 +43,7 @@ Providers (`core/providers/{claude-code,codex}.ts`) implement a common `AgentPro
 
 Binary attachments live in `embeds` JSON keyed by id; content text holds inline `![](embed://<id>)` refs. `chat_sessions` carries `meta`, `cwd`, and `last_start_config` so a session can be restored across restarts.
 
-`history/canonical.ts` builds canonical blocks from the DB. Provider-specific adapters in `history/{claude-code,codex}.ts` translate canonical → native wire format (Claude JSONL `--resume` file, Codex thread/resume payload). This is what makes a single conversation portable across providers.
+`history/canonical.ts` builds canonical blocks from the DB. Provider-specific adapters in `history/{claude-code,codex,opencode}.ts` translate canonical → native wire format (Claude JSONL `--resume` file, Codex `thread/resume(history=...)` payload, OpenCode prompt-prelude parts). This is what makes a single conversation portable across providers.
 
 #### Transports
 
@@ -77,8 +77,10 @@ The PreToolUse hook (`scripts/hook.ts`) runs before every Claude Code tool call,
 | `packages/core/src/history/canonical.ts` | Build canonical blocks from DB |
 | `packages/core/src/history/claude-code.ts` | Canonical → Claude Code JSONL adapter |
 | `packages/core/src/history/codex.ts` | Canonical → Codex thread/resume adapter |
+| `packages/core/src/history/opencode.ts` | Canonical → OpenCode prompt-prelude adapter |
 | `packages/core/src/core/providers/claude-code.ts` | Claude Code spawn + event normalization |
 | `packages/core/src/core/providers/codex.ts` | Codex spawn + event normalization |
+| `packages/core/src/core/providers/opencode.ts` | OpenCode spawn + event normalization (HTTP/SSE via `@opencode-ai/sdk`) |
 | `packages/core/src/core/completion.ts` | One-shot `completion()` API |
 | `packages/core/src/electron/index.ts` | `startSnaServer()` launcher (Electron-aware) |
 | `packages/core/src/node/index.ts` | `startSnaServer()` launcher (plain Node) |

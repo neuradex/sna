@@ -162,6 +162,12 @@ export interface SpawnOptions {
    *   disableSlashCommands?: boolean — --disable-slash-commands
    *   omlxBaseUrl?: string           — route ANTHROPIC_BASE_URL to oMLX local LLM
    * Codex: { config?: Record<string, string>, profile?: string }
+   * OpenCode:
+   *   serverUrl?: string             — route to a pre-existing `opencode serve` instead of spawning one
+   *   modelProviderId?: string       — providerID half of the OpenCode model selector ({providerID, modelID})
+   *   agent?: string                 — OpenCode agent name (build/plan/etc.) for the prompt
+   *   opencodeConfigHash?: string    — hash of opencode config overrides; different hashes get different daemons
+   *   logLevel?: string              — passed through to `opencode serve --log-level`
    */
   providerOptions?: Record<string, unknown>;
 

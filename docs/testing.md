@@ -113,8 +113,22 @@ node --import tsx --test test/claude-history-jsonl.test.ts
 node --import tsx --test test/claude-history-injection.test.ts
 node --import tsx --test test/codex-history-injection.test.ts
 node --import tsx --test test/codex-provider.test.ts
+node --import tsx --test test/opencode-history-injection.test.ts
+node --import tsx --test test/opencode-provider.test.ts
+node --import tsx --test test/opencode-complete.test.ts
 node --import tsx --test test/claude-path-resolution.test.ts
 ```
+
+For OpenCode, an end-to-end harness is also available:
+
+```bash
+# Requires real opencode 1.14.x on PATH and an authenticated provider.
+# Skips cleanly with exit 0 if opencode isn't installed.
+cd packages/core
+pnpm verify:opencode
+```
+
+It exercises start/send/complete, cross-provider history prelude, runtime-pool reuse, permission round-trip, mid-turn interrupt, and graceful daemon shutdown.
 
 `packages/client` also has its own `pnpm test`.
 

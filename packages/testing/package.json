@@ -1,6 +1,6 @@
 {
   "name": "@sna-sdk/testing",
-  "version": "0.11.4",
+  "version": "0.12.0",
   "description": "Testing utilities for SNA — mock Anthropic API, oneshot runner, and sna-test CLI",
   "type": "module",
   "bin": {

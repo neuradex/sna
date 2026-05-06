@@ -139,6 +139,10 @@ export const RuntimeHandleSchema = z.object({
   ready: z.boolean(),
   daemon: z.unknown().optional(), // ChildProcess | undefined
   dispose: z.any().optional(), // () => void
+  // OpenCode (and any future HTTP-daemon provider) — base URL of the spawned
+  // server and an optional shared secret. Not used by Codex/Claude Code.
+  httpUrl: z.string().optional(),
+  password: z.string().optional(),
 });
 
 // ── AgentProvider interface schema ────────────────────────────────────
