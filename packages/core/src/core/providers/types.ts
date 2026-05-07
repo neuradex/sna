@@ -162,6 +162,12 @@ export interface SpawnOptions {
    *   disableSlashCommands?: boolean — --disable-slash-commands
    *   omlxBaseUrl?: string           — route ANTHROPIC_BASE_URL to oMLX local LLM
    * Codex: { config?: Record<string, string>, profile?: string }
+   * OpenCode:
+   *   serverUrl?: string             — route to a pre-existing `opencode serve` instead of spawning one
+   *   modelProviderId?: string       — providerID half of the OpenCode model selector ({providerID, modelID})
+   *   agent?: string                 — OpenCode agent name (build/plan/etc.) for the prompt
+   *   opencodeConfigHash?: string    — hash of opencode config overrides; different hashes get different daemons
+   *   logLevel?: string              — passed through to `opencode serve --log-level`
    */
   providerOptions?: Record<string, unknown>;
 
@@ -201,6 +207,78 @@ export interface AgentProvider {
   spawn(options: SpawnOptions, runtimeHandle?: import("./runtime.js").RuntimeHandle): AgentProcess;
   /** One-shot completion (no session, no streaming). */
   complete(options: CompleteOptions): Promise<CompletionResult>;
+  /**
+   * List models available through this provider.
+   *
+   * The returned IDs are the slugs that should be passed back to `spawn`'s
+   * `model` field. Some providers expose a static curated catalog
+   * (claude-code, codex), others probe a live source (opencode CLI, oMLX
+   * server). Callers must treat results as a hint — model availability can
+   * change between calls.
+   *
+   * Optional: providers without a meaningful catalog can omit this.
+   */
+  listModels?(config?: ListModelsConfig): Promise<ListModelsResult>;
+}
+
+// ── Model listing ────────────────────────────────────────────────────────────
+
+/**
+ * Caller-supplied configuration for listModels.
+ *
+ * Most fields are only used by specific providers — claude-code uses
+ * `baseUrl` to switch into oMLX (Anthropic-compatible local server) mode;
+ * opencode honors `cliPath` to override the default `opencode` binary.
+ */
+export interface ListModelsConfig {
+  /** Override CLI binary path (opencode). */
+  cliPath?: string;
+  /**
+   * Anthropic-compatible base URL. When set on the claude-code provider,
+   * triggers oMLX mode: fetches `{baseUrl}/v1/models` instead of returning
+   * the static cloud catalog.
+   */
+  baseUrl?: string;
+  /** Bearer token for the baseUrl request. */
+  apiKey?: string;
+  /** Bypass the in-memory cache. */
+  refresh?: boolean;
+}
+
+/** Single model entry returned by listModels. */
+export interface RuntimeModelInfo {
+  /** Slug to pass back to spawn's `model` field. */
+  id: string;
+  /** Human-readable label for UI. */
+  label: string;
+  /**
+   * Inference backend family for grouping/attribution: "anthropic", "openai",
+   * "google", "oss", or other provider-specific identifier.
+   */
+  provider: string;
+  /** Where this entry came from — for cache TTL / staleness reasoning. */
+  source: "static" | "api" | "cli";
+  /** Token context window when known. */
+  contextWindow?: number;
+  /** Mark deprecated entries so UI can de-emphasize them. */
+  deprecated?: boolean;
+  /** Human-readable annotation ("legacy alias", "preview", etc.). */
+  notes?: string;
+}
+
+/** Aggregate result of a listModels call. */
+export interface ListModelsResult {
+  models: RuntimeModelInfo[];
+  /** Dominant source category for the result set. */
+  source: "static" | "api" | "cli" | "mixed";
+  /** Epoch ms when this result was produced (or pulled from cache). */
+  fetchedAt: number;
+  /**
+   * Set when the call could not fully populate the list — e.g. opencode CLI
+   * not installed, oMLX server unreachable. `models` may still be populated
+   * with a partial / fallback result.
+   */
+  error?: string;
 }
 
 // ── One-shot completion types ────────────────────────────────────────────────

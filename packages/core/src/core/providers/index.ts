@@ -1,4 +1,14 @@
-export type { AgentProvider, AgentProcess, AgentEvent, SpawnOptions, CompleteOptions, CompletionResult } from "./types.js";
+export type {
+  AgentProvider,
+  AgentProcess,
+  AgentEvent,
+  SpawnOptions,
+  CompleteOptions,
+  CompletionResult,
+  ListModelsConfig,
+  ListModelsResult,
+  RuntimeModelInfo,
+} from "./types.js";
 export { RuntimePool } from "./runtime.js";
 export {
   SpawnOptionsSchema,
@@ -7,15 +17,18 @@ export {
 } from "./schemas.js";
 export { ClaudeCodeProvider } from "./claude-code.js";
 export { CodexProvider } from "./codex.js";
+export { OpenCodeProvider } from "./opencode.js";
 
 import type { AgentProvider } from "./types.js";
 import { ClaudeCodeProvider } from "./claude-code.js";
 import { CodexProvider } from "./codex.js";
+import { OpenCodeProvider } from "./opencode.js";
 import { RuntimePool } from "./runtime.js";
 
 const providers: Record<string, AgentProvider> = {
   "claude-code": new ClaudeCodeProvider(),
   "codex": new CodexProvider(),
+  "opencode": new OpenCodeProvider(),
   "omlx": new ClaudeCodeProvider(),
 };
 

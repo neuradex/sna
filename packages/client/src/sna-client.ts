@@ -718,6 +718,56 @@ export interface RunOnceResult {
   usage: Record<string, unknown> | null;
 }
 
+// ── Model listing ────────────────────────────────────────────────────────────
+
+/**
+ * Caller-supplied config for `agent.listModels`. Most fields are runtime-
+ * specific. Pass an empty object (or omit) for the static-catalog case
+ * (claude-code, codex). Pass `baseUrl` + `apiKey` for oMLX. Pass `cliPath` to
+ * override the opencode binary lookup. Set `refresh: true` to bypass cache.
+ */
+export interface ListModelsConfig {
+  cliPath?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  refresh?: boolean;
+}
+
+/** A single model entry returned by `agent.listModels`. */
+export interface RuntimeModelInfo {
+  /** Slug to pass back as `model` on subsequent spawn / runOnce calls. */
+  id: string;
+  /** Human-readable label for UI. */
+  label: string;
+  /**
+   * Inference backend family ("anthropic", "openai", "google", "oss", ...).
+   * Useful for grouping in selectors and stamping attribution metadata at
+   * registration time so spawn doesn't need a round-trip.
+   */
+  provider: string;
+  /** Where this entry came from. Cache-staleness hint. */
+  source: "static" | "api" | "cli";
+  /** Token context window when known. */
+  contextWindow?: number;
+  /** Mark deprecated entries so UI can de-emphasize them. */
+  deprecated?: boolean;
+  /** Annotation surfaced in UI ("legacy alias", "preview", ...). */
+  notes?: string;
+}
+
+/** Aggregate result of `agent.listModels`. */
+export interface ListModelsResult {
+  models: RuntimeModelInfo[];
+  source: "static" | "api" | "cli" | "mixed";
+  fetchedAt: number;
+  /**
+   * Set when the call could not fully populate the list — e.g. opencode CLI
+   * not installed, oMLX server unreachable. `models` may still be a partial
+   * fallback the caller can use.
+   */
+  error?: string;
+}
+
 /** A chat session row from the database. */
 export interface ChatSession {
   id: string;
@@ -1378,6 +1428,34 @@ class AgentApi {
       return this.client._httpFetch("POST", "/agent/run-once", opts as unknown as Record<string, unknown>);
     }
     return this.client.request("agent.run-once", opts as unknown as Record<string, unknown>);
+  }
+
+  /**
+   * List models available through a runtime.
+   *
+   * Use cases:
+   *   - Settings UI populating a "registered models" picker
+   *   - Validating that a configured oMLX server is reachable and serves
+   *     the expected models
+   *   - Refreshing the catalog after the user edits opencode.json
+   *
+   * Per-runtime behavior:
+   *   - "claude-code": static curated catalog of Anthropic aliases + IDs
+   *   - "codex":       static curated catalog of GPT-5 family
+   *   - "opencode":    parses `opencode models` CLI output (5min cache)
+   *   - "omlx":        fetches `{baseUrl}/v1/models` (1min cache).
+   *                    Pass `config.baseUrl` and optional `config.apiKey`.
+   *
+   * The result `error` field is populated on partial failure (CLI missing,
+   * server unreachable) — `models` may still contain a fallback and is safe
+   * to render. Always check `error` for surfacing in UI.
+   */
+  async listModels(runtime: string, config?: ListModelsConfig): Promise<ListModelsResult> {
+    const body = { runtime, config };
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("POST", "/agent/list-models", body as unknown as Record<string, unknown>);
+    }
+    return this.client.request("agent.list-models", body as unknown as Record<string, unknown>);
   }
 
   /**

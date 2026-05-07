@@ -202,7 +202,21 @@ External compatibility: optional SNA ACP server later
 
 This keeps the optimization levers available while still borrowing ACP's already-designed session, tool, permission, and update shapes.
 
-## OpenCode Integration Recommendation
+## OpenCode Integration — Status
+
+**Implemented (2026-05).** `OpenCodeProvider` is now the third Tier-1 provider:
+
+- `packages/core/src/core/providers/opencode.ts` — daemon-pooled HTTP/SSE provider via `@opencode-ai/sdk`.
+- `packages/core/src/history/opencode.ts` — canonical → prompt-prelude adapter (OpenCode's prompt API only takes user-side parts; cross-provider history is serialized into a single `TextPartInput` prepended to the first user prompt).
+- Daemon spawn delegated to `createOpencodeServer` (free port allocated explicitly to dodge the `--port 0` regression noted earlier).
+- `RuntimeHandle.httpUrl` / `password` fields and `computeKey` `serverUrl` / `opencodeConfigHash` branches added to `runtime.ts`.
+- One-shot `complete()` implemented via ephemeral server + `client.session.prompt` (sync).
+- 37 new tests (24 unit + 8 integration + 5 complete) green; full suite 218/218.
+- E2E harness at `packages/core/scripts/verify-opencode.ts` (run via `pnpm verify:opencode`).
+
+The original recommendation below is preserved for context.
+
+## OpenCode Integration Recommendation (original)
 
 Do not start with ACP as the primary OpenCode integration. Start with OpenCode Server/SDK.
 

@@ -5,4 +5,7 @@ export type {
   SessionInfo,
   AgentStartConfig,
   WsMessage,
+  ListModelsConfig,
+  ListModelsResult,
+  RuntimeModelInfo,
 } from "./sna-client.js";

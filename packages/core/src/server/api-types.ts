@@ -93,6 +93,20 @@ export interface ApiResponses {
     durationApiMs: number;
     model: string;
   };
+  "agent.list-models": {
+    models: Array<{
+      id: string;
+      label: string;
+      provider: string;
+      source: "static" | "api" | "cli";
+      contextWindow?: number;
+      deprecated?: boolean;
+      notes?: string;
+    }>;
+    source: "static" | "api" | "cli" | "mixed";
+    fetchedAt: number;
+    error?: string;
+  };
 
   // Permission
   "permission.respond": {

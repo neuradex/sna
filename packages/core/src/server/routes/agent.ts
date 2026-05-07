@@ -252,6 +252,45 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     }
   });
 
+  // POST /list-models — list models available through a runtime
+  //
+  // Body: { runtime: string, config?: ListModelsConfig }
+  // Returns: { models, source, fetchedAt, error? }
+  //
+  // The runtime parameter selects which AgentProvider answers (claude-code,
+  // codex, opencode, omlx). The config payload is provider-specific —
+  // claude-code/omlx honors `baseUrl` + `apiKey`, opencode honors `cliPath`.
+  // POST (not GET) because config may carry an apiKey we don't want logged
+  // in URLs or proxy access logs.
+  app.post("/list-models", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      runtime?: string;
+      config?: import("../../core/providers/types.js").ListModelsConfig;
+    };
+    const runtime = body.runtime ?? "claude-code";
+    let provider;
+    try {
+      provider = getProvider(runtime);
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
+    if (!provider.listModels) {
+      return httpJson(c, "agent.list-models", {
+        models: [],
+        source: "static",
+        fetchedAt: Date.now(),
+        error: `runtime "${runtime}" does not support model listing`,
+      });
+    }
+    try {
+      const result = await provider.listModels(body.config);
+      return httpJson(c, "agent.list-models", result);
+    } catch (e: any) {
+      logger.err("err", `POST /list-models[${runtime}] → ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 500);
+    }
+  });
+
   // POST /completion — lightweight one-shot LLM call (no session)
   app.post("/completion", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as CompletionOptions;
@@ -347,6 +386,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
           configDir,
           model,
           permissionMode: permissionMode as any,
+          mcp: body.mcpServers as any,
           settings: {
             allowedTools: body.allowedTools ?? [],
             disallowedTools: body.disallowedTools ?? [],

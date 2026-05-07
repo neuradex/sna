@@ -237,6 +237,9 @@ function handleMessage(
     case "agent.completion":
       handleAgentCompletion(ws, msg);
       return;
+    case "agent.list-models":
+      handleAgentListModels(ws, msg);
+      return;
 
     // ── Agent event subscription ──────────────────────
     case "agent.subscribe":
@@ -738,6 +741,30 @@ async function handleAgentCompletion(ws: WebSocket, msg: WsRequest): Promise<voi
   if (!msg.prompt) return replyError(ws, msg, "prompt is required");
   try {
     const result = await completion(msg as unknown as CompletionOptions);
+    wsReply(ws, msg, result);
+  } catch (e: any) {
+    replyError(ws, msg, e.message);
+  }
+}
+
+async function handleAgentListModels(ws: WebSocket, msg: WsRequest): Promise<void> {
+  const runtime = (msg.runtime as string | undefined) ?? "claude-code";
+  let provider;
+  try {
+    provider = getProvider(runtime);
+  } catch (e: any) {
+    return replyError(ws, msg, e.message);
+  }
+  if (!provider.listModels) {
+    return wsReply(ws, msg, {
+      models: [],
+      source: "static",
+      fetchedAt: Date.now(),
+      error: `runtime "${runtime}" does not support model listing`,
+    });
+  }
+  try {
+    const result = await provider.listModels(msg.config as any);
     wsReply(ws, msg, result);
   } catch (e: any) {
     replyError(ws, msg, e.message);

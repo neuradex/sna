@@ -1,9 +1,9 @@
 ## SNA Architecture
 
-SNA wraps Claude Code and Codex as backend processes and exposes them through a single HTTP/WebSocket API. Consumer apps treat the running agent like any other backend service: they create a session, send messages, and subscribe to events. They never spawn the CLI directly.
+SNA wraps Claude Code, Codex, and OpenCode as backend processes and exposes them through a single HTTP/WebSocket API. Consumer apps treat the running agent like any other backend service: they create a session, send messages, and subscribe to events. They never spawn the CLI directly.
 
 ```
-Consumer app  ──HTTP──▶  SNA server  ──spawn──▶  claude-code | codex
+Consumer app  ──HTTP──▶  SNA server  ──spawn──▶  claude-code | codex | opencode
               ◀──WS────              ◀──events─
 ```
 
@@ -24,7 +24,7 @@ Consumer app  ──HTTP──▶  SNA server  ──spawn──▶  claude-code
 
 Every running agent is a `Session` owned by `SessionManager`. Each session has:
 
-- `process` — the spawned `AgentProcess` (Claude Code or Codex), or `null` when idle
+- `process` — the spawned `AgentProcess` (Claude Code, Codex, or OpenCode), or `null` when idle
 - `eventBuffer` + `eventCounter` — append-only stream consumed by subscribers via `since`
 - `cwd`, `label`, `meta` — metadata persisted to `chat_sessions` so the SDK can be shared across apps. Use `meta.app: "loom"` (for example) to isolate sessions per consumer.
 - `lastStartConfig` — `{ provider, modelProvider, model, permissionMode, providerOptions, ... }`, used by `agent.restart` to bring the same config back
@@ -35,19 +35,29 @@ Listeners cover lifecycle (`started` / `resumed` / `killed` / `exited` / `crashe
 
 ### Providers
 
-`core/providers/{claude-code,codex}.ts` implement a common `AgentProvider` interface:
+`core/providers/{claude-code,codex,opencode}.ts` implement a common `AgentProvider` interface:
 
 ```ts
 interface AgentProvider {
   readonly name: string;
+  readonly supportsRuntimePooling: boolean;
   isAvailable(): Promise<boolean>;
-  spawn(options: SpawnOptions): AgentProcess;
+  prepareRuntime?(config: RuntimeConfig): Promise<RuntimeHandle>;
+  spawn(options: SpawnOptions, runtimeHandle?: RuntimeHandle): AgentProcess;
+  complete(options: CompleteOptions): Promise<CompletionResult>;
 }
 ```
 
-The returned `AgentProcess` exposes a uniform control surface — `send`, `interrupt`, `setModel`, `setPermissionMode`, `respondToPermission`, `kill` — that each provider translates into its native control message.
+The returned `AgentProcess` exposes a uniform control surface — `send`, `interrupt`, `setModel`, `setPermissionMode`, `respondToPermission`, `closeThread`, `kill` — that each provider translates into its native control message.
 
-`SpawnOptions` covers the cross-provider knobs (`cwd`, `prompt`, `model`, `permissionMode`, `systemPrompt`, `appendSystemPrompt`, `allowedTools`, `disallowedTools`, `mcpServers`, `history`, `env`, `configDir`, `resumeSessionId`). Anything provider-specific goes in `providerOptions` (an opaque record). Use `getProvider("claude-code" | "codex")` from `@sna-sdk/core` to look one up.
+Two runtime shapes are supported:
+
+- **Stateless per-session** (Claude Code) — `supportsRuntimePooling = false`. Each session spawns its own subprocess; `prepareRuntime` is unused.
+- **Daemon-pooled** (Codex, OpenCode) — `supportsRuntimePooling = true`. `prepareRuntime` starts (or reuses, via `RuntimePool`) a long-lived daemon process; `spawn` allocates a thread/session on top of it. `kill()` calls `closeThread()` to release the thread without tearing down the daemon. `RuntimePool.dispose()` shuts everything down on SNA exit.
+
+For Codex the daemon is `codex app-server` over JSON-RPC stdio. For OpenCode it is `opencode serve` over HTTP/SSE — `OpenCodeProvider` delegates to `@opencode-ai/sdk`'s `createOpencodeServer` for the spawn and uses `createOpencodeClient` for typed HTTP calls (`session.create`, `session.promptAsync`, `session.abort`, `event.subscribe`, `postSessionIdPermissionsPermissionId`).
+
+`SpawnOptions` covers the cross-provider knobs (`cwd`, `prompt`, `model`, `permissionMode`, `systemPrompt`, `appendSystemPrompt`, `allowedTools`, `disallowedTools`, `mcpServers`, `history`, `env`, `configDir`, `resumeSessionId`). Anything provider-specific goes in `providerOptions` (an opaque record). Use `getProvider("claude-code" | "codex" | "opencode")` from `@sna-sdk/core` to look one up.
 
 ### Canonical conversation model
 
@@ -63,7 +73,7 @@ chat_sessions (id PK, label, type, meta, cwd, last_start_config, created_at)
 chat_messages (id PK, session_id FK, actor, kind, content, embeds, skill_name, meta, created_at, updated_at)
 ```
 
-`history/canonical.ts` reads these rows back into `CanonicalBlock[]`. Provider adapters in `history/{claude-code,codex}.ts` convert canonical blocks into the native wire format — Claude JSONL for `--resume`, Codex thread/resume payload — which is what lets a session switch providers (or models) without losing context.
+`history/canonical.ts` reads these rows back into `CanonicalBlock[]`. Provider adapters in `history/{claude-code,codex,opencode}.ts` convert canonical blocks into the native wire format — Claude JSONL for `--resume`, Codex `thread/resume(history=...)` payload, OpenCode prompt-prelude parts (since OpenCode's prompt API only accepts user-side input parts, prior turns are serialized into a single `TextPartInput` prepended to the first user prompt) — which is what lets a session switch providers (or models) without losing context.
 
 ### 3-layer attribution
 
@@ -71,7 +81,7 @@ Every assistant turn is stamped with three identifiers:
 
 | Layer | Field | Examples |
 |-------|-------|----------|
-| Runtime CLI | `provider` | `claude-code`, `codex` |
+| Runtime CLI | `provider` | `claude-code`, `codex`, `opencode` |
 | Model vendor | `modelProvider` | `anthropic`, `openai`, `google` |
 | Model slug | `model` | `claude-sonnet-4-6`, `gpt-5.4` |
 
@@ -146,7 +156,7 @@ A single connection covers everything. Request shape is `{ type, rid?, ...args }
 
 ### Permission flow
 
-Claude Code uses a PreToolUse hook; Codex uses JSON-RPC bidirectional approval. SNA hides the difference behind one flow:
+Claude Code uses a PreToolUse hook; Codex uses JSON-RPC bidirectional approval; OpenCode emits `permission.updated` SSE events and accepts `POST /session/:id/permissions/:permID` responses. SNA hides the difference behind one flow:
 
 1. The agent tries to call a tool.
 2. Provider-specific glue posts a `permission_needed` request to the running server (Claude: hook script; Codex: rpc → provider).
@@ -168,7 +178,7 @@ A session doesn't need to die to change shape:
 
 ### One-shot completion
 
-`completion({ prompt, model?, provider?, systemPrompt?, ... })` skips the session machinery. Spawns `claude -p --output-format json` (or `codex exec --json`), parses the result, returns `{ text, usage, costUsd, durationMs, durationApiMs, model }`. Used for short single-prompt jobs — naming a chat, summarizing a doc — where multi-turn would be overkill.
+`completion({ prompt, model?, provider?, systemPrompt?, ... })` skips the session machinery. Spawns `claude -p --output-format json` for Claude Code, `codex exec --json` for Codex, or for OpenCode briefly stands up an ephemeral `opencode serve` and runs a synchronous `client.session.prompt`. Parses the result, returns `{ text, usage, costUsd, durationMs, durationApiMs, model }`. Used for short single-prompt jobs — naming a chat, summarizing a doc — where multi-turn would be overkill.
 
 ### Launcher API
 

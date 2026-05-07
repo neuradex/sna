@@ -3,7 +3,18 @@ import { EventEmitter } from "events";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import type { AgentProvider, AgentProcess, AgentEvent, SpawnOptions, ContentBlock, CompleteOptions, CompletionResult } from "./types.js";
+import type {
+  AgentProvider,
+  AgentProcess,
+  AgentEvent,
+  SpawnOptions,
+  ContentBlock,
+  CompleteOptions,
+  CompletionResult,
+  ListModelsConfig,
+  ListModelsResult,
+  RuntimeModelInfo,
+} from "./types.js";
 import { canonicalToCodexResponseItems } from "../../history/codex.js";
 import { logger } from "../../lib/logger.js";
 
@@ -337,88 +348,9 @@ class CodexProcess implements AgentProcess {
       this.emitter.emit("error", err);
     });
 
-    // When using a pooled daemon, skip the initialize handshake —
-    // the daemon was already initialized during prepareRuntime().
-    // We only need to create/start a thread for this session.
-    if (this.pooled) {
-      this._ready = true;
-      // Start a thread for this session
-      this.startThread();
-    } else {
-      // Start initialization handshake
-      this.initialize();
-    }
-  }
-
-  /**
-   * Start a thread on a pooled daemon (no re-initialize).
-   * Called when using a shared app-server runtime.
-   */
-  private async startThread(): Promise<void> {
-    try {
-      // Start or resume thread on the pooled daemon
-      const resumeThreadId = this.options.resumeSessionId;
-      const baseInstructions = this.options.systemPrompt;
-      const developerInstructions = this.options.appendSystemPrompt;
-      const sandbox = toCodexSandbox(this.options.permissionMode);
-
-      const threadParams: Record<string, unknown> = {
-        sandbox,
-        ...(this.options.model ? { model: this.options.model } : {}),
-        ...(baseInstructions ? { baseInstructions } : {}),
-        ...(developerInstructions ? { developerInstructions } : {}),
-      };
-
-      if (resumeThreadId) {
-        const resumeResult = await this.sendRpc("thread/resume", {
-          threadId: resumeThreadId,
-          ...(baseInstructions ? { baseInstructions } : {}),
-          ...(developerInstructions ? { developerInstructions } : {}),
-        });
-        if (resumeResult?._error) {
-          logger.log("agent", `codex: resume on pooled daemon failed, starting new thread`);
-          const threadResult = await this.sendRpc("thread/start", threadParams);
-          this._threadId = threadResult?.threadId ?? threadResult?.thread?.id ?? null;
-        } else {
-          this._threadId = resumeResult?.thread?.id ?? resumeThreadId;
-          logger.log("agent", `codex: resumed thread ${this._threadId} on pooled daemon`);
-        }
-      } else {
-        const threadResult = await this.sendRpc("thread/start", threadParams);
-        this._threadId = threadResult?.threadId ?? threadResult?.thread?.id ?? null;
-        logger.log("agent", `codex: created thread ${this._threadId} on pooled daemon`);
-      }
-
-      this._sessionId = this._threadId;
-      this._activeThreadId = this._threadId;
-      this._ready = true;
-
-      if (!this._initEmitted) {
-        this._initEmitted = true;
-        this.enqueue({
-          type: "init",
-          message: `Codex ready (thread=${this._threadId}, pooled)`,
-          data: { sessionId: this._threadId, provider: "codex", pooled: true },
-          timestamp: Date.now(),
-        });
-      }
-
-      // Send initial prompt if provided
-      if (this.options.prompt) {
-        this.startTurn(this.options.prompt);
-      }
-
-      // Drain any messages queued while initializing
-      for (const fn of this._pendingSend) fn();
-      this._pendingSend = [];
-    } catch (err) {
-      logger.err("agent", `codex thread start on pooled daemon failed:`, err);
-      this.enqueue({
-        type: "error",
-        message: `Codex thread start failed: ${err}`,
-        timestamp: Date.now(),
-      });
-    }
+    // For pooled daemons, prepareRuntime() already did the initialize
+    // handshake, so we skip straight to thread start/resume.
+    this.bootstrapThread();
   }
 
   // ── JSON-RPC communication ──────────────────────────────────────────────
@@ -556,32 +488,40 @@ class CodexProcess implements AgentProcess {
 
   // ── Initialization handshake ────────────────────────────────────────────
 
-  private async initialize(): Promise<void> {
+  /**
+   * Run the JSON-RPC handshake (when needed) and start or resume a thread.
+   *
+   * Pooled mode skips the `initialize`/`initialized` handshake — the shared
+   * daemon was already initialized during `prepareRuntime()`. The thread
+   * start/resume logic (history injection, extraArgs fallbacks, sandbox /
+   * model / instructions) is identical for both modes.
+   */
+  private async bootstrapThread(): Promise<void> {
+    const where = this.pooled ? " on pooled daemon" : "";
     try {
-      // Step 1: initialize request
-      await this.sendRpc("initialize", {
-        clientInfo: { name: "sna", title: "SNA SDK", version: "1.0.0" },
-        capabilities: { experimentalApi: true },
-      });
+      if (!this.pooled) {
+        // Step 1: initialize request
+        await this.sendRpc("initialize", {
+          clientInfo: { name: "sna", title: "SNA SDK", version: "1.0.0" },
+          capabilities: { experimentalApi: true },
+        });
+        // Step 2: initialized notification
+        this.sendNotification("initialized");
+      }
 
-      // Step 2: initialized notification
-      this.sendNotification("initialized");
-
-      // Step 3: start or resume thread
-      // Typed fields take precedence, extraArgs as fallback for backward compat
+      // Step 3: start or resume thread.
+      // Typed fields take precedence; extraArgs is a fallback for backward compat.
       const resumeInfo = extractResumeArg(this.options.extraArgs);
       const resumeThreadId = this.options.resumeSessionId ?? resumeInfo?.threadId;
       const extraArgPrompts = extractSystemPromptArgs(
         resumeInfo ? resumeInfo.cleanArgs : this.options.extraArgs,
       );
 
-      // Typed fields > extraArgs fallback
       const baseInstructions = this.options.systemPrompt ?? extraArgPrompts.baseInstructions;
       const developerInstructions = this.options.appendSystemPrompt ?? extraArgPrompts.developerInstructions;
 
       const sandbox = toCodexSandbox(this.options.permissionMode);
 
-      // Common thread params
       const threadParams: Record<string, unknown> = {
         sandbox,
         ...(this.options.model ? { model: this.options.model } : {}),
@@ -616,12 +556,12 @@ class CodexProcess implements AgentProcess {
         if (resumeResult?._error) {
           // Experimental feature unavailable — fall back to fresh thread.
           // History is lost but we don't pollute the chat with fake turns.
-          logger.log("agent", `codex: thread/resume with history failed (${resumeResult.message ?? "unknown"}); falling back to fresh thread (history dropped)`);
+          logger.log("agent", `codex: thread/resume with history failed${where} (${resumeResult.message ?? "unknown"}); falling back to fresh thread (history dropped)`);
           const threadResult = await this.sendRpc("thread/start", threadParams);
           this._threadId = threadResult?.threadId ?? threadResult?.thread?.id ?? null;
         } else {
           this._threadId = resumeResult?.thread?.id ?? syntheticThreadId;
-          logger.log("agent", `codex: injected ${this.options.history!.length} history messages via thread/resume (thread=${this._threadId})`);
+          logger.log("agent", `codex: injected ${this.options.history!.length} history messages via thread/resume${where} (thread=${this._threadId})`);
         }
       } else if (resumeThreadId) {
         const resumeResult = await this.sendRpc("thread/resume", {
@@ -630,16 +570,19 @@ class CodexProcess implements AgentProcess {
           ...(developerInstructions ? { developerInstructions } : {}),
         });
         if (resumeResult?._error) {
-          logger.log("agent", `codex: resume failed (${resumeResult.message ?? "unknown"}), starting new thread`);
+          logger.log("agent", `codex: resume failed${where} (${resumeResult.message ?? "unknown"}), starting new thread`);
           const threadResult = await this.sendRpc("thread/start", threadParams);
           this._threadId = threadResult?.threadId ?? threadResult?.thread?.id ?? null;
         } else {
           this._threadId = resumeResult?.thread?.id ?? resumeThreadId;
-          logger.log("agent", `codex: resumed thread ${this._threadId}`);
+          logger.log("agent", `codex: resumed thread ${this._threadId}${where}`);
         }
       } else {
         const threadResult = await this.sendRpc("thread/start", threadParams);
         this._threadId = threadResult?.threadId ?? threadResult?.thread?.id ?? null;
+        if (this.pooled) {
+          logger.log("agent", `codex: created thread ${this._threadId}${where}`);
+        }
       }
 
       this._sessionId = this._threadId;
@@ -650,8 +593,12 @@ class CodexProcess implements AgentProcess {
         this._initEmitted = true;
         this.enqueue({
           type: "init",
-          message: `Codex ready (thread=${this._threadId})`,
-          data: { sessionId: this._threadId, provider: "codex" },
+          message: `Codex ready (thread=${this._threadId}${this.pooled ? ", pooled" : ""})`,
+          data: {
+            sessionId: this._threadId,
+            provider: "codex",
+            ...(this.pooled ? { pooled: true } : {}),
+          },
           timestamp: Date.now(),
         });
       }
@@ -668,10 +615,13 @@ class CodexProcess implements AgentProcess {
       for (const fn of this._pendingSend) fn();
       this._pendingSend = [];
     } catch (err) {
-      logger.err("agent", `codex init failed:`, err);
+      const phase = this.pooled ? "thread start" : "init";
+      logger.err("agent", `codex ${phase}${where} failed:`, err);
       this.enqueue({
         type: "error",
-        message: `Codex initialization failed: ${err}`,
+        message: this.pooled
+          ? `Codex thread start failed: ${err}`
+          : `Codex initialization failed: ${err}`,
         timestamp: Date.now(),
       });
     }
@@ -1587,5 +1537,109 @@ export class CodexProvider implements AgentProvider {
     logger.log("agent", `spawned codex app-server (pid=${proc.pid}) → ${codexPath} ${args.join(" ")}`);
 
     return new CodexProcess(proc, options);
+  }
+
+  /**
+   * List Codex (OpenAI) models. Calls `codex debug models` which returns the
+   * raw model catalog as JSON — kept fresh by the CLI itself, so we don't
+   * have to ship a stale static list. We filter to `visibility === "list"`
+   * (hides internal models like `codex-auto-review`) and to entries that
+   * declare `supported_in_api === true`.
+   *
+   * Falls back to the curated static catalog if the CLI isn't reachable
+   * (CLI not installed, child-process failure, malformed output). The
+   * fallback's `error` field surfaces the underlying reason.
+   */
+  async listModels(config?: ListModelsConfig): Promise<ListModelsResult> {
+    return listCodexModels(config?.cliPath, config?.refresh);
+  }
+}
+
+const CODEX_STATIC_MODELS: RuntimeModelInfo[] = [
+  { id: "gpt-5.4",         label: "GPT-5.4",         provider: "openai", source: "static" },
+  { id: "gpt-5.4-mini",    label: "GPT-5.4 Mini",    provider: "openai", source: "static" },
+  { id: "gpt-5.3-codex",   label: "GPT-5.3 Codex",   provider: "openai", source: "static" },
+  { id: "gpt-5.2",         label: "GPT-5.2",         provider: "openai", source: "static" },
+];
+
+const codexModelsCache = new Map<string, { result: ListModelsResult; expiresAt: number }>();
+const CODEX_MODELS_TTL_MS = 5 * 60_000;
+
+function staticCodexFallback(error?: string): ListModelsResult {
+  return {
+    models: CODEX_STATIC_MODELS.slice(),
+    source: "static",
+    fetchedAt: Date.now(),
+    ...(error ? { error } : {}),
+  };
+}
+
+/**
+ * Parse `codex debug models` JSON output into the canonical RuntimeModelInfo
+ * shape. Exported for unit testing — the actual CLI invocation is shelled
+ * out in {@link listCodexModels} and uses this parser on the captured stdout.
+ */
+export function parseCodexModelsOutput(stdout: string): RuntimeModelInfo[] {
+  if (!stdout || !stdout.trim()) return [];
+  let parsed: any;
+  try { parsed = JSON.parse(stdout); }
+  catch { return []; }
+
+  const models: any[] = Array.isArray(parsed?.models) ? parsed.models : [];
+  const out: RuntimeModelInfo[] = [];
+  for (const m of models) {
+    if (!m || typeof m.slug !== "string" || !m.slug) continue;
+    if (m.visibility && m.visibility !== "list") continue;
+    if (m.supported_in_api === false) continue;
+    out.push({
+      id: m.slug,
+      label: typeof m.display_name === "string" && m.display_name ? m.display_name : m.slug,
+      provider: "openai",
+      source: "cli",
+      ...(typeof m.description === "string" && m.description ? { notes: m.description } : {}),
+    });
+  }
+  return out;
+}
+
+async function listCodexModels(cliPathOverride?: string, refresh?: boolean): Promise<ListModelsResult> {
+  let cliPath = cliPathOverride;
+  if (!cliPath) {
+    const resolved = resolveCodexCli();
+    // resolveCodexCli always returns a path; treat the "fallback" source
+    // (PATH lookup) as best-effort — the execSync below will surface
+    // ENOENT if it isn't actually on PATH and we'll fall back to static.
+    cliPath = resolved.path;
+  }
+  if (!cliPath) {
+    return staticCodexFallback("codex CLI not found — using static catalog");
+  }
+
+  const cacheKey = cliPath;
+  if (!refresh) {
+    const hit = codexModelsCache.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) return hit.result;
+  }
+
+  try {
+    const codexDir = path.dirname(cliPath);
+    const env = { ...process.env, PATH: `${codexDir}:${process.env.PATH ?? ""}` };
+    const stdout = execSync(`"${cliPath}" debug models`, {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000, env,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const models = parseCodexModelsOutput(stdout);
+    if (models.length === 0) {
+      return staticCodexFallback("codex debug models returned no entries — using static catalog");
+    }
+    const result: ListModelsResult = {
+      models,
+      source: "cli",
+      fetchedAt: Date.now(),
+    };
+    codexModelsCache.set(cacheKey, { result, expiresAt: Date.now() + CODEX_MODELS_TTL_MS });
+    return result;
+  } catch (e: any) {
+    return staticCodexFallback(`codex debug models failed: ${e?.message ?? e}`);
   }
 }
