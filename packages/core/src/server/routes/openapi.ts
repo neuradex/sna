@@ -1388,6 +1388,43 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     }
   });
 
+  // POST /agent/list-models — provider model introspection
+  //
+  // Body: { runtime: string, config?: ListModelsConfig }
+  // Returns: { models, source, fetchedAt, error? }
+  //
+  // POST (not GET) because config may carry an apiKey we don't want logged
+  // in URLs or proxy access logs. Plain Hono route — no OpenAPI definition
+  // because the response shape is provider-driven and varies in detail.
+  app.post("/agent/list-models", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      runtime?: string;
+      config?: import("../../core/providers/types.js").ListModelsConfig;
+    };
+    const runtime = body.runtime ?? "claude-code";
+    let provider;
+    try {
+      provider = getProvider(runtime);
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
+    if (!provider.listModels) {
+      return c.json({
+        models: [],
+        source: "static",
+        fetchedAt: Date.now(),
+        error: `runtime "${runtime}" does not support model listing`,
+      }, 200);
+    }
+    try {
+      const result = await provider.listModels(body.config);
+      return c.json(result, 200);
+    } catch (e: any) {
+      logger.err("err", `POST /agent/list-models[${runtime}] → ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 500);
+    }
+  });
+
   // ── Permission ────────────────────────────────────────────────
 
   app.openapi(permissionRequestRoute, async (c) => {

@@ -3,7 +3,18 @@ import { EventEmitter } from "events";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import type { AgentProvider, AgentProcess, AgentEvent, SpawnOptions, ContentBlock, CompleteOptions, CompletionResult } from "./types.js";
+import type {
+  AgentProvider,
+  AgentProcess,
+  AgentEvent,
+  SpawnOptions,
+  ContentBlock,
+  CompleteOptions,
+  CompletionResult,
+  ListModelsConfig,
+  ListModelsResult,
+  RuntimeModelInfo,
+} from "./types.js";
 import { canonicalToCodexResponseItems } from "../../history/codex.js";
 import { logger } from "../../lib/logger.js";
 
@@ -1526,5 +1537,109 @@ export class CodexProvider implements AgentProvider {
     logger.log("agent", `spawned codex app-server (pid=${proc.pid}) → ${codexPath} ${args.join(" ")}`);
 
     return new CodexProcess(proc, options);
+  }
+
+  /**
+   * List Codex (OpenAI) models. Calls `codex debug models` which returns the
+   * raw model catalog as JSON — kept fresh by the CLI itself, so we don't
+   * have to ship a stale static list. We filter to `visibility === "list"`
+   * (hides internal models like `codex-auto-review`) and to entries that
+   * declare `supported_in_api === true`.
+   *
+   * Falls back to the curated static catalog if the CLI isn't reachable
+   * (CLI not installed, child-process failure, malformed output). The
+   * fallback's `error` field surfaces the underlying reason.
+   */
+  async listModels(config?: ListModelsConfig): Promise<ListModelsResult> {
+    return listCodexModels(config?.cliPath, config?.refresh);
+  }
+}
+
+const CODEX_STATIC_MODELS: RuntimeModelInfo[] = [
+  { id: "gpt-5.4",         label: "GPT-5.4",         provider: "openai", source: "static" },
+  { id: "gpt-5.4-mini",    label: "GPT-5.4 Mini",    provider: "openai", source: "static" },
+  { id: "gpt-5.3-codex",   label: "GPT-5.3 Codex",   provider: "openai", source: "static" },
+  { id: "gpt-5.2",         label: "GPT-5.2",         provider: "openai", source: "static" },
+];
+
+const codexModelsCache = new Map<string, { result: ListModelsResult; expiresAt: number }>();
+const CODEX_MODELS_TTL_MS = 5 * 60_000;
+
+function staticCodexFallback(error?: string): ListModelsResult {
+  return {
+    models: CODEX_STATIC_MODELS.slice(),
+    source: "static",
+    fetchedAt: Date.now(),
+    ...(error ? { error } : {}),
+  };
+}
+
+/**
+ * Parse `codex debug models` JSON output into the canonical RuntimeModelInfo
+ * shape. Exported for unit testing — the actual CLI invocation is shelled
+ * out in {@link listCodexModels} and uses this parser on the captured stdout.
+ */
+export function parseCodexModelsOutput(stdout: string): RuntimeModelInfo[] {
+  if (!stdout || !stdout.trim()) return [];
+  let parsed: any;
+  try { parsed = JSON.parse(stdout); }
+  catch { return []; }
+
+  const models: any[] = Array.isArray(parsed?.models) ? parsed.models : [];
+  const out: RuntimeModelInfo[] = [];
+  for (const m of models) {
+    if (!m || typeof m.slug !== "string" || !m.slug) continue;
+    if (m.visibility && m.visibility !== "list") continue;
+    if (m.supported_in_api === false) continue;
+    out.push({
+      id: m.slug,
+      label: typeof m.display_name === "string" && m.display_name ? m.display_name : m.slug,
+      provider: "openai",
+      source: "cli",
+      ...(typeof m.description === "string" && m.description ? { notes: m.description } : {}),
+    });
+  }
+  return out;
+}
+
+async function listCodexModels(cliPathOverride?: string, refresh?: boolean): Promise<ListModelsResult> {
+  let cliPath = cliPathOverride;
+  if (!cliPath) {
+    const resolved = resolveCodexCli();
+    // resolveCodexCli always returns a path; treat the "fallback" source
+    // (PATH lookup) as best-effort — the execSync below will surface
+    // ENOENT if it isn't actually on PATH and we'll fall back to static.
+    cliPath = resolved.path;
+  }
+  if (!cliPath) {
+    return staticCodexFallback("codex CLI not found — using static catalog");
+  }
+
+  const cacheKey = cliPath;
+  if (!refresh) {
+    const hit = codexModelsCache.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) return hit.result;
+  }
+
+  try {
+    const codexDir = path.dirname(cliPath);
+    const env = { ...process.env, PATH: `${codexDir}:${process.env.PATH ?? ""}` };
+    const stdout = execSync(`"${cliPath}" debug models`, {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 10_000, env,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const models = parseCodexModelsOutput(stdout);
+    if (models.length === 0) {
+      return staticCodexFallback("codex debug models returned no entries — using static catalog");
+    }
+    const result: ListModelsResult = {
+      models,
+      source: "cli",
+      fetchedAt: Date.now(),
+    };
+    codexModelsCache.set(cacheKey, { result, expiresAt: Date.now() + CODEX_MODELS_TTL_MS });
+    return result;
+  } catch (e: any) {
+    return staticCodexFallback(`codex debug models failed: ${e?.message ?? e}`);
   }
 }

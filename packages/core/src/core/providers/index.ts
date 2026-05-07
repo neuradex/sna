@@ -1,4 +1,14 @@
-export type { AgentProvider, AgentProcess, AgentEvent, SpawnOptions, CompleteOptions, CompletionResult } from "./types.js";
+export type {
+  AgentProvider,
+  AgentProcess,
+  AgentEvent,
+  SpawnOptions,
+  CompleteOptions,
+  CompletionResult,
+  ListModelsConfig,
+  ListModelsResult,
+  RuntimeModelInfo,
+} from "./types.js";
 export { RuntimePool } from "./runtime.js";
 export {
   SpawnOptionsSchema,

@@ -3,7 +3,17 @@ import { EventEmitter } from "events";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import type { AgentProvider, AgentProcess, AgentEvent, SpawnOptions, CompleteOptions, CompletionResult } from "./types.js";
+import type {
+  AgentProvider,
+  AgentProcess,
+  AgentEvent,
+  SpawnOptions,
+  CompleteOptions,
+  CompletionResult,
+  ListModelsConfig,
+  ListModelsResult,
+  RuntimeModelInfo,
+} from "./types.js";
 import { writeClaudeHistoryJsonl } from "../../history/claude-code.js";
 import { logger } from "../../lib/logger.js";
 import { getConfig } from "../../config.js";
@@ -899,5 +909,101 @@ export class ClaudeCodeProvider implements AgentProvider {
     logger.log("agent", `spawned claude-code (pid=${proc.pid}) → ${claudeCommand} ${args.join(" ")}`);
 
     return new ClaudeCodeProcess(proc, options);
+  }
+
+  /**
+   * List models for claude-code (Anthropic cloud) or oMLX (local Anthropic-
+   * compatible server) when `config.baseUrl` is provided. The "omlx" runtime
+   * registers as an alias to ClaudeCodeProvider, so this method handles both
+   * via the same code path — branching on baseUrl.
+   *
+   * Static catalog: returned without network access. Mirrors the aliases and
+   * full IDs the Claude CLI accepts. Curated rather than authoritative — when
+   * Anthropic ships a new model family, this list updates with the SDK.
+   */
+  async listModels(config?: ListModelsConfig): Promise<ListModelsResult> {
+    if (config?.baseUrl) {
+      return listModelsFromAnthropicCompatible(config.baseUrl, config.apiKey, config.refresh);
+    }
+    return {
+      models: CLAUDE_STATIC_MODELS.slice(),
+      source: "static",
+      fetchedAt: Date.now(),
+    };
+  }
+}
+
+// ── Static model catalog ─────────────────────────────────────────────────────
+
+const CLAUDE_STATIC_MODELS: RuntimeModelInfo[] = [
+  { id: "opus",                       label: "Claude Opus 4.7 (alias)",   provider: "anthropic", source: "static", notes: "alias → latest opus" },
+  { id: "claude-opus-4-7",            label: "Claude Opus 4.7",           provider: "anthropic", source: "static" },
+  { id: "sonnet",                     label: "Claude Sonnet 4.6 (alias)", provider: "anthropic", source: "static", notes: "alias → latest sonnet" },
+  { id: "claude-sonnet-4-6",          label: "Claude Sonnet 4.6",         provider: "anthropic", source: "static" },
+  { id: "haiku",                      label: "Claude Haiku 4.5 (alias)",  provider: "anthropic", source: "static", notes: "alias → latest haiku" },
+  { id: "claude-haiku-4-5-20251001",  label: "Claude Haiku 4.5",          provider: "anthropic", source: "static" },
+];
+
+// ── oMLX (Anthropic-compatible) live fetch ──────────────────────────────────
+
+interface OmlxCacheEntry {
+  result: ListModelsResult;
+  expiresAt: number;
+}
+
+const OMLX_CACHE_TTL_MS = 60_000;
+const omlxCache = new Map<string, OmlxCacheEntry>();
+
+async function listModelsFromAnthropicCompatible(
+  baseUrl: string,
+  apiKey: string | undefined,
+  refresh: boolean | undefined,
+): Promise<ListModelsResult> {
+  const key = `${baseUrl}::${apiKey ?? ""}`;
+  const now = Date.now();
+  if (!refresh) {
+    const cached = omlxCache.get(key);
+    if (cached && cached.expiresAt > now) return cached.result;
+  }
+
+  const url = baseUrl.replace(/\/+$/, "") + "/v1/models";
+  const headers: Record<string, string> = {
+    "anthropic-version": "2023-06-01",
+  };
+  if (apiKey) headers["x-api-key"] = apiKey;
+
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 5_000);
+    const res = await fetch(url, { headers, signal: ctrl.signal }).finally(() => clearTimeout(timer));
+    if (!res.ok) {
+      const result: ListModelsResult = {
+        models: [],
+        source: "api",
+        fetchedAt: now,
+        error: `oMLX /v1/models returned ${res.status}`,
+      };
+      return result;
+    }
+    const body = await res.json() as { data?: Array<{ id?: string; display_name?: string }> };
+    const data = Array.isArray(body.data) ? body.data : [];
+    const models: RuntimeModelInfo[] = data
+      .filter((m) => typeof m.id === "string" && m.id.length > 0)
+      .map((m) => ({
+        id: m.id as string,
+        label: m.display_name || (m.id as string),
+        provider: "oss",
+        source: "api" as const,
+      }));
+    const result: ListModelsResult = { models, source: "api", fetchedAt: now };
+    omlxCache.set(key, { result, expiresAt: now + OMLX_CACHE_TTL_MS });
+    return result;
+  } catch (err) {
+    return {
+      models: [],
+      source: "api",
+      fetchedAt: now,
+      error: `oMLX fetch failed: ${(err as Error).message}`,
+    };
   }
 }

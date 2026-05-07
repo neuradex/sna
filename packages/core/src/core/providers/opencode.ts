@@ -28,11 +28,13 @@ import { execSync } from "child_process";
 import { EventEmitter } from "events";
 import fs from "fs";
 import path from "path";
-import {
-  createOpencodeClient,
-  createOpencodeServer,
-  type OpencodeClient,
-} from "@opencode-ai/sdk";
+// Lazy-loaded — the SDK is ESM-only (`@opencode-ai/sdk`'s package.json has
+// only an `import` export, no `require` export). Static imports get bundled
+// by tsup as `require("@opencode-ai/sdk")` for the CJS launcher entries
+// (electron/index.cjs, node/index.cjs), which then fails at runtime in
+// consumer apps with "No exports main defined". Dynamic import keeps the
+// SDK off the static bundle graph and Node resolves it as ESM at runtime.
+import type { OpencodeClient } from "@opencode-ai/sdk";
 import type {
   AgentProvider,
   AgentProcess,
@@ -42,6 +44,9 @@ import type {
   CompleteOptions,
   CompletionResult,
   McpServerConfig,
+  ListModelsConfig,
+  ListModelsResult,
+  RuntimeModelInfo,
 } from "./types.js";
 import type { RuntimeConfig, RuntimeHandle } from "./runtime.js";
 import {
@@ -51,6 +56,33 @@ import {
 import { logger } from "../../lib/logger.js";
 
 const SHELL = process.env.SHELL || "/bin/zsh";
+
+// ── SDK lazy loader ────────────────────────────────────────────────────────
+
+/**
+ * Cache for the dynamically-imported SDK. Populated on first prepareRuntime
+ * (or complete) call. spawn() runs synchronously and reads from this cache —
+ * it relies on prepareRuntime having loaded the SDK first, which is always
+ * true for pooled providers (RuntimePool.prepare always runs before spawn).
+ */
+let _sdkCache: typeof import("@opencode-ai/sdk") | null = null;
+
+async function loadOpenCodeSdk(): Promise<typeof import("@opencode-ai/sdk")> {
+  if (!_sdkCache) {
+    _sdkCache = await import("@opencode-ai/sdk");
+  }
+  return _sdkCache;
+}
+
+/** Synchronous accessor for spawn() — throws if SDK hasn't been loaded yet. */
+function requireLoadedSdk(): typeof import("@opencode-ai/sdk") {
+  if (!_sdkCache) {
+    throw new Error(
+      "OpenCodeProvider: SDK not loaded. Call prepareRuntime() before spawn().",
+    );
+  }
+  return _sdkCache;
+}
 
 // ── Binary resolution ──────────────────────────────────────────────────────
 
@@ -895,6 +927,8 @@ export class OpenCodeProvider implements AgentProvider {
     let serverUrl: string;
     let cleanup: () => void = () => {};
 
+    const sdk = await loadOpenCodeSdk();
+
     if (externalUrl) {
       // Caller-managed daemon (tests, embedded uses).
       serverUrl = externalUrl;
@@ -904,7 +938,7 @@ export class OpenCodeProvider implements AgentProvider {
       // structured token usage, so we go through the same HTTP API the
       // session path uses.
       const port = await allocateFreePort();
-      const server = await createOpencodeServer({
+      const server = await sdk.createOpencodeServer({
         hostname: "127.0.0.1",
         port,
         timeout: options.timeout ?? 15_000,
@@ -913,7 +947,7 @@ export class OpenCodeProvider implements AgentProvider {
       cleanup = () => { try { server.close(); } catch { /* already gone */ } };
     }
 
-    const client = createOpencodeClient({ baseUrl: serverUrl });
+    const client = sdk.createOpencodeClient({ baseUrl: serverUrl });
     const startTime = Date.now();
     const overallTimeout = options.timeout ?? 60_000;
 
@@ -1007,6 +1041,12 @@ export class OpenCodeProvider implements AgentProvider {
   }
 
   async prepareRuntime(config: RuntimeConfig): Promise<RuntimeHandle> {
+    // Always load the SDK here so the synchronous spawn() can read it from
+    // the cache without doing its own dynamic import. This is necessary even
+    // for the serverUrl short-circuit because spawn() still calls
+    // sdk.createOpencodeClient.
+    await loadOpenCodeSdk();
+
     // Short-circuit: caller already has a serve URL (tests, external daemons).
     const externalUrl = config.providerOptions?.serverUrl as string | undefined;
     if (externalUrl) {
@@ -1034,7 +1074,8 @@ export class OpenCodeProvider implements AgentProvider {
       logger.log("agent", `opencode: registering ${Object.keys(mcp).length} MCP server(s) with daemon`);
     }
 
-    const server = await createOpencodeServer({
+    const sdk = await loadOpenCodeSdk();
+    const server = await sdk.createOpencodeServer({
       hostname: "127.0.0.1",
       port,
       timeout: 15_000,
@@ -1079,10 +1120,113 @@ export class OpenCodeProvider implements AgentProvider {
         + "Call prepareRuntime() first.",
       );
     }
-    const client = createOpencodeClient({ baseUrl: runtimeHandle.httpUrl });
+    // SDK was loaded by prepareRuntime; spawn is sync so we can't await here.
+    const sdk = requireLoadedSdk();
+    const client = sdk.createOpencodeClient({ baseUrl: runtimeHandle.httpUrl });
     runtimeHandle.activeThreadCount++;
     return new OpenCodeProcess(client, options, runtimeHandle);
   }
+
+  /**
+   * List models available to opencode. Calls `opencode models` (one-shot CLI)
+   * which prints `provider/model` per line — its own models.dev cache and any
+   * provider keys configured in opencode.json determine what surfaces here.
+   *
+   * Cached for 5 minutes to keep the settings-page open cheap. Pass
+   * `config.refresh: true` after the user edits their opencode.json.
+   */
+  async listModels(config?: ListModelsConfig): Promise<ListModelsResult> {
+    return listOpenCodeModels(config?.cliPath, config?.refresh);
+  }
+}
+
+// ── opencode model listing (CLI parse + cache) ───────────────────────────────
+
+interface OpenCodeCacheEntry {
+  result: ListModelsResult;
+  expiresAt: number;
+}
+
+const OPENCODE_CACHE_TTL_MS = 5 * 60_000;
+const opencodeCache = new Map<string, OpenCodeCacheEntry>();
+
+async function listOpenCodeModels(
+  cliPathOverride: string | undefined,
+  refresh: boolean | undefined,
+): Promise<ListModelsResult> {
+  const now = Date.now();
+  const cliPath = cliPathOverride ?? (() => {
+    try {
+      const r = resolveOpenCodeCli();
+      return r.source === "fallback" ? null : r.path;
+    } catch {
+      return null;
+    }
+  })();
+
+  if (!cliPath) {
+    return {
+      models: [],
+      source: "cli",
+      fetchedAt: now,
+      error: "opencode CLI not found",
+    };
+  }
+
+  const cacheKey = cliPath;
+  if (!refresh) {
+    const cached = opencodeCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) return cached.result;
+  }
+
+  try {
+    const dir = path.dirname(cliPath);
+    const env = { ...process.env, PATH: `${dir}:${process.env.PATH ?? ""}` };
+    const stdout = execSync(`"${cliPath}" models`, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 5_000,
+      env,
+    });
+    const models = parseOpenCodeModelsOutput(stdout);
+    const result: ListModelsResult = { models, source: "cli", fetchedAt: now };
+    opencodeCache.set(cacheKey, { result, expiresAt: now + OPENCODE_CACHE_TTL_MS });
+    return result;
+  } catch (err) {
+    return {
+      models: [],
+      source: "cli",
+      fetchedAt: now,
+      error: `opencode models failed: ${(err as Error).message}`,
+    };
+  }
+}
+
+/**
+ * Parse `opencode models` stdout. Each non-empty line is `<providerId>/<modelId>`.
+ * Returns one RuntimeModelInfo per line, with the compound `provider/model` as
+ * the spawn slug (matches what spawn() ultimately passes to OpenCode).
+ *
+ * @internal Exported for testing.
+ */
+export function parseOpenCodeModelsOutput(stdout: string): RuntimeModelInfo[] {
+  const out: RuntimeModelInfo[] = [];
+  for (const raw of stdout.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (!line.includes("/")) continue;
+    const slash = line.indexOf("/");
+    const providerId = line.slice(0, slash);
+    const modelId = line.slice(slash + 1);
+    if (!providerId || !modelId) continue;
+    out.push({
+      id: line,
+      label: line,
+      provider: providerId,
+      source: "cli",
+    });
+  }
+  return out;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
