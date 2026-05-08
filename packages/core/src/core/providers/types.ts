@@ -13,6 +13,7 @@ export interface AgentEvent {
     | "assistant_delta" // streaming text delta (real-time, before final assistant event)
     | "assistant"       // full assistant message (complete, backward-compatible)
     | "tool_use"        // agent is calling a tool
+    | "tool_use_delta"  // streaming partial tool input (Claude Code only — Codex/OpenCode wire formats do not surface this)
     | "tool_result"     // tool returned a result
     | "permission_needed" // agent needs user approval
     | "milestone"       // skill progress milestone
@@ -22,9 +23,13 @@ export interface AgentEvent {
     | "complete";       // agent finished
   message?: string;
   data?: Record<string, unknown>;
-  /** Streaming text delta (for assistant_delta events only) */
+  /**
+   * Streaming text delta. Used by:
+   *   - assistant_delta : token text from the assistant
+   *   - tool_use_delta  : partial JSON fragment for the tool call's input
+   */
   delta?: string;
-  /** Content block index (for assistant_delta events only) */
+  /** Content block index (for assistant_delta and tool_use_delta events) */
   index?: number;
   timestamp: number;
 }
