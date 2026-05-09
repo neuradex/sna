@@ -505,9 +505,18 @@ export class ClaudeCodeProcess implements AgentProcess {
 
         for (const block of content) {
           if (block.type === "thinking") {
+            // Anthropic's extended thinking carries an opaque `signature` on
+            // every thinking block. Replay (CC `--resume` JSONL or any
+            // history-bearing canonical→native adapter) must echo the
+            // signature back unchanged or the API rejects the next turn
+            // with `messages.N.content.M.thinking.signature: Field required`.
+            // Pass it through `data` so session-manager's persistEvent can
+            // stash it in chat_messages.meta.
+            const sig = (block as { signature?: string }).signature;
             events.push({
               type: "thinking",
               message: block.thinking ?? "",
+              data: sig ? { signature: sig } : undefined,
               timestamp: Date.now(),
             });
           } else if (block.type === "tool_use") {
