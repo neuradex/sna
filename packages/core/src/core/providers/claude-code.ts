@@ -210,7 +210,8 @@ export function buildClaudeEnv(
  * stdin format:  {"type":"user","message":{"role":"user","content":"..."}}
  * stdout format: {"type":"system"|"assistant"|"result"|...}
  */
-class ClaudeCodeProcess implements AgentProcess {
+/** @internal exported for fixture-based provider tests; not part of the public SDK */
+export class ClaudeCodeProcess implements AgentProcess {
   private emitter = new EventEmitter();
   private proc: ChildProcess;
   private _alive = true;
@@ -221,6 +222,12 @@ class ClaudeCodeProcess implements AgentProcess {
   private _receivedStreamEvents = false;
   /** tool_use IDs already emitted via stream_event (to update instead of re-create in assistant block) */
   private _streamedToolUseIds = new Set<string>();
+  /**
+   * content_block index → tool_use id, populated on `content_block_start (tool_use)`.
+   * Anthropic's `input_json_delta` events carry only the index, not the id, so we
+   * need this map to attach a stable id to each `tool_use_delta` we emit.
+   */
+  private _activeToolUseByIndex = new Map<number, string>();
 
   /**
    * FIFO event queue — ALL events (deltas, assistant, complete, etc.) go through
@@ -435,6 +442,7 @@ class ClaudeCodeProcess implements AgentProcess {
           const block = inner.content_block;
           this._receivedStreamEvents = true;
           this._streamedToolUseIds.add(block.id);
+          if (typeof inner.index === "number") this._activeToolUseByIndex.set(inner.index, block.id);
           return {
             type: "tool_use",
             message: block.name,
@@ -460,6 +468,22 @@ class ClaudeCodeProcess implements AgentProcess {
               timestamp: Date.now(),
             } satisfies AgentEvent;
           }
+          if (delta?.type === "input_json_delta" && typeof delta.partial_json === "string") {
+            // Anthropic emits `partial_json: ""` as the first delta in some tool calls;
+            // forward all of them so consumers can use a streaming JSON parser without
+            // worrying about gaps. Empty deltas are harmless to a partial-JSON parser.
+            const id = typeof inner.index === "number" ? this._activeToolUseByIndex.get(inner.index) : undefined;
+            return {
+              type: "tool_use_delta",
+              delta: delta.partial_json,
+              index: inner.index ?? 0,
+              data: { id },
+              timestamp: Date.now(),
+            } satisfies AgentEvent;
+          }
+        }
+        if (inner.type === "content_block_stop" && typeof inner.index === "number") {
+          this._activeToolUseByIndex.delete(inner.index);
         }
         return null;
       }
@@ -481,9 +505,18 @@ class ClaudeCodeProcess implements AgentProcess {
 
         for (const block of content) {
           if (block.type === "thinking") {
+            // Anthropic's extended thinking carries an opaque `signature` on
+            // every thinking block. Replay (CC `--resume` JSONL or any
+            // history-bearing canonical→native adapter) must echo the
+            // signature back unchanged or the API rejects the next turn
+            // with `messages.N.content.M.thinking.signature: Field required`.
+            // Pass it through `data` so session-manager's persistEvent can
+            // stash it in chat_messages.meta.
+            const sig = (block as { signature?: string }).signature;
             events.push({
               type: "thinking",
               message: block.thinking ?? "",
+              data: sig ? { signature: sig } : undefined,
               timestamp: Date.now(),
             });
           } else if (block.type === "tool_use") {
@@ -561,6 +594,7 @@ class ClaudeCodeProcess implements AgentProcess {
             } satisfies AgentEvent);
             this._receivedStreamEvents = false;
             this._streamedToolUseIds.clear();
+            this._activeToolUseByIndex.clear();
           }
           // Per-turn usage — represents actual context size for this turn
           const u = msg.usage ?? {};

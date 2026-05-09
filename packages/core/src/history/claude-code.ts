@@ -140,8 +140,17 @@ function canonicalToAnthropicMessages(
       if (b.kind === "text") {
         current.content.push(...renderTextWithEmbeds(b.content, b.embeds, sessionId));
       } else if (b.kind === "thinking") {
+        // Drop thinking blocks that lack a signature. Anthropic's API now
+        // rejects (`messages.N.content.M.thinking.signature: Field required`)
+        // any history entry whose thinking block doesn't carry the original
+        // server-issued signature. Persisted rows from before the provider
+        // fix that started capturing `block.signature` have a null
+        // meta.signature; sending them would 400 the next turn. Losing the
+        // thinking content from prior turns is acceptable — the assistant's
+        // text/tool_use blocks remain intact.
         const signature = typeof b.meta?.signature === "string" ? (b.meta.signature as string) : undefined;
-        current.content.push({ type: "thinking", thinking: b.content, ...(signature ? { signature } : {}) });
+        if (!signature) continue;
+        current.content.push({ type: "thinking", thinking: b.content, signature });
       } else if (b.kind === "tool_use") {
         const id = (b.meta?.id as string | undefined) ?? `tool_${b.id ?? Math.random().toString(36).slice(2)}`;
         const name = b.content || (b.meta?.name as string | undefined) || "tool";
