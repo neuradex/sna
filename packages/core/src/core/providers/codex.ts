@@ -200,6 +200,81 @@ interface JsonRpcRequest {
   params?: Record<string, unknown>;
 }
 
+// ── PreToolUse hook merge ─────────────────────────────────────────────────
+//
+// Codex consumes hooks.json with shape:
+//   { hooks: { PreToolUse: [{ matcher: <regex>, hooks: [{type, command, …}] }] } }
+//
+// SNA's provider always writes its own permission-bridge + tool-filter
+// scripts in a single ".*" matcher. Consumers (e.g. Loom) can supply extra
+// matchers — for example, a Bash-only wrapper that rewrites long-running
+// commands. Those extra matchers append after SNA's so the canonical
+// permission + filter chain runs first.
+//
+// Mirrors `mergeAppSettings()` in claude-code.ts; kept as a pure function
+// to make the merge testable without spinning up a CodexProvider instance.
+
+export interface CodexHookEntry {
+  type: string;
+  command: string;
+  timeout?: number;
+}
+
+export interface CodexHookMatcher {
+  matcher: string;
+  hooks: CodexHookEntry[];
+}
+
+export interface CodexHooksJson {
+  hooks: { PreToolUse: CodexHookMatcher[] };
+}
+
+/**
+ * Build the hooks.json content from SNA's internal PreToolUse chain plus
+ * any consumer-provided settings.
+ *
+ * @param internalHooks Permission/tool-filter scripts SNA always wants to run.
+ * @param appSettings   Optional `providerOptions.settings` object — the same
+ *                      shape claude-code accepts. Only `hooks.PreToolUse`
+ *                      (an array of `{matcher, hooks}` entries) is honored
+ *                      here; other settings keys are ignored because Codex
+ *                      has no equivalent surface.
+ * @returns The hooks.json payload, or null when nothing needs to be written.
+ *
+ * @internal Exported for unit tests.
+ */
+export function buildCodexHooksJson(
+  internalHooks: CodexHookEntry[],
+  appSettings?: Record<string, unknown> | undefined,
+): CodexHooksJson | null {
+  const matchers: CodexHookMatcher[] = [];
+  if (internalHooks.length > 0) {
+    matchers.push({ matcher: ".*", hooks: internalHooks });
+  }
+
+  if (appSettings && typeof appSettings === "object") {
+    const appHooks = (appSettings as { hooks?: unknown }).hooks;
+    if (appHooks && typeof appHooks === "object") {
+      const appPreToolUse = (appHooks as { PreToolUse?: unknown }).PreToolUse;
+      if (Array.isArray(appPreToolUse)) {
+        for (const entry of appPreToolUse) {
+          if (
+            entry &&
+            typeof entry === "object" &&
+            typeof (entry as { matcher?: unknown }).matcher === "string" &&
+            Array.isArray((entry as { hooks?: unknown }).hooks)
+          ) {
+            matchers.push(entry as CodexHookMatcher);
+          }
+        }
+      }
+    }
+  }
+
+  if (matchers.length === 0) return null;
+  return { hooks: { PreToolUse: matchers } };
+}
+
 function rpcRequest(method: string, params?: Record<string, unknown>): JsonRpcRequest & { id: number } {
   return { method, id: ++rpcIdCounter, params: params ?? {} };
 }
@@ -1462,7 +1537,7 @@ export class CodexProvider implements AgentProvider {
       pkgRoot = parent;
     }
 
-    const preToolUseHooks: Array<{ type: string; command: string; timeout?: number }> = [];
+    const preToolUseHooks: CodexHookEntry[] = [];
 
     // 1. Permission hook (skip when bypassPermissions)
     if (options.permissionMode !== "bypassPermissions") {
@@ -1492,16 +1567,14 @@ export class CodexProvider implements AgentProvider {
       logger.log("agent", `codex: tool-filter hook → ${options.allowedTools ? `allowed=[${options.allowedTools}]` : `disallowed=[${options.disallowedTools}]`}`);
     }
 
-    // Write hooks.json if any hooks are configured
-    if (preToolUseHooks.length > 0) {
-      const hooksJson = {
-        hooks: {
-          PreToolUse: [{
-            matcher: ".*",
-            hooks: preToolUseHooks,
-          }],
-        },
-      };
+    // 3. Consumer-provided hooks via providerOptions.settings (parity with
+    //    the claude-code provider). Same shape: `{ hooks: { PreToolUse: [...] } }`.
+    //    Only PreToolUse is plumbed through to Codex today — that's the only
+    //    hook event Codex's engine supports.
+    const consumerSettings = (options.providerOptions as { settings?: Record<string, unknown> } | undefined)?.settings;
+    const hooksJson = buildCodexHooksJson(preToolUseHooks, consumerSettings);
+
+    if (hooksJson) {
       fs.writeFileSync(path.join(codexHome, "hooks.json"), JSON.stringify(hooksJson));
 
       // Enable codex_hooks feature in config.toml

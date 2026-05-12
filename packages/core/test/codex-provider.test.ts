@@ -12,6 +12,7 @@ import {
   extractResumeArg,
   extractSystemPromptArgs,
   validateCodexPath,
+  buildCodexHooksJson,
   // @ts-ignore — toCodexSandboxPolicy is not exported but we test via toCodexSandbox
 } from "../src/core/providers/codex.js";
 import { canonicalToCodexResponseItems } from "../src/history/codex.js";
@@ -223,5 +224,89 @@ describe("permission response format", () => {
   it("decline decision format matches Codex protocol", () => {
     const response = { id: 0, result: { decision: "decline" } };
     assert.equal(response.result.decision, "decline");
+  });
+});
+
+// ── buildCodexHooksJson ─────────────────────────────────────────────────────
+//
+// Codex's hooks.json mirrors claude-code's settings.hooks: a list of matchers
+// each with their own hook scripts. SNA writes one ".*" matcher with the
+// permission + tool-filter chain; consumers (Loom) layer additional matchers
+// for tool-specific wrappers (e.g. a Bash-only `lbash` rewrite). The merge
+// function below preserves SNA's matcher first so its permission gate always
+// runs ahead of consumer logic.
+
+describe("buildCodexHooksJson", () => {
+  const internal = [
+    { type: "command", command: "node sna-hook.js", timeout: 300 },
+  ];
+
+  it("returns null when no internal and no app hooks", () => {
+    assert.equal(buildCodexHooksJson([], undefined), null);
+    assert.equal(buildCodexHooksJson([], {}), null);
+    assert.equal(buildCodexHooksJson([], { hooks: {} }), null);
+  });
+
+  it("wraps internal-only hooks in a single .* matcher", () => {
+    const out = buildCodexHooksJson(internal, undefined);
+    assert.deepEqual(out, {
+      hooks: { PreToolUse: [{ matcher: ".*", hooks: internal }] },
+    });
+  });
+
+  it("appends consumer matchers after the internal one (order matters)", () => {
+    const appBash = { matcher: "Bash", hooks: [{ type: "command", command: "node lbash-hook.js" }] };
+    const out = buildCodexHooksJson(internal, { hooks: { PreToolUse: [appBash] } });
+    assert.deepEqual(out, {
+      hooks: {
+        PreToolUse: [
+          { matcher: ".*", hooks: internal },
+          appBash,
+        ],
+      },
+    });
+  });
+
+  it("emits a consumer-only PreToolUse array when SNA has no internal hooks", () => {
+    // Happens when permissionMode is bypassPermissions and no tool filter is set.
+    const appBash = { matcher: "Bash", hooks: [{ type: "command", command: "node lbash-hook.js" }] };
+    const out = buildCodexHooksJson([], { hooks: { PreToolUse: [appBash] } });
+    assert.deepEqual(out, { hooks: { PreToolUse: [appBash] } });
+  });
+
+  it("ignores non-PreToolUse hook events from app settings", () => {
+    // Codex's engine only supports PreToolUse today. Other event names are
+    // silently dropped instead of being written through and producing a
+    // confusing hooks.json that the runtime would reject.
+    const out = buildCodexHooksJson(internal, {
+      hooks: {
+        PostToolUse: [{ matcher: ".*", hooks: [{ type: "command", command: "node post.js" }] }],
+      },
+    });
+    assert.deepEqual(out, {
+      hooks: { PreToolUse: [{ matcher: ".*", hooks: internal }] },
+    });
+  });
+
+  it("skips malformed matcher entries", () => {
+    const out = buildCodexHooksJson(internal, {
+      hooks: {
+        PreToolUse: [
+          { matcher: "Bash", hooks: [{ type: "command", command: "node ok.js" }] },
+          null,
+          { matcher: "Read" }, // missing hooks
+          { hooks: [] }, // missing matcher
+          "garbage",
+        ],
+      },
+    });
+    assert.deepEqual(out, {
+      hooks: {
+        PreToolUse: [
+          { matcher: ".*", hooks: internal },
+          { matcher: "Bash", hooks: [{ type: "command", command: "node ok.js" }] },
+        ],
+      },
+    });
   });
 });
