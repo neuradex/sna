@@ -120,4 +120,61 @@ describe("ClaudeCodeProcess — tool_use_delta forwarding", () => {
     assert.equal((tud!.data as { id?: string }).id, undefined);
     assert.equal(tud!.delta, "{\"k\":1}");
   });
+
+  it("emits the completed tool input only after all queued input_json_delta chunks", async () => {
+    const { proc, pushLine, close } = makeMockProc();
+    const cc = new ClaudeCodeProcess(proc, SPAWN_OPTIONS);
+
+    const events: AgentEvent[] = [];
+    cc.on("event", (e) => events.push(e));
+
+    const toolUseId = "toolu_ordered_input";
+    pushLine(JSON.stringify({
+      type: "stream_event",
+      event: {
+        type: "content_block_start",
+        index: 1,
+        content_block: { type: "tool_use", id: toolUseId, name: "Write", input: {}, caller: { type: "direct" } },
+      },
+    }));
+    pushLine(JSON.stringify({
+      type: "stream_event",
+      event: { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: "{\"body\":\"Hel" } },
+    }));
+    pushLine(JSON.stringify({
+      type: "stream_event",
+      event: { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: "lo\"}" } },
+    }));
+    pushLine(JSON.stringify({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: toolUseId, name: "Write", input: { body: "Hello" }, caller: { type: "direct" } },
+        ],
+        stop_reason: null,
+      },
+    }));
+
+    await new Promise<void>((resolve) => {
+      cc.on("exit", () => resolve());
+      close();
+    });
+    await new Promise((r) => setTimeout(r, 50));
+
+    const ordered = events
+      .filter((e) => e.type === "tool_use_delta" || (e.type === "tool_use" && (e.data as { id?: string }).id === toolUseId))
+      .map((e) => e.type === "tool_use_delta"
+        ? `delta:${e.delta}`
+        : (e.data as { update?: boolean }).update
+          ? "update"
+          : "start");
+
+    assert.deepEqual(ordered, [
+      "start",
+      "delta:{\"body\":\"Hel",
+      "delta:lo\"}",
+      "update",
+    ]);
+  });
 });
