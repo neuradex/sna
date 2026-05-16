@@ -20,6 +20,62 @@ import { getConfig } from "../../config.js";
 
 const SHELL = process.env.SHELL || "/bin/zsh";
 
+function traceClaude(stage: string, details: Record<string, unknown>): void {
+  const tracePath = process.env.SNA_CLAUDE_TRACE_PATH;
+  if (!tracePath) return;
+  try {
+    fs.mkdirSync(path.dirname(tracePath), { recursive: true });
+    fs.appendFileSync(tracePath, JSON.stringify({
+      t: Date.now(),
+      stage,
+      ...details,
+    }) + "\n");
+  } catch {
+    // Diagnostic-only path. Never let tracing affect agent execution.
+  }
+}
+
+function sampleTraceText(value: string, max = 240): string {
+  const compact = value.replace(/\s+/g, " ");
+  if (compact.length <= max) return compact;
+  const half = Math.floor(max / 2);
+  return `${compact.slice(0, half)}…${compact.slice(-half)}`;
+}
+
+function summarizeNativeMessage(msg: any): Record<string, unknown> {
+  const inner = msg?.event;
+  const delta = inner?.delta;
+  const contentBlock = inner?.content_block;
+  return {
+    type: msg?.type,
+    subtype: msg?.subtype,
+    innerType: inner?.type,
+    index: inner?.index,
+    contentBlockType: contentBlock?.type,
+    contentBlockId: contentBlock?.id,
+    contentBlockName: contentBlock?.name,
+    deltaType: delta?.type,
+    partialJsonLen: typeof delta?.partial_json === "string" ? delta.partial_json.length : undefined,
+    partialJson: typeof delta?.partial_json === "string" ? delta.partial_json : undefined,
+    stopReason: msg?.message?.stop_reason,
+  };
+}
+
+function summarizeAgentEvent(event: AgentEvent | undefined): Record<string, unknown> | null {
+  if (!event) return null;
+  return {
+    type: event.type,
+    index: event.index,
+    deltaLen: typeof event.delta === "string" ? event.delta.length : undefined,
+    delta: event.delta,
+    toolName: event.data?.toolName,
+    id: event.data?.id,
+    update: event.data?.update,
+    streaming: event.data?.streaming,
+    inputPresent: Object.prototype.hasOwnProperty.call(event.data ?? {}, "input"),
+  };
+}
+
 // ── Claude binary resolution ─────────────────────────────────────────────────
 
 /**
@@ -215,9 +271,15 @@ export class ClaudeCodeProcess implements AgentProcess {
   private emitter = new EventEmitter();
   private proc: ChildProcess;
   private _alive = true;
+  private _snaSessionId: string | null = null;
   private _sessionId: string | null = null;
   private _initEmitted = false;
   private buffer = "";
+  private _traceChunkSeq = 0;
+  private _traceRawSeq = 0;
+  private _traceNormalizeSeq = 0;
+  private _traceEnqueueSeq = 0;
+  private _traceEmitSeq = 0;
   /** True once we receive a real text_delta stream_event this turn */
   private _receivedStreamEvents = false;
   /** tool_use IDs already emitted via stream_event (to update instead of re-create in assistant block) */
@@ -231,45 +293,82 @@ export class ClaudeCodeProcess implements AgentProcess {
 
   /**
    * FIFO event queue — ALL events (deltas, assistant, complete, etc.) go through
-   * this queue. A fixed-interval timer drains one item at a time, guaranteeing
-   * strict ordering: deltas → assistant → complete, never out of order.
+   * this queue. It drains in fast microtask batches so a completed tool input
+   * cannot overtake earlier input_json_delta chunks, while still avoiding the
+   * multi-second latency a fixed per-event timer would introduce for large
+   * tool inputs.
    */
   private eventQueue: AgentEvent[] = [];
-  private drainTimer: ReturnType<typeof setInterval> | null = null;
-  private static readonly DRAIN_INTERVAL_MS = 15; // ~67 events/sec
+  private drainScheduled = false;
+  private eventQueueHead = 0;
+  private static readonly DRAIN_BATCH_SIZE = 1000;
 
   /**
    * Enqueue an event for ordered emission.
    * Starts the drain timer if not already running.
    */
   private enqueue(event: AgentEvent): void {
+    this.trace("enqueue", {
+      enqueueSeq: ++this._traceEnqueueSeq,
+      queueDepthBefore: this.eventQueue.length - this.eventQueueHead,
+      event: summarizeAgentEvent(event),
+    });
     this.eventQueue.push(event);
-    if (!this.drainTimer) {
-      this.drainTimer = setInterval(() => this.drainOne(), ClaudeCodeProcess.DRAIN_INTERVAL_MS);
-    }
+    this.scheduleDrain();
   }
 
-  /** Emit one event from the front of the queue. Stop timer when empty. */
-  private drainOne(): void {
-    const event = this.eventQueue.shift();
-    if (event) {
-      this.emitter.emit("event", event);
+  private emitEvent(event: AgentEvent, source: string): void {
+    this.trace("emit", {
+      emitSeq: ++this._traceEmitSeq,
+      source,
+      queueDepth: this.eventQueue.length - this.eventQueueHead,
+      event: summarizeAgentEvent(event),
+    });
+    this.emitter.emit("event", event);
+  }
+
+  private scheduleDrain(): void {
+    if (this.drainScheduled) return;
+    this.drainScheduled = true;
+    queueMicrotask(() => this.drainQueuedBatch());
+  }
+
+  /** Emit queued events in order. Large bursts are split into microtask batches. */
+  private drainQueuedBatch(): void {
+    this.drainScheduled = false;
+    let emitted = 0;
+    while (this.eventQueueHead < this.eventQueue.length && emitted < ClaudeCodeProcess.DRAIN_BATCH_SIZE) {
+      const event = this.eventQueue[this.eventQueueHead++]!;
+      this.emitEvent(event, "queue");
+      emitted++;
     }
-    if (this.eventQueue.length === 0 && this.drainTimer) {
-      clearInterval(this.drainTimer);
-      this.drainTimer = null;
+
+    if (this.eventQueueHead >= this.eventQueue.length) {
+      this.eventQueue = [];
+      this.eventQueueHead = 0;
+      return;
     }
+
+    this.scheduleDrain();
   }
 
   /** Flush all remaining queued events immediately (used on process exit). */
   private flushQueue(): void {
-    if (this.drainTimer) {
-      clearInterval(this.drainTimer);
-      this.drainTimer = null;
+    this.drainScheduled = false;
+    while (this.eventQueueHead < this.eventQueue.length) {
+      this.emitEvent(this.eventQueue[this.eventQueueHead++]!, "flush");
     }
-    while (this.eventQueue.length > 0) {
-      this.emitter.emit("event", this.eventQueue.shift()!);
-    }
+    this.eventQueue = [];
+    this.eventQueueHead = 0;
+  }
+
+  private trace(stage: string, details: Record<string, unknown>): void {
+    traceClaude(stage, {
+      snaSessionId: this._snaSessionId,
+      claudeSessionId: this._sessionId,
+      pid: this.proc.pid ?? null,
+      ...details,
+    });
   }
 
   /**
@@ -300,21 +399,57 @@ export class ClaudeCodeProcess implements AgentProcess {
 
   constructor(proc: ChildProcess, options: SpawnOptions) {
     this.proc = proc;
+    this._snaSessionId = options.env?.SNA_SESSION_ID ?? null;
 
     proc.stdout!.on("data", (chunk: Buffer) => {
-      this.buffer += chunk.toString();
+      const chunkText = chunk.toString();
+      const chunkSeq = ++this._traceChunkSeq;
+      const bufferLenBefore = this.buffer.length;
+      const newlineCount = (chunkText.match(/\n/g) ?? []).length;
+      this.trace("stdout-chunk", {
+        chunkSeq,
+        chunkBytes: chunk.length,
+        chunkChars: chunkText.length,
+        newlineCount,
+        bufferLenBefore,
+        containsInputJsonDelta: chunkText.includes("input_json_delta"),
+        containsBodyKey: chunkText.includes("\"body\""),
+        containsBodyOpen: /<body\b/i.test(chunkText),
+        containsHeadClose: /<\/head>/i.test(chunkText),
+        chunkHead: sampleTraceText(chunkText.slice(0, 800)),
+        chunkTail: sampleTraceText(chunkText.slice(-800)),
+      });
+
+      this.buffer += chunkText;
       const lines = this.buffer.split("\n");
       this.buffer = lines.pop() ?? "";
+      this.trace("stdout-chunk-lines", {
+        chunkSeq,
+        completeLineCount: lines.filter((line) => line.trim()).length,
+        bufferLenAfter: this.buffer.length,
+        bufferedTail: sampleTraceText(this.buffer.slice(-800)),
+      });
 
       for (const line of lines) {
         if (!line.trim()) continue;
         logger.log("stdout", line);
         try {
           const msg = JSON.parse(line);
+          const rawSeq = ++this._traceRawSeq;
+          this.trace("stdout", {
+            rawSeq,
+            lineLen: line.length,
+            native: summarizeNativeMessage(msg),
+          });
           if (msg.session_id && !this._sessionId) {
             this._sessionId = msg.session_id;
           }
           const event = this.normalizeEvent(msg);
+          this.trace("normalize", {
+            rawSeq,
+            normalizeSeq: ++this._traceNormalizeSeq,
+            event: summarizeAgentEvent(event ?? undefined),
+          });
           if (event) this.enqueue(event);
         } catch { /* non-JSON */ }
       }
@@ -523,8 +658,11 @@ export class ClaudeCodeProcess implements AgentProcess {
             const alreadyStreamed = this._streamedToolUseIds.has(block.id);
             if (alreadyStreamed) {
               this._streamedToolUseIds.delete(block.id);
-              // Emit update directly (not enqueued) to guarantee it arrives before tool_result
-              this.emitter.emit("event", {
+              // Keep the completed input on the same FIFO path as its deltas.
+              // If this bypasses the queue, large streamed inputs can render
+              // only at the end because the final tool_use update overtakes
+              // thousands of earlier input_json_delta events.
+              events.push({
                 type: "tool_use",
                 message: block.name,
                 data: { toolName: block.name, input: block.input, id: block.id, update: true },
@@ -548,17 +686,12 @@ export class ClaudeCodeProcess implements AgentProcess {
         }
 
         if (events.length > 0 || textBlocks.length > 0) {
-          // When content was already streamed via deltas, emit directly (not enqueued)
-          // to guarantee persistence before tool execution starts.
-          const shouldEmitDirectly = this._receivedStreamEvents;
           for (const e of events) {
-            if (shouldEmitDirectly) this.emitter.emit("event", e);
-            else this.enqueue(e);
+            this.enqueue(e);
           }
           for (const text of textBlocks) {
             const event = { type: "assistant", message: text, timestamp: Date.now() } satisfies AgentEvent;
-            if (shouldEmitDirectly) this.emitter.emit("event", event);
-            else this.enqueue(event);
+            this.enqueue(event);
           }
         }
         return null;
@@ -778,6 +911,9 @@ export class ClaudeCodeProvider implements AgentProvider {
 
   spawn(options: SpawnOptions): AgentProcess {
     const claudeCommand = resolveClaudePath(options.cwd);
+    if (process.env.SNA_CLAUDE_TRACE_PATH) {
+      logger.log("agent", `claude trace → ${process.env.SNA_CLAUDE_TRACE_PATH}`);
+    }
     // SNA_CLAUDE_COMMAND can be multi-word (e.g., "node sna.ts tu claude")
     const claudeParts = claudeCommand.split(/\s+/);
     const claudePath = claudeParts[0]!;
