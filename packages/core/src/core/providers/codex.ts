@@ -14,6 +14,7 @@ import type {
   ListModelsConfig,
   ListModelsResult,
   RuntimeModelInfo,
+  McpServerConfig,
 } from "./types.js";
 import { canonicalToCodexResponseItems } from "../../history/codex.js";
 import { logger } from "../../lib/logger.js";
@@ -243,6 +244,105 @@ export interface CodexHooksJson {
  *
  * @internal Exported for unit tests.
  */
+/**
+ * Write MCP server config + hooks.json into a CODEX_HOME so the daemon
+ * spawned against it loads the consumer's tooling. Shared between the
+ * pooled (prepareRuntime) and non-pooled spawn paths so a CODEX_HOME never
+ * lacks the entries the caller asked for — pre-refactor, only the
+ * non-pooled spawn applied this, so pooled daemons booted without MCP
+ * servers and tool calls silently failed.
+ *
+ * Idempotent for repeat callers on the same CODEX_HOME — config.toml is
+ * appended to and codex_hooks is enabled at most once.
+ */
+export function applyCodexConfig(
+  codexHome: string,
+  opts: {
+    mcpServers?: Record<string, McpServerConfig>;
+    allowedTools?: string[];
+    disallowedTools?: string[];
+    permissionMode?: string;
+    providerOptions?: Record<string, unknown>;
+    env?: Record<string, string | undefined>;
+  },
+  pkgRoot: string,
+): void {
+  const configTomlPath = path.join(codexHome, "config.toml");
+
+  // MCP server injection.
+  if (opts.mcpServers && Object.keys(opts.mcpServers).length > 0) {
+    const existing = fs.existsSync(configTomlPath) ? fs.readFileSync(configTomlPath, "utf8") : "";
+    const tomlLines: string[] = [];
+    for (const [name, cfg] of Object.entries(opts.mcpServers)) {
+      // Skip names already present so a repeat call doesn't duplicate
+      // entries that crash the daemon with "duplicate key" at parse time.
+      if (existing.includes(`[mcp_servers.${name}]`)) continue;
+      if ("url" in cfg) {
+        tomlLines.push(`[mcp_servers.${name}]`);
+        tomlLines.push(`url = ${JSON.stringify(cfg.url)}`);
+        if (cfg.headers) {
+          tomlLines.push(`[mcp_servers.${name}.headers]`);
+          for (const [k, v] of Object.entries(cfg.headers)) {
+            tomlLines.push(`${k} = ${JSON.stringify(v)}`);
+          }
+        }
+      } else {
+        tomlLines.push(`[mcp_servers.${name}]`);
+        tomlLines.push(`command = ${JSON.stringify(cfg.command)}`);
+        if (cfg.args?.length) tomlLines.push(`args = ${JSON.stringify(cfg.args)}`);
+        if (cfg.cwd) tomlLines.push(`cwd = ${JSON.stringify(cfg.cwd)}`);
+        if (cfg.env && Object.keys(cfg.env).length > 0) {
+          tomlLines.push(`[mcp_servers.${name}.env]`);
+          for (const [k, v] of Object.entries(cfg.env)) {
+            tomlLines.push(`${k} = ${JSON.stringify(v)}`);
+          }
+        }
+      }
+      tomlLines.push("");
+    }
+    if (tomlLines.length > 0) {
+      fs.appendFileSync(configTomlPath, "\n" + tomlLines.join("\n"));
+      logger.log("agent", `codex: ${tomlLines.filter((l) => l.startsWith("[mcp_servers.")).length} MCP servers injected`);
+    }
+  }
+
+  // Hook injection: permission hook + tool filter + consumer hooks.
+  const preToolUseHooks: CodexHookEntry[] = [];
+  if (opts.permissionMode !== "bypassPermissions") {
+    const hookScript = path.join(pkgRoot, "dist", "scripts", "hook.js");
+    const sessionId = opts.env?.SNA_SESSION_ID ?? "default";
+    preToolUseHooks.push({
+      type: "command",
+      command: `node "${hookScript}" --session=${sessionId}`,
+      timeout: 300,
+    });
+    logger.log("agent", `codex: permission hook → ${hookScript} --session=${sessionId}`);
+  }
+  if (opts.allowedTools?.length || opts.disallowedTools?.length) {
+    const filterScript = path.join(pkgRoot, "dist", "scripts", "tool-filter.js");
+    const filterArgs: string[] = [];
+    if (opts.allowedTools?.length) {
+      filterArgs.push(`--allowed=${opts.allowedTools.join(",")}`);
+    } else if (opts.disallowedTools?.length) {
+      filterArgs.push(`--disallowed=${opts.disallowedTools.join(",")}`);
+    }
+    preToolUseHooks.push({
+      type: "command",
+      command: `node "${filterScript}" ${filterArgs.join(" ")}`,
+    });
+    logger.log("agent", `codex: tool-filter hook → ${opts.allowedTools ? `allowed=[${opts.allowedTools}]` : `disallowed=[${opts.disallowedTools}]`}`);
+  }
+  const consumerSettings = (opts.providerOptions as { settings?: Record<string, unknown> } | undefined)?.settings;
+  const hooksJson = buildCodexHooksJson(preToolUseHooks, consumerSettings);
+  if (hooksJson) {
+    fs.writeFileSync(path.join(codexHome, "hooks.json"), JSON.stringify(hooksJson));
+    const existingConfig = fs.existsSync(configTomlPath) ? fs.readFileSync(configTomlPath, "utf8") : "";
+    if (!existingConfig.includes("codex_hooks")) {
+      fs.appendFileSync(configTomlPath, "\n[features]\ncodex_hooks = true\n");
+    }
+  }
+}
+
 export function buildCodexHooksJson(
   internalHooks: CodexHookEntry[],
   appSettings?: Record<string, unknown> | undefined,
@@ -1411,6 +1511,26 @@ export class CodexProvider implements AgentProvider {
       cleanEnv.PATH = `${codexDir}:${cleanEnv.PATH ?? ""}`;
     }
 
+    // MCP servers + hooks must be in CODEX_HOME *before* the daemon spawns,
+    // otherwise the pooled daemon boots without consumer tooling — tool calls
+    // (loom-tools, etc.) silently fall through to "command not found" inside
+    // the agent. The non-pooled spawn path already does this; we duplicate the
+    // call here for the pool path through the shared applyCodexConfig helper.
+    let pkgRoot = path.dirname(fileURLToPath(import.meta.url));
+    while (!fs.existsSync(path.join(pkgRoot, "package.json"))) {
+      const parent = path.dirname(pkgRoot);
+      if (parent === pkgRoot) break;
+      pkgRoot = parent;
+    }
+    applyCodexConfig(codexHome, {
+      mcpServers: config.mcp as Record<string, McpServerConfig> | undefined,
+      allowedTools: config.settings?.allowedTools,
+      disallowedTools: config.settings?.disallowedTools,
+      permissionMode: config.permissionMode,
+      providerOptions: config.providerOptions,
+      env: config.env,
+    }, pkgRoot);
+
     logger.log("agent", `codex: preparing runtime (CODEX_HOME=${codexHome})`);
 
     // Spawn the app-server daemon
@@ -1569,98 +1689,22 @@ export class CodexProvider implements AgentProvider {
 
     cleanEnv.CODEX_HOME = codexHome;
 
-    // ── MCP server injection ────────────────────────────────────────────
-    if (options.mcpServers && Object.keys(options.mcpServers).length > 0) {
-      const tomlLines: string[] = [];
-      for (const [name, cfg] of Object.entries(options.mcpServers)) {
-        if ("url" in cfg) {
-          // HTTP server
-          tomlLines.push(`[mcp_servers.${name}]`);
-          tomlLines.push(`url = ${JSON.stringify(cfg.url)}`);
-          if (cfg.headers) {
-            tomlLines.push(`[mcp_servers.${name}.headers]`);
-            for (const [k, v] of Object.entries(cfg.headers)) {
-              tomlLines.push(`${k} = ${JSON.stringify(v)}`);
-            }
-          }
-        } else {
-          // Stdio server
-          tomlLines.push(`[mcp_servers.${name}]`);
-          tomlLines.push(`command = ${JSON.stringify(cfg.command)}`);
-          if (cfg.args?.length) {
-            tomlLines.push(`args = ${JSON.stringify(cfg.args)}`);
-          }
-          if (cfg.cwd) {
-            tomlLines.push(`cwd = ${JSON.stringify(cfg.cwd)}`);
-          }
-          if (cfg.env && Object.keys(cfg.env).length > 0) {
-            tomlLines.push(`[mcp_servers.${name}.env]`);
-            for (const [k, v] of Object.entries(cfg.env)) {
-              tomlLines.push(`${k} = ${JSON.stringify(v)}`);
-            }
-          }
-        }
-        tomlLines.push("");
-      }
-      fs.appendFileSync(configTomlPath, "\n" + tomlLines.join("\n"));
-      logger.log("agent", `codex: ${Object.keys(options.mcpServers).length} MCP servers injected`);
-    }
-
-    // ── Hook injection ─────────────────────────────────────────────────
-    // Resolve package root for hook scripts
+    // MCP servers + hooks. Shared with prepareRuntime via applyCodexConfig
+    // so pooled and non-pooled CODEX_HOMEs are configured identically.
     let pkgRoot = path.dirname(fileURLToPath(import.meta.url));
     while (!fs.existsSync(path.join(pkgRoot, "package.json"))) {
       const parent = path.dirname(pkgRoot);
       if (parent === pkgRoot) break;
       pkgRoot = parent;
     }
-
-    const preToolUseHooks: CodexHookEntry[] = [];
-
-    // 1. Permission hook (skip when bypassPermissions)
-    if (options.permissionMode !== "bypassPermissions") {
-      const hookScript = path.join(pkgRoot, "dist", "scripts", "hook.js");
-      const sessionId = options.env?.SNA_SESSION_ID ?? "default";
-      preToolUseHooks.push({
-        type: "command",
-        command: `node "${hookScript}" --session=${sessionId}`,
-        timeout: 300,
-      });
-      logger.log("agent", `codex: permission hook → ${hookScript} --session=${sessionId}`);
-    }
-
-    // 2. Tool filter hook (allowedTools / disallowedTools)
-    if (options.allowedTools?.length || options.disallowedTools?.length) {
-      const filterScript = path.join(pkgRoot, "dist", "scripts", "tool-filter.js");
-      const filterArgs: string[] = [];
-      if (options.allowedTools?.length) {
-        filterArgs.push(`--allowed=${options.allowedTools.join(",")}`);
-      } else if (options.disallowedTools?.length) {
-        filterArgs.push(`--disallowed=${options.disallowedTools.join(",")}`);
-      }
-      preToolUseHooks.push({
-        type: "command",
-        command: `node "${filterScript}" ${filterArgs.join(" ")}`,
-      });
-      logger.log("agent", `codex: tool-filter hook → ${options.allowedTools ? `allowed=[${options.allowedTools}]` : `disallowed=[${options.disallowedTools}]`}`);
-    }
-
-    // 3. Consumer-provided hooks via providerOptions.settings (parity with
-    //    the claude-code provider). Same shape: `{ hooks: { PreToolUse: [...] } }`.
-    //    Only PreToolUse is plumbed through to Codex today — that's the only
-    //    hook event Codex's engine supports.
-    const consumerSettings = (options.providerOptions as { settings?: Record<string, unknown> } | undefined)?.settings;
-    const hooksJson = buildCodexHooksJson(preToolUseHooks, consumerSettings);
-
-    if (hooksJson) {
-      fs.writeFileSync(path.join(codexHome, "hooks.json"), JSON.stringify(hooksJson));
-
-      // Enable codex_hooks feature in config.toml
-      const existingConfig = fs.readFileSync(configTomlPath, "utf8");
-      if (!existingConfig.includes("codex_hooks")) {
-        fs.appendFileSync(configTomlPath, "\n[features]\ncodex_hooks = true\n");
-      }
-    }
+    applyCodexConfig(codexHome, {
+      mcpServers: options.mcpServers,
+      allowedTools: options.allowedTools,
+      disallowedTools: options.disallowedTools,
+      permissionMode: options.permissionMode,
+      providerOptions: options.providerOptions,
+      env: options.env,
+    }, pkgRoot);
 
     logger.log("agent", `codex: CODEX_HOME=${codexHome}`);
 
