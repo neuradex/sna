@@ -67,6 +67,32 @@ export interface SessionConfig {
  */
 export type StartConfig = SessionConfig;
 
+/**
+ * Per-spawn snapshot. Each config mutation (model swap, cwd change, restart)
+ * produces a new RuntimeSession whose `parentId` points at the prior node,
+ * forming a chain rooted at the first spawn. Exactly one RuntimeSession per
+ * Session has `retiredAt === null` at any time — that node is the active
+ * runtime and lives at `Session.currentRuntimeId`.
+ *
+ * Phase 4 introduces the type + the backing `runtime_sessions` table.
+ * Phase 5 wires SessionManager to read/write through it.
+ */
+export interface RuntimeSession {
+  id: string;
+  /** FK to the owning `chat_sessions.id`. */
+  snaSessionId: string;
+  /** Direct ancestor in the chain, or null for the first spawn. */
+  parentId: string | null;
+  /** The config that was used to start this runtime. Stable within the runtime. */
+  config: SessionConfig;
+  /** Process pointer — non-null while this runtime is `current` and alive. */
+  process: AgentProcess | null;
+  state: SessionState;
+  spawnedAt: number;
+  /** null = this is the active runtime; non-null = retired in favor of a successor. */
+  retiredAt: number | null;
+}
+
 export interface Session {
   id: string;
   process: AgentProcess | null;

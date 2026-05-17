@@ -197,6 +197,93 @@ function extToMime(ext: string): string {
   }
 }
 
+/**
+ * Add `current_runtime_id` + `cc_session_id` to chat_sessions, and create
+ * `runtime_sessions`. Backfill: every chat_sessions row with a
+ * last_start_config gets one runtime_sessions entry (parentId null, current),
+ * and chat_sessions.current_runtime_id is pointed at it.
+ *
+ * Phase 5 of the session-model refactor (#21) wires SessionManager to read
+ * from runtime_sessions. Phase 4 (this code) is additive: the old
+ * `last_start_config` / `cwd` columns continue to be written for backward
+ * compat until phase 5 lands.
+ */
+function migrateRuntimeSessions(db: Database.Database) {
+  // Idempotent: skip if the table already exists with the expected shape.
+  const tables = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='runtime_sessions'",
+  ).all() as { name: string }[];
+  const tableExists = tables.length > 0;
+
+  // Columns to add to chat_sessions (idempotent).
+  const cols = db.prepare("PRAGMA table_info(chat_sessions)").all() as { name: string }[];
+  const hasCurrentRuntime = cols.some((c) => c.name === "current_runtime_id");
+  const hasCcSession = cols.some((c) => c.name === "cc_session_id");
+
+  db.transaction(() => {
+    if (!hasCurrentRuntime) {
+      db.exec("ALTER TABLE chat_sessions ADD COLUMN current_runtime_id TEXT");
+    }
+    if (!hasCcSession) {
+      db.exec("ALTER TABLE chat_sessions ADD COLUMN cc_session_id TEXT");
+    }
+
+    if (!tableExists) {
+      db.exec(`
+        CREATE TABLE runtime_sessions (
+          id              TEXT PRIMARY KEY,
+          sna_session_id  TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          parent_id       TEXT REFERENCES runtime_sessions(id),
+          config          TEXT NOT NULL,
+          state           TEXT NOT NULL DEFAULT 'idle',
+          spawned_at      INTEGER NOT NULL,
+          retired_at      INTEGER
+        );
+        CREATE INDEX idx_runtime_sessions_sna ON runtime_sessions(sna_session_id);
+        CREATE INDEX idx_runtime_sessions_parent ON runtime_sessions(parent_id);
+        CREATE INDEX idx_runtime_sessions_alive ON runtime_sessions(sna_session_id)
+          WHERE retired_at IS NULL;
+      `);
+    }
+
+    // Backfill: every chat_sessions row that has a recorded config gets a
+    // runtime_sessions entry. Idempotent: only insert when there's no
+    // existing runtime for that session.
+    const sessions = db.prepare(
+      `SELECT id, cwd, last_start_config, current_runtime_id
+         FROM chat_sessions
+        WHERE last_start_config IS NOT NULL`,
+    ).all() as { id: string; cwd: string | null; last_start_config: string; current_runtime_id: string | null }[];
+
+    const insertRT = db.prepare(
+      `INSERT INTO runtime_sessions
+         (id, sna_session_id, parent_id, config, state, spawned_at, retired_at)
+       VALUES (?, ?, NULL, ?, 'idle', ?, NULL)`,
+    );
+    const linkCurrent = db.prepare(
+      `UPDATE chat_sessions SET current_runtime_id = ? WHERE id = ?`,
+    );
+
+    for (const row of sessions) {
+      if (row.current_runtime_id) continue; // already migrated
+      let config: Record<string, unknown>;
+      try {
+        config = JSON.parse(row.last_start_config) as Record<string, unknown>;
+      } catch {
+        continue; // malformed — skip; SessionManager will re-create on next start
+      }
+      // Ensure cwd is present in the new config JSON. Falls back to the
+      // legacy chat_sessions.cwd column, then the empty string.
+      if (typeof config.cwd !== "string") {
+        config.cwd = row.cwd ?? "";
+      }
+      const rtId = `rt_${row.id}_${Date.now().toString(36)}`;
+      insertRT.run(rtId, row.id, JSON.stringify(config), Date.now());
+      linkCurrent.run(rtId, row.id);
+    }
+  })();
+}
+
 function initSchema(db: Database.Database) {
   dropLegacySkillEvents(db);
   migrateChatSessionsMeta(db);
@@ -210,6 +297,8 @@ function initSchema(db: Database.Database) {
       meta       TEXT,
       cwd        TEXT,
       last_start_config TEXT,
+      current_runtime_id TEXT,
+      cc_session_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -234,9 +323,26 @@ function initSchema(db: Database.Database) {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS runtime_sessions (
+      id              TEXT PRIMARY KEY,
+      sna_session_id  TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+      parent_id       TEXT REFERENCES runtime_sessions(id),
+      config          TEXT NOT NULL,
+      state           TEXT NOT NULL DEFAULT 'idle',
+      spawned_at      INTEGER NOT NULL,
+      retired_at      INTEGER
+    );
+
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session_kind ON chat_messages(session_id, kind);
+    CREATE INDEX IF NOT EXISTS idx_runtime_sessions_sna ON runtime_sessions(sna_session_id);
+    CREATE INDEX IF NOT EXISTS idx_runtime_sessions_parent ON runtime_sessions(parent_id);
+    CREATE INDEX IF NOT EXISTS idx_runtime_sessions_alive ON runtime_sessions(sna_session_id)
+      WHERE retired_at IS NULL;
   `);
+
+  // Backfill must run after chat_sessions / runtime_sessions exist.
+  migrateRuntimeSessions(db);
 }
 
 export interface ChatSession {
