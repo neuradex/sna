@@ -599,6 +599,10 @@ class CodexProcess implements AgentProcess {
 
       const threadParams: Record<string, unknown> = {
         sandbox,
+        // `ThreadStartParams.cwd` lets a shared app-server daemon host threads
+        // operating on different working directories. Without this every cwd
+        // would need its own daemon; with it, one daemon serves all sessions.
+        ...(this.options.cwd ? { cwd: this.options.cwd } : {}),
         ...(this.options.model ? { model: this.options.model } : {}),
         ...(baseInstructions ? { baseInstructions } : {}),
         ...(developerInstructions ? { developerInstructions } : {}),
@@ -623,6 +627,7 @@ class CodexProcess implements AgentProcess {
         const resumeResult = await this.sendRpc("thread/resume", {
           threadId: syntheticThreadId,
           history: responseItems,
+          ...(this.options.cwd ? { cwd: this.options.cwd } : {}),
           ...(baseInstructions ? { baseInstructions } : {}),
           ...(developerInstructions ? { developerInstructions } : {}),
           ...(this.options.model ? { model: this.options.model } : {}),
@@ -641,6 +646,7 @@ class CodexProcess implements AgentProcess {
       } else if (resumeThreadId) {
         const resumeResult = await this.sendRpc("thread/resume", {
           threadId: resumeThreadId,
+          ...(this.options.cwd ? { cwd: this.options.cwd } : {}),
           ...(baseInstructions ? { baseInstructions } : {}),
           ...(developerInstructions ? { developerInstructions } : {}),
         });
@@ -1199,6 +1205,10 @@ class CodexProcess implements AgentProcess {
 export class CodexProvider implements AgentProvider {
   readonly name = "codex";
   readonly supportsRuntimePooling = true; // Daemon-style: app-server pool
+  // codex app-server's `ThreadStartParams.cwd`, `ThreadResumeParams.cwd`, and
+  // `TurnStartParams.cwd` let each thread/turn carry its own working directory,
+  // so one shared daemon can host sessions operating on different cwds.
+  readonly supportsCwdPerThread = true;
 
   async isAvailable(): Promise<boolean> {
     try {

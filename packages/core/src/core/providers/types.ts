@@ -199,6 +199,16 @@ export interface AgentProvider {
   /** Whether this provider uses a shared global runtime (daemon pool). */
   readonly supportsRuntimePooling: boolean;
   /**
+   * Whether `spawn(options)` can pass a per-thread/per-turn `cwd` to the
+   * daemon — i.e. one shared daemon can host sessions operating on different
+   * working directories. When true, RuntimePool drops `cwd` from its key so
+   * cross-cwd sessions reuse the same pooled daemon.
+   *
+   * Providers that bind cwd at daemon spawn (or have no daemon) leave this
+   * false / undefined.
+   */
+  readonly supportsCwdPerThread?: boolean;
+  /**
    * Prepare (or reuse) a global runtime for this provider.
    * Called once per unique runtime config. Returns a handle that
    * can be shared across sessions. Null for stateless providers.
