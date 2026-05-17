@@ -36,6 +36,7 @@ export type {
   SessionLifecycleEvent,
   SessionLifecycleState,
   SessionConfigChangedEvent,
+  SessionConfig,
   StartConfig,
   AgentStatus,
 } from "./session-manager.js";

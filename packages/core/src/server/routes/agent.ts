@@ -24,7 +24,7 @@ import {
   type AgentProcess,
 } from "../../core/providers/index.js";
 import type { RuntimeHandle, RuntimeConfig } from "../../core/providers/runtime.js";
-import type { StartConfig } from "../session-manager.js";
+import type { SessionConfig } from "../session-manager.js";
 import { logger } from "../../lib/logger.js";
 import { getDb } from "../../db/schema.js";
 import { SessionManager } from "../session-manager.js";
@@ -413,7 +413,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       }, runtimeHandle);
 
       sessionManager.setProcess(sessionId, proc);
-      sessionManager.saveStartConfig(sessionId, { provider: providerName, modelProvider: body.modelProvider, model, permissionMode, configDir, extraArgs, providerOptions: body.providerOptions });
+      sessionManager.saveStartConfig(sessionId, { provider: providerName, modelProvider: body.modelProvider, model, cwd: session.cwd, permissionMode, configDir, extraArgs, providerOptions: body.providerOptions });
       logger.log("route", `POST /start?session=${sessionId} → started`);
 
       return httpJson(c, "agent.start", {
@@ -591,6 +591,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       provider?: string;
       modelProvider?: string;
       model?: string;
+      cwd?: string;
       permissionMode?: string;
       configDir?: string;
       extraArgs?: string[];
@@ -607,7 +608,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       const session = sessionManager.getSession(sessionId);
       if (!session) return c.json({ status: "error", message: "Session not found" }, 404);
 
-      const prevProvider = session.lastStartConfig?.provider;
+      const prevProvider = session.config?.provider;
       const nextProvider = body.provider ?? prevProvider;
       if (!nextProvider) return c.json({ status: "error", message: "Provider is required" }, 400);
       const nextProv = getProvider(nextProvider);
@@ -631,12 +632,13 @@ export function createAgentRoutes(sessionManager: SessionManager) {
         }
 
         // Merge config
-        const base = session.lastStartConfig!;
+        const base = session.config!;
         const nextProviderChanged = prevProvider && nextProvider !== prevProvider;
-        const mergedConfig: StartConfig = {
+        const mergedConfig: SessionConfig = {
           provider: nextProvider,
           modelProvider: body.modelProvider ?? (nextProviderChanged ? undefined : base.modelProvider),
           model: body.model ?? base.model,
+          cwd: body.cwd ?? base.cwd ?? session.cwd,
           permissionMode: body.permissionMode ?? base.permissionMode,
           configDir: nextProviderChanged ? body.configDir : (body.configDir ?? base.configDir),
           extraArgs: nextProviderChanged ? body.extraArgs : (body.extraArgs ?? base.extraArgs),
@@ -752,16 +754,16 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     }
 
     const providerName = body.provider ?? getConfig().defaultProvider;
-    const providerChanged = session.lastStartConfig && session.lastStartConfig.provider !== providerName;
-    const model = body.model ?? session.lastStartConfig?.model ?? getConfig().model;
-    const permissionMode = body.permissionMode ?? session.lastStartConfig?.permissionMode;
-    const configDir = providerChanged ? body.configDir : (body.configDir ?? session.lastStartConfig?.configDir);
+    const providerChanged = session.config && session.config.provider !== providerName;
+    const model = body.model ?? session.config?.model ?? getConfig().model;
+    const permissionMode = body.permissionMode ?? session.config?.permissionMode;
+    const configDir = providerChanged ? body.configDir : (body.configDir ?? session.config?.configDir);
     // Provider-specific fields: inherit only when provider is unchanged.
-    const extraArgs = providerChanged ? body.extraArgs : (body.extraArgs ?? session.lastStartConfig?.extraArgs);
-    const providerOptions = providerChanged ? body.providerOptions : (body.providerOptions ?? session.lastStartConfig?.providerOptions);
+    const extraArgs = providerChanged ? body.extraArgs : (body.extraArgs ?? session.config?.extraArgs);
+    const providerOptions = providerChanged ? body.providerOptions : (body.providerOptions ?? session.config?.providerOptions);
     // modelProvider: inherit only when provider is unchanged AND caller didn't
     // supply one; otherwise prefer the caller's explicit value.
-    const modelProvider = body.modelProvider ?? (providerChanged ? undefined : session.lastStartConfig?.modelProvider);
+    const modelProvider = body.modelProvider ?? (providerChanged ? undefined : session.config?.modelProvider);
     const provider = getProvider(providerName);
 
     try {
@@ -817,7 +819,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
         });
       }
       sessionManager.setProcess(sessionId, proc, "resumed");
-      sessionManager.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, permissionMode, configDir, extraArgs, providerOptions });
+      sessionManager.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, cwd: session.cwd, permissionMode, configDir, extraArgs, providerOptions });
       logger.log("route", `POST /resume?session=${sessionId} → resumed (${history.length} history msgs)`);
       return httpJson(c, "agent.resume", {
         status: "resumed",
@@ -867,7 +869,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
 
     // For pooled providers (Codex, OpenCode), close only the thread.
     // For non-pooled providers (Claude Code), kill the entire process.
-    const providerName = session.lastStartConfig?.provider;
+    const providerName = session.config?.provider;
     if (providerName) {
       const provider = getProvider(providerName);
       if (provider.supportsRuntimePooling) {
@@ -905,7 +907,7 @@ export function createAgentRoutes(sessionManager: SessionManager) {
       eventCount: session?.eventCounter ?? 0,
       messageCount,
       lastMessage,
-      config: session?.lastStartConfig ?? null,
+      config: session?.config ?? null,
     });
   });
 

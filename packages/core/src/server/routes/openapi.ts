@@ -1025,6 +1025,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
         provider: providerName,
         modelProvider: body.modelProvider,
         model,
+        cwd: session.cwd,
         permissionMode: body.permissionMode,
         configDir: body.configDir,
         extraArgs: body.extraArgs,
@@ -1120,7 +1121,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
 
     try {
       const session = sessionManager.getSession(sessionId);
-      const prevProvider = session?.lastStartConfig?.provider;
+      const prevProvider = session?.config?.provider;
       const ccSessionId = session?.ccSessionId;
 
       const { config } = sessionManager.restartSession(sessionId, body, (cfg) => {
@@ -1187,13 +1188,13 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     }
 
     const providerName = body.provider ?? getConfig().defaultProvider;
-    const providerChanged = session.lastStartConfig && session.lastStartConfig.provider !== providerName;
-    const model = body.model ?? session.lastStartConfig?.model ?? getConfig().model;
-    const permissionMode = body.permissionMode ?? session.lastStartConfig?.permissionMode;
-    const configDir = providerChanged ? body.configDir : (body.configDir ?? session.lastStartConfig?.configDir);
-    const extraArgs = providerChanged ? body.extraArgs : (body.extraArgs ?? session.lastStartConfig?.extraArgs);
-    const providerOptions = providerChanged ? body.providerOptions : (body.providerOptions ?? session.lastStartConfig?.providerOptions);
-    const modelProvider = body.modelProvider ?? (providerChanged ? undefined : session.lastStartConfig?.modelProvider);
+    const providerChanged = session.config && session.config.provider !== providerName;
+    const model = body.model ?? session.config?.model ?? getConfig().model;
+    const permissionMode = body.permissionMode ?? session.config?.permissionMode;
+    const configDir = providerChanged ? body.configDir : (body.configDir ?? session.config?.configDir);
+    const extraArgs = providerChanged ? body.extraArgs : (body.extraArgs ?? session.config?.extraArgs);
+    const providerOptions = providerChanged ? body.providerOptions : (body.providerOptions ?? session.config?.providerOptions);
+    const modelProvider = body.modelProvider ?? (providerChanged ? undefined : session.config?.modelProvider);
     const provider = getProvider(providerName);
 
     try {
@@ -1218,6 +1219,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
         provider: providerName,
         modelProvider,
         model,
+        cwd: session.cwd,
         permissionMode,
         configDir,
         extraArgs,
@@ -1299,7 +1301,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
       eventCount: session?.eventCounter ?? 0,
       messageCount,
       lastMessage,
-      config: session?.lastStartConfig ?? null,
+      config: session?.config ?? null,
     }, 200);
   });
 

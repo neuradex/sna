@@ -14,7 +14,16 @@ import { getProvider, getRuntimePool, SpawnOptionsSchema, RuntimeConfigSchema } 
 
 export type SessionState = "idle" | "processing" | "waiting" | "permission";
 
-export interface StartConfig {
+/**
+ * Captured spawn configuration for a session. Conceptually "what config this
+ * session is currently running with" — updated in place when fields change via
+ * setSessionModel / setSessionPermissionMode, and rebuilt on restartSession.
+ *
+ * Phase 5 of the session-model refactor will move this onto a per-spawn
+ * RuntimeSession entity (each config snapshot becomes its own chain node).
+ * For now it lives on the Session as `Session.config`.
+ */
+export interface SessionConfig {
   /**
    * Runtime — the CLI/binary we spawn (e.g. "claude-code", "codex", "opencode").
    * Dispatched via providers/index.ts getProvider(). Distinct from modelProvider:
@@ -31,6 +40,12 @@ export interface StartConfig {
   modelProvider?: string;
   /** Model slug within the modelProvider's catalog (e.g. "sonnet-4-6", "gpt-5.4"). */
   model: string;
+  /**
+   * Working directory for the current spawn. Mirrors Session.cwd until the
+   * session model is split (phase 5); after that, `currentRuntimeSession.config.cwd`
+   * is the canonical location.
+   */
+  cwd: string;
   permissionMode?: string;
   configDir?: string;
   /**
@@ -46,16 +61,30 @@ export interface StartConfig {
   providerOptions?: Record<string, unknown>;
 }
 
+/**
+ * @deprecated Renamed to `SessionConfig`. Kept as an alias for one release so
+ * downstream consumers can migrate without an immediate breaking change.
+ */
+export type StartConfig = SessionConfig;
+
 export interface Session {
   id: string;
   process: AgentProcess | null;
   eventBuffer: AgentEvent[];
   eventCounter: number;
   label: string;
+  /**
+   * Mirrors `config.cwd` once a config has been recorded. Kept as a top-level
+   * field for now because Session is created before its first spawn — `config`
+   * stays null until `setConfig` lands the first SessionConfig.
+   *
+   * Phase 5 removes this field; cwd then lives only on the current RuntimeSession.
+   */
   cwd: string;
   meta: Record<string, unknown> | null;
   state: SessionState;
-  lastStartConfig: StartConfig | null;
+  /** Captured spawn config, written by `setConfig` (was `saveStartConfig`). */
+  config: SessionConfig | null;
   /** Claude Code's own session ID (from system.init event). Used for --resume. */
   ccSessionId: string | null;
   createdAt: number;
@@ -72,7 +101,7 @@ export interface SessionInfo {
   agentStatus: AgentStatus;
   cwd: string;
   meta: Record<string, unknown> | null;
-  config: StartConfig | null;
+  config: SessionConfig | null;
   ccSessionId: string | null;
   eventCount: number;
   messageCount: number;
@@ -101,7 +130,7 @@ export interface SessionLifecycleEvent {
 
 export interface SessionConfigChangedEvent {
   session: string;
-  config: StartConfig;
+  config: SessionConfig;
 }
 
 export class SessionManager {
@@ -138,7 +167,7 @@ export class SessionManager {
           cwd: row.cwd ?? process.cwd(),
           meta: row.meta ? JSON.parse(row.meta) : null,
           state: "idle",
-          lastStartConfig: row.last_start_config ? JSON.parse(row.last_start_config) : null,
+          config: row.last_start_config ? JSON.parse(row.last_start_config) : null,
           ccSessionId: null,
           createdAt: new Date(row.created_at).getTime() || Date.now(),
           lastActivityAt: Date.now(),
@@ -164,7 +193,7 @@ export class SessionManager {
         session.label,
         session.meta ? JSON.stringify(session.meta) : null,
         session.cwd,
-        session.lastStartConfig ? JSON.stringify(session.lastStartConfig) : null,
+        session.config ? JSON.stringify(session.config) : null,
       );
     } catch { /* non-fatal */ }
   }
@@ -204,7 +233,7 @@ export class SessionManager {
       cwd: opts.cwd ?? process.cwd(),
       meta: opts.meta ?? null,
       state: "idle",
-      lastStartConfig: null,
+      config: null,
       ccSessionId: null,
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
@@ -409,7 +438,7 @@ export class SessionManager {
     return () => this.configChangedListeners.delete(cb);
   }
 
-  private emitConfigChanged(sessionId: string, config: StartConfig): void {
+  private emitConfigChanged(sessionId: string, config: SessionConfig): void {
     for (const cb of this.configChangedListeners) cb({ session: sessionId, config });
   }
 
@@ -500,24 +529,26 @@ export class SessionManager {
   // ── Session lifecycle ─────────────────────────────────────────
 
   /** Kill the agent process in a session (session stays, can be restarted). */
-  /** Save the start config for a session (called by start handlers). */
-  saveStartConfig(id: string, config: StartConfig): void {
+  /** Save the session config (called by start handlers, after a spawn). */
+  saveStartConfig(id: string, config: SessionConfig): void {
     const session = this.sessions.get(id);
     if (!session) return;
-    session.lastStartConfig = config;
+    session.config = config;
+    // Mirror cwd onto the legacy Session.cwd field until phase 5 collapses it.
+    session.cwd = config.cwd;
     this.persistSession(session);
   }
 
   /** Restart session: kill → re-spawn with merged config + --resume. */
   restartSession(
     id: string,
-    overrides: Partial<StartConfig>,
-    spawnFn: (config: StartConfig) => AgentProcess,
-  ): { config: StartConfig } {
+    overrides: Partial<SessionConfig>,
+    spawnFn: (config: SessionConfig) => AgentProcess,
+  ): { config: SessionConfig } {
     const session = this.sessions.get(id);
     if (!session) throw new Error(`Session "${id}" not found`);
 
-    const base = session.lastStartConfig;
+    const base = session.config;
     if (!base) throw new Error(`Session "${id}" has no previous start config`);
 
     // Merge strategy: overrides win. Provider-specific fields (extraArgs,
@@ -528,7 +559,7 @@ export class SessionManager {
     const nextProvider = overrides.provider ?? base.provider;
     const providerChanged = nextProvider !== base.provider;
 
-    const config: StartConfig = {
+    const config: SessionConfig = {
       provider: nextProvider,
       // modelProvider is attribution metadata, not runtime-specific. Caller
       // (e.g. Loom) decides it via its model catalog and passes it in with
@@ -536,6 +567,7 @@ export class SessionManager {
       // provider change, since the inherited modelProvider no longer matches.
       modelProvider: overrides.modelProvider ?? (providerChanged ? undefined : base.modelProvider),
       model: overrides.model ?? base.model,
+      cwd: overrides.cwd ?? base.cwd,
       permissionMode: overrides.permissionMode ?? base.permissionMode,
       configDir: providerChanged ? overrides.configDir : (overrides.configDir ?? base.configDir),
       extraArgs: providerChanged ? overrides.extraArgs : (overrides.extraArgs ?? base.extraArgs),
@@ -544,7 +576,7 @@ export class SessionManager {
 
     // Kill existing
     if (session.process?.alive) {
-      const providerName = session.lastStartConfig?.provider;
+      const providerName = session.config?.provider;
       if (providerName) {
         const provider = getProvider(providerName);
         if (provider.supportsRuntimePooling) {
@@ -560,7 +592,8 @@ export class SessionManager {
     // Spawn with merged config + --resume
     const proc = spawnFn(config);
     this.setProcess(id, proc);
-    session.lastStartConfig = config;
+    session.config = config;
+    session.cwd = config.cwd;
     this.persistSession(session);
     this.emitLifecycle({ session: id, state: "restarted" });
     this.emitConfigChanged(id, config);
@@ -582,13 +615,20 @@ export class SessionManager {
     const session = this.sessions.get(id);
     if (!session) return false;
     if (session.process?.alive) session.process.setModel(model);
-    if (session.lastStartConfig) {
-      session.lastStartConfig.model = model;
+    if (session.config) {
+      session.config.model = model;
     } else {
-      session.lastStartConfig = { provider: getConfig().defaultProvider, model, permissionMode: getConfig().defaultPermissionMode };
+      // No prior config — synthesize one anchored on the session's current
+      // cwd so SessionConfig's required fields are all populated.
+      session.config = {
+        provider: getConfig().defaultProvider,
+        model,
+        cwd: session.cwd,
+        permissionMode: getConfig().defaultPermissionMode,
+      };
     }
     this.persistSession(session);
-    this.emitConfigChanged(id, session.lastStartConfig);
+    this.emitConfigChanged(id, session.config);
     return true;
   }
 
@@ -597,13 +637,18 @@ export class SessionManager {
     const session = this.sessions.get(id);
     if (!session) return false;
     if (session.process?.alive) session.process.setPermissionMode(mode);
-    if (session.lastStartConfig) {
-      session.lastStartConfig.permissionMode = mode;
+    if (session.config) {
+      session.config.permissionMode = mode;
     } else {
-      session.lastStartConfig = { provider: getConfig().defaultProvider, model: getConfig().model, permissionMode: mode };
+      session.config = {
+        provider: getConfig().defaultProvider,
+        model: getConfig().model,
+        cwd: session.cwd,
+        permissionMode: mode,
+      };
     }
     this.persistSession(session);
-    this.emitConfigChanged(id, session.lastStartConfig);
+    this.emitConfigChanged(id, session.config);
     return true;
   }
 
@@ -623,7 +668,7 @@ export class SessionManager {
     if (!session) return false;
     if (session.process?.alive) {
       // For pooled providers, close only the thread; otherwise kill the process.
-      const providerName = session.lastStartConfig?.provider;
+      const providerName = session.config?.provider;
       if (providerName) {
         const provider = getProvider(providerName);
         if (provider.supportsRuntimePooling) {
@@ -652,7 +697,7 @@ export class SessionManager {
       agentStatus: !s.process?.alive ? "disconnected" : (s.state === "processing" ? "busy" : "idle") as AgentStatus,
       cwd: s.cwd,
       meta: s.meta,
-      config: s.lastStartConfig,
+      config: s.config,
       ccSessionId: s.ccSessionId,
       eventCount: s.eventCounter,
       ...this.getMessageStats(s.id),
@@ -693,7 +738,7 @@ export class SessionManager {
    *
    * Assistant-authored blocks (text / thinking / tool_use) are stamped with
    * three-layer attribution — runtime (CLI), modelProvider (LLM API vendor),
-   * and model (specific slug) — pulled from session.lastStartConfig at emit
+   * and model (specific slug) — pulled from session.config at emit
    * time. If the user switches mid-session, subsequent rows carry the new
    * attribution. Essential for auditing, Langfuse traces, UI badges, and
    * adapters that need to know "who actually said this" when converting
@@ -715,9 +760,9 @@ export class SessionManager {
       // The SDK's internal field name for the CLI is `provider` (runtime
       // dispatch key), but we surface it as `runtime` in the canonical meta
       // to disambiguate from the LLM API vendor (`modelProvider`).
-      if (session?.lastStartConfig?.provider) attr.runtime = session.lastStartConfig.provider;
-      if (session?.lastStartConfig?.modelProvider) attr.modelProvider = session.lastStartConfig.modelProvider;
-      if (session?.lastStartConfig?.model) attr.model = session.lastStartConfig.model;
+      if (session?.config?.provider) attr.runtime = session.config.provider;
+      if (session?.config?.modelProvider) attr.modelProvider = session.config.modelProvider;
+      if (session?.config?.model) attr.model = session.config.model;
 
       switch (e.type) {
         case "assistant":
@@ -804,7 +849,7 @@ export class SessionManager {
     for (const session of this.sessions.values()) {
       if (session.id === "default") continue;
       if (session.process?.alive) {
-        const providerName = session.lastStartConfig?.provider;
+        const providerName = session.config?.provider;
         if (providerName) {
           const provider = getProvider(providerName);
           if (provider.supportsRuntimePooling) {

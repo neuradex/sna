@@ -380,7 +380,7 @@ function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): vo
       mcpServers: msg.mcpServers as any,
     });
     sm.setProcess(sessionId, proc);
-    sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, permissionMode, configDir, extraArgs, providerOptions });
+    sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, cwd: session.cwd, permissionMode, configDir, extraArgs, providerOptions });
     wsReply(ws, msg, { status: "started", provider: provider.name, sessionId: session.id });
   } catch (e: any) {
     replyError(ws, msg, e.message);
@@ -465,18 +465,18 @@ async function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManag
     return replyError(ws, msg, "No history in DB — nothing to resume.");
   }
 
-  const providerName = (msg.provider as string) ?? session.lastStartConfig?.provider ?? getConfig().defaultProvider;
-  const providerChanged = session.lastStartConfig && session.lastStartConfig.provider !== providerName;
-  const model = (msg.model as string) ?? session.lastStartConfig?.model ?? getConfig().model;
-  const permissionMode = (msg.permissionMode as string) ?? session.lastStartConfig?.permissionMode;
-  const configDir = providerChanged ? (msg.configDir as string | undefined) : ((msg.configDir as string) ?? session.lastStartConfig?.configDir);
+  const providerName = (msg.provider as string) ?? session.config?.provider ?? getConfig().defaultProvider;
+  const providerChanged = session.config && session.config.provider !== providerName;
+  const model = (msg.model as string) ?? session.config?.model ?? getConfig().model;
+  const permissionMode = (msg.permissionMode as string) ?? session.config?.permissionMode;
+  const configDir = providerChanged ? (msg.configDir as string | undefined) : ((msg.configDir as string) ?? session.config?.configDir);
   // Provider-specific fields: inherit only when provider is unchanged.
-  const extraArgs = providerChanged ? (msg.extraArgs as string[] | undefined) : ((msg.extraArgs as string[]) ?? session.lastStartConfig?.extraArgs);
+  const extraArgs = providerChanged ? (msg.extraArgs as string[] | undefined) : ((msg.extraArgs as string[]) ?? session.config?.extraArgs);
   const providerOptions = providerChanged
     ? (msg.providerOptions as Record<string, unknown> | undefined)
-    : ((msg.providerOptions as Record<string, unknown> | undefined) ?? session.lastStartConfig?.providerOptions);
+    : ((msg.providerOptions as Record<string, unknown> | undefined) ?? session.config?.providerOptions);
   const modelProvider = (msg.modelProvider as string | undefined)
-    ?? (providerChanged ? undefined : session.lastStartConfig?.modelProvider);
+    ?? (providerChanged ? undefined : session.config?.modelProvider);
   const provider = getProvider(providerName);
 
   try {
@@ -513,7 +513,7 @@ async function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManag
         mcpServers: msg.mcpServers as any,
       }, runtimeHandle);
       sm.setProcess(sessionId, proc, "resumed");
-      sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, permissionMode, configDir, extraArgs, providerOptions });
+      sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, cwd: session.cwd, permissionMode, configDir, extraArgs, providerOptions });
       wsReply(ws, msg, {
         status: "resumed",
         provider: providerName,
@@ -539,7 +539,7 @@ async function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManag
         mcpServers: msg.mcpServers as any,
       });
       sm.setProcess(sessionId, proc, "resumed");
-      sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, permissionMode, configDir, extraArgs, providerOptions });
+      sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, cwd: session.cwd, permissionMode, configDir, extraArgs, providerOptions });
       wsReply(ws, msg, {
         status: "resumed",
         provider: providerName,
@@ -557,7 +557,7 @@ async function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionMana
   try {
     const session = sm.getSession(sessionId);
     if (!session) return replyError(ws, msg, "Session not found");
-    const prevProvider = session.lastStartConfig?.provider;
+    const prevProvider = session.config?.provider;
     const ccSessionId = session?.ccSessionId;
 
     const nextProvider = msg.provider as string | undefined ?? prevProvider;
@@ -580,12 +580,13 @@ async function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionMana
       }
 
       // Merge config
-      const base = session.lastStartConfig!;
+      const base = session.config!;
       const nextProviderChanged = prevProvider && nextProvider !== prevProvider;
       const mergedConfig: any = {
         provider: nextProvider,
         modelProvider: msg.modelProvider ?? (nextProviderChanged ? undefined : base.modelProvider),
         model: msg.model ?? base.model,
+        cwd: (msg.cwd as string | undefined) ?? base.cwd ?? session.cwd,
         permissionMode: msg.permissionMode ?? base.permissionMode,
         configDir: nextProviderChanged ? (msg.configDir as string | undefined) : (msg.configDir ?? base.configDir),
         extraArgs: nextProviderChanged ? (msg.extraArgs as string[] | undefined) : (msg.extraArgs ?? base.extraArgs),
@@ -723,7 +724,7 @@ function handleAgentStatus(ws: WebSocket, msg: WsRequest, sm: SessionManager): v
     eventCount: session?.eventCounter ?? 0,
     messageCount,
     lastMessage,
-    config: session?.lastStartConfig ?? null,
+    config: session?.config ?? null,
   });
 }
 
