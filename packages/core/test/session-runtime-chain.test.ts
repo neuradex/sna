@@ -234,6 +234,48 @@ describe("SessionManager.applySessionPatch — in-place vs respawn", () => {
   });
 });
 
+describe("SessionInfo.runtimeChain exposure", () => {
+  it("listSessions() omits runtimeChain by default", () => {
+    const sm = freshSm("info-default");
+    sm.createSession({ id: "s1", cwd: "/tmp/proj" });
+    sm.saveStartConfig("s1", baseConfig());
+
+    const infos = sm.listSessions();
+    const info = infos.find((i) => i.id === "s1")!;
+    assert.equal(info.runtimeChain, undefined,
+      "default listSessions response should not carry the chain — kept small for high-frequency polls");
+    assert.ok(info.currentRuntimeId, "currentRuntimeId is part of the default surface");
+  });
+
+  it("listSessions({ includeRuntimeChain: true }) embeds the chain", () => {
+    const sm = freshSm("info-chain");
+    sm.createSession({ id: "s1", cwd: "/tmp/proj" });
+    sm.saveStartConfig("s1", baseConfig({ model: "gpt-5.4" }));
+    sm.setSessionModel("s1", "gpt-5.5");
+
+    const infos = sm.listSessions({ includeRuntimeChain: true });
+    const info = infos.find((i) => i.id === "s1")!;
+    assert.ok(Array.isArray(info.runtimeChain));
+    assert.equal(info.runtimeChain!.length, 2);
+    assert.equal(info.runtimeChain![0].config.model, "gpt-5.4");
+    assert.equal(info.runtimeChain![0].retiredAt !== null, true);
+    assert.equal(info.runtimeChain![1].config.model, "gpt-5.5");
+    assert.equal(info.runtimeChain![1].retiredAt, null);
+    assert.equal(info.runtimeChain![1].id, info.currentRuntimeId);
+  });
+
+  it("getSessionInfo() returns null for unknown session, info for known", () => {
+    const sm = freshSm("info-single");
+    assert.equal(sm.getSessionInfo("nope"), null);
+    sm.createSession({ id: "s1", cwd: "/tmp/proj" });
+    sm.saveStartConfig("s1", baseConfig());
+    const info = sm.getSessionInfo("s1", { includeRuntimeChain: true });
+    assert.ok(info);
+    assert.equal(info!.id, "s1");
+    assert.equal(info!.runtimeChain!.length, 1);
+  });
+});
+
 describe("SessionManager — restoreFromDb rebuilds the chain", () => {
   it("a new SessionManager observes the chain saved by a previous instance", () => {
     const dbPath = tmpDbPath("chain-restore");

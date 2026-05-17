@@ -194,9 +194,13 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     }
   });
 
-  // GET /sessions — list all sessions
+  // GET /sessions — list all sessions. Pass `?include=chain` to embed each
+  // session's full RuntimeSession audit chain.
   app.get("/sessions", (c) => {
-    return httpJson(c, "sessions.list", { sessions: sessionManager.listSessions() });
+    const include = c.req.query("include");
+    return httpJson(c, "sessions.list", {
+      sessions: sessionManager.listSessions({ includeRuntimeChain: include === "chain" }),
+    });
   });
 
   // DELETE /sessions/:id — remove a session

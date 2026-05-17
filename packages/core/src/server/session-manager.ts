@@ -143,6 +143,24 @@ export interface SessionInfo {
   lastMessage: { actor: string; kind: string; content: string; created_at: string } | null;
   createdAt: number;
   lastActivityAt: number;
+  /** ID of the currently-active RuntimeSession (null until first spawn). */
+  currentRuntimeId: string | null;
+  /**
+   * Full chain of RuntimeSessions for this session, oldest first. Optional —
+   * callers can opt in via `listSessions({ includeRuntimeChain: true })` so
+   * the default response stays small for high-frequency status polls.
+   *
+   * Each entry is a snapshot of one spawn / config-change moment; the
+   * entry with `retiredAt: null` matches `currentRuntimeId`.
+   */
+  runtimeChain?: Array<{
+    id: string;
+    parentId: string | null;
+    config: SessionConfig;
+    state: SessionState;
+    spawnedAt: number;
+    retiredAt: number | null;
+  }>;
 }
 
 export interface SessionManagerOptions {
@@ -944,9 +962,25 @@ export class SessionManager {
     return true;
   }
 
-  /** List all sessions as serializable info objects. */
-  listSessions(): SessionInfo[] {
-    return Array.from(this.sessions.values()).map((s) => ({
+  /**
+   * List all sessions as serializable info objects.
+   *
+   * The optional `includeRuntimeChain` flag populates `SessionInfo.runtimeChain`
+   * with the full audit history of config changes. Off by default — status
+   * polls stay small; debugging / audit surfaces opt in.
+   */
+  listSessions(options: { includeRuntimeChain?: boolean } = {}): SessionInfo[] {
+    return Array.from(this.sessions.values()).map((s) => this.buildSessionInfo(s, options));
+  }
+
+  /** Build a SessionInfo for a single session. Same shape as listSessions. */
+  getSessionInfo(id: string, options: { includeRuntimeChain?: boolean } = {}): SessionInfo | null {
+    const session = this.sessions.get(id);
+    return session ? this.buildSessionInfo(session, options) : null;
+  }
+
+  private buildSessionInfo(s: Session, options: { includeRuntimeChain?: boolean }): SessionInfo {
+    const info: SessionInfo = {
       id: s.id,
       label: s.label,
       alive: s.process?.alive ?? false,
@@ -960,7 +994,19 @@ export class SessionManager {
       ...this.getMessageStats(s.id),
       createdAt: s.createdAt,
       lastActivityAt: s.lastActivityAt,
-    }));
+      currentRuntimeId: this.currentRuntimeId.get(s.id) ?? null,
+    };
+    if (options.includeRuntimeChain) {
+      info.runtimeChain = (this.runtimes.get(s.id) ?? []).map((rt) => ({
+        id: rt.id,
+        parentId: rt.parentId,
+        config: rt.config,
+        state: rt.state,
+        spawnedAt: rt.spawnedAt,
+        retiredAt: rt.retiredAt,
+      }));
+    }
+    return info;
   }
 
   /** Touch a session's lastActivityAt timestamp. */

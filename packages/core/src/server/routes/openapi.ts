@@ -146,7 +146,12 @@ const listSessionsRoute = createRoute({
   method: "get",
   path: "/agent/sessions",
   summary: "List sessions",
-  description: "List all agent sessions.",
+  description: "List all agent sessions. Pass `?include=chain` to embed each session's full RuntimeSession audit chain in the response.",
+  request: {
+    query: z.object({
+      include: z.enum(["chain"]).optional(),
+    }),
+  },
   responses: {
     200: {
       description: "Session list.",
@@ -978,7 +983,10 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
 
   app.openapi(listSessionsRoute, (c) => {
     if (!sessionManager) return c.json({ sessions: [] }, 200);
-    return c.json({ sessions: sessionManager.listSessions() }, 200);
+    const { include } = c.req.valid("query");
+    return c.json({
+      sessions: sessionManager.listSessions({ includeRuntimeChain: include === "chain" }),
+    }, 200);
   });
 
   app.openapi(removeSessionRoute, (c) => {
