@@ -79,6 +79,16 @@ async function start() {
       console.log("");
       logger.log("sna", "stopping all sessions...");
       sessionManager.killAll();
+      // Pool dispose tears down the codex (and opencode) daemons spawned via
+      // prepareRuntime. killAll only closes threads on pooled providers, so
+      // without this the daemons would be reparented to init and survive the
+      // SNA shutdown — taking their MCP server children with them.
+      try {
+        const { getRuntimePool } = require("../core/providers/index.js");
+        getRuntimePool().dispose();
+      } catch (err) {
+        logger.err("sna", `runtime pool dispose failed: ${err}`);
+      }
       if (server) {
         server.close(() => {
           logger.log("sna", "clean shutdown — see you next time");

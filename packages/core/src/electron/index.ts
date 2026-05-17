@@ -505,6 +505,13 @@ export async function startSnaServerInProcess(
         await shutdownTracer();
       } catch { /* langfuse not loaded — skip */ }
       sessionManager.killAll();
+      // Dispose pooled runtimes — without this the codex app-server daemons
+      // spawned by prepareRuntime are reparented to init when the SNA host
+      // process exits and keep running (along with their MCP children).
+      try {
+        const { getRuntimePool } = await import("../core/providers/index.js");
+        getRuntimePool().dispose();
+      } catch { /* pool not initialized — nothing to dispose */ }
       // Clear the logger callback and reset level to avoid leaking references after shutdown
       snaLogger.setOnLog(null);
       snaLogger.setLogLevel("info");
