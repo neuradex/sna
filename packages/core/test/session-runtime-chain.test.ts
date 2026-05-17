@@ -149,7 +149,7 @@ describe("SessionManager — setSessionModel / setSessionPermissionMode chain", 
 });
 
 describe("SessionManager.applySessionPatch — in-place vs respawn", () => {
-  it("in-place: provider applyPatch returns empty leftover → no respawn, process migrates", () => {
+  it("in-place: provider applyPatch returns empty leftover → no respawn, process migrates", async () => {
     const sm = freshSm("patch-inplace");
     sm.createSession({ id: "s1", cwd: "/tmp/proj" });
     sm.saveStartConfig("s1", baseConfig({ model: "gpt-5.4" }));
@@ -159,7 +159,7 @@ describe("SessionManager.applySessionPatch — in-place vs respawn", () => {
     proc.leftover = {}; // codex-like: everything in-place
 
     let respawnCalled = false;
-    const result = sm.applySessionPatch("s1", { cwd: "/new", model: "gpt-5.5" }, () => {
+    const result = await sm.applySessionPatch("s1", { cwd: "/new", model: "gpt-5.5" }, () => {
       respawnCalled = true;
       return new FakeProcess();
     });
@@ -179,7 +179,7 @@ describe("SessionManager.applySessionPatch — in-place vs respawn", () => {
     assert.equal(chain[1].process, proc, "current RT inherits the live process");
   });
 
-  it("respawn: leftover non-empty → caller's respawnFn drives the new process", () => {
+  it("respawn: leftover non-empty → caller's respawnFn drives the new process", async () => {
     const sm = freshSm("patch-respawn");
     sm.createSession({ id: "s1", cwd: "/tmp/proj" });
     sm.saveStartConfig("s1", baseConfig({ provider: "claude-code", model: "haiku" }));
@@ -190,7 +190,7 @@ describe("SessionManager.applySessionPatch — in-place vs respawn", () => {
 
     const newProc = new FakeProcess();
     let respawnedWith: SessionConfig | null = null;
-    const result = sm.applySessionPatch("s1", { cwd: "/new", model: "claude-opus-4-6" }, (cfg) => {
+    const result = await sm.applySessionPatch("s1", { cwd: "/new", model: "claude-opus-4-6" }, (cfg) => {
       respawnedWith = cfg;
       return newProc;
     });
@@ -209,14 +209,14 @@ describe("SessionManager.applySessionPatch — in-place vs respawn", () => {
     assert.equal(chain[1].process, newProc);
   });
 
-  it("empty patch is a no-op (no chain growth)", () => {
+  it("empty patch is a no-op (no chain growth)", async () => {
     const sm = freshSm("patch-empty");
     sm.createSession({ id: "s1", cwd: "/tmp/proj" });
     sm.saveStartConfig("s1", baseConfig());
     sm.setProcess("s1", new FakeProcess());
 
     const before = sm.getRuntimeChain("s1").length;
-    const result = sm.applySessionPatch("s1", {}, () => {
+    const result = await sm.applySessionPatch("s1", {}, () => {
       throw new Error("respawnFn should not be called for an empty patch");
     });
     assert.equal(result.applied, "in-place");
@@ -224,10 +224,10 @@ describe("SessionManager.applySessionPatch — in-place vs respawn", () => {
     assert.equal(sm.getRuntimeChain("s1").length, before);
   });
 
-  it("throws when no current runtime exists", () => {
+  it("rejects when no current runtime exists", async () => {
     const sm = freshSm("patch-no-rt");
     sm.createSession({ id: "s1", cwd: "/tmp/proj" });
-    assert.throws(
+    await assert.rejects(
       () => sm.applySessionPatch("s1", { model: "gpt-5.5" }, () => new FakeProcess()),
       /has no active runtime/,
     );

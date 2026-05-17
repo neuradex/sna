@@ -743,11 +743,11 @@ export class SessionManager {
   }
 
   /** Restart session: kill → re-spawn with merged config + --resume. */
-  restartSession(
+  async restartSession(
     id: string,
     overrides: Partial<SessionConfig>,
-    spawnFn: (config: SessionConfig) => AgentProcess,
-  ): { config: SessionConfig } {
+    spawnFn: (config: SessionConfig) => AgentProcess | Promise<AgentProcess>,
+  ): Promise<{ config: SessionConfig }> {
     const session = this.sessions.get(id);
     if (!session) throw new Error(`Session "${id}" not found`);
 
@@ -794,7 +794,7 @@ export class SessionManager {
 
     // Spawn with merged config + --resume, then transition. The previous
     // process was just killed; the new process is what attaches.
-    const proc = spawnFn(config);
+    const proc = await spawnFn(config);
     const newRt = this.transitionRuntime(session, config, { migrateProcess: false });
     newRt.process = proc;
     session.process = proc;
@@ -866,11 +866,11 @@ export class SessionManager {
    * Either path appends exactly one new RuntimeSession to the chain. The
    * return value tells the caller which path was taken.
    */
-  applySessionPatch(
+  async applySessionPatch(
     id: string,
     patch: SessionPatch,
-    respawnFn: (config: SessionConfig) => AgentProcess,
-  ): { applied: "in-place" | "respawn"; runtimeId: string; fields: string[] } {
+    respawnFn: (config: SessionConfig) => AgentProcess | Promise<AgentProcess>,
+  ): Promise<{ applied: "in-place" | "respawn"; runtimeId: string; fields: string[] }> {
     const session = this.sessions.get(id);
     if (!session) throw new Error(`Session "${id}" not found`);
     const currentRt = this.getCurrentRuntime(id);
@@ -916,7 +916,7 @@ export class SessionManager {
         session.process.kill();
       }
     }
-    const proc = respawnFn(nextConfig);
+    const proc = await respawnFn(nextConfig);
     const newRt = this.transitionRuntime(session, nextConfig, { migrateProcess: false });
     newRt.process = proc;
     session.process = proc;

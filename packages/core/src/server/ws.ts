@@ -65,7 +65,7 @@ import { formatEmbedRef } from "../history/embed-refs.js";
 import type { EmbedRecord } from "../history/types.js";
 import { getConfig } from "../config.js";
 import type { SessionManager } from "./session-manager.js";
-import { getRuntimePool } from "../core/providers/index.js";
+import { spawnWithPool } from "../core/providers/index.js";
 import type { RuntimeHandle } from "../core/providers/runtime.js";
 
 // ── Types ─────────────────────────────────────────────────────────
@@ -212,7 +212,8 @@ function handleMessage(
 
     // ── Agent lifecycle ───────────────────────────────
     case "agent.start":
-      return handleAgentStart(ws, msg, sm);
+      void handleAgentStart(ws, msg, sm);
+      return;
     case "agent.send":
       return handleAgentSend(ws, msg, sm);
     case "agent.resume":
@@ -324,7 +325,7 @@ function handleSessionsRemove(ws: WebSocket, msg: WsRequest, sm: SessionManager)
 
 // ── Agent handlers ────────────────────────────────────────────────
 
-function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): void {
+async function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): Promise<void> {
   const sessionId = (msg.session as string) ?? "default";
   const session = sm.getOrCreateSession(sessionId, {
     cwd: msg.cwd as string | undefined,
@@ -363,7 +364,7 @@ function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManager): vo
   const modelProvider = msg.modelProvider as string | undefined;
 
   try {
-    const proc = provider.spawn({
+    const proc = await spawnWithPool(provider, {
       cwd: session.cwd,
       prompt: msg.prompt as string | undefined,
       model,
@@ -480,73 +481,30 @@ async function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManag
   const provider = getProvider(providerName);
 
   try {
-    if (provider.supportsRuntimePooling) {
-      // Pooled path: prepare runtime + spawn thread on it
-      const runtimePool = getRuntimePool();
-      const runtimeHandle = await runtimePool.prepare({
-        cwd: session.cwd,
-        model,
-        configDir,
-        permissionMode: permissionMode as any,
-        modelProvider,
-        mcp: msg.mcpServers as any,
-        settings: {
-          allowedTools: (msg.allowedTools as string[]) ?? [],
-          disallowedTools: (msg.disallowedTools as string[]) ?? [],
-        },
-        env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
-      }, provider);
-      const proc = provider.spawn({
-        cwd: session.cwd,
-        prompt: msg.prompt as string | undefined,
-        model,
-        permissionMode: permissionMode as any,
-        configDir,
-        env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
-        history: history.length > 0 ? history : undefined,
-        extraArgs,
-        providerOptions,
-        systemPrompt: msg.systemPrompt as string | undefined,
-        appendSystemPrompt: msg.appendSystemPrompt as string | undefined,
-        allowedTools: msg.allowedTools as string[] | undefined,
-        disallowedTools: msg.disallowedTools as string[] | undefined,
-        mcpServers: msg.mcpServers as any,
-      }, runtimeHandle);
-      sm.setProcess(sessionId, proc, "resumed");
-      sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, cwd: session.cwd, permissionMode, configDir, extraArgs, providerOptions });
-      wsReply(ws, msg, {
-        status: "resumed",
-        provider: providerName,
-        sessionId: session.id,
-        historyCount: history.length,
-      });
-    } else {
-      // Non-pooled fallback: spawn directly
-      const proc = provider.spawn({
-        cwd: session.cwd,
-        prompt: msg.prompt as string | undefined,
-        model,
-        permissionMode: permissionMode as any,
-        configDir,
-        env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
-        history: history.length > 0 ? history : undefined,
-        extraArgs,
-        providerOptions,
-        systemPrompt: msg.systemPrompt as string | undefined,
-        appendSystemPrompt: msg.appendSystemPrompt as string | undefined,
-        allowedTools: msg.allowedTools as string[] | undefined,
-        disallowedTools: msg.disallowedTools as string[] | undefined,
-        mcpServers: msg.mcpServers as any,
-      });
-      sm.setProcess(sessionId, proc, "resumed");
-      sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, cwd: session.cwd, permissionMode, configDir, extraArgs, providerOptions });
-      wsReply(ws, msg, {
-        status: "resumed",
-        provider: providerName,
-        sessionId: session.id,
-        historyCount: history.length,
-      });
-    }
+    const proc = await spawnWithPool(provider, {
+      cwd: session.cwd,
+      prompt: msg.prompt as string | undefined,
+      model,
+      permissionMode: permissionMode as any,
+      configDir,
+      env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
+      history: history.length > 0 ? history : undefined,
+      extraArgs,
+      providerOptions,
+      systemPrompt: msg.systemPrompt as string | undefined,
+      appendSystemPrompt: msg.appendSystemPrompt as string | undefined,
+      allowedTools: msg.allowedTools as string[] | undefined,
+      disallowedTools: msg.disallowedTools as string[] | undefined,
+      mcpServers: msg.mcpServers as any,
+    });
+    sm.setProcess(sessionId, proc, "resumed");
+    sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, cwd: session.cwd, permissionMode, configDir, extraArgs, providerOptions });
+    wsReply(ws, msg, {
+      status: "resumed",
+      provider: providerName,
+      sessionId: session.id,
+      historyCount: history.length,
+    });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }
@@ -572,104 +530,56 @@ async function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionMana
       mcpServers: msg.mcpServers as any,
     };
 
-    // Handle pooled providers separately (runtime pool + spawn(handle))
-    if (nextProv.supportsRuntimePooling) {
-      // Kill the existing thread (pooled-aware)
-      if (session.process?.alive) {
-        session.process.closeThread();
-      }
+    // Single unified path. restartSession handles kill + persist; spawnWithPool
+    // hides the pooled/non-pooled branching so this site can't forget the
+    // runtime pool for pooled providers.
+    const { config } = await sm.restartSession(
+      sessionId,
+      {
+        provider: msg.provider as string | undefined,
+        modelProvider: msg.modelProvider as string | undefined,
+        model: msg.model as string | undefined,
+        cwd: msg.cwd as string | undefined,
+        permissionMode: msg.permissionMode as string | undefined,
+        configDir: msg.configDir as string | undefined,
+        extraArgs: msg.extraArgs as string[] | undefined,
+        providerOptions: msg.providerOptions as Record<string, unknown> | undefined,
+      },
+      async (cfg) => {
+        const prov = getProvider(cfg.provider);
+        const providerChanged = prevProvider && cfg.provider !== prevProvider;
 
-      // Merge config
-      const base = session.config!;
-      const nextProviderChanged = prevProvider && nextProvider !== prevProvider;
-      const mergedConfig: any = {
-        provider: nextProvider,
-        modelProvider: msg.modelProvider ?? (nextProviderChanged ? undefined : base.modelProvider),
-        model: msg.model ?? base.model,
-        cwd: (msg.cwd as string | undefined) ?? base.cwd ?? session.cwd,
-        permissionMode: msg.permissionMode ?? base.permissionMode,
-        configDir: nextProviderChanged ? (msg.configDir as string | undefined) : (msg.configDir ?? base.configDir),
-        extraArgs: nextProviderChanged ? (msg.extraArgs as string[] | undefined) : (msg.extraArgs ?? base.extraArgs),
-        providerOptions: nextProviderChanged ? (msg.providerOptions as Record<string, unknown> | undefined) : (msg.providerOptions ?? base.providerOptions),
-      };
-
-      const runtimePool = getRuntimePool();
-      const runtimeHandle = await runtimePool.prepare({
-        cwd: session.cwd,
-        model: mergedConfig.model,
-        permissionMode: mergedConfig.permissionMode as any,
-        configDir: mergedConfig.configDir,
-        modelProvider: mergedConfig.modelProvider,
-        mcp: msg.mcpServers as any,
-        settings: {
-          allowedTools: (msg.allowedTools as string[]) ?? [],
-          disallowedTools: (msg.disallowedTools as string[]) ?? [],
-        },
-        env: msg.env as Record<string, string>,
-      }, nextProv);
-
-      const proc = nextProv.spawn({
-        cwd: session.cwd,
-        model: mergedConfig.model,
-        permissionMode: mergedConfig.permissionMode as any,
-        configDir: mergedConfig.configDir,
-        env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
-        extraArgs: mergedConfig.extraArgs,
-        providerOptions: mergedConfig.providerOptions,
-        ...typedOpts,
-      }, runtimeHandle);
-      sm.setProcess(sessionId, proc, "started");
-      sm.saveStartConfig(sessionId, mergedConfig);
-      wsReply(ws, msg, { status: "restarted", provider: nextProvider, sessionId });
-    } else {
-      // Non-pooled: use restartSession with spawn callback
-      const { config } = sm.restartSession(
-        sessionId,
-        {
-          provider: msg.provider as string | undefined,
-          modelProvider: msg.modelProvider as string | undefined,
-          model: msg.model as string | undefined,
-          permissionMode: msg.permissionMode as string | undefined,
-          configDir: msg.configDir as string | undefined,
-          extraArgs: msg.extraArgs as string[] | undefined,
-          providerOptions: msg.providerOptions as Record<string, unknown> | undefined,
-        },
-        (cfg) => {
-          const prov = getProvider(cfg.provider);
-          const providerChanged = prevProvider && cfg.provider !== prevProvider;
-
-          if (providerChanged) {
-            // Cross-provider: inject DB history
-            const history = buildCanonicalFromDb(sessionId);
-            return prov.spawn({
-              cwd: sm.getSession(sessionId)!.cwd,
-              model: cfg.model,
-              permissionMode: cfg.permissionMode as any,
-              configDir: cfg.configDir,
-              env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
-              history: history.length > 0 ? history : undefined,
-              extraArgs: cfg.extraArgs,
-              providerOptions: cfg.providerOptions,
-              ...typedOpts,
-            });
-          }
-
-          // Same provider: native resume via resumeSessionId
-          return prov.spawn({
+        if (providerChanged) {
+          // Cross-provider: inject DB history
+          const history = buildCanonicalFromDb(sessionId);
+          return spawnWithPool(prov, {
             cwd: sm.getSession(sessionId)!.cwd,
             model: cfg.model,
             permissionMode: cfg.permissionMode as any,
             configDir: cfg.configDir,
             env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
-            resumeSessionId: ccSessionId ?? undefined,
+            history: history.length > 0 ? history : undefined,
             extraArgs: cfg.extraArgs,
             providerOptions: cfg.providerOptions,
             ...typedOpts,
           });
-        },
-      );
-      wsReply(ws, msg, { status: "restarted", provider: config.provider, sessionId });
-    }
+        }
+
+        // Same provider: native resume via resumeSessionId
+        return spawnWithPool(prov, {
+          cwd: sm.getSession(sessionId)!.cwd,
+          model: cfg.model,
+          permissionMode: cfg.permissionMode as any,
+          configDir: cfg.configDir,
+          env: { ...(msg.env as Record<string, string>), SNA_SESSION_ID: sessionId },
+          resumeSessionId: ccSessionId ?? undefined,
+          extraArgs: cfg.extraArgs,
+          providerOptions: cfg.providerOptions,
+          ...typedOpts,
+        });
+      },
+    );
+    wsReply(ws, msg, { status: "restarted", provider: config.provider, sessionId });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }

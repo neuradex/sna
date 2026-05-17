@@ -18,6 +18,7 @@ export {
 export { ClaudeCodeProvider } from "./claude-code.js";
 export { CodexProvider } from "./codex.js";
 export { OpenCodeProvider } from "./opencode.js";
+export { spawnWithPool } from "./spawn-helper.js";
 
 import type { AgentProvider } from "./types.js";
 import { ClaudeCodeProvider } from "./claude-code.js";

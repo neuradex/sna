@@ -12,11 +12,13 @@ import fs from "fs";
 import path from "path";
 import {
   getProvider,
+  spawnWithPool,
   type AgentEvent,
 } from "../../core/providers/index.js";
 import { logger } from "../../lib/logger.js";
 import { getDb } from "../../db/schema.js";
 import { SessionManager } from "../session-manager.js";
+import type { SessionConfig } from "../session-manager.js";
 import { buildCanonicalFromDb } from "../../history/canonical.js";
 import { saveEmbeds } from "../image-store.js";
 import { insertChatMessage } from "../../db/chat-messages.js";
@@ -325,6 +327,7 @@ const restartRoute = createRoute({
         provider: z.string().optional(),
         modelProvider: z.string().optional(),
         model: z.string().optional(),
+        cwd: z.string().optional(),
         permissionMode: z.string().optional(),
         configDir: z.string().optional(),
         extraArgs: z.array(z.string()).optional(),
@@ -1070,7 +1073,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     const model = body.model ?? getConfig().model;
 
     try {
-      const proc = provider.spawn({
+      const proc = await spawnWithPool(provider, {
         cwd: session.cwd,
         prompt: body.prompt,
         model,
@@ -1188,26 +1191,39 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
 
     try {
       const session = sessionManager.getSession(sessionId);
-      const prevProvider = session?.config?.provider;
-      const ccSessionId = session?.ccSessionId;
+      if (!session) {
+        // Restart-route's openapi schema only declares 200/500; surface this
+        // as 500 to stay within the typed-response contract.
+        return c.json({ status: "error", message: "Session not found" }, 500);
+      }
+      const prevProvider = session.config?.provider;
+      const ccSessionId = session.ccSessionId;
 
-      const { config } = sessionManager.restartSession(sessionId, body, (cfg) => {
+      const nextProvider = body.provider ?? prevProvider ?? getConfig().defaultProvider;
+      const nextProv = getProvider(nextProvider);
+
+      const typedOpts = {
+        systemPrompt: body.systemPrompt,
+        appendSystemPrompt: body.appendSystemPrompt,
+        allowedTools: body.allowedTools,
+        disallowedTools: body.disallowedTools,
+        mcpServers: body.mcpServers as any,
+      };
+
+      // Single path for both pooled and non-pooled: restartSession owns the
+      // kill + persist mechanics; spawnWithPool handles the runtime pool
+      // branch (no-op for non-pooled providers like claude-code). Earlier
+      // versions had separate branches and the duplication caused #21's
+      // openapi.ts regression — the helper closes that off.
+      const { config } = await sessionManager.restartSession(sessionId, body, async (cfg) => {
         const prov = getProvider(cfg.provider);
         const providerChanged = prevProvider && cfg.provider !== prevProvider;
-
-        const typedOpts = {
-          systemPrompt: body.systemPrompt,
-          appendSystemPrompt: body.appendSystemPrompt,
-          allowedTools: body.allowedTools,
-          disallowedTools: body.disallowedTools,
-          mcpServers: body.mcpServers as any,
-        };
 
         if (providerChanged) {
           const history = buildCanonicalFromDb(sessionId);
           logger.log("route", `restart: provider changed ${prevProvider} → ${cfg.provider}, using DB history (${history.length} msgs)`);
-          return prov.spawn({
-            cwd: sessionManager.getSession(sessionId)!.cwd,
+          return spawnWithPool(prov, {
+            cwd: session.cwd,
             model: cfg.model,
             permissionMode: cfg.permissionMode as any,
             configDir: cfg.configDir,
@@ -1219,8 +1235,8 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
           });
         }
 
-        return prov.spawn({
-          cwd: sessionManager.getSession(sessionId)!.cwd,
+        return spawnWithPool(prov, {
+          cwd: session.cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode as any,
           configDir: cfg.configDir,
@@ -1265,7 +1281,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     const provider = getProvider(providerName);
 
     try {
-      const proc = provider.spawn({
+      const proc = await spawnWithPool(provider, {
         cwd: session.cwd,
         prompt: body.prompt,
         model,
@@ -1347,10 +1363,10 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     }
 
     try {
-      const result = sessionManager.applySessionPatch(sessionId, patch, (cfg) => {
+      const result = await sessionManager.applySessionPatch(sessionId, patch, async (cfg) => {
         const prov = getProvider(cfg.provider);
         const history = buildCanonicalFromDb(sessionId);
-        return prov.spawn({
+        return spawnWithPool(prov, {
           cwd: cfg.cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode as any,
@@ -1443,7 +1459,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     if (body.systemPrompt) extraArgs.push("--system-prompt", body.systemPrompt);
     if (body.appendSystemPrompt) extraArgs.push("--append-system-prompt", body.appendSystemPrompt);
 
-    const proc = provider.spawn({
+    const proc = await spawnWithPool(provider, {
       cwd: session.cwd,
       prompt: body.message,
       model: body.model ?? cfg.model,
