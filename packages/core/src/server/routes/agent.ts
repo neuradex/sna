@@ -858,6 +858,62 @@ export function createAgentRoutes(sessionManager: SessionManager) {
     return httpJson(c, "agent.set-permission-mode", { status: updated ? "updated" : "no_session", permissionMode: body.permissionMode });
   });
 
+  // PATCH /session — unified PATCH mutator. Applies the patch in-place where
+  // the provider supports it (codex per-turn cwd/model/sandbox override,
+  // claude-code control_request for model/permissionMode); leftover fields
+  // (claude-code cwd, cross-runtime changes) drive a respawn-with-history.
+  // Consumers don't have to switch on runtime — the response reports which
+  // path was taken via `applied`. See #21.
+  app.patch("/session", async (c) => {
+    const sessionId = getSessionId(c);
+    const body = (await c.req.json().catch(() => ({}))) as {
+      cwd?: string;
+      model?: string;
+      permissionMode?: string;
+    };
+    // SessionPatch fields are the only thing PATCH /session accepts today.
+    // Unknown fields are silently ignored — consumers should use /restart
+    // when they need to change provider / configDir / providerOptions etc.
+    const patch = {
+      ...(body.cwd !== undefined ? { cwd: body.cwd } : {}),
+      ...(body.model !== undefined ? { model: body.model } : {}),
+      ...(body.permissionMode !== undefined ? { permissionMode: body.permissionMode } : {}),
+    };
+
+    const session = sessionManager.getSession(sessionId);
+    if (!session) return c.json({ status: "error", message: "Session not found" }, 404);
+
+    try {
+      const result = sessionManager.applySessionPatch(sessionId, patch, (cfg) => {
+        // Respawn path: spawn a fresh process with the merged config and
+        // replay DB history so the agent picks up where the prior runtime
+        // left off. Same recipe restartSession uses for cross-provider hops.
+        const prov = getProvider(cfg.provider);
+        const history = buildCanonicalFromDb(sessionId);
+        return prov.spawn({
+          cwd: cfg.cwd,
+          model: cfg.model,
+          permissionMode: cfg.permissionMode as any,
+          configDir: cfg.configDir,
+          env: { SNA_SESSION_ID: sessionId },
+          history: history.length > 0 ? history : undefined,
+          extraArgs: cfg.extraArgs,
+          providerOptions: cfg.providerOptions,
+        });
+      });
+      logger.log("route", `PATCH /session?session=${sessionId} → ${result.applied} fields=[${result.fields.join(",")}] rt=${result.runtimeId}`);
+      return httpJson(c, "agent.session.patch", {
+        status: "updated",
+        applied: result.applied,
+        runtimeId: result.runtimeId,
+        fields: result.fields,
+      });
+    } catch (e: any) {
+      logger.err("err", `PATCH /session?session=${sessionId} → ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 400);
+    }
+  });
+
   // POST /kill
   app.post("/kill", async (c) => {
     const sessionId = getSessionId(c);

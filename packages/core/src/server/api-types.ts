@@ -68,6 +68,12 @@ export interface ApiResponses {
     status: "updated" | "no_session";
     permissionMode?: string;
   };
+  "agent.session.patch": {
+    status: "updated";
+    applied: "in-place" | "respawn";
+    runtimeId: string;
+    fields: string[];
+  };
   "agent.kill": {
     status: "killed" | "no_session";
   };

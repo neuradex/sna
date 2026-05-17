@@ -1530,6 +1530,46 @@ class AgentApi {
   }
 
   /**
+   * Apply a partial config update to a running session — the unified mutator.
+   *
+   * Each field has a per-provider dispatch strategy. Codex routes everything
+   * (cwd / model / permissionMode) through its per-turn override params on
+   * the next `turn/start`. Claude Code handles model / permissionMode in
+   * place via stream-json control_request but cannot retarget cwd without a
+   * respawn — the SDK's `applyPatch` returns those fields as leftover, and
+   * `applySessionPatch` on the server then drives a respawn with DB-backed
+   * history replay so the conversation continues uninterrupted.
+   *
+   * Consumers don't have to know which path the runtime takes — the
+   * response's `applied` field reports `"in-place"` or `"respawn"`.
+   *
+   * @param session - Target session ID.
+   * @param patch - Fields to update. Omitted fields are left unchanged.
+   * @returns `applied`: which path was taken. `runtimeId`: id of the new
+   *   RuntimeSession chain node. `fields`: keys actually present in the patch.
+   *
+   * @example
+   * ```ts
+   * await sna.agent.update("default", { cwd: "/Users/foo/proj-b" });
+   * await sna.agent.update("default", { model: "gpt-5.5", permissionMode: "acceptEdits" });
+   * ```
+   */
+  async update(
+    session: string,
+    patch: { cwd?: string; model?: string; permissionMode?: string },
+  ): Promise<{
+    status: "updated";
+    applied: "in-place" | "respawn";
+    runtimeId: string;
+    fields: string[];
+  }> {
+    if (this.client._httpUrl) {
+      return this.client._httpFetch("PATCH", `/agent/session?session=${encodeURIComponent(session)}`, patch);
+    }
+    return this.client.request("agent.session.patch", { session, ...patch });
+  }
+
+  /**
    * Subscribe to real-time agent events for a session.
    *
    * After subscribing, `agent.event` push messages are delivered

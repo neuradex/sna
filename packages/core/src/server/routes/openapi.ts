@@ -446,6 +446,53 @@ const setPermissionModeRoute = createRoute({
   },
 });
 
+const sessionPatchRoute = createRoute({
+  method: "patch",
+  path: "/agent/session",
+  summary: "Patch session config",
+  description: [
+    "Unified PATCH mutator. Applies the patch in-place where the provider",
+    "supports it (codex per-turn cwd/model/sandbox override; claude-code",
+    "control_request for model/permissionMode). Leftover fields drive a",
+    "respawn-with-history. Response's `applied` reports which path was taken.",
+  ].join(" "),
+  request: {
+    query: z.object({ session: z.string().optional() }),
+    body: {
+      content: { "application/json": { schema: z.object({
+        cwd: z.string().optional(),
+        model: z.string().optional(),
+        permissionMode: z.string().optional(),
+      }) } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Patch applied.",
+      content: { "application/json": { schema: z.object({
+        status: z.literal("updated"),
+        applied: z.enum(["in-place", "respawn"]),
+        runtimeId: z.string(),
+        fields: z.array(z.string()),
+      }) } },
+    },
+    400: {
+      description: "Session has no active runtime, or respawn failed.",
+      content: { "application/json": { schema: z.object({
+        status: z.literal("error"),
+        message: z.string(),
+      }) } },
+    },
+    404: {
+      description: "Session not found.",
+      content: { "application/json": { schema: z.object({
+        status: z.literal("error"),
+        message: z.string(),
+      }) } },
+    },
+  },
+});
+
 const killRoute = createRoute({
   method: "post",
   path: "/agent/kill",
@@ -1259,6 +1306,52 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     const body = c.req.valid("json");
     const updated = sessionManager.setSessionPermissionMode(sessionId, body.permissionMode);
     return c.json({ status: updated ? "updated" : "no_session", permissionMode: body.permissionMode }, 200);
+  });
+
+  app.openapi(sessionPatchRoute, async (c) => {
+    if (!sessionManager) {
+      return c.json({ status: "error" as const, message: "No session manager" }, 400);
+    }
+    const sessionId = getSessionId(c);
+    const body = c.req.valid("json");
+    // SessionPatch fields only; unknown fields would have been stripped by Zod.
+    const patch = {
+      ...(body.cwd !== undefined ? { cwd: body.cwd } : {}),
+      ...(body.model !== undefined ? { model: body.model } : {}),
+      ...(body.permissionMode !== undefined ? { permissionMode: body.permissionMode } : {}),
+    };
+
+    const session = sessionManager.getSession(sessionId);
+    if (!session) {
+      return c.json({ status: "error" as const, message: "Session not found" }, 404);
+    }
+
+    try {
+      const result = sessionManager.applySessionPatch(sessionId, patch, (cfg) => {
+        const prov = getProvider(cfg.provider);
+        const history = buildCanonicalFromDb(sessionId);
+        return prov.spawn({
+          cwd: cfg.cwd,
+          model: cfg.model,
+          permissionMode: cfg.permissionMode as any,
+          configDir: cfg.configDir,
+          env: { SNA_SESSION_ID: sessionId },
+          history: history.length > 0 ? history : undefined,
+          extraArgs: cfg.extraArgs,
+          providerOptions: cfg.providerOptions,
+        });
+      });
+      logger.log("route", `PATCH /agent/session?session=${sessionId} → ${result.applied} fields=[${result.fields.join(",")}] rt=${result.runtimeId}`);
+      return c.json({
+        status: "updated" as const,
+        applied: result.applied,
+        runtimeId: result.runtimeId,
+        fields: result.fields,
+      }, 200);
+    } catch (e: any) {
+      logger.err("err", `PATCH /agent/session?session=${sessionId} → ${e.message}`);
+      return c.json({ status: "error" as const, message: e.message }, 400);
+    }
   });
 
   app.openapi(killRoute, (c) => {
