@@ -324,6 +324,8 @@ class CodexProcess implements AgentProcess {
   private _modelOverride: string | null = null;
   /** Sandbox override — applied on next turn/start. */
   private _sandboxOverride: string | null = null;
+  /** Working-directory override — applied on next turn/start. */
+  private _cwdOverride: string | null = null;
   /** Set after the interrupted event is emitted — prevents duplicate. */
   private _interruptedEmitted = false;
   /** Current active turnId — needed for turn/interrupt. */
@@ -748,6 +750,14 @@ class CodexProcess implements AgentProcess {
       logger.log("agent", `codex: turn/start with sandboxPolicy=${turnParams.sandboxPolicy}`);
       this._sandboxOverride = null;
     }
+    if (this._cwdOverride) {
+      // TurnStartParams.cwd is "for this turn and subsequent turns" per the
+      // codex app-server schema — sticky once set, so we only emit it on the
+      // turn where applyPatch landed.
+      turnParams.cwd = this._cwdOverride;
+      logger.log("agent", `codex: turn/start with cwd=${this._cwdOverride}`);
+      this._cwdOverride = null;
+    }
 
     this.sendRpc("turn/start", turnParams).then((result) => {
       // Capture turnId for interrupt
@@ -809,6 +819,20 @@ class CodexProcess implements AgentProcess {
     // Codex supports per-turn sandbox override via turn/start params.
     this._sandboxOverride = mode;
     logger.log("agent", `codex: sandbox override set → ${mode} (applied on next turn)`);
+  }
+
+  applyPatch(patch: import("./types.js").SessionPatch): import("./types.js").SessionPatch {
+    // codex app-server's TurnStartParams accepts `cwd`, `model`, and
+    // `sandboxPolicy` overrides that take effect on the next turn and stay
+    // sticky thereafter. Every currently-declared SessionPatch field maps
+    // cleanly into a queued override, so applyPatch never has any leftover.
+    if (patch.model !== undefined) this.setModel(patch.model);
+    if (patch.permissionMode !== undefined) this.setPermissionMode(patch.permissionMode);
+    if (patch.cwd !== undefined) {
+      this._cwdOverride = patch.cwd;
+      logger.log("agent", `codex: cwd override set → ${patch.cwd} (applied on next turn)`);
+    }
+    return {};
   }
 
   /**
