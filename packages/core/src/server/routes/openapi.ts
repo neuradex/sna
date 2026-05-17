@@ -32,14 +32,24 @@ import { resolveImagePath } from "../image-store.js";
 const sessionStateSchema = z.enum(["idle", "processing", "waiting", "permission"]);
 const agentStatusSchema = z.enum(["idle", "busy", "disconnected"]);
 
-const StartConfigSchema = z.object({
+const SessionConfigSchema = z.object({
   provider: z.string(),
   modelProvider: z.string().optional(),
   model: z.string(),
+  cwd: z.string(),
   permissionMode: z.string().optional(),
   configDir: z.string().optional(),
   extraArgs: z.array(z.string()).optional(),
   providerOptions: z.record(z.string(), z.any()).optional(),
+});
+
+const RuntimeChainEntrySchema = z.object({
+  id: z.string(),
+  parentId: z.string().nullable(),
+  config: SessionConfigSchema,
+  state: sessionStateSchema,
+  spawnedAt: z.number(),
+  retiredAt: z.number().nullable(),
 });
 
 const SessionInfoSchema = z.object({
@@ -50,7 +60,7 @@ const SessionInfoSchema = z.object({
   agentStatus: agentStatusSchema,
   cwd: z.string(),
   meta: z.record(z.string(), z.any()).nullable(),
-  config: StartConfigSchema.nullable(),
+  config: SessionConfigSchema.nullable(),
   ccSessionId: z.string().nullable(),
   eventCount: z.number(),
   messageCount: z.number(),
@@ -62,6 +72,8 @@ const SessionInfoSchema = z.object({
   }).nullable(),
   createdAt: z.number(),
   lastActivityAt: z.number(),
+  currentRuntimeId: z.string().nullable(),
+  runtimeChain: z.array(RuntimeChainEntrySchema).optional(),
 });
 
 const ErrorResponse = z.object({
@@ -540,7 +552,7 @@ const statusRoute = createRoute({
           content: z.string(),
           created_at: z.string(),
         }).nullable(),
-        config: StartConfigSchema.nullable(),
+        config: SessionConfigSchema.nullable(),
       }) } },
     },
   },

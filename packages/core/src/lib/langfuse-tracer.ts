@@ -448,7 +448,7 @@ function handleEvent(ss: SessionState, event: AgentEvent): void {
       if (!turn) break;
       // Attach usage data to open generation (Codex fallback path).
       // The `d.provider` on AgentEvent.data is the runtime (CLI); modelProvider
-      // comes from the session's lastStartConfig which tracks the vendor.
+      // comes from the session's current config (Session.config) which tracks the vendor.
       if (turn.llmGeneration && event.data) {
         const d = event.data as Record<string, unknown>;
         const session = sm?.getSession(ss.sessionId);
