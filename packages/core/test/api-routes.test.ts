@@ -21,12 +21,13 @@ function setup() {
 describe("HTTP API Routes", () => {
   let cleanup: () => void;
   let app: any;
+  let sm: any;
 
   beforeEach(async () => {
     cleanup = setup();
     const { createSnaApp } = await import("../src/server/index.js");
     const { SessionManager } = await import("../src/server/session-manager.js");
-    const sm = new SessionManager();
+    sm = new SessionManager();
     app = await createSnaApp({ sessionManager: sm });
   });
 
@@ -132,6 +133,84 @@ describe("HTTP API Routes", () => {
       const res = await req("POST", `/agent/set-permission-mode?session=${s.id}`, { permissionMode: "bypassPermissions" });
       const json = await res.json();
       assert.equal(json.status, "updated");
+    });
+  });
+
+  describe("PATCH /agent/session", () => {
+    /** Seed a session with an active runtime so applySessionPatch has somewhere
+     *  to land. We can't run a real provider in unit tests, so we drive the
+     *  SessionManager directly and assert the route honors it. */
+    async function seedSession(id: string, opts: { provider?: string; cwd?: string } = {}) {
+      sm.createSession({ id, cwd: opts.cwd ?? "/tmp/proj" });
+      sm.saveStartConfig(id, {
+        provider: opts.provider ?? "codex",
+        model: "gpt-5.4",
+        cwd: opts.cwd ?? "/tmp/proj",
+        permissionMode: "bypassPermissions",
+      });
+    }
+
+    it("returns 404 for an unknown session", async () => {
+      const res = await req("PATCH", "/agent/session?session=does-not-exist", { model: "gpt-5.5" });
+      assert.equal(res.status, 404);
+    });
+
+    it("returns 400 when the session has no active runtime", async () => {
+      await req("POST", "/agent/sessions", { id: "no-rt", label: "NoRT" });
+      const res = await req("PATCH", "/agent/session?session=no-rt", { model: "gpt-5.5" });
+      assert.equal(res.status, 400);
+      const json = await res.json();
+      assert.match(json.message, /no active runtime/);
+    });
+
+    it("empty patch is a no-op (in-place, fields=[])", async () => {
+      await seedSession("empty-patch");
+      const res = await req("PATCH", "/agent/session?session=empty-patch", {});
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.status, "updated");
+      assert.equal(json.applied, "in-place");
+      assert.deepEqual(json.fields, []);
+    });
+
+    it("in-place patch with a live process: returns 'in-place' and grows the chain", async () => {
+      await seedSession("inplace-patch");
+      // Attach a fake live process that accepts everything in-place. This
+      // emulates codex's applyPatch behavior without spawning a real CLI.
+      const proc: any = {
+        alive: true,
+        pid: null,
+        sessionId: null,
+        send() {}, interrupt() {}, kill() { this.alive = false; },
+        closeThread() { this.alive = false; },
+        setModel() {}, setPermissionMode() {},
+        applyPatch() { return {}; },
+        on() {}, off() {},
+      };
+      sm.setProcess("inplace-patch", proc);
+      const before = sm.getRuntimeChain("inplace-patch").length;
+
+      const res = await req("PATCH", "/agent/session?session=inplace-patch", { model: "gpt-5.5" });
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.status, "updated");
+      assert.equal(json.applied, "in-place");
+      assert.deepEqual(json.fields, ["model"]);
+      assert.equal(sm.getRuntimeChain("inplace-patch").length, before + 1);
+    });
+
+    it("unknown body fields are silently ignored", async () => {
+      await seedSession("ignore-extra");
+      // Hono+OpenAPI's Zod validator already strips unknowns from the body.
+      // Verify by sending an unknown-only payload — the route should treat it
+      // as empty (no chain growth, fields=[]).
+      const res = await req("PATCH", "/agent/session?session=ignore-extra", {
+        randomKey: 42,
+      });
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.deepEqual(json.fields, [],
+        "randomKey is not a SessionPatch field and should not surface");
     });
   });
 

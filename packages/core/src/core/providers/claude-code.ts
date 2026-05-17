@@ -533,6 +533,20 @@ export class ClaudeCodeProcess implements AgentProcess {
     this.proc.stdin!.write(msg + "\n");
   }
 
+  applyPatch(patch: import("./types.js").SessionPatch): import("./types.js").SessionPatch {
+    // claude-code's stream-json control_request supports `set_model` and
+    // `set_permission_mode` but has no in-place equivalent for cwd — the
+    // child process inherits cwd at spawn time and there is no protocol
+    // surface to retarget it. Return `cwd` (and any future unsupported
+    // field) as leftover so the caller can kill + respawn at the new cwd
+    // with history replay.
+    const leftover: import("./types.js").SessionPatch = {};
+    if (patch.model !== undefined) this.setModel(patch.model);
+    if (patch.permissionMode !== undefined) this.setPermissionMode(patch.permissionMode);
+    if (patch.cwd !== undefined) leftover.cwd = patch.cwd;
+    return leftover;
+  }
+
   kill(): void {
     if (this._alive) {
       this._alive = false;

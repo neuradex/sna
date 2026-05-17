@@ -27,9 +27,14 @@ Every running agent is a `Session` owned by `SessionManager`. Each session has:
 - `process` — the spawned `AgentProcess` (Claude Code, Codex, or OpenCode), or `null` when idle
 - `eventBuffer` + `eventCounter` — append-only stream consumed by subscribers via `since`
 - `cwd`, `label`, `meta` — metadata persisted to `chat_sessions` so the SDK can be shared across apps. Use `meta.app: "loom"` (for example) to isolate sessions per consumer.
-- `lastStartConfig` — `{ provider, modelProvider, model, permissionMode, providerOptions, ... }`, used by `agent.restart` to bring the same config back
+- `config` — `SessionConfig` (`{ provider, modelProvider, model, cwd, permissionMode, providerOptions, ... }`), used by `agent.restart` to bring the same config back. The legacy field name was `lastStartConfig`; the type alias `StartConfig` is kept for one release.
 - `state` — `idle` | `processing` | `waiting` | `permission`
 - `ccSessionId` — the runtime's own session id, captured from the `init` event so `--resume` works
+- `currentRuntimeId` — points at the active `RuntimeSession` in the audit chain (see below)
+
+Every config mutation — `saveStartConfig`, `restartSession`, `setSessionModel`, `setSessionPermissionMode`, `applySessionPatch` — appends a new `RuntimeSession` row to the `runtime_sessions` table and retires the previous one. `Session.config` mirrors the current `RuntimeSession.config` for backward compat with in-process callers. The full chain is available via `getRuntimeChain(sessionId)` and exposed on the HTTP surface as `SessionInfo.runtimeChain` (opt-in via `?include=chain`).
+
+`applySessionPatch(id, patch, respawnFn)` is the unified PATCH mutator: it asks the live `AgentProcess.applyPatch(patch)` first (codex queues per-turn overrides; claude-code emits `set_model` / `set_permission_mode` control_requests) and inspects the leftover. Empty leftover → in-place transition; non-empty → kill + respawn with history replay. Either path appends exactly one chain node and emits `configChanged`.
 
 Listeners cover lifecycle (`started` / `resumed` / `killed` / `exited` / `crashed` / `restarted`), config changes, state changes, agent events, permission requests, and skill events. `SessionManagerOptions.maxSessions` caps the number of concurrently alive subprocesses.
 
@@ -122,7 +127,8 @@ The `*_delta` variants stream tokens for ChatGPT-style UIs; the non-delta versio
 | `POST`   | `/agent/start` | Start (spawn) agent in a session |
 | `POST`   | `/agent/send` | Send a message |
 | `POST`   | `/agent/resume` | Restart with canonical history rebuilt for the provider |
-| `POST`   | `/agent/restart` | Re-spawn with the same `lastStartConfig` |
+| `POST`   | `/agent/restart` | Re-spawn with the same `Session.config` (with optional overrides) |
+| `PATCH`  | `/agent/session` | Unified PATCH mutator for `{cwd, model, permissionMode}`; in-place where possible, respawn-with-history-replay otherwise |
 | `POST`   | `/agent/interrupt` | Interrupt current turn (process stays alive) |
 | `POST`   | `/agent/set-model` | Change model at runtime |
 | `POST`   | `/agent/set-permission-mode` | Change permission mode at runtime |
@@ -173,7 +179,7 @@ A session doesn't need to die to change shape:
 - `agent.set-model` — control message, no respawn
 - `agent.set-permission-mode` — control message, no respawn
 - `agent.interrupt` — cancel the current turn, process stays alive
-- `agent.restart` — kill + respawn with the same `lastStartConfig` (cross-runtime restarts drop runtime-specific flags)
+- `agent.restart` — kill + respawn with the same `Session.config` (cross-runtime restarts drop runtime-specific flags). For single-field mutations prefer `agent.update` — it picks the cheaper path per runtime.
 - `agent.resume` — rebuild canonical history → provider-native format → fresh process picks up where the last one left off
 
 ### One-shot completion

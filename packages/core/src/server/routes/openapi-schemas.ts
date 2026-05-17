@@ -36,17 +36,21 @@ export const SessionQuery = z.object({
   session: z.string().optional(),
 });
 
-// ── StartConfig schemas ───────────────────────────────────────────────
+// ── SessionConfig schemas ─────────────────────────────────────────────
 
-export const StartConfigSchema = z.object({
+export const SessionConfigSchema = z.object({
   provider: z.string(),
   modelProvider: z.string().optional(),
   model: z.string(),
+  cwd: z.string(),
   permissionMode: z.string().optional(),
   configDir: z.string().optional(),
   extraArgs: z.array(z.string()).optional(),
   providerOptions: z.record(z.string(), z.any()).optional(),
 });
+
+/** @deprecated Renamed to `SessionConfigSchema`. Alias for one release. */
+export const StartConfigSchema = SessionConfigSchema;
 
 // ── Agent lifecycle schemas ───────────────────────────────────────────
 
@@ -204,7 +208,7 @@ export const SessionsListResponse = z.object({
     agentStatus: agentStatusSchema,
     cwd: z.string(),
     meta: z.record(z.string(), z.any()).nullable(),
-    config: StartConfigSchema.nullable(),
+    config: SessionConfigSchema.nullable(),
     ccSessionId: z.string().nullable(),
     eventCount: z.number(),
     messageCount: z.number(),
@@ -282,7 +286,7 @@ export const AgentStatusResponse = z.object({
     content: z.string(),
     created_at: z.string(),
   }).nullable(),
-  config: StartConfigSchema.nullable(),
+  config: SessionConfigSchema.nullable(),
 });
 
 export const RunOnceResponse = z.object({

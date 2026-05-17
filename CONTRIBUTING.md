@@ -30,9 +30,9 @@ See [docs/architecture.md](docs/architecture.md) for the full picture. Quick map
 
 `createSnaApp({ sessionManager })` returns a Hono app exposing the full HTTP API; `attachWebSocket(server, sessionManager)` mounts the WS handler on `/ws`. The standalone entry (`server/standalone.ts`) wires both up and is what the launcher API forks.
 
-The `SessionManager` owns every running agent. Each `Session` carries a `process` (Claude Code or Codex subprocess), a per-session event buffer, the last `StartConfig`, and metadata. Listeners cover lifecycle, config changes, state changes, agent events, permission requests, and skill events.
+The `SessionManager` owns every running agent. Each `Session` carries a `process` (Claude Code or Codex subprocess), a per-session event buffer, the current `SessionConfig` (legacy name: `StartConfig`, kept as an alias), and metadata. Every config mutation appends a `RuntimeSession` row to the chain in `runtime_sessions`; `Session.currentRuntimeId` points at the active one. Listeners cover lifecycle, config changes, state changes, agent events, permission requests, and skill events.
 
-Providers (`core/providers/{claude-code,codex,opencode}.ts`) implement a common `AgentProvider` interface (`spawn`, `isAvailable`). The returned `AgentProcess` exposes `send`, `interrupt`, `setModel`, `setPermissionMode`, `respondToPermission`, `kill` — translating each into the runtime's native control message. Codex and OpenCode are daemon-pooled (see `runtime.ts` / `RuntimeHandle`); Claude Code is stateless per-session.
+Providers (`core/providers/{claude-code,codex,opencode}.ts`) implement a common `AgentProvider` interface (`spawn`, `isAvailable`). The returned `AgentProcess` exposes `send`, `interrupt`, `setModel`, `setPermissionMode`, `applyPatch`, `respondToPermission`, `kill` — translating each into the runtime's native control message. `applyPatch(patch)` is the per-field dispatch hook used by `SessionManager.applySessionPatch` / `PATCH /agent/session`: codex declares everything in-place via per-turn override params; claude-code applies model / permissionMode in-place and surfaces `cwd` as leftover so the orchestrator can drive a respawn-with-history. Codex and OpenCode are daemon-pooled (see `runtime.ts` / `RuntimeHandle`); Claude Code is stateless per-session.
 
 #### Canonical conversation model
 

@@ -161,7 +161,7 @@ describe("SessionManager", () => {
       assert.equal(result, true);
 
       const session = sm.getSession("model-test")!;
-      assert.equal(session.lastStartConfig?.model, "claude-opus-4-6");
+      assert.equal(session.config?.model, "claude-opus-4-6");
     });
   });
 
@@ -175,7 +175,7 @@ describe("SessionManager", () => {
       assert.equal(result, true);
 
       const session = sm.getSession("perm-test")!;
-      assert.equal(session.lastStartConfig?.permissionMode, "bypassPermissions");
+      assert.equal(session.config?.permissionMode, "bypassPermissions");
     });
   });
 
@@ -244,6 +244,7 @@ describe("SessionManager", () => {
       sm1.saveStartConfig("config-test", {
         provider: "claude-code",
         model: "claude-sonnet-4-6",
+        cwd: cwd,
         permissionMode: "acceptEdits",
         extraArgs: ["--resume", "abc123"],
       });
@@ -251,9 +252,9 @@ describe("SessionManager", () => {
       // New manager should restore config
       const sm2 = new SessionManager();
       const restored = sm2.getSession("config-test");
-      assert.ok(restored?.lastStartConfig);
-      assert.equal(restored.lastStartConfig.model, "claude-sonnet-4-6");
-      assert.deepEqual(restored.lastStartConfig.extraArgs, ["--resume", "abc123"]);
+      assert.ok(restored?.config);
+      assert.equal(restored.config.model, "claude-sonnet-4-6");
+      assert.deepEqual(restored.config.extraArgs, ["--resume", "abc123"]);
     });
   });
 

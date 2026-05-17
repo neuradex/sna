@@ -14,6 +14,7 @@ import type {
   ListModelsConfig,
   ListModelsResult,
   RuntimeModelInfo,
+  McpServerConfig,
 } from "./types.js";
 import { canonicalToCodexResponseItems } from "../../history/codex.js";
 import { logger } from "../../lib/logger.js";
@@ -243,6 +244,105 @@ export interface CodexHooksJson {
  *
  * @internal Exported for unit tests.
  */
+/**
+ * Write MCP server config + hooks.json into a CODEX_HOME so the daemon
+ * spawned against it loads the consumer's tooling. Shared between the
+ * pooled (prepareRuntime) and non-pooled spawn paths so a CODEX_HOME never
+ * lacks the entries the caller asked for — pre-refactor, only the
+ * non-pooled spawn applied this, so pooled daemons booted without MCP
+ * servers and tool calls silently failed.
+ *
+ * Idempotent for repeat callers on the same CODEX_HOME — config.toml is
+ * appended to and codex_hooks is enabled at most once.
+ */
+export function applyCodexConfig(
+  codexHome: string,
+  opts: {
+    mcpServers?: Record<string, McpServerConfig>;
+    allowedTools?: string[];
+    disallowedTools?: string[];
+    permissionMode?: string;
+    providerOptions?: Record<string, unknown>;
+    env?: Record<string, string | undefined>;
+  },
+  pkgRoot: string,
+): void {
+  const configTomlPath = path.join(codexHome, "config.toml");
+
+  // MCP server injection.
+  if (opts.mcpServers && Object.keys(opts.mcpServers).length > 0) {
+    const existing = fs.existsSync(configTomlPath) ? fs.readFileSync(configTomlPath, "utf8") : "";
+    const tomlLines: string[] = [];
+    for (const [name, cfg] of Object.entries(opts.mcpServers)) {
+      // Skip names already present so a repeat call doesn't duplicate
+      // entries that crash the daemon with "duplicate key" at parse time.
+      if (existing.includes(`[mcp_servers.${name}]`)) continue;
+      if ("url" in cfg) {
+        tomlLines.push(`[mcp_servers.${name}]`);
+        tomlLines.push(`url = ${JSON.stringify(cfg.url)}`);
+        if (cfg.headers) {
+          tomlLines.push(`[mcp_servers.${name}.headers]`);
+          for (const [k, v] of Object.entries(cfg.headers)) {
+            tomlLines.push(`${k} = ${JSON.stringify(v)}`);
+          }
+        }
+      } else {
+        tomlLines.push(`[mcp_servers.${name}]`);
+        tomlLines.push(`command = ${JSON.stringify(cfg.command)}`);
+        if (cfg.args?.length) tomlLines.push(`args = ${JSON.stringify(cfg.args)}`);
+        if (cfg.cwd) tomlLines.push(`cwd = ${JSON.stringify(cfg.cwd)}`);
+        if (cfg.env && Object.keys(cfg.env).length > 0) {
+          tomlLines.push(`[mcp_servers.${name}.env]`);
+          for (const [k, v] of Object.entries(cfg.env)) {
+            tomlLines.push(`${k} = ${JSON.stringify(v)}`);
+          }
+        }
+      }
+      tomlLines.push("");
+    }
+    if (tomlLines.length > 0) {
+      fs.appendFileSync(configTomlPath, "\n" + tomlLines.join("\n"));
+      logger.log("agent", `codex: ${tomlLines.filter((l) => l.startsWith("[mcp_servers.")).length} MCP servers injected`);
+    }
+  }
+
+  // Hook injection: permission hook + tool filter + consumer hooks.
+  const preToolUseHooks: CodexHookEntry[] = [];
+  if (opts.permissionMode !== "bypassPermissions") {
+    const hookScript = path.join(pkgRoot, "dist", "scripts", "hook.js");
+    const sessionId = opts.env?.SNA_SESSION_ID ?? "default";
+    preToolUseHooks.push({
+      type: "command",
+      command: `node "${hookScript}" --session=${sessionId}`,
+      timeout: 300,
+    });
+    logger.log("agent", `codex: permission hook → ${hookScript} --session=${sessionId}`);
+  }
+  if (opts.allowedTools?.length || opts.disallowedTools?.length) {
+    const filterScript = path.join(pkgRoot, "dist", "scripts", "tool-filter.js");
+    const filterArgs: string[] = [];
+    if (opts.allowedTools?.length) {
+      filterArgs.push(`--allowed=${opts.allowedTools.join(",")}`);
+    } else if (opts.disallowedTools?.length) {
+      filterArgs.push(`--disallowed=${opts.disallowedTools.join(",")}`);
+    }
+    preToolUseHooks.push({
+      type: "command",
+      command: `node "${filterScript}" ${filterArgs.join(" ")}`,
+    });
+    logger.log("agent", `codex: tool-filter hook → ${opts.allowedTools ? `allowed=[${opts.allowedTools}]` : `disallowed=[${opts.disallowedTools}]`}`);
+  }
+  const consumerSettings = (opts.providerOptions as { settings?: Record<string, unknown> } | undefined)?.settings;
+  const hooksJson = buildCodexHooksJson(preToolUseHooks, consumerSettings);
+  if (hooksJson) {
+    fs.writeFileSync(path.join(codexHome, "hooks.json"), JSON.stringify(hooksJson));
+    const existingConfig = fs.existsSync(configTomlPath) ? fs.readFileSync(configTomlPath, "utf8") : "";
+    if (!existingConfig.includes("codex_hooks")) {
+      fs.appendFileSync(configTomlPath, "\n[features]\ncodex_hooks = true\n");
+    }
+  }
+}
+
 export function buildCodexHooksJson(
   internalHooks: CodexHookEntry[],
   appSettings?: Record<string, unknown> | undefined,
@@ -324,6 +424,8 @@ class CodexProcess implements AgentProcess {
   private _modelOverride: string | null = null;
   /** Sandbox override — applied on next turn/start. */
   private _sandboxOverride: string | null = null;
+  /** Working-directory override — applied on next turn/start. */
+  private _cwdOverride: string | null = null;
   /** Set after the interrupted event is emitted — prevents duplicate. */
   private _interruptedEmitted = false;
   /** Current active turnId — needed for turn/interrupt. */
@@ -599,6 +701,10 @@ class CodexProcess implements AgentProcess {
 
       const threadParams: Record<string, unknown> = {
         sandbox,
+        // `ThreadStartParams.cwd` lets a shared app-server daemon host threads
+        // operating on different working directories. Without this every cwd
+        // would need its own daemon; with it, one daemon serves all sessions.
+        ...(this.options.cwd ? { cwd: this.options.cwd } : {}),
         ...(this.options.model ? { model: this.options.model } : {}),
         ...(baseInstructions ? { baseInstructions } : {}),
         ...(developerInstructions ? { developerInstructions } : {}),
@@ -623,6 +729,7 @@ class CodexProcess implements AgentProcess {
         const resumeResult = await this.sendRpc("thread/resume", {
           threadId: syntheticThreadId,
           history: responseItems,
+          ...(this.options.cwd ? { cwd: this.options.cwd } : {}),
           ...(baseInstructions ? { baseInstructions } : {}),
           ...(developerInstructions ? { developerInstructions } : {}),
           ...(this.options.model ? { model: this.options.model } : {}),
@@ -641,6 +748,7 @@ class CodexProcess implements AgentProcess {
       } else if (resumeThreadId) {
         const resumeResult = await this.sendRpc("thread/resume", {
           threadId: resumeThreadId,
+          ...(this.options.cwd ? { cwd: this.options.cwd } : {}),
           ...(baseInstructions ? { baseInstructions } : {}),
           ...(developerInstructions ? { developerInstructions } : {}),
         });
@@ -742,6 +850,14 @@ class CodexProcess implements AgentProcess {
       logger.log("agent", `codex: turn/start with sandboxPolicy=${turnParams.sandboxPolicy}`);
       this._sandboxOverride = null;
     }
+    if (this._cwdOverride) {
+      // TurnStartParams.cwd is "for this turn and subsequent turns" per the
+      // codex app-server schema — sticky once set, so we only emit it on the
+      // turn where applyPatch landed.
+      turnParams.cwd = this._cwdOverride;
+      logger.log("agent", `codex: turn/start with cwd=${this._cwdOverride}`);
+      this._cwdOverride = null;
+    }
 
     this.sendRpc("turn/start", turnParams).then((result) => {
       // Capture turnId for interrupt
@@ -803,6 +919,20 @@ class CodexProcess implements AgentProcess {
     // Codex supports per-turn sandbox override via turn/start params.
     this._sandboxOverride = mode;
     logger.log("agent", `codex: sandbox override set → ${mode} (applied on next turn)`);
+  }
+
+  applyPatch(patch: import("./types.js").SessionPatch): import("./types.js").SessionPatch {
+    // codex app-server's TurnStartParams accepts `cwd`, `model`, and
+    // `sandboxPolicy` overrides that take effect on the next turn and stay
+    // sticky thereafter. Every currently-declared SessionPatch field maps
+    // cleanly into a queued override, so applyPatch never has any leftover.
+    if (patch.model !== undefined) this.setModel(patch.model);
+    if (patch.permissionMode !== undefined) this.setPermissionMode(patch.permissionMode);
+    if (patch.cwd !== undefined) {
+      this._cwdOverride = patch.cwd;
+      logger.log("agent", `codex: cwd override set → ${patch.cwd} (applied on next turn)`);
+    }
+    return {};
   }
 
   /**
@@ -1199,6 +1329,10 @@ class CodexProcess implements AgentProcess {
 export class CodexProvider implements AgentProvider {
   readonly name = "codex";
   readonly supportsRuntimePooling = true; // Daemon-style: app-server pool
+  // codex app-server's `ThreadStartParams.cwd`, `ThreadResumeParams.cwd`, and
+  // `TurnStartParams.cwd` let each thread/turn carry its own working directory,
+  // so one shared daemon can host sessions operating on different cwds.
+  readonly supportsCwdPerThread = true;
 
   async isAvailable(): Promise<boolean> {
     try {
@@ -1377,6 +1511,26 @@ export class CodexProvider implements AgentProvider {
       cleanEnv.PATH = `${codexDir}:${cleanEnv.PATH ?? ""}`;
     }
 
+    // MCP servers + hooks must be in CODEX_HOME *before* the daemon spawns,
+    // otherwise the pooled daemon boots without consumer tooling — tool calls
+    // (loom-tools, etc.) silently fall through to "command not found" inside
+    // the agent. The non-pooled spawn path already does this; we duplicate the
+    // call here for the pool path through the shared applyCodexConfig helper.
+    let pkgRoot = path.dirname(fileURLToPath(import.meta.url));
+    while (!fs.existsSync(path.join(pkgRoot, "package.json"))) {
+      const parent = path.dirname(pkgRoot);
+      if (parent === pkgRoot) break;
+      pkgRoot = parent;
+    }
+    applyCodexConfig(codexHome, {
+      mcpServers: config.mcp as Record<string, McpServerConfig> | undefined,
+      allowedTools: config.settings?.allowedTools,
+      disallowedTools: config.settings?.disallowedTools,
+      permissionMode: config.permissionMode,
+      providerOptions: config.providerOptions,
+      env: config.env,
+    }, pkgRoot);
+
     logger.log("agent", `codex: preparing runtime (CODEX_HOME=${codexHome})`);
 
     // Spawn the app-server daemon
@@ -1386,9 +1540,12 @@ export class CodexProvider implements AgentProvider {
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    // Health check: wait for JSON-RPC `initialize` response from the daemon.
-    // The daemon responds with {id: ..., result: {...}} to our initialize request.
-    // We use a buffer to collect stdout and parse JSON-RPC messages.
+    // Health check: send a JSON-RPC `initialize` request and wait for the
+    // matching response. The daemon doesn't volunteer a ready signal — until
+    // initialize completes, threads on this daemon would hang. The original
+    // version of this code waited for a response without sending the request,
+    // so the pooled path was effectively dormant; production traffic only ever
+    // hit the legacy non-pooled spawn fallback.
     let daemonReady = false;
     const readyTimeout = setTimeout(() => {
       if (!daemonReady) {
@@ -1397,11 +1554,16 @@ export class CodexProvider implements AgentProvider {
       }
     }, 10_000);
 
+    // JSON-RPC id for the initialize request — needs to be a number we can
+    // recognize in the response stream so we don't mistake unrelated server
+    // notifications for the init ack.
+    const initializeId = 0;
+
     // Buffer to collect stdout for JSON-RPC parsing
     let stdoutBuffer = "";
 
     return new Promise<import("./runtime.js").RuntimeHandle>((resolve, reject) => {
-      daemon.stdout!.on("data", (chunk: Buffer) => {
+      const onStdout = (chunk: Buffer) => {
         stdoutBuffer += chunk.toString();
         const lines = stdoutBuffer.split("\n");
         stdoutBuffer = lines.pop() ?? "";
@@ -1410,12 +1572,25 @@ export class CodexProvider implements AgentProvider {
           if (!line.trim()) continue;
           try {
             const msg = JSON.parse(line);
-            // The daemon responds to our initialize request with {id, result}
-            if (msg.id != null && !msg.method && msg.result !== undefined) {
+            // Match the response to our initialize id specifically.
+            if (msg.id === initializeId && !msg.method && msg.result !== undefined) {
               if (!daemonReady) {
                 daemonReady = true;
                 clearTimeout(readyTimeout);
                 logger.log("agent", `codex: runtime daemon ready (pid=${daemon.pid})`);
+                // Per the JSON-RPC convention codex uses, follow the response
+                // with an `initialized` notification before any thread/start.
+                try {
+                  daemon.stdin!.write(JSON.stringify({
+                    jsonrpc: "2.0",
+                    method: "initialized",
+                  }) + "\n");
+                } catch { /* already dead — caught below */ }
+                // Detach our listeners so the CodexProcess thread wrappers
+                // see clean event flow and we don't keep buffering stdout in
+                // this closure forever.
+                daemon.stdout!.off("data", onStdout);
+                daemon.stderr!.off("data", onStderr);
                 resolve({
                   provider: this.name,
                   ready: true,
@@ -1429,9 +1604,16 @@ export class CodexProvider implements AgentProvider {
             }
           } catch { /* non-JSON, ignore */ }
         }
-      });
+      };
+      const onStderr = (buf: Buffer) => {
+        // Surface stderr at debug volume — codex emits non-fatal warnings
+        // here, but a real crash leaves a useful trace.
+        const txt = buf.toString().trim();
+        if (txt) logger.log("agent", `codex daemon stderr: ${txt.slice(0, 500)}`);
+      };
 
-      daemon.stderr!.on("data", () => { /* debug output — ignore */ });
+      daemon.stdout!.on("data", onStdout);
+      daemon.stderr!.on("data", onStderr);
 
       daemon.on("error", (err) => {
         clearTimeout(readyTimeout);
@@ -1444,6 +1626,22 @@ export class CodexProvider implements AgentProvider {
           reject(new Error(`codex runtime daemon exited with code ${code}`));
         }
       });
+
+      // Send the initialize request now that the listeners are wired up.
+      try {
+        daemon.stdin!.write(JSON.stringify({
+          jsonrpc: "2.0",
+          id: initializeId,
+          method: "initialize",
+          params: {
+            clientInfo: { name: "sna", title: "SNA SDK", version: "1.0.0" },
+            capabilities: { experimentalApi: true },
+          },
+        }) + "\n");
+      } catch (err: any) {
+        clearTimeout(readyTimeout);
+        reject(new Error(`codex runtime initialize write failed: ${err?.message ?? err}`));
+      }
     });
   }
 
@@ -1491,98 +1689,22 @@ export class CodexProvider implements AgentProvider {
 
     cleanEnv.CODEX_HOME = codexHome;
 
-    // ── MCP server injection ────────────────────────────────────────────
-    if (options.mcpServers && Object.keys(options.mcpServers).length > 0) {
-      const tomlLines: string[] = [];
-      for (const [name, cfg] of Object.entries(options.mcpServers)) {
-        if ("url" in cfg) {
-          // HTTP server
-          tomlLines.push(`[mcp_servers.${name}]`);
-          tomlLines.push(`url = ${JSON.stringify(cfg.url)}`);
-          if (cfg.headers) {
-            tomlLines.push(`[mcp_servers.${name}.headers]`);
-            for (const [k, v] of Object.entries(cfg.headers)) {
-              tomlLines.push(`${k} = ${JSON.stringify(v)}`);
-            }
-          }
-        } else {
-          // Stdio server
-          tomlLines.push(`[mcp_servers.${name}]`);
-          tomlLines.push(`command = ${JSON.stringify(cfg.command)}`);
-          if (cfg.args?.length) {
-            tomlLines.push(`args = ${JSON.stringify(cfg.args)}`);
-          }
-          if (cfg.cwd) {
-            tomlLines.push(`cwd = ${JSON.stringify(cfg.cwd)}`);
-          }
-          if (cfg.env && Object.keys(cfg.env).length > 0) {
-            tomlLines.push(`[mcp_servers.${name}.env]`);
-            for (const [k, v] of Object.entries(cfg.env)) {
-              tomlLines.push(`${k} = ${JSON.stringify(v)}`);
-            }
-          }
-        }
-        tomlLines.push("");
-      }
-      fs.appendFileSync(configTomlPath, "\n" + tomlLines.join("\n"));
-      logger.log("agent", `codex: ${Object.keys(options.mcpServers).length} MCP servers injected`);
-    }
-
-    // ── Hook injection ─────────────────────────────────────────────────
-    // Resolve package root for hook scripts
+    // MCP servers + hooks. Shared with prepareRuntime via applyCodexConfig
+    // so pooled and non-pooled CODEX_HOMEs are configured identically.
     let pkgRoot = path.dirname(fileURLToPath(import.meta.url));
     while (!fs.existsSync(path.join(pkgRoot, "package.json"))) {
       const parent = path.dirname(pkgRoot);
       if (parent === pkgRoot) break;
       pkgRoot = parent;
     }
-
-    const preToolUseHooks: CodexHookEntry[] = [];
-
-    // 1. Permission hook (skip when bypassPermissions)
-    if (options.permissionMode !== "bypassPermissions") {
-      const hookScript = path.join(pkgRoot, "dist", "scripts", "hook.js");
-      const sessionId = options.env?.SNA_SESSION_ID ?? "default";
-      preToolUseHooks.push({
-        type: "command",
-        command: `node "${hookScript}" --session=${sessionId}`,
-        timeout: 300,
-      });
-      logger.log("agent", `codex: permission hook → ${hookScript} --session=${sessionId}`);
-    }
-
-    // 2. Tool filter hook (allowedTools / disallowedTools)
-    if (options.allowedTools?.length || options.disallowedTools?.length) {
-      const filterScript = path.join(pkgRoot, "dist", "scripts", "tool-filter.js");
-      const filterArgs: string[] = [];
-      if (options.allowedTools?.length) {
-        filterArgs.push(`--allowed=${options.allowedTools.join(",")}`);
-      } else if (options.disallowedTools?.length) {
-        filterArgs.push(`--disallowed=${options.disallowedTools.join(",")}`);
-      }
-      preToolUseHooks.push({
-        type: "command",
-        command: `node "${filterScript}" ${filterArgs.join(" ")}`,
-      });
-      logger.log("agent", `codex: tool-filter hook → ${options.allowedTools ? `allowed=[${options.allowedTools}]` : `disallowed=[${options.disallowedTools}]`}`);
-    }
-
-    // 3. Consumer-provided hooks via providerOptions.settings (parity with
-    //    the claude-code provider). Same shape: `{ hooks: { PreToolUse: [...] } }`.
-    //    Only PreToolUse is plumbed through to Codex today — that's the only
-    //    hook event Codex's engine supports.
-    const consumerSettings = (options.providerOptions as { settings?: Record<string, unknown> } | undefined)?.settings;
-    const hooksJson = buildCodexHooksJson(preToolUseHooks, consumerSettings);
-
-    if (hooksJson) {
-      fs.writeFileSync(path.join(codexHome, "hooks.json"), JSON.stringify(hooksJson));
-
-      // Enable codex_hooks feature in config.toml
-      const existingConfig = fs.readFileSync(configTomlPath, "utf8");
-      if (!existingConfig.includes("codex_hooks")) {
-        fs.appendFileSync(configTomlPath, "\n[features]\ncodex_hooks = true\n");
-      }
-    }
+    applyCodexConfig(codexHome, {
+      mcpServers: options.mcpServers,
+      allowedTools: options.allowedTools,
+      disallowedTools: options.disallowedTools,
+      permissionMode: options.permissionMode,
+      providerOptions: options.providerOptions,
+      env: options.env,
+    }, pkgRoot);
 
     logger.log("agent", `codex: CODEX_HOME=${codexHome}`);
 

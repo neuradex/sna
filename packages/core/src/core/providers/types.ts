@@ -35,6 +35,25 @@ export interface AgentEvent {
 }
 
 /**
+ * Mutable subset of SessionConfig that can be PATCH-applied to an alive agent.
+ *
+ * Each field has a per-provider dispatch strategy: codex applies model /
+ * permissionMode / cwd via per-turn overrides on the next `turn/start`;
+ * claude-code applies model / permissionMode via control_request but cannot
+ * change cwd in-place — `applyPatch` returns those as leftover so the caller
+ * can drive a respawn. opencode currently leaves all fields as leftover.
+ *
+ * Defined here (and not anchored on `SessionConfig` directly) to keep the
+ * providers layer independent of session-manager.
+ */
+export interface SessionPatch {
+  cwd?: string;
+  model?: string;
+  permissionMode?: string;
+  // Future: provider, systemPrompt, mcpServers, allowedTools, ...
+}
+
+/**
  * A running agent process. Wraps a child_process with typed event handlers.
  */
 export interface AgentProcess {
@@ -46,6 +65,18 @@ export interface AgentProcess {
   setModel(model: string): void;
   /** Change permission mode at runtime via control message. No restart needed. */
   setPermissionMode(mode: string): void;
+  /**
+   * Try to apply a config patch in-place on the alive process. Returns the
+   * subset of fields the provider could NOT handle without a respawn — the
+   * caller is expected to merge those into the next spawn config (with
+   * history replay) to complete the patch.
+   *
+   * Implementations: codex applies all currently-defined fields in-place via
+   * the next turn/start override mechanism. claude-code applies model /
+   * permissionMode via control_request but returns `cwd` (and any other
+   * unsupported field) as leftover. opencode leaves all fields as leftover.
+   */
+  applyPatch(patch: SessionPatch): SessionPatch;
   /**
    * Respond to a permission request from the agent.
    * Used by providers with bidirectional approval flow (e.g. Codex JSON-RPC).
@@ -198,6 +229,16 @@ export interface AgentProvider {
   isAvailable(): Promise<boolean>;
   /** Whether this provider uses a shared global runtime (daemon pool). */
   readonly supportsRuntimePooling: boolean;
+  /**
+   * Whether `spawn(options)` can pass a per-thread/per-turn `cwd` to the
+   * daemon — i.e. one shared daemon can host sessions operating on different
+   * working directories. When true, RuntimePool drops `cwd` from its key so
+   * cross-cwd sessions reuse the same pooled daemon.
+   *
+   * Providers that bind cwd at daemon spawn (or have no daemon) leave this
+   * false / undefined.
+   */
+  readonly supportsCwdPerThread?: boolean;
   /**
    * Prepare (or reuse) a global runtime for this provider.
    * Called once per unique runtime config. Returns a handle that

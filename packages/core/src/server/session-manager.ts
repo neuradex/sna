@@ -5,16 +5,34 @@
  * The default "default" session provides backward compatibility.
  */
 
-import type { AgentProcess, AgentEvent, AgentProvider } from "../core/providers/types.js";
+import type { AgentProcess, AgentEvent, AgentProvider, SessionPatch } from "../core/providers/types.js";
 import type { RuntimeHandle, RuntimeConfig } from "../core/providers/runtime.js";
 import { getDb } from "../db/schema.js";
 import { insertChatMessage, updateChatMessageMeta } from "../db/chat-messages.js";
+import {
+  insertRuntimeSession,
+  retireRuntimeSession,
+  setRuntimeState as persistRuntimeState,
+  updateRuntimeConfig,
+  getCurrentRuntime,
+  listRuntimeSessions,
+  type RuntimeSessionRow,
+} from "../db/runtime-sessions.js";
 import { getConfig } from "../config.js";
 import { getProvider, getRuntimePool, SpawnOptionsSchema, RuntimeConfigSchema } from "../core/providers/index.js";
 
 export type SessionState = "idle" | "processing" | "waiting" | "permission";
 
-export interface StartConfig {
+/**
+ * Captured spawn configuration for a session. Conceptually "what config this
+ * session is currently running with" — updated in place when fields change via
+ * setSessionModel / setSessionPermissionMode, and rebuilt on restartSession.
+ *
+ * Phase 5 of the session-model refactor will move this onto a per-spawn
+ * RuntimeSession entity (each config snapshot becomes its own chain node).
+ * For now it lives on the Session as `Session.config`.
+ */
+export interface SessionConfig {
   /**
    * Runtime — the CLI/binary we spawn (e.g. "claude-code", "codex", "opencode").
    * Dispatched via providers/index.ts getProvider(). Distinct from modelProvider:
@@ -31,6 +49,12 @@ export interface StartConfig {
   modelProvider?: string;
   /** Model slug within the modelProvider's catalog (e.g. "sonnet-4-6", "gpt-5.4"). */
   model: string;
+  /**
+   * Working directory for the current spawn. Mirrors Session.cwd until the
+   * session model is split (phase 5); after that, `currentRuntimeSession.config.cwd`
+   * is the canonical location.
+   */
+  cwd: string;
   permissionMode?: string;
   configDir?: string;
   /**
@@ -46,16 +70,56 @@ export interface StartConfig {
   providerOptions?: Record<string, unknown>;
 }
 
+/**
+ * @deprecated Renamed to `SessionConfig`. Kept as an alias for one release so
+ * downstream consumers can migrate without an immediate breaking change.
+ */
+export type StartConfig = SessionConfig;
+
+/**
+ * Per-spawn snapshot. Each config mutation (model swap, cwd change, restart)
+ * produces a new RuntimeSession whose `parentId` points at the prior node,
+ * forming a chain rooted at the first spawn. Exactly one RuntimeSession per
+ * Session has `retiredAt === null` at any time — that node is the active
+ * runtime and lives at `Session.currentRuntimeId`.
+ *
+ * Phase 4 introduces the type + the backing `runtime_sessions` table.
+ * Phase 5 wires SessionManager to read/write through it.
+ */
+export interface RuntimeSession {
+  id: string;
+  /** FK to the owning `chat_sessions.id`. */
+  snaSessionId: string;
+  /** Direct ancestor in the chain, or null for the first spawn. */
+  parentId: string | null;
+  /** The config that was used to start this runtime. Stable within the runtime. */
+  config: SessionConfig;
+  /** Process pointer — non-null while this runtime is `current` and alive. */
+  process: AgentProcess | null;
+  state: SessionState;
+  spawnedAt: number;
+  /** null = this is the active runtime; non-null = retired in favor of a successor. */
+  retiredAt: number | null;
+}
+
 export interface Session {
   id: string;
   process: AgentProcess | null;
   eventBuffer: AgentEvent[];
   eventCounter: number;
   label: string;
+  /**
+   * Mirrors `config.cwd` once a config has been recorded. Kept as a top-level
+   * field for now because Session is created before its first spawn — `config`
+   * stays null until `setConfig` lands the first SessionConfig.
+   *
+   * Phase 5 removes this field; cwd then lives only on the current RuntimeSession.
+   */
   cwd: string;
   meta: Record<string, unknown> | null;
   state: SessionState;
-  lastStartConfig: StartConfig | null;
+  /** Captured spawn config, written by `setConfig` (was `saveStartConfig`). */
+  config: SessionConfig | null;
   /** Claude Code's own session ID (from system.init event). Used for --resume. */
   ccSessionId: string | null;
   createdAt: number;
@@ -72,13 +136,31 @@ export interface SessionInfo {
   agentStatus: AgentStatus;
   cwd: string;
   meta: Record<string, unknown> | null;
-  config: StartConfig | null;
+  config: SessionConfig | null;
   ccSessionId: string | null;
   eventCount: number;
   messageCount: number;
   lastMessage: { actor: string; kind: string; content: string; created_at: string } | null;
   createdAt: number;
   lastActivityAt: number;
+  /** ID of the currently-active RuntimeSession (null until first spawn). */
+  currentRuntimeId: string | null;
+  /**
+   * Full chain of RuntimeSessions for this session, oldest first. Optional —
+   * callers can opt in via `listSessions({ includeRuntimeChain: true })` so
+   * the default response stays small for high-frequency status polls.
+   *
+   * Each entry is a snapshot of one spawn / config-change moment; the
+   * entry with `retiredAt: null` matches `currentRuntimeId`.
+   */
+  runtimeChain?: Array<{
+    id: string;
+    parentId: string | null;
+    config: SessionConfig;
+    state: SessionState;
+    spawnedAt: number;
+    retiredAt: number | null;
+  }>;
 }
 
 export interface SessionManagerOptions {
@@ -101,11 +183,38 @@ export interface SessionLifecycleEvent {
 
 export interface SessionConfigChangedEvent {
   session: string;
-  config: StartConfig;
+  config: SessionConfig;
+}
+
+/** Hydrate a RuntimeSession DAO row into the in-memory shape. Process is null
+ *  on hydrate — SessionManager only re-attaches a process when its owning
+ *  consumer (start handler) explicitly spawns one. */
+function rowToRuntimeSession(row: RuntimeSessionRow): RuntimeSession {
+  return {
+    id: row.id,
+    snaSessionId: row.sna_session_id,
+    parentId: row.parent_id,
+    config: JSON.parse(row.config) as SessionConfig,
+    process: null,
+    state: row.state,
+    spawnedAt: row.spawned_at,
+    retiredAt: row.retired_at,
+  };
 }
 
 export class SessionManager {
   private sessions = new Map<string, Session>();
+  /**
+   * In-memory chain of RuntimeSessions per Session.id. Each config mutation
+   * (saveStartConfig, restartSession, setSessionModel, setSessionPermissionMode,
+   * applySessionPatch) appends a new RuntimeSession and retires the prior one.
+   *
+   * Persisted to `runtime_sessions` table. Session.config + Session.cwd
+   * continue to mirror the current RuntimeSession's config for backward compat
+   * with in-process callers.
+   */
+  private runtimes = new Map<string, RuntimeSession[]>();
+  private currentRuntimeId = new Map<string, string>();
   private maxSessions: number;
   private eventListeners = new Map<string, Set<(cursor: number, event: AgentEvent) => void>>();
   private pendingPermissions = new Map<string, PendingPermission>();
@@ -125,21 +234,49 @@ export class SessionManager {
     try {
       const db = getDb();
       const rows = db.prepare(
-        `SELECT id, label, meta, cwd, last_start_config, created_at FROM chat_sessions`
-      ).all() as { id: string; label: string; meta: string | null; cwd: string | null; last_start_config: string | null; created_at: string }[];
+        `SELECT id, label, meta, cwd, last_start_config, cc_session_id, current_runtime_id, created_at FROM chat_sessions`
+      ).all() as {
+        id: string;
+        label: string;
+        meta: string | null;
+        cwd: string | null;
+        last_start_config: string | null;
+        cc_session_id: string | null;
+        current_runtime_id: string | null;
+        created_at: string;
+      }[];
       for (const row of rows) {
         if (this.sessions.has(row.id)) continue;
+        // Load the runtime chain for this session. The current runtime's
+        // config wins over the legacy last_start_config column — phase 4
+        // backfill ensures they agree, but if a fresh write landed in only
+        // one place, the RT row is the source of truth.
+        const chainRows = listRuntimeSessions(db, row.id);
+        const chain = chainRows.map(rowToRuntimeSession);
+        this.runtimes.set(row.id, chain);
+        const current = chain.find((rt) => rt.retiredAt === null);
+        if (current) {
+          this.currentRuntimeId.set(row.id, current.id);
+        }
+
+        const config = current
+          ? current.config
+          : row.last_start_config
+            ? (JSON.parse(row.last_start_config) as SessionConfig)
+            : null;
+        const cwd = current?.config.cwd ?? row.cwd ?? process.cwd();
+
         this.sessions.set(row.id, {
           id: row.id,
           process: null,
           eventBuffer: [],
           eventCounter: 0,
           label: row.label,
-          cwd: row.cwd ?? process.cwd(),
+          cwd,
           meta: row.meta ? JSON.parse(row.meta) : null,
-          state: "idle",
-          lastStartConfig: row.last_start_config ? JSON.parse(row.last_start_config) : null,
-          ccSessionId: null,
+          state: current?.state ?? "idle",
+          config,
+          ccSessionId: row.cc_session_id,
           createdAt: new Date(row.created_at).getTime() || Date.now(),
           lastActivityAt: Date.now(),
         });
@@ -151,22 +288,102 @@ export class SessionManager {
   private persistSession(session: Session): void {
     try {
       const db = getDb();
+      const currentRtId = this.currentRuntimeId.get(session.id) ?? null;
       db.prepare(
-        `INSERT INTO chat_sessions (id, label, type, meta, cwd, last_start_config)
-         VALUES (?, ?, 'main', ?, ?, ?)
+        `INSERT INTO chat_sessions (id, label, type, meta, cwd, last_start_config, cc_session_id, current_runtime_id)
+         VALUES (?, ?, 'main', ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            label = excluded.label,
            meta = excluded.meta,
            cwd = excluded.cwd,
-           last_start_config = excluded.last_start_config`
+           last_start_config = excluded.last_start_config,
+           cc_session_id = excluded.cc_session_id,
+           current_runtime_id = excluded.current_runtime_id`
       ).run(
         session.id,
         session.label,
         session.meta ? JSON.stringify(session.meta) : null,
         session.cwd,
-        session.lastStartConfig ? JSON.stringify(session.lastStartConfig) : null,
+        session.config ? JSON.stringify(session.config) : null,
+        session.ccSessionId,
+        currentRtId,
       );
     } catch { /* non-fatal */ }
+  }
+
+  // ── Runtime chain management ─────────────────────────────────────
+
+  /** Get the live (in-memory) current RuntimeSession for a session, or null. */
+  getCurrentRuntime(sessionId: string): RuntimeSession | null {
+    const id = this.currentRuntimeId.get(sessionId);
+    if (!id) return null;
+    const chain = this.runtimes.get(sessionId);
+    return chain?.find((rt) => rt.id === id) ?? null;
+  }
+
+  /** Return the full chain for a session, oldest first. Empty array if none. */
+  getRuntimeChain(sessionId: string): RuntimeSession[] {
+    return this.runtimes.get(sessionId) ?? [];
+  }
+
+  /**
+   * Atomically retire the current RuntimeSession (if any) and insert a new
+   * one for this session. Updates the in-memory chain + currentRuntimeId
+   * map + DB rows, and mirrors the new config onto Session.config / .cwd.
+   *
+   * The returned RuntimeSession has `process = null`; callers (start /
+   * restart / applyPatch) wire the process pointer onto it via setProcess.
+   * If `migrateProcess` is true, the previous RT's process pointer moves
+   * onto the new RT — used by in-place transitions (codex per-turn override,
+   * setSessionModel) where no respawn happened.
+   */
+  private transitionRuntime(
+    session: Session,
+    config: SessionConfig,
+    options: { migrateProcess?: boolean } = {},
+  ): RuntimeSession {
+    const now = Date.now();
+    const prev = this.getCurrentRuntime(session.id);
+    const newRt: RuntimeSession = {
+      id: `rt_${session.id}_${now.toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      snaSessionId: session.id,
+      parentId: prev?.id ?? null,
+      config,
+      process: options.migrateProcess ? prev?.process ?? null : null,
+      state: prev?.state ?? "idle",
+      spawnedAt: now,
+      retiredAt: null,
+    };
+
+    // Memory: chain append + pointer flip
+    const chain = this.runtimes.get(session.id) ?? [];
+    if (prev) prev.retiredAt = now;
+    if (prev && options.migrateProcess) prev.process = null;
+    chain.push(newRt);
+    this.runtimes.set(session.id, chain);
+    this.currentRuntimeId.set(session.id, newRt.id);
+
+    // DB: same transition in one transaction
+    try {
+      const db = getDb();
+      db.transaction(() => {
+        if (prev) retireRuntimeSession(db, prev.id, now);
+        insertRuntimeSession(db, {
+          id: newRt.id,
+          snaSessionId: newRt.snaSessionId,
+          parentId: newRt.parentId,
+          config: newRt.config,
+          state: newRt.state,
+          spawnedAt: newRt.spawnedAt,
+        });
+      })();
+    } catch { /* DB not ready — chain still in memory */ }
+
+    // Mirror onto Session for backward compat with in-process callers.
+    session.config = config;
+    session.cwd = config.cwd;
+
+    return newRt;
   }
 
   /** Create a new session. Updates existing session fields if already present. */
@@ -204,7 +421,7 @@ export class SessionManager {
       cwd: opts.cwd ?? process.cwd(),
       meta: opts.meta ?? null,
       state: "idle",
-      lastStartConfig: null,
+      config: null,
       ccSessionId: null,
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
@@ -257,6 +474,11 @@ export class SessionManager {
     if (!session) throw new Error(`Session "${sessionId}" not found`);
 
     session.process = proc;
+    // Mirror onto the current RuntimeSession (if any) so the chain reflects
+    // which process is alive on which spawn. saveStartConfig / restartSession
+    // wire this explicitly too — this branch handles direct setProcess callers.
+    const currentRt = this.getCurrentRuntime(sessionId);
+    if (currentRt) currentRt.process = proc;
     session.lastActivityAt = Date.now();
 
     // Sync eventCounter with DB history so live event cursors continue
@@ -409,7 +631,7 @@ export class SessionManager {
     return () => this.configChangedListeners.delete(cb);
   }
 
-  private emitConfigChanged(sessionId: string, config: StartConfig): void {
+  private emitConfigChanged(sessionId: string, config: SessionConfig): void {
     for (const cb of this.configChangedListeners) cb({ session: sessionId, config });
   }
 
@@ -440,6 +662,12 @@ export class SessionManager {
   private setSessionState(sessionId: string, session: Session, newState: SessionState): void {
     const oldState = session.state;
     session.state = newState;
+    // Mirror onto the current RuntimeSession + persist.
+    const currentRt = this.getCurrentRuntime(sessionId);
+    if (currentRt && currentRt.state !== newState) {
+      currentRt.state = newState;
+      try { persistRuntimeState(getDb(), currentRt.id, newState); } catch { /* non-fatal */ }
+    }
     const newStatus: AgentStatus = !session.process?.alive ? "disconnected" : (newState === "processing" ? "busy" : "idle");
     if (oldState !== newState) {
       for (const cb of this.stateChangedListeners) cb({ session: sessionId, agentStatus: newStatus, state: newState });
@@ -500,24 +728,30 @@ export class SessionManager {
   // ── Session lifecycle ─────────────────────────────────────────
 
   /** Kill the agent process in a session (session stays, can be restarted). */
-  /** Save the start config for a session (called by start handlers). */
-  saveStartConfig(id: string, config: StartConfig): void {
+  /**
+   * Record a new spawn config for the session. Called by start / resume
+   * handlers after they spawn the agent process. Appends a new RuntimeSession
+   * to the chain. The process pointer is migrated from the prior current RT
+   * (if any), because the caller has already attached it via setProcess —
+   * this avoids dropping the process during the transition.
+   */
+  saveStartConfig(id: string, config: SessionConfig): void {
     const session = this.sessions.get(id);
     if (!session) return;
-    session.lastStartConfig = config;
+    this.transitionRuntime(session, config, { migrateProcess: true });
     this.persistSession(session);
   }
 
   /** Restart session: kill → re-spawn with merged config + --resume. */
-  restartSession(
+  async restartSession(
     id: string,
-    overrides: Partial<StartConfig>,
-    spawnFn: (config: StartConfig) => AgentProcess,
-  ): { config: StartConfig } {
+    overrides: Partial<SessionConfig>,
+    spawnFn: (config: SessionConfig) => AgentProcess | Promise<AgentProcess>,
+  ): Promise<{ config: SessionConfig }> {
     const session = this.sessions.get(id);
     if (!session) throw new Error(`Session "${id}" not found`);
 
-    const base = session.lastStartConfig;
+    const base = session.config;
     if (!base) throw new Error(`Session "${id}" has no previous start config`);
 
     // Merge strategy: overrides win. Provider-specific fields (extraArgs,
@@ -528,7 +762,7 @@ export class SessionManager {
     const nextProvider = overrides.provider ?? base.provider;
     const providerChanged = nextProvider !== base.provider;
 
-    const config: StartConfig = {
+    const config: SessionConfig = {
       provider: nextProvider,
       // modelProvider is attribution metadata, not runtime-specific. Caller
       // (e.g. Loom) decides it via its model catalog and passes it in with
@@ -536,6 +770,7 @@ export class SessionManager {
       // provider change, since the inherited modelProvider no longer matches.
       modelProvider: overrides.modelProvider ?? (providerChanged ? undefined : base.modelProvider),
       model: overrides.model ?? base.model,
+      cwd: overrides.cwd ?? base.cwd,
       permissionMode: overrides.permissionMode ?? base.permissionMode,
       configDir: providerChanged ? overrides.configDir : (overrides.configDir ?? base.configDir),
       extraArgs: providerChanged ? overrides.extraArgs : (overrides.extraArgs ?? base.extraArgs),
@@ -544,7 +779,7 @@ export class SessionManager {
 
     // Kill existing
     if (session.process?.alive) {
-      const providerName = session.lastStartConfig?.provider;
+      const providerName = session.config?.provider;
       if (providerName) {
         const provider = getProvider(providerName);
         if (provider.supportsRuntimePooling) {
@@ -557,10 +792,12 @@ export class SessionManager {
       }
     }
 
-    // Spawn with merged config + --resume
-    const proc = spawnFn(config);
-    this.setProcess(id, proc);
-    session.lastStartConfig = config;
+    // Spawn with merged config + --resume, then transition. The previous
+    // process was just killed; the new process is what attaches.
+    const proc = await spawnFn(config);
+    const newRt = this.transitionRuntime(session, config, { migrateProcess: false });
+    newRt.process = proc;
+    session.process = proc;
     this.persistSession(session);
     this.emitLifecycle({ session: id, state: "restarted" });
     this.emitConfigChanged(id, config);
@@ -577,34 +814,117 @@ export class SessionManager {
     return true;
   }
 
-  /** Change model. Sends control message if alive, always persists to config. */
+  /**
+   * Change model. Pushes the control message to the live process and appends
+   * a new RuntimeSession (config diff only — process is migrated, no respawn).
+   */
   setSessionModel(id: string, model: string): boolean {
     const session = this.sessions.get(id);
     if (!session) return false;
     if (session.process?.alive) session.process.setModel(model);
-    if (session.lastStartConfig) {
-      session.lastStartConfig.model = model;
-    } else {
-      session.lastStartConfig = { provider: getConfig().defaultProvider, model, permissionMode: getConfig().defaultPermissionMode };
-    }
+    const base = session.config ?? {
+      provider: getConfig().defaultProvider,
+      model: getConfig().model,
+      cwd: session.cwd,
+      permissionMode: getConfig().defaultPermissionMode,
+    };
+    const nextConfig: SessionConfig = { ...base, model };
+    this.transitionRuntime(session, nextConfig, { migrateProcess: true });
     this.persistSession(session);
-    this.emitConfigChanged(id, session.lastStartConfig);
+    this.emitConfigChanged(id, nextConfig);
     return true;
   }
 
-  /** Change permission mode. Sends control message if alive, always persists to config. */
+  /**
+   * Change permission mode. Pushes the control message to the live process and
+   * appends a new RuntimeSession.
+   */
   setSessionPermissionMode(id: string, mode: string): boolean {
     const session = this.sessions.get(id);
     if (!session) return false;
     if (session.process?.alive) session.process.setPermissionMode(mode);
-    if (session.lastStartConfig) {
-      session.lastStartConfig.permissionMode = mode;
-    } else {
-      session.lastStartConfig = { provider: getConfig().defaultProvider, model: getConfig().model, permissionMode: mode };
-    }
+    const base = session.config ?? {
+      provider: getConfig().defaultProvider,
+      model: getConfig().model,
+      cwd: session.cwd,
+      permissionMode: mode,
+    };
+    const nextConfig: SessionConfig = { ...base, permissionMode: mode };
+    this.transitionRuntime(session, nextConfig, { migrateProcess: true });
     this.persistSession(session);
-    this.emitConfigChanged(id, session.lastStartConfig);
+    this.emitConfigChanged(id, nextConfig);
     return true;
+  }
+
+  /**
+   * Apply a SessionPatch to the current runtime. In-place fields are pushed
+   * via the provider's `applyPatch`; remaining (leftover) fields require a
+   * respawn — the caller drives that via `respawnFn` which is invoked with
+   * the merged config + replay history, and is expected to return the new
+   * process.
+   *
+   * Either path appends exactly one new RuntimeSession to the chain. The
+   * return value tells the caller which path was taken.
+   */
+  async applySessionPatch(
+    id: string,
+    patch: SessionPatch,
+    respawnFn: (config: SessionConfig) => AgentProcess | Promise<AgentProcess>,
+  ): Promise<{ applied: "in-place" | "respawn"; runtimeId: string; fields: string[] }> {
+    const session = this.sessions.get(id);
+    if (!session) throw new Error(`Session "${id}" not found`);
+    const currentRt = this.getCurrentRuntime(id);
+    if (!currentRt || !session.config) {
+      throw new Error(`Session "${id}" has no active runtime — call saveStartConfig first`);
+    }
+
+    const fields = Object.keys(patch).filter((k) => (patch as Record<string, unknown>)[k] !== undefined);
+    if (fields.length === 0) {
+      return { applied: "in-place", runtimeId: currentRt.id, fields: [] };
+    }
+
+    // Try in-place application first. Provider returns whichever fields it
+    // could not handle.
+    let leftover: SessionPatch = patch;
+    if (session.process?.alive) {
+      leftover = session.process.applyPatch(patch);
+    } else {
+      // No live process — every field must respawn.
+      leftover = { ...patch };
+    }
+    const leftoverKeys = Object.keys(leftover).filter((k) => (leftover as Record<string, unknown>)[k] !== undefined);
+
+    const nextConfig: SessionConfig = { ...session.config, ...patch };
+
+    if (leftoverKeys.length === 0) {
+      // Pure in-place: process keeps living on the new RT.
+      const newRt = this.transitionRuntime(session, nextConfig, { migrateProcess: true });
+      this.persistSession(session);
+      this.emitConfigChanged(id, nextConfig);
+      return { applied: "in-place", runtimeId: newRt.id, fields };
+    }
+
+    // Respawn path: kill current process (the in-place subset has already
+    // been queued by the provider; respawning may overwrite that for the
+    // leftover fields). Caller supplies the new process via respawnFn.
+    if (session.process?.alive) {
+      const providerName = session.config.provider;
+      const provider = getProvider(providerName);
+      if (provider.supportsRuntimePooling) {
+        session.process.closeThread();
+      } else {
+        session.process.kill();
+      }
+    }
+    const proc = await respawnFn(nextConfig);
+    const newRt = this.transitionRuntime(session, nextConfig, { migrateProcess: false });
+    newRt.process = proc;
+    session.process = proc;
+    this.persistSession(session);
+    this.emitLifecycle({ session: id, state: "restarted" });
+    this.emitConfigChanged(id, nextConfig);
+
+    return { applied: "respawn", runtimeId: newRt.id, fields };
   }
 
   /** Kill the agent process in a session (session stays, can be restarted). */
@@ -623,7 +943,7 @@ export class SessionManager {
     if (!session) return false;
     if (session.process?.alive) {
       // For pooled providers, close only the thread; otherwise kill the process.
-      const providerName = session.lastStartConfig?.provider;
+      const providerName = session.config?.provider;
       if (providerName) {
         const provider = getProvider(providerName);
         if (provider.supportsRuntimePooling) {
@@ -642,9 +962,25 @@ export class SessionManager {
     return true;
   }
 
-  /** List all sessions as serializable info objects. */
-  listSessions(): SessionInfo[] {
-    return Array.from(this.sessions.values()).map((s) => ({
+  /**
+   * List all sessions as serializable info objects.
+   *
+   * The optional `includeRuntimeChain` flag populates `SessionInfo.runtimeChain`
+   * with the full audit history of config changes. Off by default — status
+   * polls stay small; debugging / audit surfaces opt in.
+   */
+  listSessions(options: { includeRuntimeChain?: boolean } = {}): SessionInfo[] {
+    return Array.from(this.sessions.values()).map((s) => this.buildSessionInfo(s, options));
+  }
+
+  /** Build a SessionInfo for a single session. Same shape as listSessions. */
+  getSessionInfo(id: string, options: { includeRuntimeChain?: boolean } = {}): SessionInfo | null {
+    const session = this.sessions.get(id);
+    return session ? this.buildSessionInfo(session, options) : null;
+  }
+
+  private buildSessionInfo(s: Session, options: { includeRuntimeChain?: boolean }): SessionInfo {
+    const info: SessionInfo = {
       id: s.id,
       label: s.label,
       alive: s.process?.alive ?? false,
@@ -652,13 +988,25 @@ export class SessionManager {
       agentStatus: !s.process?.alive ? "disconnected" : (s.state === "processing" ? "busy" : "idle") as AgentStatus,
       cwd: s.cwd,
       meta: s.meta,
-      config: s.lastStartConfig,
+      config: s.config,
       ccSessionId: s.ccSessionId,
       eventCount: s.eventCounter,
       ...this.getMessageStats(s.id),
       createdAt: s.createdAt,
       lastActivityAt: s.lastActivityAt,
-    }));
+      currentRuntimeId: this.currentRuntimeId.get(s.id) ?? null,
+    };
+    if (options.includeRuntimeChain) {
+      info.runtimeChain = (this.runtimes.get(s.id) ?? []).map((rt) => ({
+        id: rt.id,
+        parentId: rt.parentId,
+        config: rt.config,
+        state: rt.state,
+        spawnedAt: rt.spawnedAt,
+        retiredAt: rt.retiredAt,
+      }));
+    }
+    return info;
   }
 
   /** Touch a session's lastActivityAt timestamp. */
@@ -693,7 +1041,7 @@ export class SessionManager {
    *
    * Assistant-authored blocks (text / thinking / tool_use) are stamped with
    * three-layer attribution — runtime (CLI), modelProvider (LLM API vendor),
-   * and model (specific slug) — pulled from session.lastStartConfig at emit
+   * and model (specific slug) — pulled from session.config at emit
    * time. If the user switches mid-session, subsequent rows carry the new
    * attribution. Essential for auditing, Langfuse traces, UI badges, and
    * adapters that need to know "who actually said this" when converting
@@ -715,9 +1063,9 @@ export class SessionManager {
       // The SDK's internal field name for the CLI is `provider` (runtime
       // dispatch key), but we surface it as `runtime` in the canonical meta
       // to disambiguate from the LLM API vendor (`modelProvider`).
-      if (session?.lastStartConfig?.provider) attr.runtime = session.lastStartConfig.provider;
-      if (session?.lastStartConfig?.modelProvider) attr.modelProvider = session.lastStartConfig.modelProvider;
-      if (session?.lastStartConfig?.model) attr.model = session.lastStartConfig.model;
+      if (session?.config?.provider) attr.runtime = session.config.provider;
+      if (session?.config?.modelProvider) attr.modelProvider = session.config.modelProvider;
+      if (session?.config?.model) attr.model = session.config.model;
 
       switch (e.type) {
         case "assistant":
@@ -804,7 +1152,7 @@ export class SessionManager {
     for (const session of this.sessions.values()) {
       if (session.id === "default") continue;
       if (session.process?.alive) {
-        const providerName = session.lastStartConfig?.provider;
+        const providerName = session.config?.provider;
         if (providerName) {
           const provider = getProvider(providerName);
           if (provider.supportsRuntimePooling) {

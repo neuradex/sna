@@ -841,6 +841,18 @@ class OpenCodeProcess implements AgentProcess {
     logger.log("agent", `opencode: agent override → ${this._agentOverride ?? "(default)"} (mode=${mode})`);
   }
 
+  applyPatch(patch: import("./types.js").SessionPatch): import("./types.js").SessionPatch {
+    // opencode's `setModel` and `setPermissionMode` apply on the next prompt
+    // via per-session overrides. cwd has no in-place surface in the current
+    // opencode SDK — leave it for the caller to respawn. See sna#22 for the
+    // native-channel investigation we plan to do for in-place coverage.
+    const leftover: import("./types.js").SessionPatch = {};
+    if (patch.model !== undefined) this.setModel(patch.model);
+    if (patch.permissionMode !== undefined) this.setPermissionMode(patch.permissionMode);
+    if (patch.cwd !== undefined) leftover.cwd = patch.cwd;
+    return leftover;
+  }
+
   respondToPermission(requestId: string, approved: boolean): void {
     void this.respondToPermissionAsync(requestId, approved);
   }

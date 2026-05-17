@@ -291,9 +291,9 @@ function startTurn(ss: SessionState, userMessage: string): void {
   // queries can filter/aggregate by runtime (CLI), modelProvider (vendor), or
   // specific model. The SDK still names the CLI field `provider` internally;
   // we rename it to `runtime` here to match the canonical vocabulary.
-  const runtime = session?.lastStartConfig?.provider ?? "unknown";
-  const modelProvider = session?.lastStartConfig?.modelProvider ?? "unknown";
-  const model = session?.lastStartConfig?.model ?? "unknown";
+  const runtime = session?.config?.provider ?? "unknown";
+  const modelProvider = session?.config?.modelProvider ?? "unknown";
+  const model = session?.config?.model ?? "unknown";
 
   const turnName = ss.label
     ? `${ss.label}/turn-${ss.turnCounter}`
@@ -448,20 +448,20 @@ function handleEvent(ss: SessionState, event: AgentEvent): void {
       if (!turn) break;
       // Attach usage data to open generation (Codex fallback path).
       // The `d.provider` on AgentEvent.data is the runtime (CLI); modelProvider
-      // comes from the session's lastStartConfig which tracks the vendor.
+      // comes from the session's current config (Session.config) which tracks the vendor.
       if (turn.llmGeneration && event.data) {
         const d = event.data as Record<string, unknown>;
         const session = sm?.getSession(ss.sessionId);
         turn.llmGeneration.update({
-          model: (d.model as string | undefined) ?? session?.lastStartConfig?.model,
+          model: (d.model as string | undefined) ?? session?.config?.model,
           usage: {
             input: d.inputTokens as number | undefined,
             output: d.outputTokens as number | undefined,
             total: ((d.inputTokens as number) ?? 0) + ((d.outputTokens as number) ?? 0),
           },
           metadata: {
-            runtime: (d.provider as string | undefined) ?? session?.lastStartConfig?.provider,
-            modelProvider: session?.lastStartConfig?.modelProvider,
+            runtime: (d.provider as string | undefined) ?? session?.config?.provider,
+            modelProvider: session?.config?.modelProvider,
             durationMs: d.durationMs,
             costUsd: d.costUsd,
           },

@@ -12,11 +12,13 @@ import fs from "fs";
 import path from "path";
 import {
   getProvider,
+  spawnWithPool,
   type AgentEvent,
 } from "../../core/providers/index.js";
 import { logger } from "../../lib/logger.js";
 import { getDb } from "../../db/schema.js";
 import { SessionManager } from "../session-manager.js";
+import type { SessionConfig } from "../session-manager.js";
 import { buildCanonicalFromDb } from "../../history/canonical.js";
 import { saveEmbeds } from "../image-store.js";
 import { insertChatMessage } from "../../db/chat-messages.js";
@@ -32,14 +34,24 @@ import { resolveImagePath } from "../image-store.js";
 const sessionStateSchema = z.enum(["idle", "processing", "waiting", "permission"]);
 const agentStatusSchema = z.enum(["idle", "busy", "disconnected"]);
 
-const StartConfigSchema = z.object({
+const SessionConfigSchema = z.object({
   provider: z.string(),
   modelProvider: z.string().optional(),
   model: z.string(),
+  cwd: z.string(),
   permissionMode: z.string().optional(),
   configDir: z.string().optional(),
   extraArgs: z.array(z.string()).optional(),
   providerOptions: z.record(z.string(), z.any()).optional(),
+});
+
+const RuntimeChainEntrySchema = z.object({
+  id: z.string(),
+  parentId: z.string().nullable(),
+  config: SessionConfigSchema,
+  state: sessionStateSchema,
+  spawnedAt: z.number(),
+  retiredAt: z.number().nullable(),
 });
 
 const SessionInfoSchema = z.object({
@@ -50,7 +62,7 @@ const SessionInfoSchema = z.object({
   agentStatus: agentStatusSchema,
   cwd: z.string(),
   meta: z.record(z.string(), z.any()).nullable(),
-  config: StartConfigSchema.nullable(),
+  config: SessionConfigSchema.nullable(),
   ccSessionId: z.string().nullable(),
   eventCount: z.number(),
   messageCount: z.number(),
@@ -62,6 +74,8 @@ const SessionInfoSchema = z.object({
   }).nullable(),
   createdAt: z.number(),
   lastActivityAt: z.number(),
+  currentRuntimeId: z.string().nullable(),
+  runtimeChain: z.array(RuntimeChainEntrySchema).optional(),
 });
 
 const ErrorResponse = z.object({
@@ -146,7 +160,12 @@ const listSessionsRoute = createRoute({
   method: "get",
   path: "/agent/sessions",
   summary: "List sessions",
-  description: "List all agent sessions.",
+  description: "List all agent sessions. Pass `?include=chain` to embed each session's full RuntimeSession audit chain in the response.",
+  request: {
+    query: z.object({
+      include: z.enum(["chain"]).optional(),
+    }),
+  },
   responses: {
     200: {
       description: "Session list.",
@@ -308,6 +327,7 @@ const restartRoute = createRoute({
         provider: z.string().optional(),
         modelProvider: z.string().optional(),
         model: z.string().optional(),
+        cwd: z.string().optional(),
         permissionMode: z.string().optional(),
         configDir: z.string().optional(),
         extraArgs: z.array(z.string()).optional(),
@@ -446,6 +466,53 @@ const setPermissionModeRoute = createRoute({
   },
 });
 
+const sessionPatchRoute = createRoute({
+  method: "patch",
+  path: "/agent/session",
+  summary: "Patch session config",
+  description: [
+    "Unified PATCH mutator. Applies the patch in-place where the provider",
+    "supports it (codex per-turn cwd/model/sandbox override; claude-code",
+    "control_request for model/permissionMode). Leftover fields drive a",
+    "respawn-with-history. Response's `applied` reports which path was taken.",
+  ].join(" "),
+  request: {
+    query: z.object({ session: z.string().optional() }),
+    body: {
+      content: { "application/json": { schema: z.object({
+        cwd: z.string().optional(),
+        model: z.string().optional(),
+        permissionMode: z.string().optional(),
+      }) } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Patch applied.",
+      content: { "application/json": { schema: z.object({
+        status: z.literal("updated"),
+        applied: z.enum(["in-place", "respawn"]),
+        runtimeId: z.string(),
+        fields: z.array(z.string()),
+      }) } },
+    },
+    400: {
+      description: "Session has no active runtime, or respawn failed.",
+      content: { "application/json": { schema: z.object({
+        status: z.literal("error"),
+        message: z.string(),
+      }) } },
+    },
+    404: {
+      description: "Session not found.",
+      content: { "application/json": { schema: z.object({
+        status: z.literal("error"),
+        message: z.string(),
+      }) } },
+    },
+  },
+});
+
 const killRoute = createRoute({
   method: "post",
   path: "/agent/kill",
@@ -488,7 +555,7 @@ const statusRoute = createRoute({
           content: z.string(),
           created_at: z.string(),
         }).nullable(),
-        config: StartConfigSchema.nullable(),
+        config: SessionConfigSchema.nullable(),
       }) } },
     },
   },
@@ -931,7 +998,10 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
 
   app.openapi(listSessionsRoute, (c) => {
     if (!sessionManager) return c.json({ sessions: [] }, 200);
-    return c.json({ sessions: sessionManager.listSessions() }, 200);
+    const { include } = c.req.valid("query");
+    return c.json({
+      sessions: sessionManager.listSessions({ includeRuntimeChain: include === "chain" }),
+    }, 200);
   });
 
   app.openapi(removeSessionRoute, (c) => {
@@ -1003,7 +1073,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     const model = body.model ?? getConfig().model;
 
     try {
-      const proc = provider.spawn({
+      const proc = await spawnWithPool(provider, {
         cwd: session.cwd,
         prompt: body.prompt,
         model,
@@ -1025,6 +1095,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
         provider: providerName,
         modelProvider: body.modelProvider,
         model,
+        cwd: session.cwd,
         permissionMode: body.permissionMode,
         configDir: body.configDir,
         extraArgs: body.extraArgs,
@@ -1120,26 +1191,39 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
 
     try {
       const session = sessionManager.getSession(sessionId);
-      const prevProvider = session?.lastStartConfig?.provider;
-      const ccSessionId = session?.ccSessionId;
+      if (!session) {
+        // Restart-route's openapi schema only declares 200/500; surface this
+        // as 500 to stay within the typed-response contract.
+        return c.json({ status: "error", message: "Session not found" }, 500);
+      }
+      const prevProvider = session.config?.provider;
+      const ccSessionId = session.ccSessionId;
 
-      const { config } = sessionManager.restartSession(sessionId, body, (cfg) => {
+      const nextProvider = body.provider ?? prevProvider ?? getConfig().defaultProvider;
+      const nextProv = getProvider(nextProvider);
+
+      const typedOpts = {
+        systemPrompt: body.systemPrompt,
+        appendSystemPrompt: body.appendSystemPrompt,
+        allowedTools: body.allowedTools,
+        disallowedTools: body.disallowedTools,
+        mcpServers: body.mcpServers as any,
+      };
+
+      // Single path for both pooled and non-pooled: restartSession owns the
+      // kill + persist mechanics; spawnWithPool handles the runtime pool
+      // branch (no-op for non-pooled providers like claude-code). Earlier
+      // versions had separate branches and the duplication caused #21's
+      // openapi.ts regression — the helper closes that off.
+      const { config } = await sessionManager.restartSession(sessionId, body, async (cfg) => {
         const prov = getProvider(cfg.provider);
         const providerChanged = prevProvider && cfg.provider !== prevProvider;
-
-        const typedOpts = {
-          systemPrompt: body.systemPrompt,
-          appendSystemPrompt: body.appendSystemPrompt,
-          allowedTools: body.allowedTools,
-          disallowedTools: body.disallowedTools,
-          mcpServers: body.mcpServers as any,
-        };
 
         if (providerChanged) {
           const history = buildCanonicalFromDb(sessionId);
           logger.log("route", `restart: provider changed ${prevProvider} → ${cfg.provider}, using DB history (${history.length} msgs)`);
-          return prov.spawn({
-            cwd: sessionManager.getSession(sessionId)!.cwd,
+          return spawnWithPool(prov, {
+            cwd: session.cwd,
             model: cfg.model,
             permissionMode: cfg.permissionMode as any,
             configDir: cfg.configDir,
@@ -1151,8 +1235,8 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
           });
         }
 
-        return prov.spawn({
-          cwd: sessionManager.getSession(sessionId)!.cwd,
+        return spawnWithPool(prov, {
+          cwd: session.cwd,
           model: cfg.model,
           permissionMode: cfg.permissionMode as any,
           configDir: cfg.configDir,
@@ -1187,17 +1271,17 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     }
 
     const providerName = body.provider ?? getConfig().defaultProvider;
-    const providerChanged = session.lastStartConfig && session.lastStartConfig.provider !== providerName;
-    const model = body.model ?? session.lastStartConfig?.model ?? getConfig().model;
-    const permissionMode = body.permissionMode ?? session.lastStartConfig?.permissionMode;
-    const configDir = providerChanged ? body.configDir : (body.configDir ?? session.lastStartConfig?.configDir);
-    const extraArgs = providerChanged ? body.extraArgs : (body.extraArgs ?? session.lastStartConfig?.extraArgs);
-    const providerOptions = providerChanged ? body.providerOptions : (body.providerOptions ?? session.lastStartConfig?.providerOptions);
-    const modelProvider = body.modelProvider ?? (providerChanged ? undefined : session.lastStartConfig?.modelProvider);
+    const providerChanged = session.config && session.config.provider !== providerName;
+    const model = body.model ?? session.config?.model ?? getConfig().model;
+    const permissionMode = body.permissionMode ?? session.config?.permissionMode;
+    const configDir = providerChanged ? body.configDir : (body.configDir ?? session.config?.configDir);
+    const extraArgs = providerChanged ? body.extraArgs : (body.extraArgs ?? session.config?.extraArgs);
+    const providerOptions = providerChanged ? body.providerOptions : (body.providerOptions ?? session.config?.providerOptions);
+    const modelProvider = body.modelProvider ?? (providerChanged ? undefined : session.config?.modelProvider);
     const provider = getProvider(providerName);
 
     try {
-      const proc = provider.spawn({
+      const proc = await spawnWithPool(provider, {
         cwd: session.cwd,
         prompt: body.prompt,
         model,
@@ -1218,6 +1302,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
         provider: providerName,
         modelProvider,
         model,
+        cwd: session.cwd,
         permissionMode,
         configDir,
         extraArgs,
@@ -1257,6 +1342,52 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     const body = c.req.valid("json");
     const updated = sessionManager.setSessionPermissionMode(sessionId, body.permissionMode);
     return c.json({ status: updated ? "updated" : "no_session", permissionMode: body.permissionMode }, 200);
+  });
+
+  app.openapi(sessionPatchRoute, async (c) => {
+    if (!sessionManager) {
+      return c.json({ status: "error" as const, message: "No session manager" }, 400);
+    }
+    const sessionId = getSessionId(c);
+    const body = c.req.valid("json");
+    // SessionPatch fields only; unknown fields would have been stripped by Zod.
+    const patch = {
+      ...(body.cwd !== undefined ? { cwd: body.cwd } : {}),
+      ...(body.model !== undefined ? { model: body.model } : {}),
+      ...(body.permissionMode !== undefined ? { permissionMode: body.permissionMode } : {}),
+    };
+
+    const session = sessionManager.getSession(sessionId);
+    if (!session) {
+      return c.json({ status: "error" as const, message: "Session not found" }, 404);
+    }
+
+    try {
+      const result = await sessionManager.applySessionPatch(sessionId, patch, async (cfg) => {
+        const prov = getProvider(cfg.provider);
+        const history = buildCanonicalFromDb(sessionId);
+        return spawnWithPool(prov, {
+          cwd: cfg.cwd,
+          model: cfg.model,
+          permissionMode: cfg.permissionMode as any,
+          configDir: cfg.configDir,
+          env: { SNA_SESSION_ID: sessionId },
+          history: history.length > 0 ? history : undefined,
+          extraArgs: cfg.extraArgs,
+          providerOptions: cfg.providerOptions,
+        });
+      });
+      logger.log("route", `PATCH /agent/session?session=${sessionId} → ${result.applied} fields=[${result.fields.join(",")}] rt=${result.runtimeId}`);
+      return c.json({
+        status: "updated" as const,
+        applied: result.applied,
+        runtimeId: result.runtimeId,
+        fields: result.fields,
+      }, 200);
+    } catch (e: any) {
+      logger.err("err", `PATCH /agent/session?session=${sessionId} → ${e.message}`);
+      return c.json({ status: "error" as const, message: e.message }, 400);
+    }
   });
 
   app.openapi(killRoute, (c) => {
@@ -1299,7 +1430,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
       eventCount: session?.eventCounter ?? 0,
       messageCount,
       lastMessage,
-      config: session?.lastStartConfig ?? null,
+      config: session?.config ?? null,
     }, 200);
   });
 
@@ -1328,7 +1459,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     if (body.systemPrompt) extraArgs.push("--system-prompt", body.systemPrompt);
     if (body.appendSystemPrompt) extraArgs.push("--append-system-prompt", body.appendSystemPrompt);
 
-    const proc = provider.spawn({
+    const proc = await spawnWithPool(provider, {
       cwd: session.cwd,
       prompt: body.message,
       model: body.model ?? cfg.model,

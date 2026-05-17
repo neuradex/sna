@@ -85,10 +85,16 @@ await sna.agent.subscribePermissions();
 ```ts
 await sna.agent.setModel(sessionId, "claude-haiku-4-5");
 await sna.agent.setPermissionMode(sessionId, "bypassPermissions");
+await sna.agent.update(sessionId, { cwd: "/path/to/proj-b" });  // unified PATCH
 await sna.agent.interrupt(sessionId);
-await sna.agent.restart(sessionId);   // same lastStartConfig
+await sna.agent.restart(sessionId);   // re-uses the session's current config
 await sna.agent.resume(sessionId);    // rebuild from canonical history
 ```
+
+The `agent.update()` method is the unified mutator: pass any combination of
+`{cwd, model, permissionMode}` and the SDK picks the right path per runtime
+(codex per-turn override vs claude-code kill+respawn+replay). The response's
+`applied` field tells you which path was taken.
 
 ## One-shot completion
 

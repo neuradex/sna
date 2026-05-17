@@ -79,8 +79,9 @@ await sna.agent.subscribePermissions();
 ```ts
 await sna.agent.setModel(sessionId, "claude-haiku-4-5");
 await sna.agent.setPermissionMode(sessionId, "bypassPermissions");
+await sna.agent.update(sessionId, { cwd: "/path/to/proj-b" });   // unified PATCH
 await sna.agent.interrupt(sessionId);
-await sna.agent.restart(sessionId);  // same lastStartConfig
+await sna.agent.restart(sessionId);  // re-uses Session.config
 await sna.agent.resume(sessionId);   // rebuild from canonical history
 ```
 

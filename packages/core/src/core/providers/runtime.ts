@@ -106,9 +106,9 @@ export class RuntimePool {
    */
   async prepare(
     config: RuntimeConfig,
-    provider: { prepareRuntime?: RuntimePrepareFn; name: string },
+    provider: { prepareRuntime?: RuntimePrepareFn; name: string; supportsCwdPerThread?: boolean },
   ): Promise<RuntimeHandle> {
-    const key = this.computeKey(config, provider.name);
+    const key = this.computeKey(config, provider.name, provider.supportsCwdPerThread);
 
     // Reuse existing handle if available
     const existing = this.handles.get(key);
@@ -176,9 +176,16 @@ export class RuntimePool {
    *   - profile: sandbox/permission profile (e.g. "danger-full-access")
    *   - hooksHash: hash of hooks.json content (tool filters, permission hooks)
    *   - configHash: hash of config.toml content (MCP servers, feature flags)
+   *
+   * When `supportsCwdPerThread` is true, `cwd` is dropped from the key — the
+   * daemon can host threads operating on any cwd (each thread passes its own
+   * via the provider's thread/turn params), so cross-cwd sessions share one
+   * daemon instead of spawning a new one per workspace.
    */
-  private computeKey(config: RuntimeConfig, providerName: string): string {
-    const parts: string[] = [providerName, config.cwd];
+  private computeKey(config: RuntimeConfig, providerName: string, supportsCwdPerThread = false): string {
+    const parts: string[] = supportsCwdPerThread
+      ? [providerName]
+      : [providerName, config.cwd];
 
     if (config.configDir) parts.push(`configDir=${config.configDir}`);
     if (config.model) parts.push(`model=${config.model}`);
