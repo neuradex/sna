@@ -1420,9 +1420,12 @@ export class CodexProvider implements AgentProvider {
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    // Health check: wait for JSON-RPC `initialize` response from the daemon.
-    // The daemon responds with {id: ..., result: {...}} to our initialize request.
-    // We use a buffer to collect stdout and parse JSON-RPC messages.
+    // Health check: send a JSON-RPC `initialize` request and wait for the
+    // matching response. The daemon doesn't volunteer a ready signal — until
+    // initialize completes, threads on this daemon would hang. The original
+    // version of this code waited for a response without sending the request,
+    // so the pooled path was effectively dormant; production traffic only ever
+    // hit the legacy non-pooled spawn fallback.
     let daemonReady = false;
     const readyTimeout = setTimeout(() => {
       if (!daemonReady) {
@@ -1431,11 +1434,16 @@ export class CodexProvider implements AgentProvider {
       }
     }, 10_000);
 
+    // JSON-RPC id for the initialize request — needs to be a number we can
+    // recognize in the response stream so we don't mistake unrelated server
+    // notifications for the init ack.
+    const initializeId = 0;
+
     // Buffer to collect stdout for JSON-RPC parsing
     let stdoutBuffer = "";
 
     return new Promise<import("./runtime.js").RuntimeHandle>((resolve, reject) => {
-      daemon.stdout!.on("data", (chunk: Buffer) => {
+      const onStdout = (chunk: Buffer) => {
         stdoutBuffer += chunk.toString();
         const lines = stdoutBuffer.split("\n");
         stdoutBuffer = lines.pop() ?? "";
@@ -1444,12 +1452,25 @@ export class CodexProvider implements AgentProvider {
           if (!line.trim()) continue;
           try {
             const msg = JSON.parse(line);
-            // The daemon responds to our initialize request with {id, result}
-            if (msg.id != null && !msg.method && msg.result !== undefined) {
+            // Match the response to our initialize id specifically.
+            if (msg.id === initializeId && !msg.method && msg.result !== undefined) {
               if (!daemonReady) {
                 daemonReady = true;
                 clearTimeout(readyTimeout);
                 logger.log("agent", `codex: runtime daemon ready (pid=${daemon.pid})`);
+                // Per the JSON-RPC convention codex uses, follow the response
+                // with an `initialized` notification before any thread/start.
+                try {
+                  daemon.stdin!.write(JSON.stringify({
+                    jsonrpc: "2.0",
+                    method: "initialized",
+                  }) + "\n");
+                } catch { /* already dead — caught below */ }
+                // Detach our listeners so the CodexProcess thread wrappers
+                // see clean event flow and we don't keep buffering stdout in
+                // this closure forever.
+                daemon.stdout!.off("data", onStdout);
+                daemon.stderr!.off("data", onStderr);
                 resolve({
                   provider: this.name,
                   ready: true,
@@ -1463,9 +1484,16 @@ export class CodexProvider implements AgentProvider {
             }
           } catch { /* non-JSON, ignore */ }
         }
-      });
+      };
+      const onStderr = (buf: Buffer) => {
+        // Surface stderr at debug volume — codex emits non-fatal warnings
+        // here, but a real crash leaves a useful trace.
+        const txt = buf.toString().trim();
+        if (txt) logger.log("agent", `codex daemon stderr: ${txt.slice(0, 500)}`);
+      };
 
-      daemon.stderr!.on("data", () => { /* debug output — ignore */ });
+      daemon.stdout!.on("data", onStdout);
+      daemon.stderr!.on("data", onStderr);
 
       daemon.on("error", (err) => {
         clearTimeout(readyTimeout);
@@ -1478,6 +1506,22 @@ export class CodexProvider implements AgentProvider {
           reject(new Error(`codex runtime daemon exited with code ${code}`));
         }
       });
+
+      // Send the initialize request now that the listeners are wired up.
+      try {
+        daemon.stdin!.write(JSON.stringify({
+          jsonrpc: "2.0",
+          id: initializeId,
+          method: "initialize",
+          params: {
+            clientInfo: { name: "sna", title: "SNA SDK", version: "1.0.0" },
+            capabilities: { experimentalApi: true },
+          },
+        }) + "\n");
+      } catch (err: any) {
+        clearTimeout(readyTimeout);
+        reject(new Error(`codex runtime initialize write failed: ${err?.message ?? err}`));
+      }
     });
   }
 
