@@ -42,6 +42,12 @@ export interface CompletionOptions {
   label?: string;
   /** Timeout in milliseconds. Default: 60000 (60s). */
   timeout?: number;
+  /**
+   * Reasoning effort / thinking strength (0..5). See
+   * {@link import("./providers/types.js").SpawnOptions.reasoningLevel}
+   * for the per-provider translation table.
+   */
+  reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
   /** Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`). */
   providerOptions?: Record<string, unknown>;
 }
@@ -72,6 +78,7 @@ export async function completion(opts: CompletionOptions): Promise<CompletionRes
       env: opts.env,
       extraArgs: opts.extraArgs,
       timeout: opts.timeout,
+      reasoningLevel: opts.reasoningLevel,
       providerOptions: opts.providerOptions,
     });
 

@@ -271,6 +271,7 @@ const startRoute = createRoute({
         providerOptions: z.record(z.string(), z.any()).optional(),
         systemPrompt: z.string().optional(),
         appendSystemPrompt: z.string().optional(),
+        reasoningLevel: z.number().int().min(0).max(5).optional(),
         allowedTools: z.array(z.string()).optional(),
         disallowedTools: z.array(z.string()).optional(),
         mcpServers: z.record(z.string(), z.any()).optional(),
@@ -349,6 +350,7 @@ const restartRoute = createRoute({
         providerOptions: z.record(z.string(), z.any()).optional(),
         systemPrompt: z.string().optional(),
         appendSystemPrompt: z.string().optional(),
+        reasoningLevel: z.number().int().min(0).max(5).optional(),
         allowedTools: z.array(z.string()).optional(),
         disallowedTools: z.array(z.string()).optional(),
         mcpServers: z.record(z.string(), z.any()).optional(),
@@ -391,6 +393,7 @@ const resumeRoute = createRoute({
         providerOptions: z.record(z.string(), z.any()).optional(),
         systemPrompt: z.string().optional(),
         appendSystemPrompt: z.string().optional(),
+        reasoningLevel: z.number().int().min(0).max(5).optional(),
         allowedTools: z.array(z.string()).optional(),
         disallowedTools: z.array(z.string()).optional(),
         mcpServers: z.record(z.string(), z.any()).optional(),
@@ -590,6 +593,7 @@ const runOnceRoute = createRoute({
         model: z.string().optional(),
         systemPrompt: z.string().optional(),
         appendSystemPrompt: z.string().optional(),
+        reasoningLevel: z.number().int().min(0).max(5).optional(),
         permissionMode: z.string().optional(),
         cwd: z.string().optional(),
         timeout: z.number().optional(),
@@ -632,6 +636,7 @@ const completionRoute = createRoute({
         model: z.string().optional(),
         systemPrompt: z.string().optional(),
         appendSystemPrompt: z.string().optional(),
+        reasoningLevel: z.number().int().min(0).max(5).optional(),
         cwd: z.string().optional(),
         env: z.record(z.string(), z.any()).optional(),
         extraArgs: z.array(z.string()).optional(),
@@ -1191,6 +1196,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
         allowedTools: body.allowedTools,
         disallowedTools: body.disallowedTools,
         mcpServers: body.mcpServers as any,
+        reasoningLevel: body.reasoningLevel as (0 | 1 | 2 | 3 | 4 | 5) | undefined,
       });
 
       sessionManager.setProcess(sessionId, proc);
@@ -1399,6 +1405,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
         allowedTools: body.allowedTools,
         disallowedTools: body.disallowedTools,
         mcpServers: body.mcpServers as any,
+        reasoningLevel: body.reasoningLevel as (0 | 1 | 2 | 3 | 4 | 5) | undefined,
       });
       sessionManager.setProcess(sessionId, proc, "resumed");
       sessionManager.saveStartConfig(sessionId, {

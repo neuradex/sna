@@ -17,6 +17,7 @@ import type {
 import { writeClaudeHistoryJsonl } from "../../history/claude-code.js";
 import { logger } from "../../lib/logger.js";
 import { getConfig } from "../../config.js";
+import { toClaudeEffort } from "./reasoning-level.js";
 
 const SHELL = process.env.SHELL || "/bin/zsh";
 
@@ -828,6 +829,9 @@ export class ClaudeCodeProvider implements AgentProvider {
     if (options.model) args.push("--model", options.model);
     if (options.systemPrompt) args.push("--system-prompt", options.systemPrompt);
     if (options.appendSystemPrompt) args.push("--append-system-prompt", options.appendSystemPrompt);
+    if (options.reasoningLevel !== undefined) {
+      args.push("--effort", toClaudeEffort(options.reasoningLevel));
+    }
     if (options.extraArgs) args.push(...options.extraArgs);
     args.push(options.prompt);
 
@@ -1010,6 +1014,11 @@ export class ClaudeCodeProvider implements AgentProvider {
 
     if (options.permissionMode) {
       args.push("--permission-mode", options.permissionMode);
+    }
+
+    // Reasoning effort (provider-agnostic 0..5 → Claude's 5-step --effort)
+    if (options.reasoningLevel !== undefined) {
+      args.push("--effort", toClaudeEffort(options.reasoningLevel));
     }
 
     // System prompt from typed fields (takes precedence over extraArgs)

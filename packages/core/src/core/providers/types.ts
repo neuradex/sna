@@ -197,7 +197,19 @@ export interface SpawnOptions {
    *   maxTurns?: number              — --max-turns
    *   disableSlashCommands?: boolean — --disable-slash-commands
    *   omlxBaseUrl?: string           — route ANTHROPIC_BASE_URL to oMLX local LLM
-   * Codex: { config?: Record<string, string>, profile?: string }
+   * Codex:
+   *   config?: Record<string, string> — extra `-c key=value` config overrides for `codex exec`
+   *   profile?: string                — config.toml profile name to activate (pool key)
+   *   serviceTier?: string            — OpenAI request-priority tier (Codex `/fast` slash command
+   *                                     equivalent). Common values: "priority" (fastest, premium
+   *                                     billing — mirrors `/fast`), "flex" (cheaper, slower),
+   *                                     "batch" (lowest priority). The pool path threads this
+   *                                     into `turn/start.serviceTier`; the ephemeral `codex exec`
+   *                                     path passes `-c service_tier=<value>`.
+   *                                     INTENTIONALLY Codex-only: Claude Code's `/fast` is a
+   *                                     different (more expensive) MODEL variant, not a routing
+   *                                     tier — auto-mapping there would invite surprise spending.
+   *                                     For Claude, pick a faster variant via `model` directly.
    * OpenCode:
    *   serverUrl?: string             — route to a pre-existing `opencode serve` instead of spawning one
    *   modelProviderId?: string       — providerID half of the OpenCode model selector ({providerID, modelID})
@@ -206,6 +218,30 @@ export interface SpawnOptions {
    *   logLevel?: string              — passed through to `opencode serve --log-level`
    */
   providerOptions?: Record<string, unknown>;
+
+  /**
+   * Reasoning effort / thinking strength. Provider-agnostic 0..5 scale,
+   * where 0 is the lightest reasoning the provider supports and 5 is the
+   * heaviest. Each provider adapter translates this to its native knob:
+   *
+   *   level | Claude Code (`--effort`) | Codex (`model_reasoning_effort` / `turn/start.effort`)
+   *   ------+--------------------------+-------------------------------------------------------
+   *     0   | low                      | none
+   *     1   | low      (collapse)      | minimal
+   *     2   | medium                   | low
+   *     3   | high                     | medium
+   *     4   | xhigh                    | high
+   *     5   | max                      | xhigh
+   *
+   * Omit to inherit the provider's own default (`~/.codex/config.toml`'s
+   * `model_reasoning_effort`, Claude Code's `settings.json` `effortLevel`,
+   * etc.). OpenCode currently ignores this field.
+   *
+   * Note on Codex `minimal`: the model rejects `minimal` when certain
+   * built-in tools (image_gen, web_search) are enabled in your codex
+   * config. Use level 2 or higher in that case.
+   */
+  reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
 
   /**
    * Additional CLI flags passed directly to the agent binary.
@@ -347,6 +383,11 @@ export interface CompleteOptions {
   extraArgs?: string[];
   /** Timeout in milliseconds. Default: 60000. */
   timeout?: number;
+  /**
+   * Reasoning effort / thinking strength (0..5, lightest to heaviest).
+   * See {@link SpawnOptions.reasoningLevel} for the full mapping table.
+   */
+  reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
   /** Provider-specific options (e.g. `omlxBaseUrl` to override API endpoint). */
   providerOptions?: Record<string, unknown>;
 }

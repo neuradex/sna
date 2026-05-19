@@ -21,6 +21,10 @@ export interface RunOnceOptions {
   provider?: string;
   extraArgs?: string[];
   env?: Record<string, string>;
+  /**
+   * Reasoning effort 0..5. See {@link import("../core/providers/types.js").SpawnOptions.reasoningLevel}.
+   */
+  reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
   /** Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`). */
   providerOptions?: Record<string, unknown>;
 }
@@ -64,6 +68,7 @@ export async function runOnce(
     providerOptions: opts.providerOptions,
     systemPrompt: opts.systemPrompt,
     appendSystemPrompt: opts.appendSystemPrompt,
+    reasoningLevel: opts.reasoningLevel,
   });
 
   sessionManager.setProcess(sessionId, proc);

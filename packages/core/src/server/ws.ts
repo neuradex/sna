@@ -379,6 +379,7 @@ async function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManage
       allowedTools: msg.allowedTools as string[] | undefined,
       disallowedTools: msg.disallowedTools as string[] | undefined,
       mcpServers: msg.mcpServers as any,
+      reasoningLevel: msg.reasoningLevel as (0 | 1 | 2 | 3 | 4 | 5) | undefined,
     });
     sm.setProcess(sessionId, proc);
     sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, cwd: session.cwd, permissionMode, configDir, extraArgs, providerOptions });
@@ -496,6 +497,7 @@ async function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManag
       allowedTools: msg.allowedTools as string[] | undefined,
       disallowedTools: msg.disallowedTools as string[] | undefined,
       mcpServers: msg.mcpServers as any,
+      reasoningLevel: msg.reasoningLevel as (0 | 1 | 2 | 3 | 4 | 5) | undefined,
     });
     sm.setProcess(sessionId, proc, "resumed");
     sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, cwd: session.cwd, permissionMode, configDir, extraArgs, providerOptions });
@@ -528,6 +530,7 @@ async function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionMana
       allowedTools: msg.allowedTools as string[] | undefined,
       disallowedTools: msg.disallowedTools as string[] | undefined,
       mcpServers: msg.mcpServers as any,
+      reasoningLevel: msg.reasoningLevel as (0 | 1 | 2 | 3 | 4 | 5) | undefined,
     };
 
     // Single unified path. restartSession handles kill + persist; spawnWithPool

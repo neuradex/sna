@@ -19,6 +19,7 @@ import type {
 import { canonicalToCodexResponseItems } from "../../history/codex.js";
 import { logger } from "../../lib/logger.js";
 import { getRuntimePool } from "./runtime.js";
+import { toCodexEffort } from "./reasoning-level.js";
 
 const SHELL = process.env.SHELL || "/bin/zsh";
 
@@ -859,6 +860,19 @@ class CodexProcess implements AgentProcess {
       logger.log("agent", `codex: turn/start with cwd=${this._cwdOverride}`);
       this._cwdOverride = null;
     }
+    // Reasoning effort: per-turn override via TurnStartParams.effort
+    // (camelCase `effort`, NOT `model_reasoning_effort` — see the codex
+    // app-server protocol v2 TurnStartParams type).
+    if (this.options.reasoningLevel !== undefined) {
+      turnParams.effort = toCodexEffort(this.options.reasoningLevel);
+    }
+    // Service tier (Codex `/fast` slash command equivalent). Passed via
+    // the `turn/start.serviceTier` per-turn override; see
+    // app-server-protocol v2 TurnStartParams.serviceTier.
+    const turnServiceTier = (this.options.providerOptions as { serviceTier?: string } | undefined)?.serviceTier;
+    if (typeof turnServiceTier === "string" && turnServiceTier.length > 0) {
+      turnParams.serviceTier = turnServiceTier;
+    }
 
     this.sendRpc("turn/start", turnParams).then((result) => {
       // Capture turnId for interrupt
@@ -1373,6 +1387,7 @@ export class CodexProvider implements AgentProvider {
         providerOptions: options.providerOptions,
         systemPrompt: options.systemPrompt,
         appendSystemPrompt: options.appendSystemPrompt,
+        reasoningLevel: options.reasoningLevel,
       },
       pooled,
     );
@@ -1460,6 +1475,19 @@ export class CodexProvider implements AgentProvider {
     const args = ["exec", "--json", "--ephemeral", "--full-auto"];
 
     if (options.model) args.push("--model", options.model);
+    if (options.reasoningLevel !== undefined) {
+      // `codex exec` honours config overrides via `-c key=value`. Note: when
+      // built-in tools `image_gen` / `web_search` are enabled in the user's
+      // codex config, the model API rejects `minimal` (level 1) and the
+      // call will 400 with an explicit message. See SpawnOptions docstring.
+      args.push("-c", `model_reasoning_effort=${toCodexEffort(options.reasoningLevel)}`);
+    }
+    const serviceTier = (options.providerOptions as { serviceTier?: string } | undefined)?.serviceTier;
+    if (typeof serviceTier === "string" && serviceTier.length > 0) {
+      // Mirrors codex's `/fast` slash command — sets the OpenAI request
+      // priority tier ("priority" / "flex" / "batch" / model-defined).
+      args.push("-c", `service_tier=${serviceTier}`);
+    }
     if (options.extraArgs) args.push(...options.extraArgs);
 
     const instructions = [options.systemPrompt, options.appendSystemPrompt].filter(Boolean).join("\n\n");
