@@ -55,7 +55,7 @@ import type { AgentEvent, AgentProcess } from "../core/providers/types.js";
 import { getProvider } from "../core/providers/index.js";
 import { getDb } from "../db/schema.js";
 import { logger } from "../lib/logger.js";
-import { runOnce, type RunOnceOptions } from "./routes/agent.js";
+import { runOnce, type RunOnceOptions } from "./run-once.js";
 import { completion, type CompletionOptions } from "../core/completion.js";
 import { wsReply } from "./api-types.js";
 import { buildCanonicalFromDb } from "../history/canonical.js";

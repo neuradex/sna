@@ -80,11 +80,9 @@ const db = getDb();
 | Import path | Contents |
 |-------------|----------|
 | `@sna-sdk/core` | Default port/url, types (`AgentEvent`, `Session`, `SessionInfo`, `ChatSession`, `ChatMessage`, `CanonicalBlock`, `EmbedRecord`, …), `completion`, config helpers |
-| `@sna-sdk/core/server` | `createSnaApp`, `attachWebSocket`, `SessionManager`, route handlers |
-| `@sna-sdk/core/server/routes/agent` | `createAgentRoutes`, `runOnce` |
-| `@sna-sdk/core/server/routes/chat` | `createChatRoutes` |
-| `@sna-sdk/core/db/schema` | `getDb`, schema types |
-| `@sna-sdk/core/providers` | `getProvider`, `ClaudeCodeProvider`, `CodexProvider` |
+| `@sna-sdk/core/server` | `createSnaApp`, `attachWebSocket`, `SessionManager`, `snaPortRoute`, `buildCanonicalFromDb`, `completion`, `runOnce`, related types |
+| `@sna-sdk/core/db/schema` | `getDb`, `resetDb`, schema types (`ChatSession`, `ChatMessage`, `ChatActor`, `ChatKind`) |
+| `@sna-sdk/core/providers` | `getProvider`, `registerProvider`, `getRuntimePool`, `ClaudeCodeProvider`, `CodexProvider`, `OpenCodeProvider`, `RuntimePool`, schemas (`SpawnOptionsSchema`, `RuntimeConfigSchema`, `RuntimeHandleSchema`) |
 | `@sna-sdk/core/electron` | `startSnaServer` (Electron-aware launcher) |
 | `@sna-sdk/core/node` | `startSnaServer` (plain Node launcher) |
 

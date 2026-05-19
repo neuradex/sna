@@ -26,9 +26,9 @@ export async function createSnaApp(options: SnaAppOptions = {}) {
   return createOpenApiApp(options);
 }
 
-export { createAgentRoutes } from "./routes/agent.js";
-export { createChatRoutes } from "./routes/chat.js";
 export { SessionManager } from "./session-manager.js";
+export { runOnce } from "./run-once.js";
+export type { RunOnceOptions, RunOnceResult } from "./run-once.js";
 export type {
   Session,
   SessionInfo,
