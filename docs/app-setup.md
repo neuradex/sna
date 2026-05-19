@@ -123,6 +123,28 @@ that cwd, sparing the per-call cold-start cost. Provision the pool once
 (e.g. on app boot via `getRuntimePool().prepare(...)` from
 `@sna-sdk/core`) for fastest subsequent calls.
 
+To stream the assistant text as it's produced — useful for inline
+autocomplete previews or typewriter rendering — call `completion()`
+directly from `@sna-sdk/core` (the in-process API) with an `onDelta`
+callback. The Promise still resolves with the final concatenated text,
+so it's purely additive:
+
+```ts
+import { completion } from "@sna-sdk/core";
+
+await completion({
+  prompt: "Draft a commit message for: ...",
+  onDelta: (chunk) => stdoutWriter.write(chunk),
+});
+```
+
+`onDelta` is a local callback and so can't traverse the HTTP/WS client —
+it only applies when you import `completion` directly inside the
+process that owns the SNA server (e.g. the embedded launcher or a
+custom integration). Wired for `claude-code` and `codex` (both pool and
+ephemeral paths); on OpenCode the SDK call is single-shot, so the
+callback is a documented no-op for now.
+
 ### React integration
 
 ```tsx

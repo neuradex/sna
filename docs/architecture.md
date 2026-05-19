@@ -216,6 +216,13 @@ A session doesn't need to die to change shape:
 
 Returns `{ text, usage, costUsd, durationMs, durationApiMs, model }`. Used for short single-prompt jobs — naming a chat, summarising a doc, autocomplete — where multi-turn would be overkill.
 
+Optionally streaming: pass `onDelta: (chunk: string) => void` to receive assistant-text chunks as the provider produces them. The Promise still resolves with the full concatenated text plus usage/cost — the callback is a side channel, not a replacement. Per-provider wiring:
+
+- **Claude Code** — upgrades the `-p` call to `--output-format stream-json --include-partial-messages` and forwards `content_block_delta.text_delta` events.
+- **Codex (pool)** — listens on the same `assistant_delta` agent event the session path already emits.
+- **Codex (ephemeral)** — parses `codex exec --json` stdout line-by-line for `agent_message.delta` / `item.updated` events instead of buffering until close.
+- **OpenCode** — currently a no-op (the SDK call is single-shot); listed for completeness so consumer code can stay provider-agnostic.
+
 ### Reasoning effort & service tier
 
 Two provider-aware latency knobs, both flow through `SpawnOptions` and `CompleteOptions`:
