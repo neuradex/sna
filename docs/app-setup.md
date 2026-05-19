@@ -145,6 +145,28 @@ custom integration). Wired for `claude-code` and `codex` (both pool and
 ephemeral paths); on OpenCode the SDK call is single-shot, so the
 callback is a documented no-op for now.
 
+For network consumers, `runOnce` exposes the same idea over Server-Sent
+Events. Each event in the underlying agent pipeline (assistant_delta,
+tool_use, complete, ...) flows through; the connection closes after the
+run's terminal event.
+
+```ts
+for await (const event of sna.agent.runOnceStream({
+  message: "Draft a commit message for: ...",
+})) {
+  if (event.type === "assistant_delta") {
+    stdoutWriter.write(event.delta as string);
+  } else if (event.type === "complete") {
+    console.log("usage", event.data);
+  }
+}
+```
+
+In-process callers of `runOnce()` from `@sna-sdk/core` can pass an
+`onDelta` (text only) or `onEvent` (full event stream) callback for the
+same effect without an HTTP hop. `runOnceStream` requires `http: true`
+on the client.
+
 ### React integration
 
 ```tsx

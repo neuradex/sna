@@ -141,6 +141,7 @@ The HTTP routes are defined with `@hono/zod-openapi` in `server/routes/openapi.t
 | `POST`   | `/agent/kill` | Kill the agent in a session |
 | `GET`    | `/agent/status` | Session status snapshot |
 | `POST`   | `/agent/run-once` | One-shot: spawn → run → return result → cleanup |
+| `POST`   | `/agent/run-once/stream` | One-shot, SSE feed of `AgentEvent`s (token-by-token streaming over HTTP) |
 | `POST`   | `/agent/completion` | Lightweight one-shot completion (no session) |
 | `POST`   | `/agent/list-models` | Provider model introspection (POST so config/apiKey doesn't end up in URL logs) |
 | `GET`    | `/agent/events` | SSE event stream (subscribe to a session's events over plain HTTP) |
@@ -216,7 +217,9 @@ A session doesn't need to die to change shape:
 
 Returns `{ text, usage, costUsd, durationMs, durationApiMs, model }`. Used for short single-prompt jobs — naming a chat, summarising a doc, autocomplete — where multi-turn would be overkill.
 
-Optionally streaming: pass `onDelta: (chunk: string) => void` to receive assistant-text chunks as the provider produces them. The Promise still resolves with the full concatenated text plus usage/cost — the callback is a side channel, not a replacement. Per-provider wiring:
+`runOnce()` follows the same shape (full session machinery, no manual cleanup) but goes through the agent event pipeline. It accepts an `onDelta` text-chunk callback or an `onEvent` full-event callback for in-process callers. Network consumers can subscribe to the same stream via `POST /agent/run-once/stream`, which runs the call and pipes every `AgentEvent` over Server-Sent Events until the terminal `complete` / `error`. The client SDK wraps this as `client.agent.runOnceStream(...)` returning an `AsyncIterable<AgentEvent>`.
+
+Optionally streaming for `completion()`: pass `onDelta: (chunk: string) => void` to receive assistant-text chunks as the provider produces them. The Promise still resolves with the full concatenated text plus usage/cost — the callback is a side channel, not a replacement. Per-provider wiring:
 
 - **Claude Code** — upgrades the `-p` call to `--output-format stream-json --include-partial-messages` and forwards `content_block_delta.text_delta` events.
 - **Codex (pool)** — listens on the same `assistant_delta` agent event the session path already emits.

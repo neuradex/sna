@@ -219,6 +219,33 @@ describe("HTTP API Routes", () => {
       const res = await req("POST", "/agent/run-once", {});
       assert.equal(res.status, 400);
     });
+
+    it("POST /agent/run-once/stream requires message", async () => {
+      const res = await req("POST", "/agent/run-once/stream", {});
+      assert.equal(res.status, 400);
+    });
+
+    it("POST /agent/run-once/stream advertises SSE on success path", async () => {
+      // We can't run a real agent without a real CLI, but we can verify
+      // the route is registered + the validator accepts a well-formed
+      // body. The handler will start the stream, then fail to spawn —
+      // we abort the request before that matters.
+      const ctrl = new AbortController();
+      setTimeout(() => ctrl.abort(), 50);
+      try {
+        const res = await app.request("/agent/run-once/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+          body: JSON.stringify({ message: "hi", provider: "claude-code", timeout: 200 }),
+          signal: ctrl.signal,
+        });
+        const ct = res.headers.get("content-type") ?? "";
+        assert.match(ct, /text\/event-stream/);
+      } catch (err: any) {
+        // Aborts are expected — we just wanted to reach the SSE handler.
+        if (err?.name !== "AbortError") throw err;
+      }
+    });
   });
 
   describe("Permission endpoints", () => {
