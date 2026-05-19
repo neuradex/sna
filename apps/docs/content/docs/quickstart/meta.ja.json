@@ -1,0 +1,14 @@
+{
+  "title": "クイックスタート",
+  "description": "イントロ、インストール、組み込み。",
+  "icon": "Rocket",
+  "root": true,
+  "pages": [
+    "---イントロ---",
+    "index",
+    "what-is-sna",
+    "---セットアップ---",
+    "install",
+    "embedding"
+  ]
+}

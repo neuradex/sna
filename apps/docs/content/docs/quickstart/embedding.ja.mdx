@@ -1,0 +1,62 @@
+---
+title: 組み込み
+description: Electron アプリや Node サービスの中で SNA を動かす。
+icon: Box
+---
+
+`startSnaServer()` は standalone サーバを管理された子プロセスとして
+fork する。ホストに応じてエントリポイントは 2 つ:
+
+```ts
+import { startSnaServer } from "@sna-sdk/core/node";      // 普通の Node
+import { startSnaServer } from "@sna-sdk/core/electron";  // Electron
+```
+
+Electron 版は asar-unpacked パスを解決し、コンシューマアプリが
+electron でリビルドした `better-sqlite3` バイナリを見つける。
+
+## ライフサイクル
+
+```ts
+const sna = await startSnaServer({
+  port: 3099,
+  dbPath: path.join(app.getPath("userData"), "sna.db"),
+  maxSessions: 20,
+  permissionMode: "acceptEdits",
+  onLog: (line) => console.log("[sna]", line),
+});
+
+// sna.process : spawn された ChildProcess
+// sna.port    : 実際のポート (自動選択後)
+// sna.stop()  : graceful SIGTERM
+```
+
+## Electron チェックリスト
+
+- `node_modules/@sna-sdk/core/**` を electron-builder の `asarUnpack`
+  に追加。サーバの `dist/` が実行時に到達可能である必要がある。
+- Electron ランタイム用にネイティブ依存をリビルド:
+  ```bash
+  npx electron-rebuild -f -w better-sqlite3
+  ```
+- `dbPath` は `app.getPath("userData")` 配下に置くこと。アップグレード
+  後も SQLite ファイルが残るように。
+- カスタムビルドの `better_sqlite3.node` をデフォルト位置外に置く
+  なら `nativeBinding` を渡す。
+
+## レンダラから接続
+
+レンダラプロセスは組み込みサーバを普通の HTTP/WS ホストのように扱う:
+
+```ts
+import { SnaClient } from "@sna-sdk/client";
+
+const client = new SnaClient({
+  baseUrl: `localhost:${snaPort}`,
+  http: true,
+  ws: true,
+});
+```
+
+`<SnaProvider>` がヘルパーエンドポイント `GET /api/sna-port` を
+React アプリで使うので、レンダラは IPC なしでポートを自動発見できる。

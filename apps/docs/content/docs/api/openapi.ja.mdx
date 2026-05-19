@@ -1,0 +1,42 @@
+---
+title: OpenAPI 仕様
+description: 稼働中サーバが直接提供するライブ仕様。
+icon: FileCode
+---
+
+Hono サーバはルートが使うのと同じ Zod スキーマから生成した OpenAPI
+3.1 仕様を自身が提供する。同期を取らねばならない別の仕様ファイルは
+ない。仕様、SDK 型、ルートハンドラがすべて同じ 1 つのソースから派生
+する。
+
+## どこで見つけるか
+
+サーバが稼働中のとき:
+
+| URL | 形式 |
+|-----|------|
+| `http://localhost:3099/openapi.json` | 生の JSON (機械可読) |
+| `http://localhost:3099/docs` | Swagger UI (インタラクティブ) |
+| `http://localhost:3099/spec` | プレーンテキストダンプ |
+
+`3099` は `startSnaServer({ port })` が返したポートに置き換えること。
+
+## ユースケース
+
+- **他言語クライアントを生成.** `/openapi.json` に任意の OpenAPI
+  codegen を当てる。スキーマが strict (Zod 派生) なので出力は型安全。
+- **インタラクティブ探索.** Swagger UI で認証や body エディタを使い、
+  ブラウザからすべてのルートを発射できる。
+- **CI で契約を固定.** 仕様をディスクにスナップショット、ビルドごと
+  に diff。意図しない公開表面の変更が diff として現れる。
+
+## 安定性
+
+ルートは SNA ワークスペース全体で semver に従う。後方非互換のルート
+変更はメジャーバージョンとしてリリースされる。OpenAPI タグがルートを
+表面別 (Sessions、Agent、Permissions、Chat) にまとめるので、生成
+クライアントが妥当なグルーピングを持つ。
+
+ルートと一行説明の完全リストは [HTTP ルート](/docs/api/http) 参照。
+各ルートが emit できるイベントタイプは [イベント](/docs/api/events)
+参照。

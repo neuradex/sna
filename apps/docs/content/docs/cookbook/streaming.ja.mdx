@@ -1,0 +1,78 @@
+---
+title: ストリーミング completion
+description: 単発プロンプトからテキストをストリーミングする 3 つの方法。
+icon: WavesHorizontal
+---
+
+SNA は単発呼び出し向けのストリーミングを 3 つの形で露出する。ホスト
+(インプロセス vs ネットワーク) と形 (テキストのみ vs フルイベント)
+で選べばいい。
+
+## 1. インプロセス、テキストのみ: `completion({ onDelta })`
+
+最も安く、最もシンプル。自動補完プレビューやタイプライタ UX で
+テキスト delta だけ必要なときに。
+
+```ts
+import { completion } from "@sna-sdk/core";
+
+await completion({
+  prompt: "Draft a commit message for: ...",
+  provider: "claude-code",
+  model: "claude-haiku-4-5",
+  onDelta: (chunk) => process.stdout.write(chunk),
+});
+```
+
+Promise はやはり最終的に結合されたテキストと使用量で resolve する。
+`onDelta` は side channel で、置き換えではない。
+
+`claude-code` と `codex` (プールと ephemeral 両方) で配線済み。
+OpenCode の SDK 呼び出しは現状 single-shot なので、コールバックは
+そこでは文書化された no-op。
+
+## 2. インプロセス、フルイベントストリーム: `runOnce({ onEvent })`
+
+単発実行でも `tool_use` / `thinking` / `permission_needed` イベント
+が必要なとき。
+
+```ts
+import { runOnce } from "@sna-sdk/core/server";
+
+await runOnce(sessionManager, {
+  message: "List the markdown files and summarize each.",
+  provider: "codex",
+  onEvent: (event) => {
+    if (event.type === "assistant_delta") render(event.delta);
+    if (event.type === "tool_use") showToolCard(event);
+  },
+});
+```
+
+非テキストイベントが要らないなら `onDelta` 専用の変種もある。
+
+## 3. ネットワーク: SSE 上の `runOnceStream`
+
+`@sna-sdk/core` を直接 import できないブラウザ / Electron レンダラ /
+リモートクライアント向け。
+
+```ts
+for await (const event of client.agent.runOnceStream({
+  message: "Draft a commit message for: ...",
+})) {
+  if (event.type === "assistant_delta") write(event.delta as string);
+  if (event.type === "complete") console.log("usage", event.data);
+}
+```
+
+`POST /agent/run-once/stream` (Server-Sent Events) で実装。ストリーム
+は実行の最終 `complete` / `error` イベントの後に閉じる。
+
+## どれを使うべきか
+
+| 状況 | API |
+|------|-----|
+| SNA サーバと同じプロセス、テキストのみ | `completion({ onDelta })` |
+| 同じプロセス、フルイベントストリーム | `runOnce({ onEvent })` |
+| リモート (ブラウザ、別の Node ホスト) | `runOnceStream()` |
+| 長期稼働のマルチターン UI | 代わりにセッションを開いて WS `agent.subscribe` を使う |

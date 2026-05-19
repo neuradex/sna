@@ -1,0 +1,62 @@
+---
+title: イベント
+description: 15 種類の AgentEvent プロトコル。WS と SSE 上を流れるもの。
+icon: Activity
+---
+
+すべてのプロバイダが正規化された `AgentEvent` ストリームを emit する。
+コンシューマは WebSocket (push) または `GET /agent/events` (SSE) で
+購読し、どちらも同じワイヤ形を運ぶ。
+
+## イベントタイプ
+
+| タイプ | 発生タイミング | 持つもの |
+|--------|----------------|----------|
+| `init` | セッション開始 | provider、model、capabilities |
+| `assistant` | 確定した assistant テキストブロック | 全文 |
+| `assistant_delta` | ストリーミングテキストチャンク | `delta` |
+| `text_delta` | 一部アダプタが使う別名 | `delta` |
+| `thinking` | 拡張 thinking の最終ブロック | thinking 全文 |
+| `thinking_delta` | ストリーミング thinking チャンク | `delta` |
+| `tool_use` | ツール呼び出し | ツール名、入力 |
+| `tool_use_delta` | ストリーミングツール入力 (JSON) | partial 入力 |
+| `tool_result` | ツール応答 | result、isError、durationMs |
+| `permission_needed` | ツールが承認を要求 | ツール名、入力、decisionId |
+| `milestone` | プロバイダ定義のマーカー | label |
+| `user_message` | (正規化後の) ユーザ側エコー | content |
+| `interrupted` | ターン取り消し | reason |
+| `error` | プロバイダエラー | message |
+| `complete` | ターン終了 | usage、costUsd、durationMs |
+
+## delta vs final
+
+text と thinking は `_delta` チャンクと最終 `assistant` / `thinking`
+イベントの両方が到着する。最終が正規版だ。履歴に永続化されるのは
+こっち。delta はライブ描画用。
+
+ツール使用については `tool_use_delta` が部分 JSON 入力 (Anthropic の
+`input_json_delta`) を運ぶ。最終 `tool_use` イベントはパース済みの
+完全な入力を持つ。
+
+## 購読
+
+WebSocket (ライブ UI 推奨):
+
+```ts
+client.agent.onEvent(({ event }) => {
+  if (event.type === "assistant_delta") render(event.delta);
+});
+await client.agent.subscribe(sessionId);
+```
+
+SSE (WS が使えない場合):
+
+```ts
+for await (const event of client.agent.streamEvents(sessionId)) {
+  if (event.type === "complete") break;
+}
+```
+
+セッションなしの単発実行には SSE エンドポイント
+`POST /agent/run-once/stream` とそのクライアントラッパー
+`agent.runOnceStream(opts)` が同じイベントプロトコルを運ぶ。

@@ -1,0 +1,7 @@
+{
+  "title": "Cookbook",
+  "description": "ストリーミング、権限、マルチプロバイダのレシピ。",
+  "icon": "ChefHat",
+  "root": true,
+  "pages": ["index", "streaming", "permissions", "multi-provider"]
+}

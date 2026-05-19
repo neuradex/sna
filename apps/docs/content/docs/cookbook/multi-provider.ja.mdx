@@ -1,0 +1,61 @@
+---
+title: マルチプロバイダセッション
+description: 文脈を失わずスレッド途中でランタイム切り替え。
+icon: Shuffle
+---
+
+SnaSession 1 つは寿命の中で複数の RuntimeSession をマウントできる。
+**runtime chain** はそのセッションが身につけたすべての設定の順序付き
+履歴だ。履歴は正規化されている。プロバイダネイティブの形は replay
+ごとに派生するので、ランタイム切り替えは単なる respawn になる。
+
+## 切り替え
+
+```ts
+// Claude Code で開始
+await client.agent.start(sessionId, {
+  provider: "claude-code",
+  model: "claude-sonnet-4-6",
+});
+
+// ...ターンが進行し、履歴が積み上がり...
+
+// 会話を保ったまま Codex に切り替え
+await client.agent.patch(sessionId, { provider: "codex", model: "gpt-5.4" });
+```
+
+`provider` フィールドを持つ `PATCH /agent/session` は現在のプロセス
+を倒し、新ランタイムで respawn し、正規化履歴を新プロバイダのネイティブ
+形に replay する。セッションレコード、イベントカーソル、runtime chain
+すべて生き残る。
+
+## Resume vs restart
+
+| 操作 | プロセス | 履歴 |
+|------|----------|------|
+| `restart` | 同じ設定で respawn | replay しない (warm restart) |
+| `resume` | 同じ設定で respawn | 再構築して再注入 |
+| `patch` (プロバイダ変更) | 新設定で respawn | 新プロバイダ用に再構築 |
+
+長いアイドル後やランタイムが死んだときは `resume`。コンシューマが
+ランタイム切り替えを望むときは `patch`。
+
+## なぜ重要か
+
+ほとんどの「エージェントプラットフォーム」抽象は、会話をランタイム
+ごとの一時的状態として扱う。プロセスを失うとスレッドも失う。SNA の
+正規化履歴が真実の源だ: すべてのプロバイダはプラグイン可能な replay
+ターゲットであって、記憶の保管者ではない。
+
+## 注意
+
+- **ホスト型ツールの状態は引き継がない.** Codex の画像生成、
+  web_search といったホスト型ツールはプロバイダ側に存在する。前回
+  呼び出しの `tool_result` は履歴にあるが、次のターンが前回の OpenAI
+  会話 id を期待する場合、それは失われている。
+- **モデル固有のトークンは replay で若干失われる.** Claude の拡張
+  thinking `signature` は Claude→Claude replay では保持されるが、
+  Codex に切り替えると破棄される (アナロジが無い)。
+- **コストアトリビューションはターンごとに正直なまま.** 3 層
+  アトリビューション (provider × modelProvider × model) が行ごとに
+  記録されるので、事後分析がランタイム別の使用量を綺麗に分割できる。

@@ -1,0 +1,30 @@
+---
+title: 概要
+description: HTTP ルート、WebSocket プロトコル、イベントタイプ。
+icon: LayoutGrid
+---
+
+このセクションはワイヤレファレンス。これらの形の *なぜ* を知りたい
+ときは [Concepts](/docs/concepts) へ。
+
+<Cards>
+  <Card title="HTTP ルート" href="/docs/api/http" description="すべてのサーバエンドポイント、表面別にグループ化。" />
+  <Card title="WebSocket プロトコル" href="/docs/api/websocket" description="Request/response op、push チャネル、再接続意味論。" />
+  <Card title="イベント" href="/docs/api/events" description="15 種類の AgentEvent enum、delta、final。" />
+  <Card title="OpenAPI 仕様" href="/docs/api/openapi" description="稼働中サーバが直接提供するライブ仕様。" />
+</Cards>
+
+## 真実の源
+
+サーバの Hono アプリは `@hono/zod-openapi` ルート定義からビルドされ
+る。稼働中サーバは同じ Zod スキーマから生成された OpenAPI 3.1 仕様を
+自身が提供する。よってここで見るワイヤ形、SDK 型、ライブ仕様が
+ドリフトすることはない。
+
+| URL | 用途 |
+|-----|------|
+| `GET /openapi.json` | 生の仕様 JSON |
+| `GET /docs` | Swagger UI |
+| `GET /spec` | プレーンテキスト仕様 |
+
+迷ったらライブサーバを叩け。常にこのページより権威がある。

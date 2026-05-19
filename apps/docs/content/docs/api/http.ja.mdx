@@ -1,0 +1,77 @@
+---
+title: HTTP ルート
+description: すべてのサーバエンドポイント、表面別にグループ化。
+icon: Network
+---
+
+HTTP API は 3 つの表面でまとめられる: **セッション** (セッションレコ
+ードの CRUD)、**エージェント** (spawn されたプロセスのライフサイクル
+と制御)、**権限** (承認フロー)。
+
+## セッション
+
+| メソッド | パス | 用途 |
+|----------|------|------|
+| `POST` | `/agent/sessions` | セッションレコード作成 (まだプロセスなし) |
+| `GET` | `/agent/sessions` | セッション一覧 (`?include=chain` で runtime 履歴も) |
+| `PATCH` | `/agent/sessions/:id` | ラベル、meta、cwd を更新 |
+| `DELETE` | `/agent/sessions/:id` | セッション削除 (履歴も削除) |
+
+## エージェントライフサイクル
+
+| メソッド | パス | 用途 |
+|----------|------|------|
+| `POST` | `/agent/start` | セッション内でエージェントを spawn |
+| `POST` | `/agent/send` | メッセージ送信 (`images[]` 対応) |
+| `POST` | `/agent/resume` | プロバイダ用に正規化履歴を再構築して再起動 |
+| `POST` | `/agent/restart` | 同じ `Session.config` で re-spawn (オプション上書き可能) |
+| `PATCH` | `/agent/session` | `{cwd, model, permissionMode}` の統一 mutator |
+| `POST` | `/agent/interrupt` | 現在のターンを取り消し (プロセスは維持) |
+| `POST` | `/agent/set-model` | ランタイム中にモデル変更 |
+| `POST` | `/agent/set-permission-mode` | ランタイム中に権限モード変更 |
+| `POST` | `/agent/kill` | エージェント終了 (セッションレコードは残る) |
+| `GET` | `/agent/status` | セッション状態スナップショット |
+
+## 単発呼び出し
+
+| メソッド | パス | 用途 |
+|----------|------|------|
+| `POST` | `/agent/run-once` | spawn → run → 結果返却 → クリーンアップ |
+| `POST` | `/agent/run-once/stream` | 同じライフサイクル、`AgentEvent` の SSE フィード |
+| `POST` | `/agent/completion` | 軽量な単発 completion (セッションなし) |
+| `POST` | `/agent/list-models` | プロバイダモデルの introspection |
+| `GET` | `/agent/events` | セッションイベントの SSE ストリーム |
+
+## 権限
+
+| メソッド | パス | 用途 |
+|----------|------|------|
+| `POST` | `/agent/permission-request` | Blocking: 要求を出し、評決を待つ |
+| `POST` | `/agent/permission-respond` | UI 側: 承認または拒否 |
+| `GET` | `/agent/permission-pending` | Pending 一覧 (グローバルまたはセッション別) |
+
+## Chat (正規化履歴表面)
+
+| メソッド | パス | 用途 |
+|----------|------|------|
+| `GET` | `/chat/sessions` | DB の chat セッション一覧 |
+| `POST` | `/chat/sessions` | chat セッション作成 |
+| `DELETE` | `/chat/sessions/:id` | chat セッション削除 |
+| `GET` | `/chat/sessions/:id/messages` | メッセージ一覧 (`since`, `limit`) |
+| `POST` | `/chat/sessions/:id/messages` | chat メッセージを追加 |
+| `DELETE` | `/chat/sessions/:id/messages` | メッセージをクリア |
+| `GET` | `/chat/images/:sessionId/:filename` | embed を提供 |
+
+## レスポンス形
+
+すべてのレスポンスは同じ envelope に従う。`server/api-types.ts` から
+生成されるので HTTP と WS がドリフトしない:
+
+```ts
+type ApiResponse<T> =
+  | { status: "ok"; data: T }
+  | { status: "error"; message: string; code?: string };
+```
+
+イベントを emit するルート (start、send、run-once) はセッションの
+イベントバッファに push する。読むには WS か SSE で購読する。

@@ -1,0 +1,62 @@
+---
+title: 権限
+description: Claude Code と Codex を横断する統一権限フロー。
+icon: Lock
+---
+
+Claude Code と Codex はどちらもツール単位の権限ゲートをサポートする
+が、プロトコルが違う。SNA は両方を 1 つの API の背後に抽象化する。
+
+## フロー
+
+```
+エージェントがツールを呼び出す
+   │
+   ▼
+プロバイダが権限要求を出す
+   │
+   ▼
+SessionManager が `permission_needed` イベントを emit  ──► UI がプロンプトを表示
+   │
+   ▼
+UI が POST /agent/permission-respond { approved: bool } を呼ぶ
+   │
+   ▼
+SessionManager が pending 要求を解決
+   │
+   ▼
+プロバイダが評決を受け取り、ツールが実行される (または拒否)
+```
+
+## プロバイダごとの配線
+
+- **Claude Code** は `PreToolUse` フックを使う。CLI が各ツール呼び出
+  しを評価するために spawn する別の Node プロセス。SNA は
+  `packages/core/dist/scripts/hook.js` を出荷していて、これがサーバ
+  に blocking な `permission-request` を POST し、応答を待つ。
+- **Codex** は stdio 上の JSON-RPC で話し、`approval/request` 通知
+  を emit する。SNA は `approval/respond` で応答する。
+
+コンシューマアプリはこのプロトコル差を一切見ない。両方とも同じ
+`permission_needed` イベントとして表面化し、同じ
+`POST /agent/permission-respond` エンドポイントで応答する。
+
+## モード
+
+`permissionMode` がゲートのデフォルト評決を制御する:
+
+| モード | 意味 |
+|--------|------|
+| `default` | safe-tool allowlist にない全ツールでプロンプト |
+| `acceptEdits` | ファイル編集は自動承認、それ以外はプロンプト |
+| `bypassPermissions` | 全部自動承認 (テスト環境、デモ用) |
+
+モードはセッション単位で、`POST /agent/set-permission-mode` か
+`PATCH /agent/session` でスレッド途中で切り替えられる。
+
+## Safe-tool allowlist
+
+設定された allowlist にマッチするツール (Read、Glob、Grep、ListFiles
+など) は権限ゲートを完全に飛ばす: イベントもなく、ラウンドトリップ
+もない。allowlist はプロバイダごとだが正規化されており、コンシューマ
+設定は 1 つのリストで済む。

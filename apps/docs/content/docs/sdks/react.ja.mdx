@@ -1,0 +1,63 @@
+---
+title: '@sna-sdk/react'
+description: React フック + ドロップイン chat UI。
+icon: Atom
+---
+
+`@sna-sdk/client` の上の React バインディング。状態用のフック、
+クライアント用のコンテキストプロバイダ、そしてオプションで事前
+作成済みの chat UI。
+
+## セットアップ
+
+```tsx
+import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
+
+<SnaProvider snaUrl="http://localhost:3099">
+  <YourApp />
+</SnaProvider>
+```
+
+`SnaProvider` は純粋なコンテキストプロバイダ。UI もなく、React 以外
+の peer 依存もない。`snaUrl` が省略されたら `/api/sna-port` でサーバ
+URL を自動発見し、それも失敗したら `http://localhost:3099` にフォール
+バックする。
+
+## フック
+
+| フック | 用途 |
+|--------|------|
+| `useSnaClient()` | 内部 `SnaClient` にアクセス。 |
+| `useSessionManager()` | セッションの一覧、作成、切り替え。 |
+| `useAgent(sessionId)` | ライフサイクル制御 (start、send、interrupt) + ライブ状態。 |
+| `useResponsiveChat(sessionId)` | 高レベルの chat 状態 (メッセージ、ストリーミングテキスト、pending ツール)。 |
+
+```tsx
+function ChatInput({ sessionId }: { sessionId: string }) {
+  const { send, status } = useAgent(sessionId);
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); send(input); }}>
+      <input value={input} onChange={(e) => setInput(e.target.value)} />
+      <button disabled={status === "busy"}>Send</button>
+    </form>
+  );
+}
+```
+
+## ドロップイン chat UI
+
+UI をゼロから書かずに動く chat パネルだけ欲しい場合:
+
+```tsx
+import { SnaChatUI } from "@sna-sdk/react/components/sna-chat-ui";
+
+<SnaProvider snaUrl="http://localhost:3099">
+  <SnaChatUI dangerouslySkipPermissions>
+    <YourApp />
+  </SnaChatUI>
+</SnaProvider>
+```
+
+得られるもの: メッセージバブル、ツール呼び出しカード、折りたためる
+thinking ブロック、Markdown レンダリング、権限ダイアログ。テーマは
+CSS 変数で。
