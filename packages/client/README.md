@@ -105,6 +105,47 @@ const { text, usage, costUsd } = await sna.agent.completion({
 });
 ```
 
+### Latency knobs
+
+For autocomplete-style fast paths, two cross-cutting options are available:
+
+```ts
+// Provider-agnostic reasoning effort (0..5, lightest → heaviest)
+await sna.agent.completion({
+  prompt: "...",
+  provider: "codex",
+  model: "gpt-5.4-mini",
+  reasoningLevel: 0,
+});
+
+// Codex-only: request-priority routing (mirrors Codex `/fast` slash command)
+await sna.agent.completion({
+  prompt: "...",
+  provider: "codex",
+  reasoningLevel: 0,
+  providerOptions: { serviceTier: "priority" },
+});
+```
+
+| level | Claude (`--effort`) | Codex (`model_reasoning_effort`) |
+|---:|---|---|
+| 0 | `low` | `none` |
+| 1 | `low` | `minimal` |
+| 2 | `medium` | `low` |
+| 3 | `high` | `medium` |
+| 4 | `xhigh` | `high` |
+| 5 | `max` | `xhigh` |
+
+`providerOptions.serviceTier` is intentionally Codex-only. Claude's
+`/fast` is a different MODEL variant billed against a separate usage
+pool (the CLI rejects it with "Fast mode requires extra usage billing"
+when not opted in), so SNA does not auto-translate this option for
+Claude — set Claude's `model` field directly when you want its fast
+variant.
+
+`completion()` also opportunistically reuses a pooled daemon when one
+is already alive for the cwd, dropping per-call cold-start cost.
+
 ## Documentation
 
 - [Architecture](https://github.com/neuradex/sna/blob/main/docs/architecture.md)

@@ -79,15 +79,31 @@ import {
 Subscribe to the agent event stream and send messages.
 
 ```tsx
-const { connected, alive, start, send, kill } = useAgent({
+const { connected, alive, start, send, kill, completion } = useAgent({
   sessionId: "default",
   provider: "claude-code",
+  reasoningLevel: 3,                            // 0..5; omit to use the provider default
+  providerOptions: { serviceTier: "priority" }, // Codex-only; Claude ignores
   onAssistant:  (e) => append(e.message),
   onToolResult: (e) => attach(e.data),
   onComplete:   () => setBusy(false),
   onError:      (e) => toast.error(e.message),
 });
 ```
+
+- `start(prompt?)` — POST `/agent/start` for the bound session
+- `send(message)` — POST `/agent/send`
+- `kill()` — POST `/agent/kill`
+- `completion({ prompt, model?, systemPrompt?, reasoningLevel?, providerOptions? })` — POST `/agent/completion`. Per-call `reasoningLevel` overrides the hook-level one; otherwise the hook default applies.
+
+`reasoningLevel` (0..5) is provider-agnostic and translates to Claude's
+`--effort` or Codex's `model_reasoning_effort`. See the table in
+[`@sna-sdk/client`'s README](../client/README.md#latency-knobs) for the
+mapping. `providerOptions.serviceTier` is intentionally Codex-only
+(mirrors Codex's `/fast` slash command); Claude's `/fast` is a
+different model variant with its own billing pool, so it's not
+auto-translated — set `model` directly there if you want Claude's fast
+variant.
 
 ### `useSessionManager`
 
@@ -108,7 +124,11 @@ const handleNew = async () => {
 
 ### `useResponsiveChat`
 
-Helper that picks `"floating"` vs `"docked"` chat layout based on viewport width.
+Returns `{ mode }` where `mode` is one of:
+
+- `"side-by-side"` — desktop (≥1024px), chat panel beside main content
+- `"overlay"` — tablet (768–1023px), chat slides over content
+- `"fullscreen"` — mobile (<768px), chat covers the viewport
 
 ## Exports
 

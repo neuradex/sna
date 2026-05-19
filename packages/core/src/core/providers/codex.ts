@@ -18,6 +18,8 @@ import type {
 } from "./types.js";
 import { canonicalToCodexResponseItems } from "../../history/codex.js";
 import { logger } from "../../lib/logger.js";
+import { getRuntimePool } from "./runtime.js";
+import { toCodexEffort } from "./reasoning-level.js";
 
 const SHELL = process.env.SHELL || "/bin/zsh";
 
@@ -858,6 +860,19 @@ class CodexProcess implements AgentProcess {
       logger.log("agent", `codex: turn/start with cwd=${this._cwdOverride}`);
       this._cwdOverride = null;
     }
+    // Reasoning effort: per-turn override via TurnStartParams.effort
+    // (camelCase `effort`, NOT `model_reasoning_effort` — see the codex
+    // app-server protocol v2 TurnStartParams type).
+    if (this.options.reasoningLevel !== undefined) {
+      turnParams.effort = toCodexEffort(this.options.reasoningLevel);
+    }
+    // Service tier (Codex `/fast` slash command equivalent). Passed via
+    // the `turn/start.serviceTier` per-turn override; see
+    // app-server-protocol v2 TurnStartParams.serviceTier.
+    const turnServiceTier = (this.options.providerOptions as { serviceTier?: string } | undefined)?.serviceTier;
+    if (typeof turnServiceTier === "string" && turnServiceTier.length > 0) {
+      turnParams.serviceTier = turnServiceTier;
+    }
 
     this.sendRpc("turn/start", turnParams).then((result) => {
       // Capture turnId for interrupt
@@ -1344,14 +1359,135 @@ export class CodexProvider implements AgentProvider {
     }
   }
 
+  /**
+   * One-shot completion against a pooled `app-server` daemon. Spawns a
+   * lightweight thread on the existing daemon, runs a single turn, and
+   * tears the thread down. The daemon itself stays alive in the pool.
+   *
+   * Called from `complete()` when `RuntimePool.findCompatible()` returns
+   * a hit. Cheaper than the ephemeral `codex exec` path whenever a daemon
+   * already exists (measured: ~5s saved per call on gpt-5.5).
+   */
+  private async completeViaPool(
+    pooled: import("./runtime.js").RuntimeHandle,
+    options: CompleteOptions,
+  ): Promise<CompletionResult> {
+    const cwd = options.cwd ?? process.cwd();
+    const model = options.model ?? "codex-default";
+    const startTime = Date.now();
+    const timeout = options.timeout ?? 60_000;
+
+    const proc = this.spawn(
+      {
+        cwd,
+        prompt: options.prompt,
+        model: options.model,
+        env: options.env,
+        extraArgs: options.extraArgs,
+        providerOptions: options.providerOptions,
+        systemPrompt: options.systemPrompt,
+        appendSystemPrompt: options.appendSystemPrompt,
+        reasoningLevel: options.reasoningLevel,
+      },
+      pooled,
+    );
+
+    logger.log("agent", `codex complete via pool: model=${model} prompt="${options.prompt.slice(0, 60)}..."`);
+
+    return new Promise<CompletionResult>((resolve, reject) => {
+      const texts: string[] = [];
+      let settled = false;
+
+      const finish = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try { proc.kill(); } catch { /* already dead */ }
+        fn();
+      };
+
+      const timer = setTimeout(() => {
+        finish(() => reject(new Error(`codex complete via pool timed out after ${timeout}ms`)));
+      }, timeout);
+
+      proc.on("event", (e: AgentEvent) => {
+        if (e.type === "assistant" && e.message) {
+          texts.push(e.message);
+        }
+        if (e.type === "complete") {
+          const data = (e.data ?? {}) as Record<string, number | string | undefined>;
+          const durationMs = Date.now() - startTime;
+          finish(() =>
+            resolve({
+              text: texts.join("\n"),
+              usage: {
+                inputTokens: Number(data.inputTokens ?? 0),
+                outputTokens: Number(data.outputTokens ?? 0),
+                cacheReadTokens: Number(data.cacheReadTokens ?? 0),
+                cacheCreationTokens: 0,
+              },
+              costUsd: 0,
+              durationMs: Number(data.durationMs ?? durationMs),
+              durationApiMs: Number(data.durationMs ?? durationMs),
+              model,
+            }),
+          );
+        }
+        if (e.type === "error") {
+          finish(() => reject(new Error(e.message ?? "codex complete via pool: agent error")));
+        }
+      });
+
+      proc.on("exit", () => {
+        if (!settled) {
+          finish(() => reject(new Error("codex complete via pool: process exited before completion")));
+        }
+      });
+
+      proc.on("error", (err: Error) => {
+        finish(() => reject(err));
+      });
+    });
+  }
+
   async complete(options: CompleteOptions): Promise<CompletionResult> {
     const cwd = options.cwd ?? process.cwd();
+
+    // Pool reuse: if an `app-server` daemon is already alive (for any cwd,
+    // since Codex's daemon is cwd-agnostic with supportsCwdPerThread=true),
+    // borrowing a thread from it is ~2× faster than spawning a fresh
+    // `codex exec --ephemeral` (measured: 4.6s vs 9.9s median on gpt-5.5).
+    // Fall through to the ephemeral path when no daemon is available so
+    // single-shot use stays cheap.
+    const pooled = getRuntimePool().findCompatible(this, cwd);
+    if (pooled?.ready && pooled.daemon) {
+      try {
+        return await this.completeViaPool(pooled, options);
+      } catch (err) {
+        logger.log("agent", `codex complete: pool path failed (${err}); falling back to ephemeral`);
+        // fall through to ephemeral path below
+      }
+    }
+
     const resolved = resolveCodexCli();
     const codexPath = resolved.path;
 
     const args = ["exec", "--json", "--ephemeral", "--full-auto"];
 
     if (options.model) args.push("--model", options.model);
+    if (options.reasoningLevel !== undefined) {
+      // `codex exec` honours config overrides via `-c key=value`. Note: when
+      // built-in tools `image_gen` / `web_search` are enabled in the user's
+      // codex config, the model API rejects `minimal` (level 1) and the
+      // call will 400 with an explicit message. See SpawnOptions docstring.
+      args.push("-c", `model_reasoning_effort=${toCodexEffort(options.reasoningLevel)}`);
+    }
+    const serviceTier = (options.providerOptions as { serviceTier?: string } | undefined)?.serviceTier;
+    if (typeof serviceTier === "string" && serviceTier.length > 0) {
+      // Mirrors codex's `/fast` slash command — sets the OpenAI request
+      // priority tier ("priority" / "flex" / "batch" / model-defined).
+      args.push("-c", `service_tier=${serviceTier}`);
+    }
     if (options.extraArgs) args.push(...options.extraArgs);
 
     const instructions = [options.systemPrompt, options.appendSystemPrompt].filter(Boolean).join("\n\n");

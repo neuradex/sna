@@ -10,6 +10,7 @@ import { swaggerUI } from "@hono/swagger-ui";
 import { streamSSE } from "hono/streaming";
 import fs from "fs";
 import path from "path";
+import { createRequire } from "node:module";
 import {
   getProvider,
   spawnWithPool,
@@ -28,6 +29,20 @@ import { getConfig } from "../../config.js";
 import { completion, type CompletionOptions } from "../../core/completion.js";
 import type { ContentBlock } from "../../core/providers/types.js";
 import { resolveImagePath } from "../image-store.js";
+import { runOnce, type RunOnceOptions } from "../run-once.js";
+
+// Resolve our own version from package.json so the OpenAPI document
+// reports whatever ships in @sna-sdk/core, not a hard-coded string that
+// drifts every release. The relative path is the same in src/ and dist/
+// (both live three levels deep under the package root).
+const localRequire = createRequire(import.meta.url);
+const SNA_VERSION: string = ((): string => {
+  try {
+    return localRequire("../../../package.json").version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+})();
 
 // ── Shared schemas ────────────────────────────────────────────────────
 
@@ -256,6 +271,7 @@ const startRoute = createRoute({
         providerOptions: z.record(z.string(), z.any()).optional(),
         systemPrompt: z.string().optional(),
         appendSystemPrompt: z.string().optional(),
+        reasoningLevel: z.number().int().min(0).max(5).optional(),
         allowedTools: z.array(z.string()).optional(),
         disallowedTools: z.array(z.string()).optional(),
         mcpServers: z.record(z.string(), z.any()).optional(),
@@ -334,6 +350,7 @@ const restartRoute = createRoute({
         providerOptions: z.record(z.string(), z.any()).optional(),
         systemPrompt: z.string().optional(),
         appendSystemPrompt: z.string().optional(),
+        reasoningLevel: z.number().int().min(0).max(5).optional(),
         allowedTools: z.array(z.string()).optional(),
         disallowedTools: z.array(z.string()).optional(),
         mcpServers: z.record(z.string(), z.any()).optional(),
@@ -376,6 +393,7 @@ const resumeRoute = createRoute({
         providerOptions: z.record(z.string(), z.any()).optional(),
         systemPrompt: z.string().optional(),
         appendSystemPrompt: z.string().optional(),
+        reasoningLevel: z.number().int().min(0).max(5).optional(),
         allowedTools: z.array(z.string()).optional(),
         disallowedTools: z.array(z.string()).optional(),
         mcpServers: z.record(z.string(), z.any()).optional(),
@@ -575,6 +593,7 @@ const runOnceRoute = createRoute({
         model: z.string().optional(),
         systemPrompt: z.string().optional(),
         appendSystemPrompt: z.string().optional(),
+        reasoningLevel: z.number().int().min(0).max(5).optional(),
         permissionMode: z.string().optional(),
         cwd: z.string().optional(),
         timeout: z.number().optional(),
@@ -617,6 +636,7 @@ const completionRoute = createRoute({
         model: z.string().optional(),
         systemPrompt: z.string().optional(),
         appendSystemPrompt: z.string().optional(),
+        reasoningLevel: z.number().int().min(0).max(5).optional(),
         cwd: z.string().optional(),
         env: z.record(z.string(), z.any()).optional(),
         extraArgs: z.array(z.string()).optional(),
@@ -703,6 +723,99 @@ const permissionRespondRoute = createRoute({
     500: {
       description: "Internal server error.",
       content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const listModelsRoute = createRoute({
+  method: "post",
+  path: "/agent/list-models",
+  summary: "List models",
+  description:
+    "Provider model introspection. POST (not GET) because `config` may carry an `apiKey` we don't want logged in URLs or proxy access logs. The response shape is provider-driven; `error` is set on partial failures (CLI missing, unreachable endpoint).",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z
+            .object({
+              runtime: z.string().optional(),
+              config: z
+                .object({
+                  cliPath: z.string().optional(),
+                  baseUrl: z.string().optional(),
+                  apiKey: z.string().optional(),
+                  refresh: z.boolean().optional(),
+                })
+                .optional(),
+            })
+            .strict(),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Available models for the runtime.",
+      content: {
+        "application/json": {
+          schema: z.object({
+            models: z.array(
+              z.object({
+                id: z.string(),
+                label: z.string(),
+                provider: z.string(),
+                source: z.enum(["static", "api", "cli"]),
+                contextWindow: z.number().optional(),
+                deprecated: z.boolean().optional(),
+                notes: z.string().optional(),
+              }),
+            ),
+            source: z.enum(["static", "api", "cli", "mixed"]),
+            fetchedAt: z.number(),
+            error: z.string().optional(),
+          }),
+        },
+      },
+    },
+    400: {
+      description: "Unknown runtime.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+    500: {
+      description: "listModels call failed.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const agentEventsRoute = createRoute({
+  method: "get",
+  path: "/agent/events",
+  summary: "Agent event SSE stream",
+  description:
+    "Server-Sent Events stream of agent events for a session. Replays buffered events from `since` (or the latest cursor), then streams live. Each SSE message carries an `id` equal to the event cursor (so clients can resume with `?since=<id>`), except transient deltas (`assistant_delta`, `tool_use_delta`, …) which are sent without an id. The stream stays open indefinitely; the server sends keepalive comments every `keepaliveIntervalMs` (see `getConfig()`).",
+  request: {
+    query: z.object({
+      session: z.string().optional().describe("Session id (defaults to 'default')."),
+      since: z
+        .string()
+        .optional()
+        .describe("Cursor to resume from. Omit to start at the current head."),
+    }),
+  },
+  responses: {
+    200: {
+      description: "An open SSE stream. The response body is `text/event-stream`.",
+      content: {
+        "text/event-stream": {
+          schema: z
+            .string()
+            .describe(
+              "SSE stream. Each `data:` line is a JSON-encoded AgentEvent.",
+            ),
+        },
+      },
     },
   },
 });
@@ -929,28 +1042,23 @@ function getSessionId(c: { req: { query: (k: string) => string | undefined } }):
 export async function createOpenApiApp(options?: { sessionManager?: SessionManager }) {
   const app = new OpenAPIHono();
 
-  // Swagger UI — accessible at /docs
-  app.doc("/openapi.json", {
-    openapi: "3.1.0",
+  const openApiInfo = {
+    openapi: "3.1.0" as const,
     info: {
       title: "SNA SDK API",
-      version: "0.11.3",
-      description: "Skills-Native Application SDK — HTTP API for spawning and communicating with AI agent providers (Claude Code, Codex, etc.).",
+      version: SNA_VERSION,
+      description: "Skills-Native Application SDK — HTTP API for spawning and communicating with AI agent providers (Claude Code, Codex, OpenCode).",
     },
-  });
+  };
+
+  // Swagger UI — accessible at /docs
+  app.doc("/openapi.json", openApiInfo);
 
   app.get("/docs", swaggerUI({ url: "/openapi.json" }));
 
   // Plain JSON spec viewer — non-interactive, just formatted JSON
   app.get("/spec", async (c) => {
-    const doc = app.getOpenAPIDocument({
-      openapi: "3.1.0",
-      info: {
-        title: "SNA SDK API",
-        version: "0.11.3",
-        description: "Skills-Native Application SDK — HTTP API for spawning and communicating with AI agent providers (Claude Code, Codex, etc.).",
-      },
-    });
+    const doc = app.getOpenAPIDocument(openApiInfo);
     const json = JSON.stringify(doc, null, 2);
     return c.html(`<!doctype html>
 <html lang="en">
@@ -1088,6 +1196,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
         allowedTools: body.allowedTools,
         disallowedTools: body.disallowedTools,
         mcpServers: body.mcpServers as any,
+        reasoningLevel: body.reasoningLevel as (0 | 1 | 2 | 3 | 4 | 5) | undefined,
       });
 
       sessionManager.setProcess(sessionId, proc);
@@ -1296,6 +1405,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
         allowedTools: body.allowedTools,
         disallowedTools: body.disallowedTools,
         mcpServers: body.mcpServers as any,
+        reasoningLevel: body.reasoningLevel as (0 | 1 | 2 | 3 | 4 | 5) | undefined,
       });
       sessionManager.setProcess(sessionId, proc, "resumed");
       sessionManager.saveStartConfig(sessionId, {
@@ -1442,66 +1552,12 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     if (!body.message) {
       return c.json({ status: "error", message: "message is required" }, 400);
     }
-
-    const sessionId = `run-once-${crypto.randomUUID().slice(0, 8)}`;
-    const timeout = body.timeout ?? getConfig().runOnceTimeoutMs;
-
-    const session = sessionManager.createSession({
-      id: sessionId,
-      label: "run-once",
-      cwd: body.cwd ?? process.cwd(),
-    });
-
-    const cfg = getConfig();
-    const provider = getProvider(body.provider ?? cfg.defaultProvider);
-
-    const extraArgs: string[] = body.extraArgs ? [...body.extraArgs] : [];
-    if (body.systemPrompt) extraArgs.push("--system-prompt", body.systemPrompt);
-    if (body.appendSystemPrompt) extraArgs.push("--append-system-prompt", body.appendSystemPrompt);
-
-    const proc = await spawnWithPool(provider, {
-      cwd: session.cwd,
-      prompt: body.message,
-      model: body.model ?? cfg.model,
-      permissionMode: (body.permissionMode as any) ?? cfg.defaultPermissionMode,
-      env: { ...body.env, SNA_SESSION_ID: sessionId },
-      extraArgs,
-      providerOptions: body.providerOptions,
-    });
-
-    sessionManager.setProcess(sessionId, proc);
-
     try {
-      const result = await new Promise<{ result: string; usage: Record<string, unknown> | null }>((resolve, reject) => {
-        const texts: string[] = [];
-        let usage: Record<string, unknown> | null = null;
-
-        const timer = setTimeout(() => {
-          reject(new Error(`run-once timed out after ${timeout}ms`));
-        }, timeout);
-
-        const unsub = sessionManager.onSessionEvent(sessionId, (_cursor, e) => {
-          if (e.type === "assistant" && e.message) {
-            texts.push(e.message);
-          }
-          if (e.type === "complete") {
-            clearTimeout(timer);
-            unsub();
-            usage = (e.data as Record<string, unknown>) ?? null;
-            resolve({ result: texts.join("\n"), usage });
-          }
-          if (e.type === "error") {
-            clearTimeout(timer);
-            unsub();
-            reject(new Error(e.message ?? "Agent error"));
-          }
-        });
-      });
-
+      const result = await runOnce(sessionManager, body as RunOnceOptions);
       return c.json(result, 200);
-    } finally {
-      sessionManager.killSession(sessionId);
-      sessionManager.removeSession(sessionId);
+    } catch (e: any) {
+      logger.err("err", `POST /agent/run-once → ${e.message}`);
+      return c.json({ status: "error", message: e.message }, 500);
     }
   });
 
@@ -1519,19 +1575,8 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     }
   });
 
-  // POST /agent/list-models — provider model introspection
-  //
-  // Body: { runtime: string, config?: ListModelsConfig }
-  // Returns: { models, source, fetchedAt, error? }
-  //
-  // POST (not GET) because config may carry an apiKey we don't want logged
-  // in URLs or proxy access logs. Plain Hono route — no OpenAPI definition
-  // because the response shape is provider-driven and varies in detail.
-  app.post("/agent/list-models", async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as {
-      runtime?: string;
-      config?: import("../../core/providers/types.js").ListModelsConfig;
-    };
+  app.openapi(listModelsRoute, async (c) => {
+    const body = c.req.valid("json");
     const runtime = body.runtime ?? "claude-code";
     let provider;
     try {
@@ -1540,12 +1585,15 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
       return c.json({ status: "error", message: e.message }, 400);
     }
     if (!provider.listModels) {
-      return c.json({
-        models: [],
-        source: "static",
-        fetchedAt: Date.now(),
-        error: `runtime "${runtime}" does not support model listing`,
-      }, 200);
+      return c.json(
+        {
+          models: [],
+          source: "static" as const,
+          fetchedAt: Date.now(),
+          error: `runtime "${runtime}" does not support model listing`,
+        },
+        200,
+      );
     }
     try {
       const result = await provider.listModels(body.config);
@@ -1554,6 +1602,81 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
       logger.err("err", `POST /agent/list-models[${runtime}] → ${e.message}`);
       return c.json({ status: "error", message: e.message }, 500);
     }
+  });
+
+  // ── Agent Events SSE ──────────────────────────────────────────
+  //
+  // Pure HTTP equivalent of the WS `agent.subscribe` channel. Lets HTTP-only
+  // clients (curl, fetch with ReadableStream, EventSource) tail a session
+  // without taking a dependency on the WebSocket transport.
+  app.openapi(agentEventsRoute, (c) => {
+    if (!sessionManager) {
+      return c.json({ status: "error", message: "SessionManager not provided" }, 500) as any;
+    }
+    const sessionId = getSessionId(c);
+    const session = sessionManager.getOrCreateSession(sessionId);
+
+    const sinceParam = c.req.query("since");
+    const sinceCursor = sinceParam ? parseInt(sinceParam, 10) : session.eventCounter;
+
+    return streamSSE(c, async (stream) => {
+      const KEEPALIVE_MS = getConfig().keepaliveIntervalMs;
+      const signal = c.req.raw.signal;
+
+      const queue: Array<{ cursor: number; event: AgentEvent }> = [];
+      let wakeUp: (() => void) | null = null;
+
+      const unsub = sessionManager.onSessionEvent(sessionId, (eventCursor, event) => {
+        queue.push({ cursor: eventCursor, event });
+        const fn = wakeUp; wakeUp = null; fn?.();
+      });
+      signal.addEventListener("abort", () => { const fn = wakeUp; wakeUp = null; fn?.(); });
+
+      try {
+        let cursor = sinceCursor;
+        if (cursor < session.eventCounter) {
+          const startIdx = Math.max(
+            0,
+            session.eventBuffer.length - (session.eventCounter - cursor),
+          );
+          for (const event of session.eventBuffer.slice(startIdx)) {
+            cursor++;
+            await stream.writeSSE({ id: String(cursor), data: JSON.stringify(event) });
+          }
+        } else {
+          cursor = session.eventCounter;
+        }
+
+        while (queue.length > 0 && queue[0].cursor !== -1 && queue[0].cursor <= cursor) {
+          queue.shift();
+        }
+
+        while (!signal.aborted) {
+          if (queue.length === 0) {
+            await Promise.race([
+              new Promise<void>((r) => { wakeUp = r; }),
+              new Promise<void>((r) => setTimeout(r, KEEPALIVE_MS)),
+            ]);
+          }
+          if (signal.aborted) break;
+
+          if (queue.length > 0) {
+            while (queue.length > 0) {
+              const item = queue.shift()!;
+              if (item.cursor === -1) {
+                await stream.writeSSE({ data: JSON.stringify(item.event) });
+              } else {
+                await stream.writeSSE({ id: String(item.cursor), data: JSON.stringify(item.event) });
+              }
+            }
+          } else {
+            await stream.writeSSE({ data: "" });
+          }
+        }
+      } finally {
+        unsub();
+      }
+    });
   });
 
   // ── Permission ────────────────────────────────────────────────

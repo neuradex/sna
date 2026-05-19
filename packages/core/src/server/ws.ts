@@ -55,7 +55,7 @@ import type { AgentEvent, AgentProcess } from "../core/providers/types.js";
 import { getProvider } from "../core/providers/index.js";
 import { getDb } from "../db/schema.js";
 import { logger } from "../lib/logger.js";
-import { runOnce, type RunOnceOptions } from "./routes/agent.js";
+import { runOnce, type RunOnceOptions } from "./run-once.js";
 import { completion, type CompletionOptions } from "../core/completion.js";
 import { wsReply } from "./api-types.js";
 import { buildCanonicalFromDb } from "../history/canonical.js";
@@ -379,6 +379,7 @@ async function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManage
       allowedTools: msg.allowedTools as string[] | undefined,
       disallowedTools: msg.disallowedTools as string[] | undefined,
       mcpServers: msg.mcpServers as any,
+      reasoningLevel: msg.reasoningLevel as (0 | 1 | 2 | 3 | 4 | 5) | undefined,
     });
     sm.setProcess(sessionId, proc);
     sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, cwd: session.cwd, permissionMode, configDir, extraArgs, providerOptions });
@@ -496,6 +497,7 @@ async function handleAgentResume(ws: WebSocket, msg: WsRequest, sm: SessionManag
       allowedTools: msg.allowedTools as string[] | undefined,
       disallowedTools: msg.disallowedTools as string[] | undefined,
       mcpServers: msg.mcpServers as any,
+      reasoningLevel: msg.reasoningLevel as (0 | 1 | 2 | 3 | 4 | 5) | undefined,
     });
     sm.setProcess(sessionId, proc, "resumed");
     sm.saveStartConfig(sessionId, { provider: providerName, modelProvider, model, cwd: session.cwd, permissionMode, configDir, extraArgs, providerOptions });
@@ -528,6 +530,7 @@ async function handleAgentRestart(ws: WebSocket, msg: WsRequest, sm: SessionMana
       allowedTools: msg.allowedTools as string[] | undefined,
       disallowedTools: msg.disallowedTools as string[] | undefined,
       mcpServers: msg.mcpServers as any,
+      reasoningLevel: msg.reasoningLevel as (0 | 1 | 2 | 3 | 4 | 5) | undefined,
     };
 
     // Single unified path. restartSession handles kill + persist; spawnWithPool

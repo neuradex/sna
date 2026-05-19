@@ -678,7 +678,31 @@ export interface CompletionOptions {
   timeout?: number;
   extraArgs?: string[];
   env?: Record<string, string>;
-  /** Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`). */
+  /**
+   * Reasoning effort / thinking strength on a provider-agnostic 0..5 scale.
+   * 0 is the lightest reasoning the provider supports, 5 is the heaviest.
+   * Each provider adapter translates this to its native knob:
+   *   level | Claude (`--effort`) | Codex (`model_reasoning_effort`)
+   *     0   | low                  | none
+   *     1   | low      (collapse)  | minimal
+   *     2   | medium               | low
+   *     3   | high                 | medium
+   *     4   | xhigh                | high
+   *     5   | max                  | xhigh
+   * Omit to inherit the provider's own default.
+   */
+  reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
+  /**
+   * Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`).
+   *
+   * Codex-only knobs include:
+   *   serviceTier?: string  — mirrors Codex `/fast` slash command. Common
+   *                           values: "priority", "flex", "batch". Sets
+   *                           the OpenAI request-priority routing tier
+   *                           per turn. Codex-only by design: Claude's
+   *                           `/fast` is a different MODEL variant with
+   *                           separate billing, so this is NOT auto-mapped.
+   */
   providerOptions?: Record<string, unknown>;
 }
 
@@ -708,7 +732,9 @@ export interface RunOnceOptions {
   timeout?: number;
   provider?: string;
   extraArgs?: string[];
-  /** Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`). */
+  /** Reasoning effort 0..5. See {@link CompletionOptions.reasoningLevel}. */
+  reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
+  /** Provider-specific options. See {@link CompletionOptions.providerOptions}. */
   providerOptions?: Record<string, unknown>;
 }
 
@@ -1070,8 +1096,27 @@ export interface AgentStartConfig {
   /** MCP servers to make available. */
   mcpServers?: Record<string, unknown>;
   /**
+   * Reasoning effort 0..5 (lightest → heaviest). Per-provider translation:
+   *   level | Claude (`--effort`) | Codex (`model_reasoning_effort`)
+   *     0   | low                  | none
+   *     1   | low      (collapse)  | minimal
+   *     2   | medium               | low
+   *     3   | high                 | medium
+   *     4   | xhigh                | high
+   *     5   | max                  | xhigh
+   * OpenCode ignores it. Omit to inherit the provider's own default.
+   */
+  reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
+  /**
    * Provider-specific structured options. See SpawnOptions.providerOptions
    * for the per-provider shape. Dropped on cross-provider restart.
+   *
+   * Codex-only knobs include:
+   *   serviceTier?: string  — Codex `/fast` slash command equivalent.
+   *                           "priority" / "flex" / "batch". Codex-only;
+   *                           NOT auto-mapped to Claude (Claude's `/fast`
+   *                           is a different MODEL variant with separate
+   *                           billing — set `model` directly there).
    */
   providerOptions?: Record<string, unknown>;
 

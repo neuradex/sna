@@ -141,6 +141,43 @@ export class RuntimePool {
     return handle;
   }
 
+  /**
+   * Loose, non-mutating lookup for stateless one-shot reuse. Returns any
+   * pool handle that matches `provider` and is compatible with `cwd`,
+   * ignoring full pool-key fields (MCP / hooks / permissions). Use this
+   * from `provider.complete()` to opportunistically reuse a warm daemon
+   * without taking on the responsibility of provisioning one.
+   *
+   * For providers that report `supportsCwdPerThread = true` (Codex
+   * app-server today), `cwd` doesn't restrict the match — the daemon can
+   * host threads at any working directory, so any warm daemon for the
+   * provider is fair game.
+   *
+   * For session spawning use `prepare()` (which uses the strict key).
+   */
+  findCompatible(
+    provider: { name: string; supportsCwdPerThread?: boolean },
+    cwd: string,
+  ): RuntimeHandle | null {
+    for (const [key, handle] of this.handles) {
+      if (!handle.ready) continue;
+      if (provider.supportsCwdPerThread) {
+        // Daemon is cwd-agnostic — match the provider name alone.
+        if (key === provider.name || key.startsWith(`${provider.name}|`)) {
+          return handle;
+        }
+      } else {
+        // Match provider+cwd, ignore other key components.
+        const exact = `${provider.name}|${cwd}`;
+        const prefix = `${provider.name}|${cwd}|`;
+        if (key === exact || key.startsWith(prefix)) {
+          return handle;
+        }
+      }
+    }
+    return null;
+  }
+
   /** Dispose all managed runtimes. */
   dispose(): void {
     for (const [key, handle] of this.handles) {
@@ -238,4 +275,23 @@ export class RuntimePool {
 
     return parts.join("|");
   }
+}
+
+// ── Global singleton ────────────────────────────────────────────────────
+
+let _runtimePool: RuntimePool | null = null;
+
+/**
+ * Get or create the global RuntimePool singleton.
+ *
+ * Lives here rather than in `providers/index.ts` so individual provider
+ * modules can reuse the pool without importing the provider registry —
+ * which would otherwise create a circular dependency (index.ts
+ * instantiates each provider class at module load).
+ */
+export function getRuntimePool(): RuntimePool {
+  if (!_runtimePool) {
+    _runtimePool = new RuntimePool();
+  }
+  return _runtimePool;
 }

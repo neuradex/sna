@@ -94,16 +94,18 @@ Splitting these matters because the same runtime can talk to multiple model vend
 
 ### Event protocol
 
-Twelve normalized event types flow over the agent stream:
+Fifteen normalized event types flow over the agent stream:
 
 | Type | Meaning |
 |------|---------|
 | `init` | Session initialized; carries the provider's session id |
 | `thinking` | Extended thinking block, complete |
 | `thinking_delta` | Streaming thinking chunk |
+| `text_delta` | Streaming raw text chunk (pre-finalization) |
 | `assistant` | Full assistant message |
 | `assistant_delta` | Streaming assistant token chunk |
 | `tool_use` | Agent is calling a tool |
+| `tool_use_delta` | Streaming tool-input chunk (partial JSON) |
 | `tool_result` | Tool returned a result |
 | `permission_needed` | Agent paused for approval |
 | `milestone` | Skill / app-level progress signal |
@@ -118,14 +120,18 @@ The `*_delta` variants stream tokens for ChatGPT-style UIs; the non-delta versio
 
 #### HTTP
 
+The HTTP routes are defined with `@hono/zod-openapi` in `server/routes/openapi.ts`, so the running server also publishes its own OpenAPI 3.1 spec. See [OpenAPI / Swagger UI](#openapi--swagger-ui) below.
+
 | Method | Path | What it does |
 |--------|------|--------------|
 | `GET`    | `/health` | Health check |
+| `GET`    | `/api/sna-port` | Read the dynamically allocated port from `.sna/sna-api.port` |
 | `POST`   | `/agent/sessions` | Create a session |
-| `GET`    | `/agent/sessions` | List sessions |
+| `GET`    | `/agent/sessions` | List sessions (pass `?include=chain` for `runtimeChain` on each entry) |
+| `PATCH`  | `/agent/sessions/:id` | Update session metadata (label, meta, cwd) |
 | `DELETE` | `/agent/sessions/:id` | Remove a session |
 | `POST`   | `/agent/start` | Start (spawn) agent in a session |
-| `POST`   | `/agent/send` | Send a message |
+| `POST`   | `/agent/send` | Send a message (supports `images[]`) |
 | `POST`   | `/agent/resume` | Restart with canonical history rebuilt for the provider |
 | `POST`   | `/agent/restart` | Re-spawn with the same `Session.config` (with optional overrides) |
 | `PATCH`  | `/agent/session` | Unified PATCH mutator for `{cwd, model, permissionMode}`; in-place where possible, respawn-with-history-replay otherwise |
@@ -136,14 +142,32 @@ The `*_delta` variants stream tokens for ChatGPT-style UIs; the non-delta versio
 | `GET`    | `/agent/status` | Session status snapshot |
 | `POST`   | `/agent/run-once` | One-shot: spawn → run → return result → cleanup |
 | `POST`   | `/agent/completion` | Lightweight one-shot completion (no session) |
-| `GET`    | `/agent/events` | SSE event stream |
+| `POST`   | `/agent/list-models` | Provider model introspection (POST so config/apiKey doesn't end up in URL logs) |
+| `GET`    | `/agent/events` | SSE event stream (subscribe to a session's events over plain HTTP) |
+| `POST`   | `/agent/permission-request` | Blocking: submit a permission request and wait for the UI's verdict |
+| `POST`   | `/agent/permission-respond` | UI side: approve or deny a pending permission request |
+| `GET`    | `/agent/permission-pending` | List pending permission requests (global or per-session) |
 | `GET`    | `/chat/sessions` | List chat sessions |
+| `POST`   | `/chat/sessions` | Create a chat session |
+| `DELETE` | `/chat/sessions/:id` | Delete a chat session |
+| `GET`    | `/chat/sessions/:id/messages` | List messages (supports `since`, `limit`) |
 | `POST`   | `/chat/sessions/:id/messages` | Append a chat message |
-| `GET`    | `/chat/sessions/:id/messages` | List messages |
 | `DELETE` | `/chat/sessions/:id/messages` | Clear messages |
 | `GET`    | `/chat/images/:sessionId/:filename` | Serve an embed |
 
 `server/api-types.ts` is the single source of truth for response shapes. `httpJson(c, op, data)` and `wsReply(ws, msg, data)` both consume it, so HTTP/WS drift is a TypeScript error.
+
+##### OpenAPI / Swagger UI
+
+`createSnaApp()` returns an `OpenAPIHono` instance, so the spec is generated from the same Zod schemas that validate incoming requests. Once the server is running you get three companion endpoints for free:
+
+| Path | Contents |
+|------|----------|
+| `/openapi.json` | Raw OpenAPI 3.1 document |
+| `/docs` | Swagger UI (interactive try-it-out) |
+| `/spec` | Plain-text JSON viewer (no JS) |
+
+Generating clients from this spec, or pointing Postman / Insomnia / Bruno at it, works without any extra build step.
 
 #### WebSocket (`/ws`)
 
@@ -184,7 +208,32 @@ A session doesn't need to die to change shape:
 
 ### One-shot completion
 
-`completion({ prompt, model?, provider?, systemPrompt?, ... })` skips the session machinery. Spawns `claude -p --output-format json` for Claude Code, `codex exec --json` for Codex, or for OpenCode briefly stands up an ephemeral `opencode serve` and runs a synchronous `client.session.prompt`. Parses the result, returns `{ text, usage, costUsd, durationMs, durationApiMs, model }`. Used for short single-prompt jobs — naming a chat, summarizing a doc — where multi-turn would be overkill.
+`completion({ prompt, model?, provider?, systemPrompt?, ... })` skips the session machinery. Each provider picks its own one-shot strategy explicitly:
+
+- **Claude Code** — `claude -p --output-format json` (stateless, no daemon to reuse).
+- **Codex** — `getRuntimePool().findCompatible(cwd)` first; if a pooled `codex app-server` daemon already serves this cwd, run the one-shot through it as a thread (≈2× faster on warm pools). Otherwise fall back to `codex exec --json --ephemeral`.
+- **OpenCode** — same lookup-first pattern; reuses an existing `opencode serve` daemon when present, otherwise spins up an ephemeral one and tears it down.
+
+Returns `{ text, usage, costUsd, durationMs, durationApiMs, model }`. Used for short single-prompt jobs — naming a chat, summarising a doc, autocomplete — where multi-turn would be overkill.
+
+### Reasoning effort & service tier
+
+Two provider-aware latency knobs, both flow through `SpawnOptions` and `CompleteOptions`:
+
+- **`reasoningLevel: 0 | 1 | 2 | 3 | 4 | 5`** — provider-agnostic, lightest → heaviest. Each adapter translates this to its native enum:
+
+  | level | Claude Code (`--effort`) | Codex (`model_reasoning_effort` / `turn/start.effort`) |
+  |---:|---|---|
+  | 0 | `low` | `none` |
+  | 1 | `low` (collapse) | `minimal` |
+  | 2 | `medium` | `low` |
+  | 3 | `high` | `medium` |
+  | 4 | `xhigh` | `high` |
+  | 5 | `max` | `xhigh` |
+
+  OpenCode currently ignores it. Omit to inherit the provider's own default.
+
+- **`providerOptions.serviceTier: string`** — Codex-only, mirrors the `/fast` slash command. Common values: `"priority"` (fast lane, premium billing), `"flex"`, `"batch"`. Threaded into `turn/start.serviceTier` for the pool path; `-c service_tier=<v>` for the ephemeral `codex exec` path. Intentionally NOT auto-translated to Claude — Claude's `/fast` is a faster MODEL variant with separate billing (the CLI prompts "Fast mode requires extra usage billing"), so for Claude set `model` to the desired variant directly.
 
 ### Launcher API
 

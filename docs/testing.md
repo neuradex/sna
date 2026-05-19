@@ -20,7 +20,7 @@ This is deterministic, fast, and cheap — perfect for integration tests that ex
 
 ### `sna-test` CLI
 
-The `@sna-sdk/testing` package exposes a `sna-test` binary for manual testing. Each invocation creates a named "instance" under `.sna/test-instances/<name>/` with its own mock server, isolated `CLAUDE_CONFIG_DIR`, and JSONL request/response log.
+The `@sna-sdk/testing` package exposes a `sna-test` binary for manual testing. Each invocation creates a named "instance": metadata is stored under `.sna/instances/<name>.json` and the logs + isolated `CLAUDE_CONFIG_DIR` live under `.sna/<name>/`. Each instance gets its own mock server and JSONL request/response log.
 
 ```bash
 sna-test claude [args...]      # Launch Claude Code with mock API + isolated config

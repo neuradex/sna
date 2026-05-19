@@ -50,7 +50,7 @@ UI상에 Progress를 표시하기 위해 스킬 중간 중간에 진척보고를
 - `@sna/react`: 간단한 채팅 컴포넌트가 들어있는 패키지
 - `@sna/testing`: Anthropic Mock Server
 
-대충 `POST /agent/create` 를 하면 옵션에 따라서 Claude Code 프로세스나 Codex 프로세스가 백그라운드에서 Spawn 되고, `POST /sessions/:id/messages` 를 실행하면 해당 프로세스에다 메세지를 밀어넣는식이다. 그리고 Client패키지에서 subscribe()하면 웹소켓 경유로 리얼타임으로 메세지가 흘러들어오는 식이다(Firebase의 그것과 비슷하다)
+대충 `POST /agent/sessions` 로 세션 레코드를 만들고 `POST /agent/start?session=<id>` 를 하면 옵션에 따라서 Claude Code/Codex/OpenCode 프로세스가 백그라운드에서 Spawn 되고, `POST /agent/send?session=<id>` 를 실행하면 해당 프로세스에다 메세지를 밀어넣는식이다. 그리고 Client패키지에서 subscribe()하면 웹소켓 경유로 리얼타임으로 메세지가 흘러들어오는 식이다(Firebase의 그것과 비슷하다)
 
 ## 대화이력 추상화
 
@@ -72,7 +72,7 @@ Claude Code/Codex를 병렬로 Spawn해서 서브프로세스로 이용한다. S
 
 ## 멀티 세션
 
-`POST /agent/create`를 여러 번 부르면 그만큼의 클로드 코드/코덱스 프로세스가 백그라운드에서 동시에 굴러간다. 각 세션은 본인의 이벤트 버퍼와 cwd, 메타데이터를 가지고 있어서 같은 SNA 서버를 여러 앱이 공유해도 `meta.app` 같은 키로 자기 세션만 골라낼 수 있다. WebSocket 커넥션 하나로 여러 세션을 동시에 subscribe할 수 있어, 화면 한쪽에서는 영업 메일 초안을 짜고 다른 한쪽에서는 그 회사 정보를 리서치하는 식의 병렬 워크플로우가 그제서야 가능해진다.
+`POST /agent/sessions` → `POST /agent/start?session=<id>` 를 여러 번 부르면 그만큼의 클로드 코드/코덱스/OpenCode 프로세스가 백그라운드에서 동시에 굴러간다. 각 세션은 본인의 이벤트 버퍼와 cwd, 메타데이터를 가지고 있어서 같은 SNA 서버를 여러 앱이 공유해도 `meta.app` 같은 키로 자기 세션만 골라낼 수 있다. WebSocket 커넥션 하나로 여러 세션을 동시에 subscribe할 수 있어, 화면 한쪽에서는 영업 메일 초안을 짜고 다른 한쪽에서는 그 회사 정보를 리서치하는 식의 병렬 워크플로우가 그제서야 가능해진다.
 
 ## 퍼미션 플로우 추상화
 
@@ -90,7 +90,7 @@ Claude Code/Codex를 병렬로 Spawn해서 서브프로세스로 이용한다. S
 
 ## 이벤트 종류
 
-WebSocket으로 흘러나오는 이벤트는 12종류다. `init`(세션 초기화) / `thinking`·`thinking_delta`(추론) / `assistant`·`assistant_delta`(응답, 스트리밍 청크 포함) / `tool_use`·`tool_result`(도구 호출/결과) / `permission_needed` / `milestone`(스킬 진척) / `user_message`(멀티 클라이언트 동기화) / `interrupted` / `error` / `complete`.
+WebSocket으로 흘러나오는 이벤트는 15종류다. `init`(세션 초기화) / `thinking`·`thinking_delta`(추론) / `text_delta`(원문 텍스트 청크) / `assistant`·`assistant_delta`(응답, 스트리밍 청크 포함) / `tool_use`·`tool_use_delta`·`tool_result`(도구 호출/입력 청크/결과) / `permission_needed` / `milestone`(스킬 진척) / `user_message`(멀티 클라이언트 동기화) / `interrupted` / `error` / `complete`.
 
 `_delta` 계열은 토큰 스트리밍이라 ChatGPT처럼 한 글자씩 흐르는 UI를 그대로 만들 수 있고, `milestone`은 스킬 안에서 `dispatch.milestone("5건 추출 완료")` 같이 명시적으로 쏘는 진척 신호다. UI 쪽 useAgent 훅은 이 모든 타입을 콜백으로 분기해 받을 수 있다.
 
@@ -98,14 +98,14 @@ WebSocket으로 흘러나오는 이벤트는 12종류다. `init`(세션 초기�
 
 `@sna/react`는 위 client를 React에 묶은 훅 묶음 + 그냥 갖다 붙이면 되는 채팅 UI다.
 
-- 훅: `useAgent`, `useSessionManager`, `useSkillEvents`, `useSnaClient`, `useResponsiveChat`
+- 훅: `useAgent`, `useSessionManager`, `useResponsiveChat`
 - 컴포넌트: `<SnaProvider>`로 감싸고 `<ChatPanel>` 하나 떨어뜨리면 메세지 버블, 도구 호출 카드, thinking 접힘 박스, 마크다운 렌더, 퍼미션 다이얼로그가 다 들어있는 채팅이 그대로 뜬다
 
 처음에 Electron + Xterm으로 클로드 코드를 띄웠던 그 시절을 생각하면, 이젠 백엔드는 SNA 서버에 맡기고 프론트는 진짜 평범한 React 앱처럼 짜면 된다는 게 가장 큰 차이다.
 
 ## Mock 서버 (@sna/testing)
 
-그리고 이걸 만들면서 LLM콜을 진짜 무진장 많이 돌렸는데, 진짜 클로드 토큰을 태우면서 통합 테스트 돌리면 금방 가난해진다. 그래서 Anthropic Messages API와 시그니처가 동일한 모킹 서버를 SDK 안에 같이 넣어놨다. `ANTHROPIC_BASE_URL`만 모킹 서버로 갈아끼우면 클로드 코드 본인은 자기가 진짜 Anthropic에 붙는 줄 안다. CI에서 SNA 풀스택을 검증할 때, 그리고 SDK 자체 테스트에서 쓴다. `sna tu claude` 한 줄이면 격리된 환경에서 모킹 API에 연결된 클로드가 그대로 뜬다. 동작방식이 좀 웃기기는 하다. 유저가 보낸 메세지를 그대로 뒤집어서 응답한다.
+그리고 이걸 만들면서 LLM콜을 진짜 무진장 많이 돌렸는데, 진짜 클로드 토큰을 태우면서 통합 테스트 돌리면 금방 가난해진다. 그래서 Anthropic Messages API와 시그니처가 동일한 모킹 서버를 SDK 안에 같이 넣어놨다. `ANTHROPIC_BASE_URL`만 모킹 서버로 갈아끼우면 클로드 코드 본인은 자기가 진짜 Anthropic에 붙는 줄 안다. CI에서 SNA 풀스택을 검증할 때, 그리고 SDK 자체 테스트에서 쓴다. `sna-test claude` 한 줄이면 격리된 환경에서 모킹 API에 연결된 클로드가 그대로 뜬다. 동작방식이 좀 웃기기는 하다. 유저가 보낸 메세지를 그대로 뒤집어서 응답한다.
 유저: "안녕, 밥 먹었니?" -> 에이전트 "?니었먹 밥 ,녕안"
 
 ## Electron / Node 런처

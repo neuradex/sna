@@ -30,33 +30,46 @@ describe("API Parity", () => {
     }
   });
 
-  it("HTTP routes use httpJson for all typed operations", async () => {
-    const agentSrc = fs.readFileSync(
-      path.join(import.meta.dirname, "../src/server/routes/agent.ts"), "utf-8"
-    );
-    const chatSrc = fs.readFileSync(
-      path.join(import.meta.dirname, "../src/server/routes/chat.ts"), "utf-8"
+  it("openapi.ts has an HTTP route for every typed operation", async () => {
+    // The OpenAPI app (routes/openapi.ts) is the single live HTTP router,
+    // mounted by createSnaApp(). For each ApiResponses operation we verify
+    // a matching createRoute({ method, path: ... }) exists in that file.
+    const src = fs.readFileSync(
+      path.join(import.meta.dirname, "../src/server/routes/openapi.ts"), "utf-8"
     );
 
-    // Agent routes
-    const agentOps = [
-      "sessions.create", "sessions.list", "sessions.remove",
-      "agent.start", "agent.send", "agent.kill", "agent.status",
-      "agent.run-once", "agent.restart", "agent.interrupt",
-      "agent.set-model", "agent.set-permission-mode",
-      "permission.respond", "permission.pending",
+    const opToPath: Array<[string, string]> = [
+      ["sessions.create", "/agent/sessions"],
+      ["sessions.list", "/agent/sessions"],
+      ["sessions.update", "/agent/sessions/{id}"],
+      ["sessions.remove", "/agent/sessions/{id}"],
+      ["agent.start", "/agent/start"],
+      ["agent.send", "/agent/send"],
+      ["agent.resume", "/agent/resume"],
+      ["agent.restart", "/agent/restart"],
+      ["agent.interrupt", "/agent/interrupt"],
+      ["agent.set-model", "/agent/set-model"],
+      ["agent.set-permission-mode", "/agent/set-permission-mode"],
+      ["agent.kill", "/agent/kill"],
+      ["agent.status", "/agent/status"],
+      ["agent.run-once", "/agent/run-once"],
+      ["agent.completion", "/agent/completion"],
+      ["agent.list-models", "/agent/list-models"],
+      ["permission.respond", "/agent/permission-respond"],
+      ["permission.pending", "/agent/permission-pending"],
+      ["chat.sessions.list", "/chat/sessions"],
+      ["chat.sessions.create", "/chat/sessions"],
+      ["chat.sessions.remove", "/chat/sessions/{id}"],
+      ["chat.messages.list", "/chat/sessions/{id}/messages"],
+      ["chat.messages.create", "/chat/sessions/{id}/messages"],
+      ["chat.messages.clear", "/chat/sessions/{id}/messages"],
     ];
-    for (const op of agentOps) {
-      assert.ok(agentSrc.includes(`httpJson(c, "${op}"`), `agent.ts should use httpJson for "${op}"`);
-    }
 
-    // Chat routes
-    const chatOps = [
-      "chat.sessions.list", "chat.sessions.create", "chat.sessions.remove",
-      "chat.messages.list", "chat.messages.create", "chat.messages.clear",
-    ];
-    for (const op of chatOps) {
-      assert.ok(chatSrc.includes(`httpJson(c, "${op}"`), `chat.ts should use httpJson for "${op}"`);
+    for (const [op, p] of opToPath) {
+      assert.ok(
+        src.includes(`path: "${p}"`),
+        `openapi.ts should declare a route at path "${p}" (for op "${op}")`,
+      );
     }
   });
 
