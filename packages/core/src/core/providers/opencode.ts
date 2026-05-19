@@ -48,7 +48,7 @@ import type {
   ListModelsResult,
   RuntimeModelInfo,
 } from "./types.js";
-import type { RuntimeConfig, RuntimeHandle } from "./runtime.js";
+import { getRuntimePool, type RuntimeConfig, type RuntimeHandle } from "./runtime.js";
 import {
   canonicalToOpenCodeHistoryPrelude,
   type OpenCodePart,
@@ -945,18 +945,29 @@ export class OpenCodeProvider implements AgentProvider {
       // Caller-managed daemon (tests, embedded uses).
       serverUrl = externalUrl;
     } else {
-      // Spin up an ephemeral server. Heavier than codex's `exec` one-shot,
-      // but honest: there is no `opencode run --json` we can rely on for
-      // structured token usage, so we go through the same HTTP API the
-      // session path uses.
-      const port = await allocateFreePort();
-      const server = await sdk.createOpencodeServer({
-        hostname: "127.0.0.1",
-        port,
-        timeout: options.timeout ?? 15_000,
-      });
-      serverUrl = server.url;
-      cleanup = () => { try { server.close(); } catch { /* already gone */ } };
+      // Three-step strategy, cheapest-first:
+      //   1. Caller-supplied URL (handled above).
+      //   2. Reuse a daemon that's already in the pool for this cwd —
+      //      `opencode serve` cold start is the bulk of the cost, so this
+      //      is the big win whenever an interactive session is also running.
+      //   3. Spin up an ephemeral server. Heavier than codex's `exec`
+      //      one-shot, but honest: there is no `opencode run --json` we can
+      //      rely on for structured token usage, so we go through the same
+      //      HTTP API the session path uses.
+      const pooled = getRuntimePool().findCompatible(this, cwd);
+      if (pooled?.httpUrl) {
+        serverUrl = pooled.httpUrl;
+        logger.log("agent", `opencode complete: reusing pooled daemon ${serverUrl}`);
+      } else {
+        const port = await allocateFreePort();
+        const server = await sdk.createOpencodeServer({
+          hostname: "127.0.0.1",
+          port,
+          timeout: options.timeout ?? 15_000,
+        });
+        serverUrl = server.url;
+        cleanup = () => { try { server.close(); } catch { /* already gone */ } };
+      }
     }
 
     const client = sdk.createOpencodeClient({ baseUrl: serverUrl });
