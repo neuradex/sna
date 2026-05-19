@@ -9,27 +9,5 @@ export function baseOptions(): BaseLayoutProps {
       ),
     },
     githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
-    links: [
-      {
-        text: 'Quickstart',
-        url: '/docs/quickstart',
-      },
-      {
-        text: 'Concepts',
-        url: '/docs/concepts',
-      },
-      {
-        text: 'API Spec',
-        url: '/docs/api',
-      },
-      {
-        text: 'SDKs',
-        url: '/docs/sdks',
-      },
-      {
-        text: 'Cookbook',
-        url: '/docs/cookbook',
-      },
-    ],
   };
 }
