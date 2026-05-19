@@ -208,7 +208,32 @@ A session doesn't need to die to change shape:
 
 ### One-shot completion
 
-`completion({ prompt, model?, provider?, systemPrompt?, ... })` skips the session machinery. Spawns `claude -p --output-format json` for Claude Code, `codex exec --json` for Codex, or for OpenCode briefly stands up an ephemeral `opencode serve` and runs a synchronous `client.session.prompt`. Parses the result, returns `{ text, usage, costUsd, durationMs, durationApiMs, model }`. Used for short single-prompt jobs — naming a chat, summarizing a doc — where multi-turn would be overkill.
+`completion({ prompt, model?, provider?, systemPrompt?, ... })` skips the session machinery. Each provider picks its own one-shot strategy explicitly:
+
+- **Claude Code** — `claude -p --output-format json` (stateless, no daemon to reuse).
+- **Codex** — `getRuntimePool().findCompatible(cwd)` first; if a pooled `codex app-server` daemon already serves this cwd, run the one-shot through it as a thread (≈2× faster on warm pools). Otherwise fall back to `codex exec --json --ephemeral`.
+- **OpenCode** — same lookup-first pattern; reuses an existing `opencode serve` daemon when present, otherwise spins up an ephemeral one and tears it down.
+
+Returns `{ text, usage, costUsd, durationMs, durationApiMs, model }`. Used for short single-prompt jobs — naming a chat, summarising a doc, autocomplete — where multi-turn would be overkill.
+
+### Reasoning effort & service tier
+
+Two provider-aware latency knobs, both flow through `SpawnOptions` and `CompleteOptions`:
+
+- **`reasoningLevel: 0 | 1 | 2 | 3 | 4 | 5`** — provider-agnostic, lightest → heaviest. Each adapter translates this to its native enum:
+
+  | level | Claude Code (`--effort`) | Codex (`model_reasoning_effort` / `turn/start.effort`) |
+  |---:|---|---|
+  | 0 | `low` | `none` |
+  | 1 | `low` (collapse) | `minimal` |
+  | 2 | `medium` | `low` |
+  | 3 | `high` | `medium` |
+  | 4 | `xhigh` | `high` |
+  | 5 | `max` | `xhigh` |
+
+  OpenCode currently ignores it. Omit to inherit the provider's own default.
+
+- **`providerOptions.serviceTier: string`** — Codex-only, mirrors the `/fast` slash command. Common values: `"priority"` (fast lane, premium billing), `"flex"`, `"batch"`. Threaded into `turn/start.serviceTier` for the pool path; `-c service_tier=<v>` for the ephemeral `codex exec` path. Intentionally NOT auto-translated to Claude — Claude's `/fast` is a faster MODEL variant with separate billing (the CLI prompts "Fast mode requires extra usage billing"), so for Claude set `model` to the desired variant directly.
 
 ### Launcher API
 

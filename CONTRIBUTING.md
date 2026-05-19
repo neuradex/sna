@@ -72,6 +72,7 @@ The PreToolUse hook (`scripts/hook.ts`) runs before every Claude Code tool call,
 | `packages/core/src/server/ws.ts` | WebSocket handler wrapping all routes |
 | `packages/core/src/server/api-types.ts` | Shared HTTP/WS response shapes |
 | `packages/core/src/server/standalone.ts` | Standalone server entry (forked by launchers) |
+| `packages/core/src/server/run-once.ts` | One-shot agent execution helper (spawn → wait for `complete` event → tear down). Used by HTTP `/agent/run-once` and WS `agent.run-once` |
 | `packages/core/src/db/schema.ts` | Canonical SQLite schema + migrations |
 | `packages/core/src/db/chat-messages.ts` | `insertChatMessage` etc. |
 | `packages/core/src/history/canonical.ts` | Build canonical blocks from DB |
@@ -81,6 +82,8 @@ The PreToolUse hook (`scripts/hook.ts`) runs before every Claude Code tool call,
 | `packages/core/src/core/providers/claude-code.ts` | Claude Code spawn + event normalization |
 | `packages/core/src/core/providers/codex.ts` | Codex spawn + event normalization |
 | `packages/core/src/core/providers/opencode.ts` | OpenCode spawn + event normalization (HTTP/SSE via `@opencode-ai/sdk`) |
+| `packages/core/src/core/providers/reasoning-level.ts` | Cross-provider `reasoningLevel: 0..5` ↔ `--effort` / `model_reasoning_effort` translation tables |
+| `packages/core/src/core/providers/runtime.ts` | `RuntimePool` (pool key, `prepare`, `findCompatible`) + singleton |
 | `packages/core/src/core/completion.ts` | One-shot `completion()` API |
 | `packages/core/src/electron/index.ts` | `startSnaServer()` launcher (Electron-aware) |
 | `packages/core/src/node/index.ts` | `startSnaServer()` launcher (plain Node) |

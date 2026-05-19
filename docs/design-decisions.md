@@ -54,6 +54,16 @@ Hooks, MCP servers, allowed/disallowed tools, system prompts — each runtime ac
 
 Provider-specific knobs that don't translate go in `providerOptions: Record<string, unknown>` — opaque to the framework, defined per provider.
 
+### Latency knobs: which to abstract, which to leave provider-specific
+
+Two latency-control surfaces share one trait — both let a consumer ask for "less work per call" — but they sit in different places in the SDK on purpose.
+
+**`reasoningLevel: 0..5` is cross-provider.** Every provider we support today has *some* notion of "how hard should the model think" and the runtime cost of each notch is roughly comparable across providers. So this gets a typed field on `SpawnOptions` / `CompleteOptions` and a single translation table in `core/providers/reasoning-level.ts`. Consumers pick a number, each provider adapter maps it to its own enum (`--effort low|medium|high|xhigh|max` for Claude, `model_reasoning_effort none|minimal|low|medium|high|xhigh` for Codex). OpenCode currently has no equivalent typed knob and silently ignores the field, which is honest: it's a no-op now, becomes a wire-up later if OpenCode exposes one.
+
+**`providerOptions.serviceTier` is intentionally Codex-only.** Codex's `/fast` is a request-priority header on the OpenAI API — same model, same reasoning, just a faster routing tier (premium billing). Claude Code's `/fast`, despite sharing a name, is a *different model variant* with its own usage-credit pool (`/extra-usage` / `/usage-credits` gate). The Claude CLI itself rejects `/fast` with "Fast mode requires extra usage billing" when the user hasn't opted in. Auto-mapping `serviceTier="priority"` to Claude would silently change which billing pool the call hits — exactly the kind of surprise consumers don't forgive. So this lives under `providerOptions` rather than top-level, scoped to Codex, with the rationale in the JSDoc.
+
+The general rule: if a knob has a 1:1 semantic counterpart across providers, it's typed and translated; if it's "the same word in two providers' UIs that means different mechanisms," it's `providerOptions.<provider-specific>` and documented explicitly.
+
 ### Session state belongs to the SDK, not the runtime
 
 Conversation history is the SDK's source of truth. Provider-native session ids (Claude's CC session id, Codex's thread id) are kept on `Session.ccSessionId` so `--resume` works, but they are *one of two* resume strategies — the other is rebuilding from canonical blocks via `agent.resume`. Switching providers mid-conversation works because the canonical store doesn't depend on either runtime's native shape.

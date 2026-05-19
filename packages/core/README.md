@@ -13,7 +13,8 @@ Your app → SNA server → spawn(claude-code | codex | opencode) → events bac
 - **`SessionManager`** — Multi-session lifecycle, per-session event buffer, lifecycle/state/config pub/sub, permission-request bridging, `runtime_sessions` chain for per-mutation history.
 - **Providers** — `ClaudeCodeProvider`, `CodexProvider`, and `OpenCodeProvider`, all exposing a uniform `AgentProcess` interface (`send`, `setModel`, `setPermissionMode`, `interrupt`, `kill`, `applyPatch`, `respondToPermission`). Codex and OpenCode are pooled through `RuntimePool`; Claude Code is stateless per-session.
 - **Canonical conversation model** — `chat_messages` rows split a message into orthogonal `actor` × `kind` axes. `history/canonical.ts` rebuilds blocks; `history/{claude-code,codex,opencode}.ts` adapters convert canonical → native wire format.
-- **One-shot completion** — `completion({ prompt, model?, provider? })` for short single-prompt jobs.
+- **One-shot completion** — `completion({ prompt, model?, provider?, reasoningLevel? })` for short single-prompt jobs. Each provider implements its own optimal one-shot path (Codex `exec --ephemeral` or pooled thread; Claude `-p`; OpenCode pooled session or ephemeral serve). Opportunistically reuses a pooled daemon when one is already alive for the cwd, so high-frequency callers (autocomplete, etc.) don't pay per-call cold-start.
+- **Cross-provider latency knobs** — `reasoningLevel: 0..5` (Claude `--effort` / Codex `model_reasoning_effort`) and Codex-only `providerOptions.serviceTier` (mirrors Codex `/fast` slash command: `"priority"`, `"flex"`, `"batch"`).
 - **Launcher API** — `startSnaServer({ port, dbPath, ... })` from `@sna-sdk/core/node` or `@sna-sdk/core/electron`. Forks the standalone server, resolves native bindings, waits for ready.
 - **PreToolUse hook** — `scripts/hook.ts`, auto-injected by `ClaudeCodeProvider.spawn()`. No manual `.claude/settings.json` editing needed.
 
@@ -65,6 +66,30 @@ const result = await completion({
   label: "summarizer",
 });
 // result.text, result.usage, result.costUsd, result.durationMs, result.model
+```
+
+Autocomplete-grade fast path:
+
+```ts
+await completion({
+  prompt: "...",
+  provider: "codex",
+  model: "gpt-5.4-mini",
+  reasoningLevel: 0,                            // none reasoning on Codex
+  providerOptions: { serviceTier: "priority" }, // Codex `/fast` lane
+});
+```
+
+Pre-warm the pool once at startup so subsequent calls hit the
+"daemon already alive" fast path inside `complete()`:
+
+```ts
+import { getRuntimePool, getProvider } from "@sna-sdk/core/providers";
+
+await getRuntimePool().prepare(
+  { cwd: process.cwd() },
+  getProvider("codex"),
+);
 ```
 
 ### Direct DB access

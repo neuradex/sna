@@ -95,6 +95,32 @@ const { text, usage, costUsd } = await sna.agent.completion({
 });
 ```
 
+For latency-sensitive callers (autocomplete, naming a chat) you can pin
+the reasoning effort low and — on Codex — opt into the request-priority
+lane that mirrors the `/fast` slash command:
+
+```ts
+await sna.agent.completion({
+  prompt: "...",
+  provider: "codex",
+  model: "gpt-5.4-mini",
+  reasoningLevel: 0,                            // → Codex: `none`, Claude: `low`
+  providerOptions: { serviceTier: "priority" }, // Codex-only: `/fast` equivalent
+});
+```
+
+`reasoningLevel` is a provider-agnostic 0..5 scale (lightest → heaviest)
+that maps to `--effort` on Claude and `model_reasoning_effort` on Codex.
+`providerOptions.serviceTier` is intentionally Codex-only — Claude's
+`/fast` is a different model variant billed against its own usage pool,
+so set Claude's `model` directly when you want its fast variant.
+
+If `completion()` is called frequently against the same `cwd`, the
+provider opportunistically reuses any pooled daemon already alive for
+that cwd, sparing the per-call cold-start cost. Provision the pool once
+(e.g. on app boot via `getRuntimePool().prepare(...)` from
+`@sna-sdk/core`) for fastest subsequent calls.
+
 ### React integration
 
 ```tsx
