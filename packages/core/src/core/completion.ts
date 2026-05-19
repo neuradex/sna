@@ -48,6 +48,14 @@ export interface CompletionOptions {
    * for the per-provider translation table.
    */
   reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
+  /**
+   * Streaming callback for assistant-text chunks. Optional — when set,
+   * the provider delivers each token chunk to this callback as soon as
+   * it arrives. The Promise still resolves with the final concatenated
+   * text. See {@link import("./providers/types.js").CompleteOptions.onDelta}
+   * for per-provider wiring notes.
+   */
+  onDelta?: (delta: string) => void;
   /** Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`). */
   providerOptions?: Record<string, unknown>;
 }
@@ -79,6 +87,7 @@ export async function completion(opts: CompletionOptions): Promise<CompletionRes
       extraArgs: opts.extraArgs,
       timeout: opts.timeout,
       reasoningLevel: opts.reasoningLevel,
+      onDelta: opts.onDelta,
       providerOptions: opts.providerOptions,
     });
 

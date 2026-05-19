@@ -1476,6 +1476,49 @@ class AgentApi {
   }
 
   /**
+   * Run-once with a live SSE event stream — token-by-token streaming for
+   * one-shot prompts, without joining a long-lived session.
+   *
+   * Returns an `AsyncIterable` of agent events. The stream ends after
+   * the run's terminal `complete` or `error` event (the server closes
+   * the connection).
+   *
+   * **Requires `http: true`** — uses the SSE endpoint
+   * `POST /agent/run-once/stream`, not WebSocket. For local in-process
+   * runs, call `runOnce({ onDelta })` from `@sna-sdk/core` directly.
+   *
+   * @example
+   * ```ts
+   * let result = "";
+   * for await (const event of sna.agent.runOnceStream({ message: "..." })) {
+   *   if (event.type === "assistant_delta") {
+   *     process.stdout.write(event.delta);
+   *   } else if (event.type === "assistant") {
+   *     result += event.message;
+   *   } else if (event.type === "complete") {
+   *     console.log("usage", event.data);
+   *   }
+   * }
+   * ```
+   */
+  async *runOnceStream(opts: RunOnceOptions): AsyncGenerator<Record<string, unknown>> {
+    if (!this.client._httpUrl) {
+      throw new Error("runOnceStream requires http: true");
+    }
+    const base = this.client._httpUrl.replace(/\/$/, "");
+    const res = await fetch(`${base}/agent/run-once/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify(opts),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status}${text ? `: ${text.slice(0, 200)}` : ""}`);
+    }
+    yield* SnaClient._parseSse(res);
+  }
+
+  /**
    * List models available through a runtime.
    *
    * Use cases:

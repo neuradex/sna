@@ -8,6 +8,7 @@
 import { getConfig } from "../config.js";
 import { getProvider } from "../core/providers/index.js";
 import { spawnWithPool } from "../core/providers/spawn-helper.js";
+import type { AgentEvent } from "../core/providers/types.js";
 import type { SessionManager } from "./session-manager.js";
 
 export interface RunOnceOptions {
@@ -27,6 +28,27 @@ export interface RunOnceOptions {
   reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
   /** Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`). */
   providerOptions?: Record<string, unknown>;
+  /**
+   * Streaming callback for assistant-text chunks. When set, each
+   * `assistant_delta` event is delivered to the callback as soon as
+   * the agent emits it. The Promise still resolves to the final
+   * concatenated text + usage.
+   *
+   * In-process only — function references can't traverse the HTTP/WS
+   * client. For network consumers, use the `POST /agent/run-once/stream`
+   * SSE endpoint via `client.agent.runOnceStream(...)`.
+   *
+   * Callbacks fire from the same Node.js event loop as the underlying
+   * session bus — keep them cheap. Throwing inside aborts the run.
+   */
+  onDelta?: (delta: string) => void;
+  /**
+   * Full event stream callback. Fires once per `AgentEvent` produced
+   * during the run — useful when you want tool_use / thinking /
+   * permission events too, not just text deltas. Same in-process only
+   * caveat as {@link onDelta}.
+   */
+  onEvent?: (event: AgentEvent) => void;
 }
 
 export interface RunOnceResult {
@@ -83,6 +105,30 @@ export async function runOnce(
       }, timeout);
 
       const unsub = sessionManager.onSessionEvent(sessionId, (_cursor, e) => {
+        // Side channel: full-event subscriber first, then the narrower
+        // text-delta callback. Either may throw — convert to a run
+        // rejection so the caller sees it instead of an unhandled error.
+        if (opts.onEvent) {
+          try { opts.onEvent(e); }
+          catch (err) {
+            clearTimeout(timer);
+            unsub();
+            reject(err instanceof Error ? err : new Error(String(err)));
+            return;
+          }
+        }
+        if (opts.onDelta && e.type === "assistant_delta") {
+          const chunk = (e.delta as string | undefined) ?? e.message ?? "";
+          if (chunk) {
+            try { opts.onDelta(chunk); }
+            catch (err) {
+              clearTimeout(timer);
+              unsub();
+              reject(err instanceof Error ? err : new Error(String(err)));
+              return;
+            }
+          }
+        }
         if (e.type === "assistant" && e.message) {
           texts.push(e.message);
         }

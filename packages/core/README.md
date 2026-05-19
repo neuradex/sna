@@ -80,6 +80,29 @@ await completion({
 });
 ```
 
+Streaming UX with the same call — pass `onDelta` to receive text chunks
+as the provider produces them. The Promise still resolves to the full
+result; the callback is purely a side channel for typewriter rendering
+or autocomplete previews.
+
+```ts
+await completion({
+  prompt: "Summarize ...",
+  provider: "codex",
+  onDelta: (chunk) => process.stdout.write(chunk),
+});
+```
+
+`onDelta` is wired for the `claude-code` and `codex` providers
+(both pool and ephemeral paths). On OpenCode the SDK call is single-shot,
+so the callback is a documented no-op there for now.
+
+`runOnce()` accepts the same `onDelta` plus an `onEvent` callback for
+the full agent event stream (tool_use, thinking, complete, ...). For
+network consumers, `POST /agent/run-once/stream` pipes those same
+events over SSE — `client.agent.runOnceStream(...)` wraps that as an
+`AsyncIterable<AgentEvent>`.
+
 Pre-warm the pool once at startup so subsequent calls hit the
 "daemon already alive" fast path inside `complete()`:
 

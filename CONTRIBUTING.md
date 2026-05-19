@@ -72,7 +72,7 @@ The PreToolUse hook (`scripts/hook.ts`) runs before every Claude Code tool call,
 | `packages/core/src/server/ws.ts` | WebSocket handler wrapping all routes |
 | `packages/core/src/server/api-types.ts` | Shared HTTP/WS response shapes |
 | `packages/core/src/server/standalone.ts` | Standalone server entry (forked by launchers) |
-| `packages/core/src/server/run-once.ts` | One-shot agent execution helper (spawn → wait for `complete` event → tear down). Used by HTTP `/agent/run-once` and WS `agent.run-once` |
+| `packages/core/src/server/run-once.ts` | One-shot agent execution helper (spawn → wait for `complete` event → tear down). Used by HTTP `/agent/run-once`, the SSE `/agent/run-once/stream`, and WS `agent.run-once`. Accepts optional `onDelta` / `onEvent` callbacks for in-process streaming |
 | `packages/core/src/db/schema.ts` | Canonical SQLite schema + migrations |
 | `packages/core/src/db/chat-messages.ts` | `insertChatMessage` etc. |
 | `packages/core/src/history/canonical.ts` | Build canonical blocks from DB |

@@ -388,6 +388,25 @@ export interface CompleteOptions {
    * See {@link SpawnOptions.reasoningLevel} for the full mapping table.
    */
   reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
+  /**
+   * Streaming callback. When set, each assistant-text chunk is delivered
+   * to the callback as soon as the provider emits it. The Promise still
+   * resolves to the final {@link CompletionResult} with the concatenated
+   * text + usage; the callback is purely a side channel for streaming UX
+   * (autocomplete, typewriter rendering, etc.).
+   *
+   * Provider notes:
+   *   - claude-code: streamed via `--include-partial-messages` + JSONL parse
+   *   - codex (pool): forwarded from `item/agentMessage/delta` notifications
+   *   - codex (ephemeral): parsed from `codex exec --json` stdout stream
+   *   - opencode: not yet wired (the SDK call is single-shot today);
+   *               the callback is silently a no-op there.
+   *
+   * Callbacks fire from the same Node.js microtask as the underlying
+   * stream — keep them cheap. Throwing inside the callback aborts the
+   * completion with the thrown error.
+   */
+  onDelta?: (delta: string) => void;
   /** Provider-specific options (e.g. `omlxBaseUrl` to override API endpoint). */
   providerOptions?: Record<string, unknown>;
 }

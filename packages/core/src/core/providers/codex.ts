@@ -429,6 +429,32 @@ export function buildCodexHooksJson(
   return { hooks: { PreToolUse: matchers } };
 }
 
+/**
+ * Pull the streaming assistant-text delta out of a single `codex exec --json`
+ * stdout line, if any. Returns `null` for events that don't carry partial
+ * agent text (turn lifecycle, token usage, tool calls, …).
+ *
+ * Codex's exec-mode event shapes vary across versions; we accept the two
+ * variants seen on 0.13x/0.14x:
+ *   - { type: "item.updated", item: { type: "agent_message", delta: "..." } }
+ *   - { type: "agent_message.delta", delta: "..." }
+ *
+ * If neither shape matches, returns null. We deliberately do *not* fall
+ * back to emitting `item.completed.text` here — that's the final value
+ * and would double up with the buffered final read after `close`.
+ */
+export function extractCodexExecDelta(evt: any): string | null {
+  if (!evt || typeof evt !== "object") return null;
+  if (evt.type === "agent_message.delta" && typeof evt.delta === "string") {
+    return evt.delta;
+  }
+  if (evt.type === "item.updated" && evt.item?.type === "agent_message") {
+    const d = evt.item.delta ?? evt.delta;
+    return typeof d === "string" ? d : null;
+  }
+  return null;
+}
+
 function rpcRequest(method: string, params?: Record<string, unknown>): JsonRpcRequest & { id: number } {
   return { method, id: ++rpcIdCounter, params: params ?? {} };
 }
@@ -1554,6 +1580,16 @@ export class CodexProvider implements AgentProvider {
       }, timeout);
 
       proc.on("event", (e: AgentEvent) => {
+        // Streaming side channel — surface partial assistant chunks to the
+        // caller as they arrive. The Promise still resolves with the
+        // concatenated final text.
+        if (e.type === "assistant_delta" && options.onDelta) {
+          const chunk = (e.delta as string | undefined) ?? e.message ?? "";
+          if (chunk) {
+            try { options.onDelta(chunk); }
+            catch (err) { finish(() => reject(err instanceof Error ? err : new Error(String(err)))); }
+          }
+        }
         if (e.type === "assistant" && e.message) {
           texts.push(e.message);
         }
@@ -1662,13 +1698,44 @@ export class CodexProvider implements AgentProvider {
 
       let stdout = "";
       let stderr = "";
+      // Streaming buffer — process complete JSON lines as they arrive so
+      // we can fire options.onDelta during the call instead of waiting
+      // for the process to close. Whatever doesn't yet end in \n stays
+      // here until the next chunk completes it.
+      let streamBuf = "";
 
       const timer = setTimeout(() => {
         proc.kill();
         reject(new Error(`complete timed out after ${timeout}ms`));
       }, timeout);
 
-      proc.stdout!.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+      proc.stdout!.on("data", (chunk: Buffer) => {
+        const text = chunk.toString();
+        stdout += text;
+        if (!options.onDelta) return;
+        // Per-line streaming dispatch. We only care about `item.updated`
+        // / `item.delta` events that carry partial agent_message text;
+        // everything else is summarised after `close`.
+        streamBuf += text;
+        const lines = streamBuf.split("\n");
+        streamBuf = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const evt = JSON.parse(line);
+            const delta = extractCodexExecDelta(evt);
+            if (delta && options.onDelta) {
+              try { options.onDelta(delta); }
+              catch (err) {
+                clearTimeout(timer);
+                try { proc.kill(); } catch {}
+                reject(err instanceof Error ? err : new Error(String(err)));
+                return;
+              }
+            }
+          } catch { /* malformed line — skip */ }
+        }
+      });
       proc.stderr!.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
 
       proc.on("error", (err) => {

@@ -219,6 +219,31 @@ export interface ClaudeEnvOptions {
  * Handles API routing (oMLX > proxy), inherited env cleanup, and PATH setup.
  * Shared between the agent provider and the completion helper.
  */
+/**
+ * Pull the streaming assistant-text delta out of a single
+ * `claude -p --output-format stream-json --include-partial-messages`
+ * stdout line, if any. Returns `null` for events that don't carry
+ * partial assistant text (system init, tool_use deltas, etc.).
+ *
+ * Two shapes carry partial text:
+ *   - {"type":"stream_event","event":{"type":"content_block_delta",
+ *       "delta":{"type":"text_delta","text":"..."}}}
+ *   - same with the deeper "delta" key in some CLI versions
+ *
+ * We deliberately don't surface `content_block_start.content_block.text`
+ * (initial empty block) or assistant snapshot messages — those would
+ * double up with the stream_event deltas.
+ */
+export function extractClaudeStreamDelta(evt: any): string | null {
+  if (!evt || typeof evt !== "object") return null;
+  if (evt.type !== "stream_event") return null;
+  const inner = evt.event;
+  if (!inner || inner.type !== "content_block_delta") return null;
+  const delta = inner.delta;
+  if (delta?.type !== "text_delta") return null;
+  return typeof delta.text === "string" && delta.text.length > 0 ? delta.text : null;
+}
+
 export function buildClaudeEnv(
   claudePath: string,
   opts: ClaudeEnvOptions = {},
@@ -819,10 +844,17 @@ export class ClaudeCodeProvider implements AgentProvider {
     const claudePath = claudeParts[0]!;
     const claudePrefix = claudeParts.slice(1);
 
+    // When onDelta is set, switch to stream-json so we can dispatch
+    // text deltas as they arrive. The streaming wire format still
+    // carries a final `result` event with cost/usage, so we don't lose
+    // anything by upgrading.
+    const streaming = typeof options.onDelta === "function";
+
     const args = [
       ...claudePrefix,
       "-p",
-      "--output-format", "json",
+      "--output-format", streaming ? "stream-json" : "json",
+      ...(streaming ? ["--verbose", "--include-partial-messages"] : []),
       "--no-session-persistence",
     ];
 
@@ -855,13 +887,40 @@ export class ClaudeCodeProvider implements AgentProvider {
 
       let stdout = "";
       let stderr = "";
+      // Streaming line buffer — only used when --output-format stream-json
+      // is active. Whatever doesn't end in \n stays here until the next
+      // chunk completes it.
+      let streamBuf = "";
 
       const timer = setTimeout(() => {
         proc.kill();
         reject(new Error(`complete timed out after ${timeout}ms`));
       }, timeout);
 
-      proc.stdout!.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+      proc.stdout!.on("data", (chunk: Buffer) => {
+        const text = chunk.toString();
+        stdout += text;
+        if (!streaming) return;
+        streamBuf += text;
+        const lines = streamBuf.split("\n");
+        streamBuf = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const evt = JSON.parse(line);
+            const delta = extractClaudeStreamDelta(evt);
+            if (delta && options.onDelta) {
+              try { options.onDelta(delta); }
+              catch (err) {
+                clearTimeout(timer);
+                try { proc.kill(); } catch {}
+                reject(err instanceof Error ? err : new Error(String(err)));
+                return;
+              }
+            }
+          } catch { /* malformed line — skip */ }
+        }
+      });
       proc.stderr!.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
 
       proc.on("error", (err) => {
@@ -871,6 +930,45 @@ export class ClaudeCodeProvider implements AgentProvider {
 
       proc.on("close", (code) => {
         clearTimeout(timer);
+
+        if (streaming) {
+          // Walk the JSONL stream looking for the final `result` event.
+          // That event carries result text + usage + cost just like the
+          // single-shot `--output-format json` payload.
+          const lines = stdout.split("\n").filter(l => l.trim());
+          let resultEvent: any = null;
+          for (const line of lines) {
+            try {
+              const evt = JSON.parse(line);
+              if (evt?.type === "result") resultEvent = evt;
+            } catch { /* skip */ }
+          }
+          if (!resultEvent) {
+            reject(new Error(`complete: no result event in stream (code=${code}): ${stderr.slice(0, 200)}`));
+            return;
+          }
+          if (resultEvent.subtype !== "success") {
+            reject(new Error(`complete error: ${resultEvent.result ?? resultEvent.subtype}`));
+            return;
+          }
+          const u = resultEvent.usage ?? {};
+          const mu = resultEvent.modelUsage ?? {};
+          const modelKey = Object.keys(mu)[0] ?? model;
+          resolve({
+            text: resultEvent.result ?? "",
+            usage: {
+              inputTokens: u.input_tokens ?? 0,
+              outputTokens: u.output_tokens ?? 0,
+              cacheReadTokens: u.cache_read_input_tokens ?? 0,
+              cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
+            },
+            costUsd: resultEvent.total_cost_usd ?? 0,
+            durationMs: resultEvent.duration_ms ?? 0,
+            durationApiMs: resultEvent.duration_api_ms ?? 0,
+            model: modelKey,
+          });
+          return;
+        }
 
         let parsed: {
           type: string;

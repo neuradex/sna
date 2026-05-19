@@ -623,6 +623,49 @@ const runOnceRoute = createRoute({
   },
 });
 
+const runOnceStreamRoute = createRoute({
+  method: "post",
+  path: "/agent/run-once/stream",
+  summary: "Run once (SSE stream)",
+  description:
+    "Same one-shot lifecycle as `POST /agent/run-once`, but streams every `AgentEvent` produced by the run as a Server-Sent Events feed instead of buffering until completion. The stream ends after the run's terminal `complete` or `error` event (the server closes the connection). Consumers can render token-by-token UI without joining the full session machinery.",
+  request: {
+    body: {
+      content: { "application/json": { schema: z.object({
+        message: z.string(),
+        model: z.string().optional(),
+        systemPrompt: z.string().optional(),
+        appendSystemPrompt: z.string().optional(),
+        reasoningLevel: z.number().int().min(0).max(5).optional(),
+        permissionMode: z.string().optional(),
+        cwd: z.string().optional(),
+        timeout: z.number().optional(),
+        provider: z.string().optional(),
+        extraArgs: z.array(z.string()).optional(),
+        env: z.record(z.string(), z.any()).optional(),
+        providerOptions: z.record(z.string(), z.any()).optional(),
+      }).strict() }},
+    },
+  },
+  responses: {
+    200: {
+      description:
+        "Open SSE stream. Each `data:` line is a JSON-encoded AgentEvent (assistant, assistant_delta, tool_use, tool_use_delta, complete, error, ...). The connection closes after the terminal event.",
+      content: {
+        "text/event-stream": {
+          schema: z
+            .string()
+            .describe("SSE feed of AgentEvent objects, one per `data:` line."),
+        },
+      },
+    },
+    400: {
+      description: "Missing message.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
 const completionRoute = createRoute({
   method: "post",
   path: "/agent/completion",
@@ -1559,6 +1602,82 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
       logger.err("err", `POST /agent/run-once → ${e.message}`);
       return c.json({ status: "error", message: e.message }, 500);
     }
+  });
+
+  app.openapi(runOnceStreamRoute, (c) => {
+    if (!sessionManager) {
+      return c.json({ status: "error", message: "SessionManager not provided" }, 500) as any;
+    }
+    const body = c.req.valid("json");
+    if (!body.message) {
+      return c.json({ status: "error", message: "message is required" }, 400);
+    }
+
+    return streamSSE(c, async (stream) => {
+      const signal = c.req.raw.signal;
+
+      // Queue every event the run produces, then drain to the SSE
+      // stream below. We can't `await` inside the onEvent callback
+      // (sessionManager dispatches synchronously), so we decouple
+      // production from consumption.
+      const queue: AgentEvent[] = [];
+      let wakeUp: (() => void) | null = null;
+      const wake = () => { const fn = wakeUp; wakeUp = null; fn?.(); };
+
+      signal.addEventListener("abort", wake);
+
+      // Kick off the run. Its Promise resolves with the final
+      // joined text, but we don't ship that back — every event has
+      // already been forwarded over SSE.
+      const runPromise = runOnce(sessionManager, {
+        ...(body as RunOnceOptions),
+        onEvent: (event) => {
+          queue.push(event);
+          wake();
+        },
+      });
+
+      // Make sure rejection wakes the drainer so we can flush an
+      // error event and close.
+      const errBox: { err: Error | null } = { err: null };
+      runPromise.catch((err) => {
+        errBox.err = err instanceof Error ? err : new Error(String(err));
+        wake();
+      });
+
+      try {
+        let terminated = false;
+        while (!signal.aborted && !terminated) {
+          if (queue.length === 0 && !errBox.err) {
+            await new Promise<void>((r) => { wakeUp = r; });
+            continue;
+          }
+          while (queue.length > 0) {
+            const ev = queue.shift()!;
+            await stream.writeSSE({ data: JSON.stringify(ev) });
+            if (ev.type === "complete" || ev.type === "error") {
+              terminated = true;
+              break;
+            }
+          }
+          if (errBox.err && !terminated) {
+            await stream.writeSSE({
+              data: JSON.stringify({
+                type: "error",
+                message: errBox.err.message,
+                timestamp: Date.now(),
+              }),
+            });
+            terminated = true;
+          }
+        }
+      } finally {
+        // Drain (without awaiting writes) so a downstream caller's
+        // failure doesn't leak the run process. runOnce's own finally
+        // block already kills + removes the temp session.
+        await runPromise.catch(() => { /* error already shipped over SSE */ });
+      }
+    });
   });
 
   app.openapi(completionRoute, async (c) => {
