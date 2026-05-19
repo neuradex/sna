@@ -64,6 +64,22 @@ const writeLine = (obj) => {
 let threadCounter = 0;
 let turnCounter = 0;
 
+// Tests inject custom notifications between turn/started and turn/completed
+// by setting CODEX_MOCK_TURN_NOTIFICATIONS to a JSON-encoded array of
+// JSON-RPC notification objects. Used to simulate hosted-tool lifecycles
+// (image_generation, web_search, ...) and unknown item types without
+// touching the real codex binary.
+function mockTurnNotifications() {
+  const raw = process.env.CODEX_MOCK_TURN_NOTIFICATIONS;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function handle(msg) {
   appendLog(msg);
 
@@ -128,6 +144,9 @@ function handle(msg) {
         method: "turn/started",
         params: { turn: { id: turnId } },
       });
+      for (const notification of mockTurnNotifications()) {
+        writeLine(notification);
+      }
       writeLine({
         jsonrpc: "2.0",
         method: "turn/completed",
