@@ -146,6 +146,27 @@ variant.
 `completion()` also opportunistically reuses a pooled daemon when one
 is already alive for the cwd, dropping per-call cold-start cost.
 
+### Streaming one-shot runs
+
+`runOnce()` returns the buffered final text. When you want token-by-token
+streaming over the wire — typewriter UX, inline autocomplete — use
+`runOnceStream` instead. It hits `POST /agent/run-once/stream` and yields
+each `AgentEvent` as it's produced; the stream closes after the run's
+terminal `complete` / `error`.
+
+```ts
+for await (const event of sna.agent.runOnceStream({
+  message: "Draft a commit message for: ...",
+})) {
+  if (event.type === "assistant_delta") process.stdout.write(event.delta as string);
+  if (event.type === "complete") console.log("usage", event.data);
+}
+```
+
+`runOnceStream` requires `http: true` (SSE transport). The companion
+in-process API is `runOnce({ onDelta, onEvent })` from `@sna-sdk/core`
+when you own the server process — same wire format, no HTTP hop.
+
 ## Documentation
 
 - [Architecture](https://github.com/neuradex/sna/blob/main/docs/architecture.md)
