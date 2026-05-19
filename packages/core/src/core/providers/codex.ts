@@ -490,6 +490,15 @@ class CodexProcess implements AgentProcess {
   /** Accumulated token usage from tokenUsage/updated notifications. */
   private _lastUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } | null = null;
 
+  /**
+   * Per-item start timestamps, indexed by item.id. Populated when
+   * `item/started` arrives and consumed by `item/completed` to compute
+   * `durationMs` on the resulting tool_result. Long-running hosted tools
+   * (image_generation, web_search) have no intermediate progress signal,
+   * so duration is the only honest latency metric we can surface.
+   */
+  private _itemStartedAt: Map<string, number> = new Map();
+
   /** FIFO event queue for ordered emission. */
   private eventQueue: AgentEvent[] = [];
   private drainTimer: ReturnType<typeof setInterval> | null = null;
@@ -1242,6 +1251,11 @@ class CodexProcess implements AgentProcess {
   }
 
   private normalizeItemStarted(item: any): AgentEvent | null {
+    // Record start timestamp for any item with an id, so item/completed can
+    // compute durationMs. Cheap to do unconditionally — items without an id
+    // (rare) just don't get duration tracking.
+    if (item.id) this._itemStartedAt.set(item.id, Date.now());
+
     switch (item.type) {
       case "command_execution":
       case "commandExecution":
@@ -1294,16 +1308,53 @@ class CodexProcess implements AgentProcess {
           timestamp: Date.now(),
         };
 
+      case "image_generation":
+      case "imageGeneration":
+        // OpenAI's hosted image_generation tool — `revised_prompt` and
+        // `result` are empty at start; they get populated in item/completed.
+        return {
+          type: "tool_use",
+          message: "image_generation",
+          data: {
+            toolName: "image_generation",
+            id: item.id,
+            streaming: true,
+          },
+          timestamp: Date.now(),
+        };
+
       case "userMessage":
       case "user_message":
         return null; // echo of user input — skip
 
       default:
-        return null;
+        // Fail-open: forward any item.type SNA doesn't have a specific
+        // shape for as a generic tool_use. Without this, new Codex tool
+        // types ship to consumers as silent invisibility — they happen
+        // but nothing surfaces. `data.raw` carries the full payload so
+        // advanced consumers can render it specifically before SNA
+        // catches up with an explicit case.
+        return {
+          type: "tool_use",
+          message: item.type ?? "unknown",
+          data: {
+            toolName: item.type ?? "unknown",
+            id: item.id,
+            streaming: true,
+            raw: item,
+          },
+          timestamp: Date.now(),
+        };
     }
   }
 
   private normalizeItemCompleted(item: any): AgentEvent | null {
+    // Pop the start timestamp if we recorded one, so the Map doesn't grow
+    // unbounded across a long-running session.
+    const startedAt = item.id ? this._itemStartedAt.get(item.id) : undefined;
+    if (item.id) this._itemStartedAt.delete(item.id);
+    const durationMs = startedAt !== undefined ? Date.now() - startedAt : undefined;
+
     switch (item.type) {
       case "agent_message":
       case "agentMessage":
@@ -1331,6 +1382,7 @@ class CodexProcess implements AgentProcess {
             exitCode: item.exit_code ?? item.exitCode,
             status: item.status,
             isError: item.status === "failed" || item.status === "declined",
+            durationMs,
           },
           timestamp: Date.now(),
         };
@@ -1346,6 +1398,7 @@ class CodexProcess implements AgentProcess {
             changes: item.changes,
             status: item.status,
             isError: item.status === "failed",
+            durationMs,
           },
           timestamp: Date.now(),
         };
@@ -1361,6 +1414,7 @@ class CodexProcess implements AgentProcess {
             toolName: `${item.server}:${item.tool}`,
             id: item.id,
             isError: !!item.error || item.status === "failed",
+            durationMs,
           },
           timestamp: Date.now(),
         };
@@ -1370,7 +1424,26 @@ class CodexProcess implements AgentProcess {
         return {
           type: "tool_result",
           message: "Web search completed",
-          data: { toolName: "web_search", id: item.id },
+          data: { toolName: "web_search", id: item.id, durationMs },
+          timestamp: Date.now(),
+        };
+
+      case "image_generation":
+      case "imageGeneration":
+        // saved_path is set by codex daemon after writing the PNG;
+        // see codex-rs/core/src/stream_events_utils.rs:save_image_generation_result.
+        return {
+          type: "tool_result",
+          message: item.saved_path ?? item.savedPath ?? "Image generation completed",
+          data: {
+            toolName: "image_generation",
+            id: item.id,
+            savedPath: item.saved_path ?? item.savedPath,
+            revisedPrompt: item.revised_prompt ?? item.revisedPrompt,
+            status: item.status,
+            isError: item.status === "failed",
+            durationMs,
+          },
           timestamp: Date.now(),
         };
 
@@ -1386,7 +1459,25 @@ class CodexProcess implements AgentProcess {
         };
 
       default:
-        return null;
+        // Fail-open: forward any item.type SNA doesn't have a specific
+        // shape for. Without this, new Codex tool types ship to consumers
+        // as silent invisibility — the model invoked something but the
+        // event never surfaces. `data.raw` carries the full payload so
+        // advanced consumers can render it before SNA catches up with an
+        // explicit case.
+        return {
+          type: "tool_result",
+          message: item.text ?? item.message ?? `${item.type ?? "unknown"} completed`,
+          data: {
+            toolName: item.type ?? "unknown",
+            id: item.id,
+            status: item.status,
+            isError: item.status === "failed",
+            durationMs,
+            raw: item,
+          },
+          timestamp: Date.now(),
+        };
     }
   }
 }
