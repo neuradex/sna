@@ -28,7 +28,7 @@ See [docs/architecture.md](docs/architecture.md) for the full picture. Quick map
 
 #### Server (`@sna-sdk/core`)
 
-`createSnaApp({ sessionManager })` returns a Hono app exposing the full HTTP API; `attachWebSocket(server, sessionManager)` mounts the WS handler on `/ws`. The standalone entry (`server/standalone.ts`) wires both up and is what the launcher API forks.
+`createSnaApp({ sessionManager })` returns an `OpenAPIHono` app exposing the full HTTP API plus its own OpenAPI 3.1 spec (`GET /openapi.json`, Swagger UI at `/docs`, plain-text viewer at `/spec`). `attachWebSocket(server, sessionManager)` mounts the WS handler on `/ws`. The standalone entry (`server/standalone.ts`) wires both up and is what the launcher API forks.
 
 The `SessionManager` owns every running agent. Each `Session` carries a `process` (Claude Code or Codex subprocess), a per-session event buffer, the current `SessionConfig` (legacy name: `StartConfig`, kept as an alias), and metadata. Every config mutation appends a `RuntimeSession` row to the chain in `runtime_sessions`; `Session.currentRuntimeId` points at the active one. Listeners cover lifecycle, config changes, state changes, agent events, permission requests, and skill events.
 
@@ -65,12 +65,12 @@ The PreToolUse hook (`scripts/hook.ts`) runs before every Claude Code tool call,
 
 | File | Role |
 |------|------|
-| `packages/core/src/server/index.ts` | `createSnaApp()` Hono factory |
+| `packages/core/src/server/index.ts` | `createSnaApp()` Hono factory (delegates to `createOpenApiApp`) |
+| `packages/core/src/server/routes/openapi.ts` | All HTTP routes defined with `@hono/zod-openapi`; serves Swagger UI at `/docs` and the spec at `/openapi.json` |
+| `packages/core/src/server/routes/openapi-schemas.ts` | Shared Zod schemas used by `openapi.ts` |
 | `packages/core/src/server/session-manager.ts` | Multi-session manager + pub/sub |
 | `packages/core/src/server/ws.ts` | WebSocket handler wrapping all routes |
 | `packages/core/src/server/api-types.ts` | Shared HTTP/WS response shapes |
-| `packages/core/src/server/routes/agent.ts` | Agent lifecycle + run-once HTTP routes |
-| `packages/core/src/server/routes/chat.ts` | Chat persistence routes |
 | `packages/core/src/server/standalone.ts` | Standalone server entry (forked by launchers) |
 | `packages/core/src/db/schema.ts` | Canonical SQLite schema + migrations |
 | `packages/core/src/db/chat-messages.ts` | `insertChatMessage` etc. |

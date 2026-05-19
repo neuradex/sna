@@ -14,15 +14,15 @@ The SDK normalizes all three runtimes into a single API surface: one canonical c
 |---------|----------|------|
 | `packages/core` | `@sna-sdk/core` | HTTP/WS server, session manager, providers (Claude Code, Codex, OpenCode), canonical history, SQLite, launchers |
 | `packages/client` | `@sna-sdk/client` | TypeScript client. Dual transport (HTTP for ordering, WS for push). Framework-agnostic. |
-| `packages/react` | `@sna-sdk/react` | React bindings — hooks (`useAgent`, `useSessionManager`, `useSnaClient`, …) and a drop-in chat UI |
+| `packages/react` | `@sna-sdk/react` | React bindings — hooks (`useAgent`, `useSessionManager`, `useResponsiveChat`) and a drop-in chat UI |
 | `packages/testing` | `@sna-sdk/testing` | Mock Anthropic Messages API + `sna-test` CLI for running Claude Code in an isolated test env |
 
 ## What the SDK gives you
 
-- **Multi-session agents.** `POST /agent/create` spawns a Claude Code or Codex subprocess. Call it again and you get another. Each session has its own cwd, meta, event buffer, and lifecycle.
+- **Multi-session agents.** `POST /agent/sessions` creates a session record; `POST /agent/start?session=<id>` spawns the Claude Code, Codex, or OpenCode subprocess for it. Call them again with a new id and you get another. Each session has its own cwd, meta, event buffer, lifecycle, and a `runtimeChain` of `RuntimeSession` rows recording every config mutation.
 - **Canonical conversation model.** Messages are stored as flat blocks with two orthogonal axes: `actor` (`user`/`assistant`/`system`) and `kind` (`text`/`thinking`/`tool_use`/`tool_result`/`status`/`error`). Binaries live in an `embeds` JSON keyed by id; content text holds inline `![](embed://<id>)` refs. Provider-native formats (Anthropic content arrays, Codex ResponseItems) are derived on demand.
 - **3-layer attribution.** `provider` (runtime: claude-code / codex), `modelProvider` (vendor: anthropic / openai / google), `model` (slug). Lets you swap runtimes or models mid-session and keep accurate per-row attribution.
-- **Real-time events over WebSocket.** 12 normalized event types: `init`, `thinking` / `thinking_delta`, `assistant` / `assistant_delta`, `tool_use`, `tool_result`, `permission_needed`, `milestone`, `user_message`, `interrupted`, `error`, `complete`. The `_delta` events stream tokens for ChatGPT-style UIs.
+- **Real-time events over WebSocket.** 15 normalized event types: `init`, `thinking` / `thinking_delta`, `text_delta`, `assistant` / `assistant_delta`, `tool_use` / `tool_use_delta`, `tool_result`, `permission_needed`, `milestone`, `user_message`, `interrupted`, `error`, `complete`. The `_delta` events stream tokens for ChatGPT-style UIs.
 - **Unified permission flow.** Claude Code's PreToolUse hook and Codex's JSON-RPC bidirectional approval are abstracted behind one `permission.subscribe` / `respondPermission` API. Safe-tool allowlists work for both providers.
 - **Runtime control without restart.** `agent.set-model`, `agent.set-permission-mode`, `agent.interrupt`. `agent.restart` brings the process back with the same config. `agent.resume` rebuilds provider-native history from canonical blocks and feeds it back in.
 - **One-shot completion.** `completion()` skips session management for short single-prompt jobs (e.g. naming a chat). Returns `{ text, usage, costUsd, durationMs, model }`.

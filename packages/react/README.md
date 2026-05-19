@@ -108,7 +108,11 @@ const handleNew = async () => {
 
 ### `useResponsiveChat`
 
-Helper that picks `"floating"` vs `"docked"` chat layout based on viewport width.
+Returns `{ mode }` where `mode` is one of:
+
+- `"side-by-side"` — desktop (≥1024px), chat panel beside main content
+- `"overlay"` — tablet (768–1023px), chat slides over content
+- `"fullscreen"` — mobile (<768px), chat covers the viewport
 
 ## Exports
 

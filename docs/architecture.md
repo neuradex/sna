@@ -94,16 +94,18 @@ Splitting these matters because the same runtime can talk to multiple model vend
 
 ### Event protocol
 
-Twelve normalized event types flow over the agent stream:
+Fifteen normalized event types flow over the agent stream:
 
 | Type | Meaning |
 |------|---------|
 | `init` | Session initialized; carries the provider's session id |
 | `thinking` | Extended thinking block, complete |
 | `thinking_delta` | Streaming thinking chunk |
+| `text_delta` | Streaming raw text chunk (pre-finalization) |
 | `assistant` | Full assistant message |
 | `assistant_delta` | Streaming assistant token chunk |
 | `tool_use` | Agent is calling a tool |
+| `tool_use_delta` | Streaming tool-input chunk (partial JSON) |
 | `tool_result` | Tool returned a result |
 | `permission_needed` | Agent paused for approval |
 | `milestone` | Skill / app-level progress signal |
@@ -118,14 +120,18 @@ The `*_delta` variants stream tokens for ChatGPT-style UIs; the non-delta versio
 
 #### HTTP
 
+The HTTP routes are defined with `@hono/zod-openapi` in `server/routes/openapi.ts`, so the running server also publishes its own OpenAPI 3.1 spec. See [OpenAPI / Swagger UI](#openapi--swagger-ui) below.
+
 | Method | Path | What it does |
 |--------|------|--------------|
 | `GET`    | `/health` | Health check |
+| `GET`    | `/api/sna-port` | Read the dynamically allocated port from `.sna/sna-api.port` |
 | `POST`   | `/agent/sessions` | Create a session |
-| `GET`    | `/agent/sessions` | List sessions |
+| `GET`    | `/agent/sessions` | List sessions (pass `?include=chain` for `runtimeChain` on each entry) |
+| `PATCH`  | `/agent/sessions/:id` | Update session metadata (label, meta, cwd) |
 | `DELETE` | `/agent/sessions/:id` | Remove a session |
 | `POST`   | `/agent/start` | Start (spawn) agent in a session |
-| `POST`   | `/agent/send` | Send a message |
+| `POST`   | `/agent/send` | Send a message (supports `images[]`) |
 | `POST`   | `/agent/resume` | Restart with canonical history rebuilt for the provider |
 | `POST`   | `/agent/restart` | Re-spawn with the same `Session.config` (with optional overrides) |
 | `PATCH`  | `/agent/session` | Unified PATCH mutator for `{cwd, model, permissionMode}`; in-place where possible, respawn-with-history-replay otherwise |
@@ -136,14 +142,32 @@ The `*_delta` variants stream tokens for ChatGPT-style UIs; the non-delta versio
 | `GET`    | `/agent/status` | Session status snapshot |
 | `POST`   | `/agent/run-once` | One-shot: spawn → run → return result → cleanup |
 | `POST`   | `/agent/completion` | Lightweight one-shot completion (no session) |
-| `GET`    | `/agent/events` | SSE event stream |
+| `POST`   | `/agent/list-models` | Provider model introspection (POST so config/apiKey doesn't end up in URL logs) |
+| `GET`    | `/agent/events` | SSE event stream (subscribe to a session's events over plain HTTP) |
+| `POST`   | `/agent/permission-request` | Blocking: submit a permission request and wait for the UI's verdict |
+| `POST`   | `/agent/permission-respond` | UI side: approve or deny a pending permission request |
+| `GET`    | `/agent/permission-pending` | List pending permission requests (global or per-session) |
 | `GET`    | `/chat/sessions` | List chat sessions |
+| `POST`   | `/chat/sessions` | Create a chat session |
+| `DELETE` | `/chat/sessions/:id` | Delete a chat session |
+| `GET`    | `/chat/sessions/:id/messages` | List messages (supports `since`, `limit`) |
 | `POST`   | `/chat/sessions/:id/messages` | Append a chat message |
-| `GET`    | `/chat/sessions/:id/messages` | List messages |
 | `DELETE` | `/chat/sessions/:id/messages` | Clear messages |
 | `GET`    | `/chat/images/:sessionId/:filename` | Serve an embed |
 
 `server/api-types.ts` is the single source of truth for response shapes. `httpJson(c, op, data)` and `wsReply(ws, msg, data)` both consume it, so HTTP/WS drift is a TypeScript error.
+
+##### OpenAPI / Swagger UI
+
+`createSnaApp()` returns an `OpenAPIHono` instance, so the spec is generated from the same Zod schemas that validate incoming requests. Once the server is running you get three companion endpoints for free:
+
+| Path | Contents |
+|------|----------|
+| `/openapi.json` | Raw OpenAPI 3.1 document |
+| `/docs` | Swagger UI (interactive try-it-out) |
+| `/spec` | Plain-text JSON viewer (no JS) |
+
+Generating clients from this spec, or pointing Postman / Insomnia / Bruno at it, works without any extra build step.
 
 #### WebSocket (`/ws`)
 
