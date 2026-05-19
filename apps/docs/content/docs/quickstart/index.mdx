@@ -1,120 +1,129 @@
 ---
-title: Introduction
-description: What SNA is, what problem it solves, and how it fits together.
+title: Quick Start
+description: Boot the server, open a session, send a prompt — five minutes.
+icon: Rocket
 ---
 
-**SNA** (*Skills-Native Application*) is an SDK for building products
-on top of agent runtimes. Instead of calling an LLM API directly, your
-app talks to a small server that manages a long-lived **Claude Code**,
-**Codex**, or **OpenCode** process — and SNA gives you one canonical
-API for all three.
+The shortest path from zero to live events. By the end of this page
+you'll have an SNA server running in your app, a session attached to
+Claude Code (or Codex / OpenCode), and tokens streaming back over
+WebSocket.
 
-## The shape
+## What you're about to build
+
+SNA is a small server you embed in your app. You ask it to **start a
+session** — the server spawns an agent CLI as a managed subprocess
+and exposes it through one HTTP + WebSocket API. From the consumer
+side it looks like talking to a backend; under the hood it's a real
+Claude Code / Codex / OpenCode process doing the work.
 
 ```
 your app
    │
-   │  HTTP (request/response, ordering)
-   │  WS   (live events, fanout)
+   │  HTTP for control (send, interrupt, kill, …)
+   │  WS   for events (assistant_delta, tool_use, complete, …)
    ▼
-SNA server  ──spawn──►  claude-code | codex | opencode
-   │
-   ▼
-SQLite (canonical history)
+SNA server  ──spawn──►  claude | codex | opencode
 ```
 
-You start one server. You open one or more **sessions**. Each session
-spawns a real CLI binary — `claude`, `codex`, or `opencode` — as a
-managed subprocess. SNA normalizes every runtime's events, history,
-and permission model into one shape so the consumer app doesn't have
-to fork by provider.
-
-## What problem this solves
-
-The official LLM APIs work fine for stateless completions, but the
-moment your product needs:
-
-- **A long-running agent with tools, file edits, and approvals** — you
-  end up reimplementing Claude Code or Codex's loop yourself.
-- **The same agent under different runtimes** (Claude for code edits,
-  Codex for image generation, OpenCode for cost) — every switch is a
-  rewrite of the integration.
-- **Conversation history that survives runtime swaps** — the native
-  formats don't interoperate, so you either pick one provider for life
-  or lose context on every switch.
-- **Permission flows that look the same to your users** — Claude's
-  PreToolUse hook and Codex's JSON-RPC approval speak different
-  protocols and produce different UX.
-
-SNA takes *"use the actual CLI"* as a serious answer to all of these.
-The CLIs already do the hard parts (tool dispatch, sandboxing,
-permission gating, history). SNA wraps them so a single consumer-side
-codebase works across all three.
-
-## What you get
-
-- **One canonical conversation model.** Messages live as flat blocks
-  with two orthogonal axes — `actor` (`user`/`assistant`/`system`) and
-  `kind` (`text`/`thinking`/`tool_use`/`tool_result`/`status`/`error`).
-  Provider-native shapes are derived from this on demand.
-- **3-layer attribution.** Every block records `provider` (runtime),
-  `modelProvider` (vendor), and `model` (slug). Swap any of them
-  mid-session and the per-row truth stays honest.
-- **Unified event protocol.** 15 normalized event types over WebSocket
-  or SSE — `assistant_delta`, `tool_use`, `permission_needed`,
-  `complete`, and friends.
-- **Unified permission flow.** One API surfaces both Claude's
-  PreToolUse hook and Codex's JSON-RPC approval. The consumer app's
-  approval dialog doesn't change per provider.
-- **Runtime control without restart.** Change model, permission mode,
-  or working directory mid-thread. Restart and resume rebuild
-  provider-native history from canonical blocks.
-- **First-class one-shot APIs.** `completion()` and `runOnce()` skip
-  the session machinery for short single-prompt jobs (autocomplete,
-  chat naming) with optional streaming callbacks.
-
-## Who this is for
-
-- **Product builders** layering a chat or copilot experience on top of
-  an agent CLI. SNA is the integration boundary — your app does the
-  UI, SNA does the runtime plumbing.
-- **Multi-runtime apps** that want users to pick (or auto-route)
-  between Claude Code, Codex, and OpenCode without forking the
-  integration per provider.
-- **Electron / desktop apps** embedding an agent locally. The launcher
-  forks the server as a managed child process, handles asar-unpacked
-  paths, and locates native bindings.
-
-## What this is *not*
-
-- **Not a hosted LLM endpoint.** SNA spawns the real CLIs on the host
-  it runs on; you provide the binaries and credentials.
-- **Not an agent framework.** It doesn't tell you how to build agents
-  — that's what Claude Code / Codex / OpenCode do. SNA is the layer
-  that lets your app drive them.
-- **Not a wrapper that hides the underlying CLI's behavior.** When
-  Claude Code edits a file, you see the real edit. When Codex
-  generates an image, you get the real file path. SNA normalizes the
-  shape, not the semantics.
+Five steps below. For the *why* behind the design choices — canonical
+history, runtime swaps, attribution — read
+**[What is SNA?](/docs/quickstart/what-is-sna)** next.
 
 ## Prerequisites
 
-- **Node.js 20+** (the server uses the built-in test runner shape and modern ESM).
-- **At least one runtime CLI on `PATH`.** SNA does not bundle the
-  underlying agents — install whichever you plan to use:
-  - `claude` (Claude Code) — `npm install -g @anthropic-ai/claude-code`
-  - `codex` (Codex CLI) — see [openai/codex](https://github.com/openai/codex)
-  - `opencode` — see [opencode/opencode](https://github.com/opencode-ai/opencode)
-- **pnpm** is recommended for the workspace, but the published packages install fine with npm/yarn/bun in consumer apps.
+- **Node.js 20+**.
+- **At least one runtime CLI on `PATH`**: `claude`, `codex`, or `opencode`.
+- A package manager — examples below use `pnpm`, but npm / yarn / bun work too.
 
-## Where to go next
+## 1. Install
 
-<Cards>
-  <Card title="Install" href="/docs/quickstart/install" description="Add the SDK to your app, point SNA at your runtime CLIs." />
-  <Card title="First call" href="/docs/quickstart/first-call" description="Send a prompt, stream events, collect the result." />
-  <Card title="Embedding" href="/docs/quickstart/embedding" description="Run SNA inside Electron or a Node service." />
-</Cards>
+```bash
+pnpm add @sna-sdk/core @sna-sdk/client
+```
 
-For the bigger picture — sessions, history, providers, events —
-continue to **Concepts**. For routes and protocol details, see
-**API Spec**.
+See **[Install](/docs/quickstart/install)** for the full prerequisite
+checklist + CLI overrides.
+
+## 2. Boot the server
+
+In your app:
+
+```ts
+import { startSnaServer } from "@sna-sdk/core/node";
+
+const sna = await startSnaServer({
+  port: 3099,
+  dbPath: "./data/sna.db",
+});
+```
+
+This forks the SNA server as a managed child process. `sna.port` holds
+the bound port (auto-allocated if `0`), `sna.stop()` sends SIGTERM.
+
+## 3. Connect a client
+
+```ts
+import { SnaClient } from "@sna-sdk/client";
+
+const client = new SnaClient({
+  baseUrl: `localhost:${sna.port}`,
+  http: true,   // POST /agent/* etc.
+  ws: true,     // live event stream
+});
+client.connect();
+```
+
+## 4. Open a session and start the agent
+
+```ts
+const { sessionId } = await client.sessions.create({ label: "scratch" });
+
+await client.agent.start(sessionId, {
+  provider: "claude-code",
+  model: "claude-sonnet-4-6",
+});
+```
+
+## 5. Subscribe to events, then send
+
+```ts
+client.agent.onEvent(({ event }) => {
+  if (event.type === "assistant_delta") process.stdout.write(event.delta as string);
+  if (event.type === "tool_use") console.log("\n[tool]", event.message);
+  if (event.type === "complete") console.log("\n[done]", event.data);
+});
+await client.agent.subscribe(sessionId);
+
+await client.agent.send(sessionId, "List the files in this directory.");
+```
+
+That's the whole loop. Tokens stream into `assistant_delta`, tool
+invocations fire `tool_use`, the turn finishes on `complete` with usage
+and cost.
+
+## One-shot instead?
+
+If you just want a single answer — no session, no events — use
+`completion()`:
+
+```ts
+import { completion } from "@sna-sdk/core";
+
+const result = await completion({
+  prompt: "Summarize: ...",
+  provider: "claude-code",
+  model: "claude-haiku-4-5",
+  onDelta: (chunk) => process.stdout.write(chunk),
+});
+// result.text, result.usage, result.costUsd, result.durationMs
+```
+
+See **[Cookbook → Streaming](/docs/cookbook/streaming)** for the three
+streaming flavors (in-process callback, SSE, full event stream).
+
+## Next
+
+- **[What is SNA?](/docs/quickstart/what-is-sna)** — the conceptual deep dive.
+- **[Embedding](/docs/quickstart/embedding)** — run SNA inside Electron.
+- **[Concepts](/docs/concepts)** — sessions, history, providers, permissions.

@@ -1,7 +1,14 @@
 {
   "title": "Quickstart",
-  "description": "Introduction, install, first call, embed.",
+  "description": "Introduction, install, embed.",
   "icon": "Rocket",
   "root": true,
-  "pages": ["index", "install", "first-call", "embedding"]
+  "pages": [
+    "---Introduction---",
+    "index",
+    "what-is-sna",
+    "---Setup---",
+    "install",
+    "embedding"
+  ]
 }
