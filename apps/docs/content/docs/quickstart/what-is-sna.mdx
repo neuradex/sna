@@ -7,7 +7,7 @@ icon: HelpCircle
 **SNA** (*Skills-Native Application*) is an SDK for building products
 on top of agent runtimes. Instead of calling an LLM API directly, your
 app talks to a small server that manages a long-lived **Claude Code**,
-**Codex**, or **OpenCode** process — and SNA gives you one canonical
+**Codex**, or **OpenCode** process, and SNA gives you one canonical
 API for all three.
 
 ## The shape
@@ -25,7 +25,7 @@ SQLite (canonical history)
 ```
 
 You start one server. You open one or more **sessions**. Each session
-spawns a real CLI binary — `claude`, `codex`, or `opencode` — as a
+spawns a real CLI binary (`claude`, `codex`, or `opencode`) as a
 managed subprocess. SNA normalizes every runtime's events, history,
 and permission model into one shape so the consumer app doesn't have
 to fork by provider.
@@ -35,15 +35,15 @@ to fork by provider.
 The official LLM APIs work fine for stateless completions, but the
 moment your product needs:
 
-- **A long-running agent with tools, file edits, and approvals** — you
+- **A long-running agent with tools, file edits, and approvals**: you
   end up reimplementing Claude Code or Codex's loop yourself.
 - **The same agent under different runtimes** (Claude for code edits,
-  Codex for image generation, OpenCode for cost) — every switch is a
+  Codex for image generation, OpenCode for cost): every switch is a
   rewrite of the integration.
-- **Conversation history that survives runtime swaps** — the native
+- **Conversation history that survives runtime swaps**: the native
   formats don't interoperate, so you either pick one provider for life
   or lose context on every switch.
-- **Permission flows that look the same to your users** — Claude's
+- **Permission flows that look the same to your users**: Claude's
   PreToolUse hook and Codex's JSON-RPC approval speak different
   protocols and produce different UX.
 
@@ -55,14 +55,14 @@ codebase works across all three.
 ## What you get
 
 - **One canonical conversation model.** Messages live as flat blocks
-  with two orthogonal axes — `actor` (`user`/`assistant`/`system`) and
+  with two orthogonal axes: `actor` (`user`/`assistant`/`system`) and
   `kind` (`text`/`thinking`/`tool_use`/`tool_result`/`status`/`error`).
   Provider-native shapes are derived from this on demand.
 - **3-layer attribution.** Every block records `provider` (runtime),
   `modelProvider` (vendor), and `model` (slug). Swap any of them
   mid-session and the per-row truth stays honest.
 - **Unified event protocol.** 15 normalized event types over WebSocket
-  or SSE — `assistant_delta`, `tool_use`, `permission_needed`,
+  or SSE: `assistant_delta`, `tool_use`, `permission_needed`,
   `complete`, and friends.
 - **Unified permission flow.** One API surfaces both Claude's
   PreToolUse hook and Codex's JSON-RPC approval. The consumer app's
@@ -77,8 +77,8 @@ codebase works across all three.
 ## Who this is for
 
 - **Product builders** layering a chat or copilot experience on top of
-  an agent CLI. SNA is the integration boundary — your app does the
-  UI, SNA does the runtime plumbing.
+  an agent CLI. SNA is the integration boundary: your app does the UI,
+  SNA does the runtime plumbing.
 - **Multi-runtime apps** that want users to pick (or auto-route)
   between Claude Code, Codex, and OpenCode without forking the
   integration per provider.
@@ -90,9 +90,9 @@ codebase works across all three.
 
 - **Not a hosted LLM endpoint.** SNA spawns the real CLIs on the host
   it runs on; you provide the binaries and credentials.
-- **Not an agent framework.** It doesn't tell you how to build agents
-  — that's what Claude Code / Codex / OpenCode do. SNA is the layer
-  that lets your app drive them.
+- **Not an agent framework.** It doesn't tell you how to build agents.
+  That's what Claude Code / Codex / OpenCode do. SNA is the layer that
+  lets your app drive them.
 - **Not a wrapper that hides the underlying CLI's behavior.** When
   Claude Code edits a file, you see the real edit. When Codex
   generates an image, you get the real file path. SNA normalizes the
@@ -101,7 +101,7 @@ codebase works across all three.
 ## Where to go next
 
 Read the **[Quick Start](/docs/quickstart)** for the 5-minute hands-on
-walkthrough — boot the server, open a session, send a prompt, watch
-events. After that, the **[Concepts](/docs/concepts)** tab covers the
+walkthrough (boot the server, open a session, send a prompt, watch
+events). After that, the **[Concepts](/docs/concepts)** tab covers the
 session model, canonical history, and providers in depth; **[API
 Spec](/docs/api)** is the on-the-wire reference.

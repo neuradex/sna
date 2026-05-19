@@ -6,7 +6,7 @@ icon: FileCode
 
 The Hono server publishes its own OpenAPI 3.1 spec, generated from
 the same Zod schemas the routes use. There is no separate spec file
-to keep in sync — the spec, the SDK types, and the route handlers all
+to keep in sync: the spec, the SDK types, and the route handlers all
 derive from one source.
 
 ## Where to find it
@@ -29,7 +29,7 @@ Replace `3099` with whatever port `startSnaServer({ port })` returned.
 - **Explore the API interactively.** The Swagger UI lets you fire
   every route from the browser with auth and body editors.
 - **Pin the contract in CI.** Snapshot the spec to disk, diff on
-  every build — any unintended public-surface change shows up as a
+  every build. Any unintended public-surface change shows up as a
   diff.
 
 ## Stability

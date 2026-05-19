@@ -4,8 +4,8 @@ description: Request/response ops, push channels, reconnect semantics.
 icon: Cable
 ---
 
-WebSocket is the live channel — for push events (assistant deltas,
-tool calls, permission requests) and for the same control ops the
+WebSocket is the live channel. It carries push events (assistant
+deltas, tool calls, permission requests) and the same control ops the
 HTTP API exposes, just without the per-call HTTP overhead.
 
 ## Endpoint
@@ -32,7 +32,7 @@ Every message is a JSON object with `type` + payload:
 { "type": "agent.event", "data": { "session": "abc", "event": { "type": "assistant_delta", "delta": "Hello" } } }
 ```
 
-The `id` field is a client-chosen correlation token — present on
+The `id` field is a client-chosen correlation token: present on
 request/response pairs, absent on push messages.
 
 ## Control ops
@@ -63,17 +63,17 @@ Every HTTP route has a WS equivalent:
 
 Two channels are push-only:
 
-- `agent.event` — fires for every `AgentEvent` produced by every
-  subscribed session. Subscribe with `agent.subscribe`,
-  unsubscribe with `agent.unsubscribe`.
-- `permission.request` — fires when any session emits
+- `agent.event`: fires for every `AgentEvent` produced by every
+  subscribed session. Subscribe with `agent.subscribe`, unsubscribe
+  with `agent.unsubscribe`.
+- `permission.request`: fires when any session emits
   `permission_needed`. Subscribe with `permission.subscribe`.
 
 ## Reconnect
 
 If the connection drops, the client should reconnect and re-subscribe.
 Events buffered while disconnected are still in the per-session ring
-buffer (default: 1000 events) — pass `?since=<cursor>` on a fresh
+buffer (default: 1000 events); pass `?since=<cursor>` on a fresh
 `agent.subscribe` to replay.
 
 ## Why both HTTP and WS

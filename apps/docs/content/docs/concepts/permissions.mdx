@@ -30,14 +30,14 @@ provider receives the verdict, tool executes (or is denied)
 
 ## Per-provider wiring
 
-- **Claude Code** uses a `PreToolUse` hook — a separate Node process
+- **Claude Code** uses a `PreToolUse` hook, a separate Node process
   the CLI spawns to evaluate each tool call. SNA ships
   `packages/core/dist/scripts/hook.js`, which posts a blocking
   `permission-request` to the server and waits for the response.
 - **Codex** speaks JSON-RPC over stdio and emits an `approval/request`
   notification; SNA replies with `approval/respond`.
 
-The consumer app never sees these protocol differences — both surface
+The consumer app never sees these protocol differences. Both surface
 as the same `permission_needed` event and respond through the same
 `POST /agent/permission-respond` endpoint.
 
@@ -57,6 +57,6 @@ Modes are per-session and switchable mid-thread via
 ## Safe-tool allowlist
 
 Tools that match the configured allowlist (Read, Glob, Grep,
-ListFiles, ...) bypass the permission gate entirely — no event, no
+ListFiles, ...) bypass the permission gate entirely: no event, no
 round-trip. The allowlist is per-provider but normalized so the
 consumer config is one list.

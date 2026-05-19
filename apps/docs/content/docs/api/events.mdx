@@ -1,6 +1,6 @@
 ---
 title: Events
-description: The 15-type AgentEvent protocol — what flows over WS and SSE.
+description: The 15-type AgentEvent protocol. What flows over WS and SSE.
 icon: Activity
 ---
 
@@ -31,7 +31,7 @@ both of which carry the same wire shape.
 ## Deltas vs finals
 
 For text and thinking, both `_delta` chunks and a final `assistant` /
-`thinking` event arrive. The final is the canonical version — it's
+`thinking` event arrive. The final is the canonical version, it's
 what gets persisted in history. The deltas are for live rendering.
 
 For tool use, `tool_use_delta` carries partial JSON input (Anthropic's

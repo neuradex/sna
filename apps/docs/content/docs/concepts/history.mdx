@@ -13,16 +13,16 @@ blocks** in SQLite. Each block has two orthogonal axes:
 Binary content (images, files) lives in a separate `embeds` JSON keyed
 by id; the block's `content` text holds inline `![](embed://<id>)`
 references. Provider-native shapes (Anthropic content arrays, Codex
-`ResponseItem`s, OpenCode parts) are **derived on demand** — they are
+`ResponseItem`s, OpenCode parts) are **derived on demand**, they are
 not the source of truth.
 
 ## Why flat blocks
 
-Most providers ship a nested message format that bundles text +
-tool_use + thinking inside a single "message" object. That works fine
-for a single provider but makes cross-provider replay painful — every
-provider has slightly different rules about ordering, signatures,
-optional fields.
+Most providers ship a nested message format that bundles text,
+tool_use, and thinking inside a single "message" object. That works
+fine for a single provider but makes cross-provider replay painful:
+every provider has slightly different rules about ordering,
+signatures, optional fields.
 
 A flat block list is the smallest representation that round-trips
 across all three runtimes. The adapter for each provider walks the
@@ -32,9 +32,9 @@ flat list and rebuilds the nested shape that provider expects.
 
 | Path | Adapter |
 |------|---------|
-| `claude-code` resume | `history/claude-code.ts` — JSONL with `thinking.signature` preservation |
-| `codex` resume | `history/codex.ts` — `thread/resume` with `ResponseItem[]` |
-| `opencode` resume | `history/opencode.ts` — prompt-prelude reconstruction |
+| `claude-code` resume | `history/claude-code.ts` (JSONL with `thinking.signature` preservation) |
+| `codex` resume | `history/codex.ts` (`thread/resume` with `ResponseItem[]`) |
+| `opencode` resume | `history/opencode.ts` (prompt-prelude reconstruction) |
 
 `POST /agent/resume` is how you replay history into a freshly spawned
 process. The session id and canonical blocks are the only inputs; the
@@ -45,9 +45,9 @@ tool_use ordering, partial-text aggregation).
 
 Every block records three attribution dimensions:
 
-- `provider` — runtime that produced the block (claude-code / codex / opencode)
-- `modelProvider` — vendor that owned the model (anthropic / openai / google)
-- `model` — exact slug (`claude-sonnet-4-6`, `gpt-5.4`, etc.)
+- `provider`: runtime that produced the block (claude-code / codex / opencode)
+- `modelProvider`: vendor that owned the model (anthropic / openai / google)
+- `model`: exact slug (`claude-sonnet-4-6`, `gpt-5.4`, etc.)
 
 This lets the UI render "you switched to Codex with gpt-5.4 here"
 without losing the per-row truth when the user changes providers

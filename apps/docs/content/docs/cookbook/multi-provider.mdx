@@ -6,7 +6,7 @@ icon: Shuffle
 
 A SnaSession can mount many RuntimeSessions over its lifetime. The
 **runtime chain** is the ordered history of every config the session
-has worn, and history is canonical — provider-native shapes are
+has worn, and history is canonical: provider-native shapes are
 derived per-replay, so switching runtimes is just a respawn.
 
 ## The switch
@@ -44,7 +44,7 @@ Use `patch` when the consumer wants a runtime swap.
 
 Most "agent platform" abstractions treat the conversation as
 ephemeral per-runtime state. Lose the process, lose the thread. SNA's
-canonical history is the source of truth — every provider is a
+canonical history is the source of truth: every provider is a
 pluggable replay target, not the keeper of memory.
 
 ## Caveats

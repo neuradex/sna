@@ -38,10 +38,10 @@ Test runs don't pollute your dev account.
 ## Patterns
 
 - Spin up a fresh `SessionManager` per test, with `dbPath` in
-  `os.tmpdir()` — keeps suites isolated.
+  `os.tmpdir()`. Keeps suites isolated.
 - For provider-level tests, use the mock-codex-app-server stub
   shipped in `packages/core/test/mock-codex-app-server.ts` (the same
   one our own provider tests use).
-- Don't mock at the provider layer for integration tests — mock at the
+- Don't mock at the provider layer for integration tests. Mock at the
   transport layer (Anthropic API, Codex app-server stdio) so the
   provider code paths execute end-to-end.

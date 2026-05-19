@@ -1,6 +1,6 @@
 ---
 title: Quick Start
-description: Boot the server, open a session, send a prompt — five minutes.
+description: Boot the server, open a session, send a prompt in five minutes.
 icon: Rocket
 ---
 
@@ -12,10 +12,10 @@ WebSocket.
 ## What you're about to build
 
 SNA is a small server you embed in your app. You ask it to **start a
-session** — the server spawns an agent CLI as a managed subprocess
-and exposes it through one HTTP + WebSocket API. From the consumer
-side it looks like talking to a backend; under the hood it's a real
-Claude Code / Codex / OpenCode process doing the work.
+session**, the server spawns an agent CLI as a managed subprocess and
+exposes it through one HTTP + WebSocket API. From the consumer side
+it looks like talking to a backend; under the hood it's a real Claude
+Code / Codex / OpenCode process doing the work.
 
 ```
 your app
@@ -26,15 +26,14 @@ your app
 SNA server  ──spawn──►  claude | codex | opencode
 ```
 
-Five steps below. For the *why* behind the design choices — canonical
-history, runtime swaps, attribution — read
-**[What is SNA?](/docs/quickstart/what-is-sna)** next.
+Five steps below. For the *why* behind the design choices (canonical
+history, runtime swaps, attribution), read **[What is SNA?](/docs/quickstart/what-is-sna)** next.
 
 ## Prerequisites
 
 - **Node.js 20+**.
 - **At least one runtime CLI on `PATH`**: `claude`, `codex`, or `opencode`.
-- A package manager — examples below use `pnpm`, but npm / yarn / bun work too.
+- A package manager. Examples below use `pnpm`, but npm / yarn / bun work too.
 
 ## 1. Install
 
@@ -43,7 +42,7 @@ pnpm add @sna-sdk/core @sna-sdk/client
 ```
 
 See **[Install](/docs/quickstart/install)** for the full prerequisite
-checklist + CLI overrides.
+checklist plus CLI overrides.
 
 ## 2. Boot the server
 
@@ -104,7 +103,7 @@ and cost.
 
 ## One-shot instead?
 
-If you just want a single answer — no session, no events — use
+If you just want a single answer (no session, no events), use
 `completion()`:
 
 ```ts
@@ -124,6 +123,6 @@ streaming flavors (in-process callback, SSE, full event stream).
 
 ## Next
 
-- **[What is SNA?](/docs/quickstart/what-is-sna)** — the conceptual deep dive.
-- **[Embedding](/docs/quickstart/embedding)** — run SNA inside Electron.
-- **[Concepts](/docs/concepts)** — sessions, history, providers, permissions.
+- **[What is SNA?](/docs/quickstart/what-is-sna)**: the conceptual deep dive.
+- **[Embedding](/docs/quickstart/embedding)**: run SNA inside Electron.
+- **[Concepts](/docs/concepts)**: sessions, history, providers, permissions.

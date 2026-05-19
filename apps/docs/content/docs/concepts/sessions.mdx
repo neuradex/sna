@@ -1,12 +1,12 @@
 ---
 title: Sessions
-description: SnaSession + RuntimeSession chain — the two-layer session model.
+description: SnaSession plus RuntimeSession chain. The two-layer session model.
 icon: Users
 ---
 
 A **SnaSession** is the persistent thing the consumer app knows about
 (stable id, label, cwd, meta). A **RuntimeSession** is one specific
-runtime configuration mounted on that session — provider, model,
+runtime configuration mounted on that session: provider, model,
 permission mode, MCP servers, hooks. A SnaSession can mount many
 RuntimeSessions over its lifetime; the **runtime chain** is the
 ordered history of every config the session has worn.
@@ -14,9 +14,9 @@ ordered history of every config the session has worn.
 ## Why two layers
 
 If a user starts a chat on Claude Code, switches to Codex mid-thread,
-then bumps the reasoning level — three distinct RuntimeSessions, one
-SnaSession. Attribution stays honest per row, and replay can rebuild
-each runtime's native history without losing prior turns.
+then bumps the reasoning level, that's three distinct RuntimeSessions
+on one SnaSession. Attribution stays honest per row, and replay can
+rebuild each runtime's native history without losing prior turns.
 
 ## Lifecycle
 
