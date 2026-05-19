@@ -255,7 +255,11 @@ export interface CodexHooksJson {
  * servers and tool calls silently failed.
  *
  * Idempotent for repeat callers on the same CODEX_HOME — config.toml is
- * appended to and codex_hooks is enabled at most once.
+ * appended to and the `[features].hooks` flag is enabled at most once.
+ *
+ * The flag's name changed from `codex_hooks` to `hooks` in codex-cli
+ * 0.130; this function writes the new name and migrates legacy values
+ * in place so daemons stop emitting deprecation notices.
  */
 export function applyCodexConfig(
   codexHome: string,
@@ -338,10 +342,58 @@ export function applyCodexConfig(
   const hooksJson = buildCodexHooksJson(preToolUseHooks, consumerSettings);
   if (hooksJson) {
     fs.writeFileSync(path.join(codexHome, "hooks.json"), JSON.stringify(hooksJson));
-    const existingConfig = fs.existsSync(configTomlPath) ? fs.readFileSync(configTomlPath, "utf8") : "";
-    if (!existingConfig.includes("codex_hooks")) {
-      fs.appendFileSync(configTomlPath, "\n[features]\ncodex_hooks = true\n");
-    }
+    enableCodexHooksFeature(configTomlPath);
+  }
+}
+
+/**
+ * Ensure `[features].hooks = true` is set in the given config.toml.
+ *
+ * Codex CLI 0.130 renamed the feature flag from `codex_hooks` to `hooks`;
+ * the old name still works but produces a deprecation notice on every
+ * `turn/start`. We handle four cases without bringing in a TOML parser:
+ *
+ *  1. Nothing about hooks in the file → inject `hooks = true` inside any
+ *     existing `[features]` table, or create one if missing.
+ *  2. New `hooks = …` key already present → no-op.
+ *  3. Only the legacy `codex_hooks = …` key is present → rewrite it
+ *     in-place so the daemon stops emitting deprecation notices.
+ *  4. Both keys present (mixed state from a previous toolchain) →
+ *     no-op; the new key already wins, and we don't want to delete
+ *     the user's other config.
+ *
+ * Critically we do NOT append a fresh `[features]` table when one
+ * already exists — TOML's table semantics treat that as a duplicate
+ * definition.
+ */
+export function enableCodexHooksFeature(configTomlPath: string): void {
+  const existing = fs.existsSync(configTomlPath)
+    ? fs.readFileSync(configTomlPath, "utf8")
+    : "";
+
+  const hasNewKey = /^\s*hooks\s*=/m.test(existing);
+  const hasLegacyKey = /^\s*codex_hooks\s*=/m.test(existing);
+
+  if (hasNewKey) {
+    return; // cases 2 + 4
+  }
+
+  if (hasLegacyKey) {
+    // Case 3: migrate `codex_hooks = …` → `hooks = …` in place. Keep
+    // the existing RHS so a value like `false` survives the rename.
+    const migrated = existing.replace(/^(\s*)codex_hooks(\s*=)/m, "$1hooks$2");
+    fs.writeFileSync(configTomlPath, migrated);
+    logger.log("agent", `codex: migrated legacy [features].codex_hooks → hooks in ${configTomlPath}`);
+    return;
+  }
+
+  // Case 1: no hooks key at all. Inject into an existing [features]
+  // table or append a new one.
+  if (/^\[features\]\s*$/m.test(existing)) {
+    const updated = existing.replace(/^(\[features\]\s*\n)/m, "$1hooks = true\n");
+    fs.writeFileSync(configTomlPath, updated);
+  } else {
+    fs.appendFileSync(configTomlPath, "\n[features]\nhooks = true\n");
   }
 }
 
