@@ -55,6 +55,8 @@ await client.agent.subscribe(sessionId);
 await client.agent.send(sessionId, "What's in this directory?");
 ```
 
+> The running server publishes its own live OpenAPI 3.1 spec — open `http://localhost:3099/docs` for Swagger UI, `http://localhost:3099/openapi.json` for the raw JSON, or `http://localhost:3099/spec` for a plain-text view.
+
 ### As a React app
 
 ```tsx

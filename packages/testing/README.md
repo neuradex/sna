@@ -21,7 +21,7 @@ The mock echoes user text **reversed**:
 
 ## `sna-test` CLI
 
-Each invocation creates a named "instance" under `.sna/test-instances/<name>/` with its own mock server, isolated `CLAUDE_CONFIG_DIR`, and JSONL request/response log.
+Each invocation creates a named "instance": metadata is stored under `.sna/instances/<name>.json` and the logs + isolated `CLAUDE_CONFIG_DIR` live under `.sna/<name>/`. Each instance gets its own mock server and JSONL request/response log.
 
 ```bash
 sna-test claude [args...]      # Launch Claude Code with mock API + isolated config

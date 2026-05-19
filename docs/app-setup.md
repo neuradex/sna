@@ -63,6 +63,8 @@ await sna.agent.subscribe(sessionId);
 await sna.agent.send(sessionId, "What's in this directory?");
 ```
 
+> The running server publishes its own live OpenAPI 3.1 spec — open `http://localhost:3099/docs` for Swagger UI, `http://localhost:3099/openapi.json` for the raw JSON, or `http://localhost:3099/spec` for a plain-text view.
+
 `http: true` means each Promise resolves only after the server has committed the state change — safe to chain `sessions.create` → `agent.start` → `agent.send` without polling. Pure-WS mode (`http: false`) ACKs immediately and gives no ordering guarantees; use it only for read-only or fire-and-forget flows.
 
 #### Permission handling
