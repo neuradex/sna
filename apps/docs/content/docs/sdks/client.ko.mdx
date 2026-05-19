@@ -1,0 +1,107 @@
+---
+title: '@sna-sdk/client'
+description: 프레임워크 비종속 TypeScript 클라이언트. 순서는 HTTP, 푸시는 WS.
+icon: Plug
+---
+
+브라우저/Node 클라이언트. 듀얼 전송이라 reads는 순서를 유지하면서
+이벤트는 라이브로 도착한다.
+
+```ts
+import { SnaClient } from "@sna-sdk/client";
+
+const client = new SnaClient({
+  baseUrl: "localhost:3099",
+  http: true,  // POST /agent/* 등
+  ws: true,    // 라이브 이벤트 스트림
+});
+client.connect();
+```
+
+## 표면
+
+클라이언트는 서버 라우트에 맞춰 세 가지 네임스페이스를 노출한다:
+
+```ts
+client.sessions   // list, create, update, remove
+client.agent      // start, send, kill, restart, runOnce, completion, ...
+client.permissions // subscribe, respond, list pending
+```
+
+## 세션
+
+```ts
+const { sessionId } = await client.sessions.create({
+  label: "research",
+  cwd: "/path/to/workspace",
+  meta: { project: "alpha" },
+});
+await client.sessions.update(sessionId, { label: "renamed" });
+await client.sessions.remove(sessionId);
+```
+
+## 에이전트
+
+```ts
+await client.agent.start(sessionId, {
+  provider: "claude-code",
+  model: "claude-sonnet-4-6",
+  permissionMode: "acceptEdits",
+});
+
+await client.agent.send(sessionId, "Hi", {
+  images: [{ mimeType: "image/png", base64: "..." }],
+});
+
+await client.agent.interrupt(sessionId);
+await client.agent.restart(sessionId);
+await client.agent.resume(sessionId);
+```
+
+### 이벤트 구독
+
+```ts
+const unsub = client.agent.onEvent(({ event }) => {
+  if (event.type === "assistant_delta") render(event.delta);
+});
+await client.agent.subscribe(sessionId);
+
+// 나중에:
+unsub();
+await client.agent.unsubscribe(sessionId);
+```
+
+### 단발 API
+
+```ts
+// 버퍼링된 최종 결과
+const { result, usage } = await client.agent.runOnce({
+  message: "What is 2 + 2?",
+  model: "claude-haiku-4-5",
+});
+
+// SSE 토큰 단위 스트리밍 (http: true 필요)
+for await (const event of client.agent.runOnceStream({ message: "..." })) {
+  if (event.type === "assistant_delta") render(event.delta);
+  if (event.type === "complete") console.log(event.data);
+}
+
+// Completion 엔드포인트
+const { text, costUsd } = await client.agent.completion({
+  prompt: "Summarize: ...",
+  model: "claude-haiku-4-5",
+});
+```
+
+## 권한
+
+```ts
+await client.permissions.subscribe();
+client.permissions.onRequest(async ({ session, tool, input }) => {
+  const approved = await askUser(tool, input);
+  await client.permissions.respond(session, approved);
+});
+```
+
+전체 응답 모양은 [라이브 OpenAPI 스펙](http://localhost:3099/docs)
+참고. 모든 클라이언트 메서드는 거기 문서화된 라우트와 1:1 매핑된다.

@@ -1,0 +1,31 @@
+---
+title: 개요
+description: HTTP 라우트, WebSocket 프로토콜, 이벤트 타입.
+icon: LayoutGrid
+---
+
+이 섹션은 와이어 레퍼런스다. 이 모양들의 *왜* 가 궁금하면
+[Concepts](/docs/concepts) 로 가라.
+
+<Cards>
+  <Card title="HTTP 라우트" href="/docs/api/http" description="모든 서버 엔드포인트, 표면별로 그룹화." />
+  <Card title="WebSocket 프로토콜" href="/docs/api/websocket" description="Request/response op, 푸시 채널, 재연결 의미론." />
+  <Card title="이벤트" href="/docs/api/events" description="15가지 AgentEvent enum, 델타, 파이널." />
+  <Card title="OpenAPI 스펙" href="/docs/api/openapi" description="구동 중인 서버가 직접 제공하는 라이브 스펙." />
+</Cards>
+
+## 진실의 원천
+
+서버의 Hono 앱은 `@hono/zod-openapi` 라우트 정의로 빌드된다. 구동 중인
+서버는 같은 Zod 스키마에서 생성한 OpenAPI 3.1 스펙을 자체적으로
+제공한다. 따라서 여기 보이는 와이어 모양, SDK 타입, 라이브 스펙은
+서로 드리프트할 수 없다.
+
+| URL | 용도 |
+|-----|------|
+| `GET /openapi.json` | 원시 스펙 JSON |
+| `GET /docs` | Swagger UI |
+| `GET /spec` | 평문 스펙 |
+
+의심스러우면 라이브 서버를 두드려 봐라. 항상 이 페이지보다 더 권위
+있다.

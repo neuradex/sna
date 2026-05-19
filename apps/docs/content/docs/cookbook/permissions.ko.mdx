@@ -1,0 +1,83 @@
+---
+title: 권한 흐름
+description: 프로바이더별로 갈리지 않는 승인 UI 배선.
+icon: ShieldCheck
+---
+
+유저가 보는 패턴은 프로바이더 전반에 걸쳐 같다: 컨슈머 앱이 권한
+이벤트를 구독하고, 다이얼로그를 띄우고, 결정을 다시 POST한다. SNA가
+Claude의 PreToolUse 훅과 Codex의 JSON-RPC 승인을 하나의 이벤트 뒤로
+감춰버린다.
+
+## 서버 측
+
+에이전트 시작 시 권한 모드 선택:
+
+```ts
+await client.agent.start(sessionId, {
+  provider: "claude-code",
+  permissionMode: "default", // prompt함; 대안: "acceptEdits" | "bypassPermissions"
+});
+```
+
+## 구독과 응답
+
+```ts
+await client.permissions.subscribe();
+
+client.permissions.onRequest(async ({ session, tool, input, decisionId }) => {
+  const approved = await showApprovalDialog({ tool, input });
+  await client.permissions.respond(session, approved, { decisionId });
+});
+```
+
+같은 콜백이 Claude PreToolUse 훅과 Codex `approval/request` 알림
+모두에 발화함.
+
+## Safe-tool allowlist
+
+설정된 allowlist에 매치되는 툴은 프롬프트를 완전히 건너뜀. 기본
+리스트에는 `Read`, `Glob`, `Grep`, `LS` 같은 read-only 동작이 포함됨.
+확장하려면:
+
+```ts
+await client.agent.start(sessionId, {
+  provider: "claude-code",
+  allowedTools: ["Read", "Glob", "Grep", "Bash(ls:*)", "Bash(git status:*)"],
+});
+```
+
+패턴은 Claude Code의 tool-pattern 문법을 따른다. 같은 문자열 리스트가
+프로바이더별로 정규화되므로 컨슈머 설정은 프로바이더에 따라 쪼개지
+않아도 된다.
+
+## Renderer 패턴 (Electron / React)
+
+번들된 `<SnaChatUI>`는 권한 다이얼로그를 즉시 제공한다. 앱 주위에
+`<SnaProvider>`를 두르면 프롬프트가 자동으로 흐른다. 커스텀 UI라면:
+
+```tsx
+function PermissionGuard({ children }: React.PropsWithChildren) {
+  const [pending, setPending] = useState(null);
+
+  useEffect(() => {
+    const client = getSnaClient();
+    client.permissions.subscribe();
+    return client.permissions.onRequest(setPending);
+  }, []);
+
+  return (
+    <>
+      {children}
+      {pending && (
+        <Dialog
+          tool={pending.tool}
+          input={pending.input}
+          onApprove={() => respond(true)}
+          onDeny={() => respond(false)}
+        />
+      )}
+    </>
+  );
+}
+```

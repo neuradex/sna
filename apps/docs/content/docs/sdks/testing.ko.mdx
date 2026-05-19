@@ -1,0 +1,46 @@
+---
+title: '@sna-sdk/testing'
+description: Mock Anthropic API + 격리된 실행을 위한 sna-test CLI.
+icon: FlaskConical
+---
+
+CI에서 진짜 LLM 호출은 예산을 태운다. `@sna-sdk/testing`은 스트리밍
+SSE 포맷을 구현하는 mock Anthropic Messages API를 내장하고, Claude
+Code를 mock + 격리된 `CLAUDE_CONFIG_DIR`로 감싸는 `sna-test` CLI도
+같이 출시한다.
+
+## Mock Anthropic API
+
+띄우고, Claude Code의 `ANTHROPIC_BASE_URL`을 거기로 가리키기:
+
+```ts
+import { startMockAnthropic } from "@sna-sdk/testing";
+
+const mock = await startMockAnthropic({ port: 0 });
+process.env.ANTHROPIC_BASE_URL = mock.url;
+
+// 나중에
+await mock.stop();
+```
+
+Mock은 유저 텍스트를 뒤집어서 echo한다 (`"hello"` → `"olleh"`).
+테스트 단언을 결정적으로 유지하기 위해서.
+
+## sna-test CLI
+
+```bash
+pnpm sna-test claude -- --prompt "echo back"
+```
+
+Claude Code를 mock API와 격리된 config dir로 감싸서 실행한다. 테스트
+실행이 개발 계정을 오염시키지 않는다.
+
+## 패턴
+
+- 테스트마다 새 `SessionManager`를 띄우고 `dbPath`는 `os.tmpdir()`
+  하위로. 스위트 격리에 좋다.
+- 프로바이더 레벨 테스트는 `packages/core/test/mock-codex-app-server.ts`
+  의 stub을 쓰기 (우리 자체 프로바이더 테스트가 쓰는 그것).
+- 통합 테스트에서는 프로바이더 레이어를 mock 하지 말기. 전송 레이어
+  (Anthropic API, Codex app-server stdio)를 mock해서 프로바이더
+  코드 경로가 end-to-end로 실행되도록.

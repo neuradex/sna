@@ -1,0 +1,7 @@
+{
+  "title": "API Spec",
+  "description": "HTTP 라우트, WebSocket op, 이벤트 타입.",
+  "icon": "Plug",
+  "root": true,
+  "pages": ["index", "http", "websocket", "events", "openapi"]
+}

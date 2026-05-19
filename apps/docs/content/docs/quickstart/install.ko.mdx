@@ -1,0 +1,50 @@
+---
+title: 설치
+description: 앱에 SNA를 추가하고 런타임 CLI 사전 조건 확인.
+icon: Wrench
+---
+
+SNA는 published 패키지 3개 + 테스팅 헬퍼 1개로 출시됨.
+
+| 패키지 | 역할 |
+|--------|------|
+| `@sna-sdk/core` | HTTP/WS 서버, session manager, providers, 정규화 히스토리 |
+| `@sna-sdk/client` | 프레임워크 비종속 TypeScript 클라이언트 (HTTP + WS) |
+| `@sna-sdk/react` | React 바인딩 (훅, 드롭인 채팅 UI) |
+| `@sna-sdk/testing` | Mock Anthropic API + 격리된 Claude Code 테스트 환경 |
+
+## 컨슈머 앱에 추가
+
+```bash
+pnpm add @sna-sdk/core @sna-sdk/client
+# React 앱이라면
+pnpm add @sna-sdk/react
+```
+
+## 모노레포에서 작업
+
+레포는 pnpm 워크스페이스를 쓴다. clone → install → build:
+
+```bash
+git clone https://github.com/neuradex/sna.git
+cd sna
+pnpm install
+pnpm -r build
+```
+
+`pnpm -r build`가 모든 패키지를 토폴로지 순으로 컴파일함. 이후
+`pnpm --filter @sna-sdk/core test`나 standalone 서버 실행 준비 완료.
+
+## 런타임 CLI 확인
+
+SNA는 에이전트 바이너리들이 `PATH`에 있다고 가정함. 빠른 점검:
+
+```bash
+claude --version
+codex --version
+opencode --version
+```
+
+비표준 위치에 있다면 호출 시점에 `providerOptions.cliPath`로
+오버라이드하거나, 환경 변수 `SNA_CLAUDE_PATH` / `SNA_CODEX_COMMAND`를
+설정한다.

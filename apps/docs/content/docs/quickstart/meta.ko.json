@@ -1,0 +1,14 @@
+{
+  "title": "Quickstart",
+  "description": "소개, 설치, 임베드.",
+  "icon": "Rocket",
+  "root": true,
+  "pages": [
+    "---소개---",
+    "index",
+    "what-is-sna",
+    "---설치---",
+    "install",
+    "embedding"
+  ]
+}

@@ -1,0 +1,60 @@
+---
+title: '@sna-sdk/react'
+description: React 훅 + 드롭인 채팅 UI.
+icon: Atom
+---
+
+`@sna-sdk/client` 위의 React 바인딩. 상태용 훅, 클라이언트용 컨텍스트
+provider, 그리고 옵션으로 미리 만들어진 채팅 UI 컴포넌트.
+
+## 설정
+
+```tsx
+import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
+
+<SnaProvider snaUrl="http://localhost:3099">
+  <YourApp />
+</SnaProvider>
+```
+
+`SnaProvider`는 순수 컨텍스트 provider다. UI도 없고 React 외의 peer
+dep도 없다. `snaUrl`이 생략되면 `/api/sna-port`로 서버 URL을 자동
+발견하고, 그것도 안 되면 `http://localhost:3099`로 폴백한다.
+
+## 훅
+
+| 훅 | 용도 |
+|----|------|
+| `useSnaClient()` | 내부 `SnaClient` 접근. |
+| `useSessionManager()` | 세션 나열, 생성, 전환. |
+| `useAgent(sessionId)` | 라이프사이클 제어 (start, send, interrupt) + 라이브 상태. |
+| `useResponsiveChat(sessionId)` | 더 높은 레벨의 채팅 상태 (메시지, 스트리밍 텍스트, pending 툴). |
+
+```tsx
+function ChatInput({ sessionId }: { sessionId: string }) {
+  const { send, status } = useAgent(sessionId);
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); send(input); }}>
+      <input value={input} onChange={(e) => setInput(e.target.value)} />
+      <button disabled={status === "busy"}>Send</button>
+    </form>
+  );
+}
+```
+
+## 드롭인 채팅 UI
+
+UI를 처음부터 안 짜고 동작하는 채팅 패널만 원하면:
+
+```tsx
+import { SnaChatUI } from "@sna-sdk/react/components/sna-chat-ui";
+
+<SnaProvider snaUrl="http://localhost:3099">
+  <SnaChatUI dangerouslySkipPermissions>
+    <YourApp />
+  </SnaChatUI>
+</SnaProvider>
+```
+
+받게 되는 것: 메시지 버블, 툴 호출 카드, 접히는 thinking 블록,
+마크다운 렌더링, 권한 다이얼로그. 테마는 CSS 변수로.

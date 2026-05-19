@@ -1,0 +1,71 @@
+---
+title: 프로바이더
+description: AgentProvider 인터페이스, runtime pool, 프로바이더별 특이점.
+icon: Boxes
+---
+
+각 런타임은 공통 `AgentProvider` 인터페이스 뒤에 클래스로 구현됨.
+어댑터는 `core/providers/{claude-code,codex,opencode}.ts`.
+
+## AgentProvider
+
+```ts
+interface AgentProvider {
+  name: string;
+  isAvailable(): Promise<boolean>;
+  spawn(opts: SpawnOptions): AgentProcess;
+  complete(opts: CompleteOptions): Promise<CompletionResult>;
+  // ...
+}
+
+interface AgentProcess {
+  send(message: string, opts?): void;
+  interrupt(): void;
+  setModel(model: string): void;
+  setPermissionMode(mode: PermissionMode): void;
+  applyPatch(patch: SessionPatch): PatchResult;
+  respondToPermission(approved: boolean): void;
+  kill(): void;
+  on(event: string, handler): void;  // AgentEvent emit
+}
+```
+
+`applyPatch()`는 `PATCH /agent/session`이 쓰는 필드별 디스패치 훅.
+각 프로바이더가 어느 필드를 인플레이스로 적용할 수 있고, 어느 것은
+respawn-with-history-replay가 필요한지 결정한다.
+
+## 프로바이더별 전략
+
+| 런타임 | 전송 | 상태 | 풀? |
+|--------|------|------|------|
+| **claude-code** | `claude -p` (one-shot) + `claude --resume` (replay) | 호출 단위 무상태 | 아니오 |
+| **codex** | `codex app-server` 데몬, stdio 위 JSON-RPC | 영구 데몬, 멀티 스레드 | 예 |
+| **opencode** | `opencode serve` 데몬 + SDK HTTP | 영구 데몬, single-cwd | 예 |
+
+Codex와 OpenCode 프로바이더는 `RuntimePool`을 통해 데몬을 공유한다.
+세션이 열릴 때 `(provider, cwd, config)` 키로 풀이 조회되고, 호환되는
+기존 데몬이 있으면 재사용해서 cold-start 비용을 아낀다 (Codex 약 2초,
+OpenCode 약 3초).
+
+## RuntimePool
+
+- `prepare(opts, provider)`: 알려진 cwd에 대해 데몬을 미리 warm-up.
+- `findExisting(spawnOpts)`: 세션 spawn용 strict 매치 (설정 정렬 필요).
+- `findCompatible(provider, cwd)`: `completion()` / `runOnce()` 같은
+  단발 호출용 loose 매치 (MCP, hooks, permission mode는 무시).
+- `shutdown(handle)`: refcount가 0이면 graceful 종료.
+
+Claude Code는 풀링하지 않음. CLI 자체가 무상태라서, 일반적인 세션
+세분도에선 호출 단위 spawn이 데몬 resume과 경쟁력이 있다.
+
+## 크로스 프로바이더 노브
+
+모든 프로바이더를 관통하는 두 가지 레이턴시 노브:
+
+- **`reasoningLevel: 0..5`**: 프로바이더 비종속, 가장 가벼움부터 가장
+  무거움까지. Claude의 `--effort`와 Codex의 `model_reasoning_effort`로
+  [reasoning-level.ts](https://github.com/neuradex/sna/blob/main/packages/core/src/core/providers/reasoning-level.ts) 가 번역.
+- **`providerOptions.serviceTier`**: Codex 전용. Codex의 `/fast`
+  슬래시 명령을 모방함 (값: `"priority"`, `"flex"`, `"batch"`).
+  Claude로는 의도적으로 자동 매핑 안 함. Claude의 `/fast`는 별도
+  과금 풀을 가진 다른 MODEL variant이기 때문.
