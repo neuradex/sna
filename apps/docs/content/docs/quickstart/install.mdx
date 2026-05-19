@@ -1,0 +1,50 @@
+---
+title: Install
+description: Add SNA to your app.
+---
+
+SNA ships as three published packages plus a testing helper.
+
+| Package | What it does |
+|---------|--------------|
+| `@sna-sdk/core` | HTTP/WS server, session manager, providers, canonical history |
+| `@sna-sdk/client` | Framework-agnostic TypeScript client (HTTP + WS) |
+| `@sna-sdk/react` | React bindings (hooks, drop-in chat UI) |
+| `@sna-sdk/testing` | Mock Anthropic API + isolated Claude Code test env |
+
+## In a consumer app
+
+```bash
+pnpm add @sna-sdk/core @sna-sdk/client
+# React app?
+pnpm add @sna-sdk/react
+```
+
+## From the monorepo
+
+The repo uses pnpm workspaces. Clone, install, build:
+
+```bash
+git clone https://github.com/neuradex/sna.git
+cd sna
+pnpm install
+pnpm -r build
+```
+
+`pnpm -r build` compiles every package in topological order. After
+this, the workspace is ready for `pnpm --filter @sna-sdk/core test` or
+running the standalone server.
+
+## Verify your runtime CLIs
+
+SNA expects the agent binaries on `PATH`. A quick check:
+
+```bash
+claude --version
+codex --version
+opencode --version
+```
+
+If a binary lives somewhere non-standard, override per-call via
+`providerOptions.cliPath` or set `SNA_CLAUDE_PATH` / `SNA_CODEX_COMMAND`
+in the environment.

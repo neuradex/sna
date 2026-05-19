@@ -1,0 +1,13 @@
+{
+  "title": "Documentation",
+  "pages": [
+    "index",
+    "---Get going---",
+    "quickstart",
+    "---Concepts---",
+    "architecture",
+    "---Reference---",
+    "sdks",
+    "cookbook"
+  ]
+}

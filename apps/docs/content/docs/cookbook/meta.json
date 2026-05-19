@@ -1,0 +1,4 @@
+{
+  "title": "Cookbook",
+  "pages": ["index", "streaming", "permissions", "multi-provider"]
+}

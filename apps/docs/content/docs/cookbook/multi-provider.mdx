@@ -1,0 +1,61 @@
+---
+title: Multi-provider sessions
+description: Switch runtimes mid-thread without losing context.
+---
+
+A SnaSession can mount many RuntimeSessions over its lifetime. The
+**runtime chain** is the ordered history of every config the session
+has worn, and history is canonical — provider-native shapes are
+derived per-replay, so switching runtimes is just a respawn.
+
+## The switch
+
+```ts
+// Started on Claude Code
+await client.agent.start(sessionId, {
+  provider: "claude-code",
+  model: "claude-sonnet-4-6",
+});
+
+// ...some turns happen, history grows...
+
+// Switch to Codex while preserving the conversation
+await client.agent.patch(sessionId, { provider: "codex", model: "gpt-5.4" });
+```
+
+`PATCH /agent/session` with a `provider` field tears down the current
+process and respawns under the new runtime, replaying canonical
+history into the new provider's native format. The session record,
+event cursor, and runtime chain all survive.
+
+## Resume vs restart
+
+| Operation | Process | History |
+|-----------|---------|---------|
+| `restart` | respawn with same config | not replayed (warm restart) |
+| `resume` | respawn with same config | rebuilt + fed back in |
+| `patch` (provider change) | respawn under new config | rebuilt for new provider |
+
+Use `resume` after long idle periods or when the runtime crashed.
+Use `patch` when the consumer wants a runtime swap.
+
+## Why this matters
+
+Most "agent platform" abstractions treat the conversation as
+ephemeral per-runtime state. Lose the process, lose the thread. SNA's
+canonical history is the source of truth — every provider is a
+pluggable replay target, not the keeper of memory.
+
+## Caveats
+
+- **Hosted tool state doesn't carry over.** Codex's image generation,
+  web_search, and other hosted tools live on the provider side. A
+  prior call's `tool_result` is in history, but if the next turn
+  expects an OpenAI conversation id from the previous call, that's
+  gone.
+- **Model-specific tokens degrade slightly on replay.** Claude's
+  extended-thinking `signature` is preserved across Claude-to-Claude
+  replay but discarded when switching to Codex (it has no analog).
+- **Cost attribution stays honest per turn.** The 3-layer attribution
+  (provider × modelProvider × model) is recorded per row, so post-hoc
+  analytics can split usage by runtime cleanly.

@@ -1,0 +1,68 @@
+---
+title: First call
+description: Send a prompt, stream events, collect the result.
+---
+
+A minimal end-to-end loop: start the server, open a session, send a
+message, listen for events.
+
+```ts
+import { startSnaServer } from "@sna-sdk/core/node";
+import { SnaClient } from "@sna-sdk/client";
+
+// 1. Boot the server in-process.
+const sna = await startSnaServer({ port: 3099, dbPath: "./data/sna.db" });
+
+// 2. Open a client. HTTP for ordering, WS for push.
+const client = new SnaClient({
+  baseUrl: "localhost:3099",
+  http: true,
+  ws: true,
+});
+client.connect();
+
+// 3. Create a session and start the agent in it.
+const { sessionId } = await client.sessions.create({ label: "scratch" });
+await client.agent.start(sessionId, {
+  provider: "claude-code",
+  model: "claude-sonnet-4-6",
+});
+
+// 4. Subscribe to events before sending.
+client.agent.onEvent(({ event }) => {
+  if (event.type === "assistant_delta") process.stdout.write(event.delta as string);
+  if (event.type === "tool_use") console.log("\n[tool]", event.message);
+  if (event.type === "complete") console.log("\n[done]", event.data);
+});
+await client.agent.subscribe(sessionId);
+
+// 5. Send the prompt.
+await client.agent.send(sessionId, "List the files in this directory.");
+```
+
+## One-shot path
+
+If you just want a single answer — no session, no event subscription —
+use `completion()` or `runOnce()` instead:
+
+```ts
+import { completion } from "@sna-sdk/core";
+
+const result = await completion({
+  prompt: "Summarize this in one sentence: ...",
+  provider: "claude-code",
+  model: "claude-haiku-4-5",
+  onDelta: (chunk) => process.stdout.write(chunk),
+});
+// result.text, result.usage, result.costUsd, result.durationMs
+```
+
+See [Cookbook → Streaming completions](/docs/cookbook/streaming) for
+the full streaming API.
+
+## What to read next
+
+<Cards>
+  <Card title="Embedding" href="/docs/quickstart/embedding" description="Run SNA inside Electron or a Node service." />
+  <Card title="Architecture" href="/docs/architecture" description="How sessions, history, and providers fit together." />
+</Cards>

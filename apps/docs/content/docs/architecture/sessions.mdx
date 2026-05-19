@@ -1,0 +1,54 @@
+---
+title: Sessions
+description: SnaSession + RuntimeSession chain — the two-layer session model.
+---
+
+A **SnaSession** is the persistent thing the consumer app knows about
+(stable id, label, cwd, meta). A **RuntimeSession** is one specific
+runtime configuration mounted on that session — provider, model,
+permission mode, MCP servers, hooks. A SnaSession can mount many
+RuntimeSessions over its lifetime; the **runtime chain** is the
+ordered history of every config the session has worn.
+
+## Why two layers
+
+If a user starts a chat on Claude Code, switches to Codex mid-thread,
+then bumps the reasoning level — three distinct RuntimeSessions, one
+SnaSession. Attribution stays honest per row, and replay can rebuild
+each runtime's native history without losing prior turns.
+
+## Lifecycle
+
+```
+POST /agent/sessions      → create SnaSession (no process)
+POST /agent/start         → mount initial RuntimeSession, spawn process
+POST /agent/send          → send message, events flow
+POST /agent/set-model     → in-place override OR new RuntimeSession
+PATCH /agent/session      → unified mutator for {cwd, model, permissionMode}
+POST /agent/resume        → rebuild provider-native history, respawn
+POST /agent/restart       → respawn with same config (kept verbatim)
+POST /agent/kill          → tear down process (session record stays)
+DELETE /agent/sessions/:id → drop session + history
+```
+
+## PATCH semantics
+
+`PATCH /agent/session` is the unified mutator. The server applies each
+field through the active provider's `applyPatch()` hook, which decides
+in-place vs respawn-with-history-replay:
+
+| Field | claude-code | codex | opencode |
+|-------|-------------|-------|----------|
+| `model` | in-place | per-turn override | in-place |
+| `permissionMode` | in-place | per-turn override | in-place |
+| `cwd` | respawn + replay | in-place (per-thread cwd) | respawn |
+
+The response's `applied` field tells you which path was taken so
+clients can show a "reloading…" affordance only when needed.
+
+## Why this matters
+
+Most "agent platform" abstractions force the user to tear down a
+session to change anything. SNA treats config as a first-class axis of
+the session record, so the UX can stay continuous even as the
+underlying runtime configuration mutates.

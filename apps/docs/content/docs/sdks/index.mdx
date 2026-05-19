@@ -1,0 +1,29 @@
+---
+title: SDKs
+description: Reference for the four published packages.
+---
+
+SNA ships four packages, organized by layer.
+
+<Cards>
+  <Card title="@sna-sdk/core" href="/docs/sdks/core" description="Server, session manager, providers, completion()." />
+  <Card title="@sna-sdk/client" href="/docs/sdks/client" description="TypeScript client — HTTP + WebSocket transports." />
+  <Card title="@sna-sdk/react" href="/docs/sdks/react" description="React hooks and a drop-in chat UI." />
+  <Card title="@sna-sdk/testing" href="/docs/sdks/testing" description="Mock Anthropic API + isolated Claude Code test env." />
+</Cards>
+
+## Versioning
+
+All four packages are released together. The version is the SNA
+protocol version — consumers should pin the same major across all
+four. See the [CHANGELOG](https://github.com/neuradex/sna/blob/main/CHANGELOG.md)
+for the per-release surface changes.
+
+## Live OpenAPI spec
+
+The running server publishes its own OpenAPI 3.1 spec — open
+`http://localhost:3099/docs` for Swagger UI,
+`http://localhost:3099/openapi.json` for the raw JSON, or
+`http://localhost:3099/spec` for plain text. The spec is generated
+from the same Zod schemas the routes use, so it can't drift from the
+real handlers.

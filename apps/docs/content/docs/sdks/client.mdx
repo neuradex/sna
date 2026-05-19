@@ -1,0 +1,107 @@
+---
+title: '@sna-sdk/client'
+description: Framework-agnostic TypeScript client. HTTP for ordering, WS for push.
+---
+
+The browser/Node client. Dual transport so reads stay ordered while
+events arrive live.
+
+```ts
+import { SnaClient } from "@sna-sdk/client";
+
+const client = new SnaClient({
+  baseUrl: "localhost:3099",
+  http: true,  // POST /agent/* etc.
+  ws: true,    // live event stream
+});
+client.connect();
+```
+
+## Surface
+
+The client exposes three namespaces matching the server routes:
+
+```ts
+client.sessions   // list, create, update, remove
+client.agent      // start, send, kill, restart, runOnce, completion, ...
+client.permissions // subscribe, respond, list pending
+```
+
+## Sessions
+
+```ts
+const { sessionId } = await client.sessions.create({
+  label: "research",
+  cwd: "/path/to/workspace",
+  meta: { project: "alpha" },
+});
+await client.sessions.update(sessionId, { label: "renamed" });
+await client.sessions.remove(sessionId);
+```
+
+## Agent
+
+```ts
+await client.agent.start(sessionId, {
+  provider: "claude-code",
+  model: "claude-sonnet-4-6",
+  permissionMode: "acceptEdits",
+});
+
+await client.agent.send(sessionId, "Hi", {
+  images: [{ mimeType: "image/png", base64: "..." }],
+});
+
+await client.agent.interrupt(sessionId);
+await client.agent.restart(sessionId);
+await client.agent.resume(sessionId);
+```
+
+### Event subscription
+
+```ts
+const unsub = client.agent.onEvent(({ event }) => {
+  if (event.type === "assistant_delta") render(event.delta);
+});
+await client.agent.subscribe(sessionId);
+
+// later:
+unsub();
+await client.agent.unsubscribe(sessionId);
+```
+
+### One-shot APIs
+
+```ts
+// Buffered final result
+const { result, usage } = await client.agent.runOnce({
+  message: "What is 2 + 2?",
+  model: "claude-haiku-4-5",
+});
+
+// Token-by-token streaming via SSE (requires http: true)
+for await (const event of client.agent.runOnceStream({ message: "..." })) {
+  if (event.type === "assistant_delta") render(event.delta);
+  if (event.type === "complete") console.log(event.data);
+}
+
+// Completion endpoint
+const { text, costUsd } = await client.agent.completion({
+  prompt: "Summarize: ...",
+  model: "claude-haiku-4-5",
+});
+```
+
+## Permissions
+
+```ts
+await client.permissions.subscribe();
+client.permissions.onRequest(async ({ session, tool, input }) => {
+  const approved = await askUser(tool, input);
+  await client.permissions.respond(session, approved);
+});
+```
+
+See the [live OpenAPI spec](http://localhost:3099/docs) for the full
+response shapes — every client method maps 1:1 to a route documented
+there.

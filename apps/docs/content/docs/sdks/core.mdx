@@ -1,0 +1,84 @@
+---
+title: '@sna-sdk/core'
+description: Server, session manager, providers, completion() / runOnce().
+---
+
+The host-side package. Owns the SQLite DB, spawns provider processes,
+exposes HTTP/WS routes.
+
+## Subpath exports
+
+| Import | Use for |
+|--------|---------|
+| `@sna-sdk/core` | Top-level: `completion`, `runOnce`, `getConfig`, `setConfig`. |
+| `@sna-sdk/core/node` | `startSnaServer()` for plain Node hosts. |
+| `@sna-sdk/core/electron` | `startSnaServer()` with asar-aware path resolution. |
+| `@sna-sdk/core/server` | `createSnaApp`, `attachWebSocket`, `SessionManager`, `runOnce`. |
+| `@sna-sdk/core/providers` | `getProvider`, `getRuntimePool`. |
+| `@sna-sdk/core/db/schema` | `getDb()` for direct SQLite access (advanced). |
+
+## One-shot APIs
+
+### `completion(opts)`
+
+The lightest call — no session, no event pipeline, just a single
+prompt → string result.
+
+```ts
+import { completion } from "@sna-sdk/core";
+
+const result = await completion({
+  prompt: "Summarize this in one sentence: ...",
+  provider: "claude-code",
+  model: "claude-haiku-4-5",
+  reasoningLevel: 0,                 // 0..5 — provider-agnostic
+  onDelta: (chunk) => render(chunk), // optional streaming side channel
+});
+// result.text, result.usage, result.costUsd, result.durationMs
+```
+
+Each provider picks its own optimal one-shot path:
+- Claude — `claude -p`, stateless.
+- Codex — pooled `app-server` thread if a daemon is alive for the cwd;
+  otherwise `codex exec --json --ephemeral`.
+- OpenCode — pooled `opencode serve` session; otherwise ephemeral.
+
+### `runOnce(sessionManager, opts)`
+
+The full session machinery for one prompt — temp session, full event
+pipeline, automatic cleanup. Useful when you need `tool_use` /
+`thinking` events on a one-shot run.
+
+```ts
+import { runOnce } from "@sna-sdk/core/server";
+
+await runOnce(sessionManager, {
+  message: "List the files in this directory.",
+  provider: "codex",
+  onEvent: (event) => render(event),
+});
+```
+
+Both `onDelta` (text chunks) and `onEvent` (full event stream) are
+optional, in-process only. For network consumers, the matching SSE
+endpoint is `POST /agent/run-once/stream`, wrapped client-side as
+`agent.runOnceStream(opts)`.
+
+## Server entry
+
+```ts
+import { startSnaServer } from "@sna-sdk/core/node";
+
+const sna = await startSnaServer({
+  port: 3099,
+  dbPath: "./data/sna.db",
+  maxSessions: 20,
+  permissionMode: "acceptEdits",
+  onLog: (line) => console.log("[sna]", line),
+});
+
+await sna.stop();
+```
+
+See [Quickstart → Embedding](/docs/quickstart/embedding) for the
+Electron variant and lifecycle details.

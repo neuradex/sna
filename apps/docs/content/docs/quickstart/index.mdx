@@ -1,0 +1,24 @@
+---
+title: Quickstart
+description: Run a session in five minutes.
+---
+
+The fastest path to a working SNA integration: install the SDK, boot
+the server, open a session, send a prompt, listen for events.
+
+<Cards>
+  <Card title="Install" href="/docs/quickstart/install" description="Pick a transport — embedded server or standalone." />
+  <Card title="First call" href="/docs/quickstart/first-call" description="Send a prompt, stream events, collect the result." />
+  <Card title="Embedding" href="/docs/quickstart/embedding" description="Run SNA inside an Electron app or Node service." />
+</Cards>
+
+## Prerequisites
+
+- **Node.js 20+** (the server uses the built-in test runner shape and modern ESM).
+- **At least one runtime CLI on `PATH`.** SNA does not bundle the
+  underlying agents — install whichever you plan to use:
+  - `claude` (Claude Code) — `npm install -g @anthropic-ai/claude-code`
+  - `codex` (Codex CLI) — see [openai/codex](https://github.com/openai/codex)
+  - `opencode` — see [opencode/opencode](https://github.com/opencode-ai/opencode)
+- **pnpm** is recommended for the workspace, but the published packages
+  install fine with npm/yarn/bun in consumer apps.

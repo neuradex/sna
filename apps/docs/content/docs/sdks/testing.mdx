@@ -1,0 +1,46 @@
+---
+title: '@sna-sdk/testing'
+description: Mock Anthropic API + sna-test CLI for isolated runs.
+---
+
+Real LLM calls in CI burn budget. `@sna-sdk/testing` ships a mock
+Anthropic Messages API that implements the streaming SSE format, plus
+a `sna-test` CLI that wraps Claude Code with the mock and an
+isolated `CLAUDE_CONFIG_DIR`.
+
+## Mock Anthropic API
+
+Spin it up, then point Claude Code at it via `ANTHROPIC_BASE_URL`:
+
+```ts
+import { startMockAnthropic } from "@sna-sdk/testing";
+
+const mock = await startMockAnthropic({ port: 0 });
+process.env.ANTHROPIC_BASE_URL = mock.url;
+
+// later
+await mock.stop();
+```
+
+The mock echoes user text reversed (`"hello"` → `"olleh"`) so test
+assertions stay deterministic.
+
+## sna-test CLI
+
+```bash
+pnpm sna-test claude -- --prompt "echo back"
+```
+
+Runs Claude Code wrapped in the mock API and an isolated config dir.
+Test runs don't pollute your dev account.
+
+## Patterns
+
+- Spin up a fresh `SessionManager` per test, with `dbPath` in
+  `os.tmpdir()` — keeps suites isolated.
+- For provider-level tests, use the mock-codex-app-server stub
+  shipped in `packages/core/test/mock-codex-app-server.ts` (the same
+  one our own provider tests use).
+- Don't mock at the provider layer for integration tests — mock at the
+  transport layer (Anthropic API, Codex app-server stdio) so the
+  provider code paths execute end-to-end.

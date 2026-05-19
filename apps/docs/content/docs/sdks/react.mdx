@@ -1,0 +1,59 @@
+---
+title: '@sna-sdk/react'
+description: React hooks and a drop-in chat UI.
+---
+
+React bindings on top of `@sna-sdk/client`. Hooks for state, a context
+provider for the client, and an optional pre-built chat UI.
+
+## Setup
+
+```tsx
+import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
+
+<SnaProvider snaUrl="http://localhost:3099">
+  <YourApp />
+</SnaProvider>
+```
+
+`SnaProvider` is a pure context provider — no UI, no peer deps beyond
+React. It auto-discovers the server URL via `/api/sna-port` if
+`snaUrl` is omitted, otherwise falls back to `http://localhost:3099`.
+
+## Hooks
+
+| Hook | Purpose |
+|------|---------|
+| `useSnaClient()` | Access the underlying `SnaClient`. |
+| `useSessionManager()` | List, create, switch sessions. |
+| `useAgent(sessionId)` | Lifecycle controls (start, send, interrupt) + live state. |
+| `useResponsiveChat(sessionId)` | Higher-level chat state (messages, streaming text, pending tools). |
+
+```tsx
+function ChatInput({ sessionId }: { sessionId: string }) {
+  const { send, status } = useAgent(sessionId);
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); send(input); }}>
+      <input value={input} onChange={(e) => setInput(e.target.value)} />
+      <button disabled={status === "busy"}>Send</button>
+    </form>
+  );
+}
+```
+
+## Drop-in chat UI
+
+For a working chat panel without writing UI from scratch:
+
+```tsx
+import { SnaChatUI } from "@sna-sdk/react/components/sna-chat-ui";
+
+<SnaProvider snaUrl="http://localhost:3099">
+  <SnaChatUI dangerouslySkipPermissions>
+    <YourApp />
+  </SnaChatUI>
+</SnaProvider>
+```
+
+You get: message bubbles, tool-call cards, collapsible thinking
+blocks, markdown rendering, permission dialog. Theme via CSS variables.

@@ -1,0 +1,11 @@
+{
+  "title": "Architecture",
+  "pages": [
+    "index",
+    "sessions",
+    "history",
+    "providers",
+    "events",
+    "permissions"
+  ]
+}

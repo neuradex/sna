@@ -1,0 +1,71 @@
+---
+title: Providers
+description: AgentProvider interface, runtime pool, and per-provider quirks.
+---
+
+Each runtime is implemented as a class behind a common
+`AgentProvider` interface. Adapters live in
+`core/providers/{claude-code,codex,opencode}.ts`.
+
+## AgentProvider
+
+```ts
+interface AgentProvider {
+  name: string;
+  isAvailable(): Promise<boolean>;
+  spawn(opts: SpawnOptions): AgentProcess;
+  complete(opts: CompleteOptions): Promise<CompletionResult>;
+  // ...
+}
+
+interface AgentProcess {
+  send(message: string, opts?): void;
+  interrupt(): void;
+  setModel(model: string): void;
+  setPermissionMode(mode: PermissionMode): void;
+  applyPatch(patch: SessionPatch): PatchResult;
+  respondToPermission(approved: boolean): void;
+  kill(): void;
+  on(event: string, handler): void;  // emits AgentEvent
+}
+```
+
+`applyPatch()` is the per-field dispatch hook used by
+`PATCH /agent/session`. Each provider decides which fields it can
+apply in-place vs which require a respawn-with-history-replay.
+
+## Per-provider strategy
+
+| Runtime | Transport | State | Pool? |
+|---------|-----------|-------|-------|
+| **claude-code** | `claude -p` (one-shot) + `claude --resume` (replay) | stateless per call | no |
+| **codex** | `codex app-server` daemon, JSON-RPC over stdio | persistent daemon, multi-thread | yes |
+| **opencode** | `opencode serve` daemon + SDK HTTP | persistent daemon, single-cwd | yes |
+
+The Codex and OpenCode providers share daemons through `RuntimePool`.
+When a session opens, the pool is queried by `(provider, cwd, config)`
+and an existing daemon is reused if compatible — sparing the cold-start
+cost (≈2s for Codex, ≈3s for OpenCode).
+
+## RuntimePool
+
+- `prepare(opts, provider)` — eagerly warm up a daemon for a known cwd.
+- `findExisting(spawnOpts)` — strict match for session spawns (config must align).
+- `findCompatible(provider, cwd)` — loose match for one-shot
+  `completion()` / `runOnce()` — ignores MCP, hooks, permission mode.
+- `shutdown(handle)` — graceful teardown when refcount hits zero.
+
+Claude Code does not pool — its CLI is stateless, so per-call spawns
+are competitive with daemon-resume for typical session granularity.
+
+## Cross-provider knobs
+
+Two latency knobs flow through every provider:
+
+- **`reasoningLevel: 0..5`** — provider-agnostic, lightest → heaviest.
+  Translates to Claude's `--effort` and Codex's
+  `model_reasoning_effort` via [reasoning-level.ts](https://github.com/neuradex/sna/blob/main/packages/core/src/core/providers/reasoning-level.ts).
+- **`providerOptions.serviceTier`** — Codex-only. Mirrors Codex's
+  `/fast` slash command (values: `"priority"`, `"flex"`, `"batch"`).
+  Intentionally not auto-mapped to Claude because Claude's `/fast` is a
+  different MODEL variant with separate billing.
