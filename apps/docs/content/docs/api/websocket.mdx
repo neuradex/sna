@@ -1,0 +1,89 @@
+---
+title: WebSocket protocol
+description: Request/response ops, push channels, reconnect semantics.
+---
+
+WebSocket is the live channel — for push events (assistant deltas,
+tool calls, permission requests) and for the same control ops the
+HTTP API exposes, just without the per-call HTTP overhead.
+
+## Endpoint
+
+```
+ws://<host>:<port>/ws
+```
+
+The client connects once and multiplexes all sessions over that single
+connection.
+
+## Wire shape
+
+Every message is a JSON object with `type` + payload:
+
+```jsonc
+// Client → server
+{ "id": "rpc-7", "type": "agent.send", "payload": { "session": "abc", "message": "hi" } }
+
+// Server → client (reply)
+{ "id": "rpc-7", "type": "agent.send", "status": "ok", "data": { "queued": true } }
+
+// Server → client (push, no id)
+{ "type": "agent.event", "data": { "session": "abc", "event": { "type": "assistant_delta", "delta": "Hello" } } }
+```
+
+The `id` field is a client-chosen correlation token — present on
+request/response pairs, absent on push messages.
+
+## Control ops
+
+Every HTTP route has a WS equivalent:
+
+| WS type | HTTP equivalent |
+|---------|----------------|
+| `agent.start` | `POST /agent/start` |
+| `agent.send` | `POST /agent/send` |
+| `agent.interrupt` | `POST /agent/interrupt` |
+| `agent.set-model` | `POST /agent/set-model` |
+| `agent.set-permission-mode` | `POST /agent/set-permission-mode` |
+| `agent.restart` | `POST /agent/restart` |
+| `agent.resume` | `POST /agent/resume` |
+| `agent.kill` | `POST /agent/kill` |
+| `agent.run-once` | `POST /agent/run-once` |
+| `agent.completion` | `POST /agent/completion` |
+| `agent.status` | `GET /agent/status` |
+| `sessions.list` | `GET /agent/sessions` |
+| `sessions.create` | `POST /agent/sessions` |
+| `sessions.update` | `PATCH /agent/sessions/:id` |
+| `sessions.remove` | `DELETE /agent/sessions/:id` |
+| `permission.subscribe` | (push channel; no HTTP equivalent) |
+| `permission.respond` | `POST /agent/permission-respond` |
+
+## Push channels
+
+Two channels are push-only:
+
+- `agent.event` — fires for every `AgentEvent` produced by every
+  subscribed session. Subscribe with `agent.subscribe`,
+  unsubscribe with `agent.unsubscribe`.
+- `permission.request` — fires when any session emits
+  `permission_needed`. Subscribe with `permission.subscribe`.
+
+## Reconnect
+
+If the connection drops, the client should reconnect and re-subscribe.
+Events buffered while disconnected are still in the per-session ring
+buffer (default: 1000 events) — pass `?since=<cursor>` on a fresh
+`agent.subscribe` to replay.
+
+## Why both HTTP and WS
+
+- **HTTP for ordering and ACK.** Mutations want a request/response
+  contract that's easy to reason about. HTTP gives that for free.
+- **WS for fanout.** A single connection delivers events from N
+  sessions plus permission requests across them. Far cheaper than N
+  SSE streams.
+
+The TypeScript client uses HTTP for all mutations and WS for the push
+channels. Either alone works (`http: true, ws: false` for
+short-lived scripts; `ws: true, http: false` for clients that can't
+do HTTP at all), but the dual-transport default is the smoothest.

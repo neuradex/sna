@@ -1,5 +1,5 @@
 ---
-title: Architecture
+title: Concepts
 description: The shape of SNA's runtime — server, session manager, providers, history.
 ---
 
@@ -26,9 +26,11 @@ Hono server  ──►  SessionManager
 ## Read order
 
 <Cards>
-  <Card title="Sessions" href="/docs/architecture/sessions" description="Lifecycle, RuntimeSession chain, PATCH semantics." />
-  <Card title="History" href="/docs/architecture/history" description="Canonical flat blocks, provider-native rebuild." />
-  <Card title="Providers" href="/docs/architecture/providers" description="AgentProvider interface and runtime pool." />
-  <Card title="Events" href="/docs/architecture/events" description="15-type event protocol and delta streams." />
-  <Card title="Permissions" href="/docs/architecture/permissions" description="Unified permission flow across providers." />
+  <Card title="Sessions" href="/docs/concepts/sessions" description="Lifecycle, RuntimeSession chain, PATCH semantics." />
+  <Card title="Canonical history" href="/docs/concepts/history" description="Flat blocks, provider-native rebuild." />
+  <Card title="Providers" href="/docs/concepts/providers" description="AgentProvider interface and runtime pool." />
+  <Card title="Permissions" href="/docs/concepts/permissions" description="Unified permission flow across providers." />
 </Cards>
+
+For the on-the-wire protocol details (HTTP routes, WebSocket ops,
+event types), see **[API Spec](/docs/api)**.

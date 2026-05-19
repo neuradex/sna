@@ -15,8 +15,12 @@ export function baseOptions(): BaseLayoutProps {
         url: '/docs/quickstart',
       },
       {
-        text: 'Architecture',
-        url: '/docs/architecture',
+        text: 'Concepts',
+        url: '/docs/concepts',
+      },
+      {
+        text: 'API Spec',
+        url: '/docs/api',
       },
       {
         text: 'SDKs',

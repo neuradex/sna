@@ -1,4 +1,7 @@
 {
   "title": "Quickstart",
+  "description": "Introduction, install, first call, embed.",
+  "icon": "Rocket",
+  "root": true,
   "pages": ["index", "install", "first-call", "embedding"]
 }

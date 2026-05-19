@@ -1,4 +1,7 @@
 {
   "title": "SDKs",
+  "description": "Per-package reference for core, client, react, testing.",
+  "icon": "Package",
+  "root": true,
   "pages": ["index", "core", "client", "react", "testing"]
 }

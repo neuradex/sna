@@ -9,25 +9,31 @@ const sections: Array<{
   {
     title: 'Quickstart',
     description:
-      'Boot an embedded SNA server, open a session, send a prompt — under five minutes.',
+      'What SNA is, install, boot the server, send your first prompt.',
     href: '/docs/quickstart',
   },
   {
-    title: 'Architecture',
+    title: 'Concepts',
     description:
-      'Session model, canonical history, providers, event protocol, runtime pool.',
-    href: '/docs/architecture',
+      'Sessions, canonical history, providers, permissions — the why behind the wire.',
+    href: '/docs/concepts',
+  },
+  {
+    title: 'API Spec',
+    description:
+      'HTTP routes, WebSocket protocol, event types, live OpenAPI spec.',
+    href: '/docs/api',
   },
   {
     title: 'SDKs',
     description:
-      'API reference for @sna-sdk/core, @sna-sdk/client, @sna-sdk/react, and @sna-sdk/testing.',
+      'Reference for @sna-sdk/core, @sna-sdk/client, @sna-sdk/react, @sna-sdk/testing.',
     href: '/docs/sdks',
   },
   {
     title: 'Cookbook',
     description:
-      'Recipes for streaming, permissions, multi-provider sessions, Electron embedding.',
+      'Streaming, permissions, multi-provider sessions, Electron embedding.',
     href: '/docs/cookbook',
   },
 ];
