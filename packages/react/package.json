@@ -46,6 +46,7 @@
   },
   "scripts": {
     "build": "tsup",
+    "test": "node --import tsx --test test/**/*.test.ts",
     "prepublishOnly": "pnpm build"
   },
   "engines": {
@@ -75,7 +76,11 @@
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
+    "@types/react-test-renderer": "^19.1.0",
+    "react": "19.2.4",
+    "react-test-renderer": "19.2.4",
     "tsup": "^8.0.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.0.0"
   }
 }

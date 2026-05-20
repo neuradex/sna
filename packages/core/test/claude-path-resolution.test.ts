@@ -1,6 +1,27 @@
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseCommandVOutput } from "../src/core/providers/claude-code.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { cacheClaudePath, parseCommandVOutput, resolveClaudeCli, validateClaudePath } from "../src/core/providers/claude-code.js";
+
+const originalClaudeCommand = process.env.SNA_CLAUDE_COMMAND;
+const tempDirs: string[] = [];
+
+function makeMockClaude(version = "2.1.145 (Claude Code)") {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sna-mock-claude-"));
+  tempDirs.push(dir);
+  const bin = path.join(dir, "claude");
+  fs.writeFileSync(bin, `#!/bin/sh\necho "${version}"\n`);
+  fs.chmodSync(bin, 0o755);
+  return { dir, bin, version };
+}
+
+afterEach(() => {
+  if (originalClaudeCommand === undefined) delete process.env.SNA_CLAUDE_COMMAND;
+  else process.env.SNA_CLAUDE_COMMAND = originalClaudeCommand;
+  for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 describe("parseCommandVOutput", () => {
   // ── Direct absolute paths ──────────────────────────────────────────────────
@@ -91,5 +112,49 @@ describe("parseCommandVOutput", () => {
 
   it("path with leading/trailing whitespace", () => {
     assert.equal(parseCommandVOutput("  /opt/homebrew/bin/claude  "), "/opt/homebrew/bin/claude");
+  });
+});
+
+describe("Claude CLI resolution helpers", () => {
+  it("validateClaudePath runs the binary and returns the first version line", () => {
+    const { bin } = makeMockClaude("2.2.0\nextra line");
+
+    const result = validateClaudePath(bin);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.version, "2.2.0");
+  });
+
+  it("cacheClaudePath writes a reusable cache entry", () => {
+    const { bin, dir } = makeMockClaude();
+    const cacheDir = path.join(dir, ".sna");
+
+    cacheClaudePath(bin, cacheDir);
+
+    assert.equal(fs.readFileSync(path.join(cacheDir, "claude-path"), "utf8"), bin);
+  });
+
+  it("resolveClaudeCli prefers SNA_CLAUDE_COMMAND when set", () => {
+    const { bin } = makeMockClaude("env-version");
+    process.env.SNA_CLAUDE_COMMAND = bin;
+
+    const result = resolveClaudeCli({ cacheDir: path.join(path.dirname(bin), ".sna") });
+
+    assert.equal(result.source, "env");
+    assert.equal(result.path, bin);
+    assert.equal(result.version, "env-version");
+  });
+
+  it("resolveClaudeCli falls back to a valid cached path when no env override exists", () => {
+    const { bin, dir } = makeMockClaude("cached-version");
+    delete process.env.SNA_CLAUDE_COMMAND;
+    const cacheDir = path.join(dir, ".sna");
+    cacheClaudePath(bin, cacheDir);
+
+    const result = resolveClaudeCli({ cacheDir });
+
+    assert.equal(result.source, "cache");
+    assert.equal(result.path, bin);
+    assert.equal(result.version, "cached-version");
   });
 });
