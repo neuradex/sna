@@ -1,0 +1,19 @@
+---
+title: "React Components and Store"
+description: "Bundled UI components and chat store exports."
+---
+# React Components and Store
+
+Use these surfaces when you want a ready-made chat panel or when you want to compose your own panel from SNA primitives.
+| Surface | Purpose |
+| --- | --- |
+| `SnaChatUI` | Full floating chat UI with agent auto-start. Props: `children`, `defaultOpen?`, `dangerouslySkipPermissions?`. |
+| `ChatPanel` | Main chat panel shell. |
+| `ChatHeader` | Header used by the panel. |
+| `MessageBubble` | Message renderer. |
+| `ChatInput` | Input composer. |
+| `ToolUseCard` | Tool-use visualization. |
+| `TypingIndicator` | Assistant progress indicator. |
+| `ResizeHandle` | Side-by-side panel resize handle. |
+| `useChatStore` | Zustand store for chat UI state and persisted message hydration. |
+`SnaChatUI` requires `@radix-ui/react-tooltip` as a peer dependency and must be rendered under `SnaProvider`.

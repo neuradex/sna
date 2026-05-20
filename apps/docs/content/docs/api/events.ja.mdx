@@ -1,12 +1,12 @@
 ---
 title: イベント
-description: 15 種類の AgentEvent プロトコル。WS と SSE 上を流れるもの。
+description: WS と SSE 上を流れる 15 種類の AgentEvent プロトコルです。
 icon: Activity
 ---
 
-すべてのプロバイダが正規化された `AgentEvent` ストリームを emit する。
+すべてのプロバイダが正規化された `AgentEvent` ストリームを emit します。
 コンシューマは WebSocket (push) または `GET /agent/events` (SSE) で
-購読し、どちらも同じワイヤ形を運ぶ。
+購読し、どちらも同じワイヤ形を運びます。
 
 ## イベントタイプ
 
@@ -31,12 +31,12 @@ icon: Activity
 ## delta vs final
 
 text と thinking は `_delta` チャンクと最終 `assistant` / `thinking`
-イベントの両方が到着する。最終が正規版だ。履歴に永続化されるのは
-こっち。delta はライブ描画用。
+イベントの両方が到着します。最終イベントが正規版であり、履歴にも
+最終イベントが永続化されます。delta はライブ描画用です。
 
 ツール使用については `tool_use_delta` が部分 JSON 入力 (Anthropic の
-`input_json_delta`) を運ぶ。最終 `tool_use` イベントはパース済みの
-完全な入力を持つ。
+`input_json_delta`) を運びます。最終 `tool_use` イベントはパース済みの
+完全な入力を持ちます。
 
 ## 購読
 
@@ -59,4 +59,4 @@ for await (const event of client.agent.streamEvents(sessionId)) {
 
 セッションなしの単発実行には SSE エンドポイント
 `POST /agent/run-once/stream` とそのクライアントラッパー
-`agent.runOnceStream(opts)` が同じイベントプロトコルを運ぶ。
+`agent.runOnceStream(opts)` が同じイベントプロトコルを運びます。

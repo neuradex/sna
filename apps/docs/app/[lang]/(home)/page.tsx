@@ -25,14 +25,9 @@ const copy: Record<string, HomeCopy> = {
     viewGithub: 'View on GitHub',
     sections: [
       {
-        title: 'Quickstart',
-        description: 'What SNA is, install, boot the server, send your first prompt.',
-        path: 'quickstart',
-      },
-      {
-        title: 'Concepts',
-        description: 'Sessions, canonical history, providers, permissions: the why behind the wire.',
-        path: 'concepts',
+        title: 'Introduction',
+        description: 'What SNA is, install, boot the server, send your first prompt, and learn the core concepts.',
+        path: 'introduction',
       },
       {
         title: 'API Spec',
@@ -59,14 +54,9 @@ const copy: Record<string, HomeCopy> = {
     viewGithub: 'GitHub에서 보기',
     sections: [
       {
-        title: 'Quickstart',
-        description: 'SNA가 무엇인지, 설치, 서버 부팅, 첫 프롬프트 전송까지.',
-        path: 'quickstart',
-      },
-      {
-        title: 'Concepts',
-        description: '세션, 정규화 히스토리, 프로바이더, 권한: 와이어 뒤의 이유.',
-        path: 'concepts',
+        title: 'Introduction',
+        description: 'SNA의 개요, 설치, 서버 부팅, 첫 프롬프트, 핵심 개념까지.',
+        path: 'introduction',
       },
       {
         title: 'API Spec',
@@ -93,14 +83,9 @@ const copy: Record<string, HomeCopy> = {
     viewGithub: 'GitHub で見る',
     sections: [
       {
-        title: 'Quickstart',
-        description: 'SNA とは何か、インストール、サーバ起動、最初のプロンプト送信まで。',
-        path: 'quickstart',
-      },
-      {
-        title: 'Concepts',
-        description: 'セッション、正規化履歴、プロバイダ、権限：ワイヤの背後にある理由。',
-        path: 'concepts',
+        title: 'Introduction',
+        description: 'SNA の概要、インストール、サーバ起動、最初のプロンプト、核心概念まで。',
+        path: 'introduction',
       },
       {
         title: 'API Spec',
@@ -147,7 +132,7 @@ export default async function HomePage(props: PageProps<'/[lang]'>) {
         </div>
         <div className="flex flex-wrap gap-3">
           <Link
-            href={docHref(lang, 'quickstart')}
+            href={docHref(lang, 'introduction')}
             className="bg-fd-foreground text-fd-background rounded-md px-5 py-2.5 text-sm font-medium transition hover:opacity-90"
           >
             {c.getStarted}

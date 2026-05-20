@@ -1,0 +1,19 @@
+---
+title: "React Components と Store"
+description: "Bundled UI component と chat store export です。"
+---
+# React Components と Store
+
+完成済み chat panel を使う場合、または SNA primitive から独自 panel を組み立てる場合にこのサーフェスを使います。
+| サーフェス | 目的 |
+| --- | --- |
+| `SnaChatUI` | agent auto-start を含む floating chat UI です。Props: `children`, `defaultOpen?`, `dangerouslySkipPermissions?`. |
+| `ChatPanel` | main chat panel shell です。 |
+| `ChatHeader` | panel header です。 |
+| `MessageBubble` | message renderer です。 |
+| `ChatInput` | input composer です。 |
+| `ToolUseCard` | tool-use visualization です。 |
+| `TypingIndicator` | assistant progress indicator です。 |
+| `ResizeHandle` | side-by-side panel resize handle です。 |
+| `useChatStore` | chat UI 状態と保存済み message hydration を扱う Zustand store です。 |
+`SnaChatUI` は peer dependency として `@radix-ui/react-tooltip` が必要で、`SnaProvider` の下で render してください。

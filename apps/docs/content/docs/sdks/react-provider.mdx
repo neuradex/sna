@@ -1,0 +1,49 @@
+---
+title: "React provider and context"
+description: "Props and return values for SnaProvider, SnaSession, and useSnaContext."
+---
+
+# React provider and context
+
+## `<SnaProvider>`
+
+```tsx
+<SnaProvider snaUrl?: string sessionId?: string hydrate?: boolean>
+  {children}
+</SnaProvider>
+```
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `children` | `React.ReactNode` | required | Subtree that receives SNA context. |
+| `snaUrl` | `string` | auto-discovery | SNA internal API server URL. If omitted, it first reads `/api/sna-port`, then falls back to `http://localhost:3099`. |
+| `sessionId` | `string` | `default` | Default session ID for descendants. |
+| `hydrate` | `boolean` | `true` | Controls whether the chat store fetches persisted sessions and messages on mount. Set to `false` when the app does not use the chat store. |
+
+`SnaProvider` does not render UI. It provides `{ apiUrl, sessionId }` through React context and hydrates `useChatStore` when requested.
+
+## `<SnaSession>`
+
+```tsx
+<SnaSession id="review-panel">
+  {children}
+</SnaSession>
+```
+
+| Prop | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | yes | Session ID used by descendant hooks. |
+| `children` | `React.ReactNode` | yes | Subtree scoped to this session. |
+
+`SnaSession` reuses the parent API URL and changes only the session ID for the subtree.
+
+## `useSnaContext()`
+
+```ts
+const context = useSnaContext(): { apiUrl: string; sessionId: string }
+```
+
+| Field | Description |
+| --- | --- |
+| `apiUrl` | Current SNA server base URL. |
+| `sessionId` | Active session ID for the current subtree. |

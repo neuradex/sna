@@ -1,0 +1,49 @@
+---
+title: "React provider と context"
+description: "SnaProvider、SnaSession、useSnaContext の props と返り値。"
+---
+
+# React provider と context
+
+## `<SnaProvider>`
+
+```tsx
+<SnaProvider snaUrl?: string sessionId?: string hydrate?: boolean>
+  {children}
+</SnaProvider>
+```
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `children` | `React.ReactNode` | required | SNA context を受け取る subtree です。 |
+| `snaUrl` | `string` | auto-discovery | SNA internal API server URL です。省略すると `/api/sna-port` を先に読み、失敗した場合は `http://localhost:3099` を使います。 |
+| `sessionId` | `string` | `default` | descendants の default session ID です。 |
+| `hydrate` | `boolean` | `true` | mount 時に chat store が保存済み sessions と messages を取得するかを制御します。chat store を使わない app では `false` にできます。 |
+
+`SnaProvider` は UI を render しません。React context に `{ apiUrl, sessionId }` を提供し、必要に応じて `useChatStore` を hydrate します。
+
+## `<SnaSession>`
+
+```tsx
+<SnaSession id="review-panel">
+  {children}
+</SnaSession>
+```
+
+| Prop | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | yes | descendant hooks が使う session ID です。 |
+| `children` | `React.ReactNode` | yes | この session scope が適用される subtree です。 |
+
+`SnaSession` は parent の API URL を再利用し、subtree の session ID だけを変更します。
+
+## `useSnaContext()`
+
+```ts
+const context = useSnaContext(): { apiUrl: string; sessionId: string }
+```
+
+| Field | Description |
+| --- | --- |
+| `apiUrl` | 現在の SNA server base URL です。 |
+| `sessionId` | 現在の subtree の active session ID です。 |

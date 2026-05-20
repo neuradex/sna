@@ -1,0 +1,36 @@
+---
+title: "Testing CLI"
+description: "`sna-test` command line 표면입니다."
+---
+# Testing CLI
+
+testing package는 `sna-test` binary도 노출합니다. 이 CLI는 격리된 Claude 호환 instance를 만들고 mock API를 가리키게 하며, log를 `.sna/instances/name/` 아래에 저장합니다.
+| Command | 목적 |
+| --- | --- |
+| `sna-test claude [args...]` | 격리된 test instance에서 Claude 호환 CLI argument를 실행합니다. |
+| `sna-test ls` | 알려진 test instance 목록을 조회합니다. |
+| `sna-test logs name [-f] [--api]` | instance log를 읽거나 follow합니다. |
+| `sna-test rm name|--all` | instance 하나 또는 전체를 제거합니다. |
+Programmatic workflow를 위해 `generateInstanceName`, `getInstanceDir`, `getInstancesDir`, `listInstances`, `readInstanceMeta`, `writeInstanceMeta`, `removeInstance` helper가 export됩니다.
+
+## Helper 레퍼런스
+
+### `generateInstanceName()`
+
+고유한 test instance 이름을 생성합니다. 각 test가 격리된 log와 configuration을 가져야 할 때 사용합니다.
+
+### `getInstancesDir()` / `getInstanceDir(name)`
+
+CLI harness가 사용하는 storage directory를 resolve합니다. `.sna/instances` path를 직접 하드코딩하지 말고 이 helper를 사용하십시오.
+
+### `listInstances()`
+
+디스크에 있는 test instance 목록을 반환합니다. Cleanup test나 debugging tool에 유용합니다.
+
+### `readInstanceMeta(name)` / `writeInstanceMeta(name, meta)`
+
+instance metadata를 읽고 씁니다. 격리된 CLI run에 추가 상태를 연결해야 하는 test harness에서 사용합니다.
+
+### `removeInstance(name)`
+
+test instance directory와 log를 삭제합니다. Test cleanup에서는 path를 직접 삭제하기보다 이 helper를 우선 사용하십시오.

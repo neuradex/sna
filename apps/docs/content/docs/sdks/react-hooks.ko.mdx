@@ -1,0 +1,136 @@
+---
+title: "React hooks"
+description: "useAgent, useSessionManager, useResponsiveChat의 입력과 반환값."
+---
+
+# React hooks
+
+## `useAgent(options?)`
+
+**Signature**
+
+```ts
+const agent = useAgent(options?: {
+  sessionId?: string;
+  baseUrl?: string;
+  provider?: string;
+  permissionMode?: string;
+  reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
+  providerOptions?: Record<string, unknown>;
+  onEvent?: (event: AgentEvent) => void;
+  onThinking?: (event: AgentEvent) => void;
+  onAssistant?: (event: AgentEvent) => void;
+  onToolResult?: (event: AgentEvent) => void;
+  onComplete?: (event: AgentEvent) => void;
+  onError?: (event: AgentEvent) => void;
+  onInit?: (event: AgentEvent) => void;
+});
+```
+
+**Options**
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `sessionId` | context `sessionId` | 연결할 agent session입니다. |
+| `baseUrl` | `${apiUrl}/agent` | agent HTTP API base URL입니다. |
+| `provider` | `claude-code` | start/completion에 사용할 provider입니다. |
+| `permissionMode` | provider default | tool permission mode입니다. |
+| `reasoningLevel` | provider default | provider-neutral reasoning effort입니다. |
+| `providerOptions` | none | provider-specific option입니다. Codex `serviceTier` 등이 들어갑니다. |
+| `onEvent` | none | 모든 event를 받습니다. |
+| `onThinking` | none | `thinking` event만 받습니다. |
+| `onAssistant` | none | `assistant` event만 받습니다. |
+| `onToolResult` | none | `tool_result` event만 받습니다. |
+| `onComplete` | none | `complete` event만 받습니다. |
+| `onError` | none | `error` event만 받습니다. |
+| `onInit` | none | `init` event만 받습니다. |
+
+**Returns**
+
+```ts
+{
+  connected: boolean;
+  alive: boolean;
+  start: (prompt?: string) => Promise<any>;
+  send: (message: string) => Promise<any>;
+  kill: () => Promise<void>;
+  completion: (opts: {
+    prompt: string;
+    model?: string;
+    systemPrompt?: string;
+    reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
+    providerOptions?: Record<string, unknown>;
+  }) => Promise<any>;
+}
+```
+
+**Example**
+
+```tsx
+function AssistantBox() {
+  const agent = useAgent({
+    sessionId: "default",
+    onAssistant: (event) => appendMessage(event),
+    onComplete: () => setBusy(false),
+  });
+
+  return <button onClick={() => agent.send("Review this file")}>Send</button>;
+}
+```
+
+**Notes**
+
+- mount 시 SSE event stream에 연결합니다.
+- `send`는 `/agent/send`를 호출합니다.
+- `start`는 `/agent/start`를 호출하고 성공하면 `alive`를 `true`로 둡니다.
+
+## `useSessionManager(pollInterval?)`
+
+**Signature**
+
+```ts
+const manager = useSessionManager(pollInterval?: number);
+```
+
+**Input**
+
+| Parameter | Default | Description |
+| --- | --- | --- |
+| `pollInterval` | `3000` | session 목록 자동 refresh 주기입니다. `0`이면 polling하지 않습니다. |
+
+**Returns**
+
+```ts
+{
+  sessions: SessionInfo[];
+  loading: boolean;
+  createSession: (opts?: { label?: string; cwd?: string }) => Promise<string | null>;
+  killSession: (id: string) => Promise<void>;
+  deleteSession: (id: string) => Promise<void>;
+  refresh: () => Promise<void>;
+}
+```
+
+**Example**
+
+```tsx
+const { sessions, createSession, deleteSession } = useSessionManager(5000);
+const id = await createSession({ label: "New task", cwd: "/repo" });
+if (id) console.log("created", id);
+```
+
+## `useResponsiveChat()`
+
+**Signature**
+
+```ts
+const { mode } = useResponsiveChat(): { mode: "side-by-side" | "overlay" | "fullscreen" }
+```
+
+**Behavior**
+
+| Width | Mode | Meaning |
+| --- | --- | --- |
+| `>= 1024px` | `side-by-side` | main content 옆에 chat panel을 둡니다. |
+| `768px - 1023px` | `overlay` | content 위에 chat panel을 띄웁니다. |
+| `< 768px` | `fullscreen` | chat이 viewport 전체를 덮습니다. |

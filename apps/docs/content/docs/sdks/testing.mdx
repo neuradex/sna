@@ -1,47 +1,20 @@
 ---
-title: '@sna-sdk/testing'
-description: Mock Anthropic API + sna-test CLI for isolated runs.
-icon: FlaskConical
+title: "Testing SDK"
+description: "Mock provider server and CLI harness for deterministic SNA integration tests."
 ---
+# Testing SDK
 
-Real LLM calls in CI burn budget. `@sna-sdk/testing` ships a mock
-Anthropic Messages API that implements the streaming SSE format, plus
-a `sna-test` CLI that wraps Claude Code with the mock and an
-isolated `CLAUDE_CONFIG_DIR`.
+`@sna-sdk/testing` exists so tests do not need a real Anthropic or Claude account. It provides a local Anthropic-compatible API server and a CLI wrapper that isolates configuration and logs per instance.
 
-## Mock Anthropic API
+Use it for smoke tests, provider-adapter tests, and UI flows that need predictable agent output.
 
-Spin it up, then point Claude Code at it via `ANTHROPIC_BASE_URL`:
+## Install
 
-```ts
-import { startMockAnthropic } from "@sna-sdk/testing";
+~~~bash
+pnpm add @sna-sdk/testing
+~~~
 
-const mock = await startMockAnthropic({ port: 0 });
-process.env.ANTHROPIC_BASE_URL = mock.url;
+## Public surfaces
 
-// later
-await mock.stop();
-```
-
-The mock echoes user text reversed (`"hello"` → `"olleh"`) so test
-assertions stay deterministic.
-
-## sna-test CLI
-
-```bash
-pnpm sna-test claude -- --prompt "echo back"
-```
-
-Runs Claude Code wrapped in the mock API and an isolated config dir.
-Test runs don't pollute your dev account.
-
-## Patterns
-
-- Spin up a fresh `SessionManager` per test, with `dbPath` in
-  `os.tmpdir()`. Keeps suites isolated.
-- For provider-level tests, use the mock-codex-app-server stub
-  shipped in `packages/core/test/mock-codex-app-server.ts` (the same
-  one our own provider tests use).
-- Don't mock at the provider layer for integration tests. Mock at the
-  transport layer (Anthropic API, Codex app-server stdio) so the
-  provider code paths execute end-to-end.
+- [testing-mock-api](/docs/sdks/testing-mock-api)
+- [testing-cli](/docs/sdks/testing-cli)

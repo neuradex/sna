@@ -1,22 +1,22 @@
 ---
 title: 権限フロー
-description: プロバイダごとに分岐しない承認 UI 配線。
+description: プロバイダごとに分岐しない承認 UI 配線です。
 icon: ShieldCheck
 ---
 
-ユーザに見えるパターンはプロバイダ横断で同じだ: コンシューマアプリ
-が権限イベントを購読し、ダイアログを出し、評決を post-back する。
+ユーザーに見えるパターンはプロバイダ横断で同じです。コンシューマアプリ
+が権限イベントを購読し、ダイアログを出し、評決を post-back します。
 SNA が Claude の PreToolUse フックと Codex の JSON-RPC 承認を 1 つの
-イベントの背後に隠す。
+イベントの背後に隠します。
 
 ## サーバ側
 
-エージェント起動時に権限モードを選ぶ:
+エージェント起動時に権限モードを選びます。
 
 ```ts
 await client.agent.start(sessionId, {
   provider: "claude-code",
-  permissionMode: "default", // prompt する; 代替: "acceptEdits" | "bypassPermissions"
+  permissionMode: "default", // プロンプト表示; 代替: "acceptEdits" | "bypassPermissions"
 });
 ```
 
@@ -32,13 +32,13 @@ client.permissions.onRequest(async ({ session, tool, input, decisionId }) => {
 ```
 
 同じコールバックが Claude PreToolUse フックと Codex `approval/request`
-通知の両方に発火する。
+通知の両方に発火します。
 
 ## Safe-tool allowlist
 
-設定された allowlist にマッチするツールはプロンプトを完全に飛ばす。
+設定された allowlist にマッチするツールはプロンプトを完全にスキップします。
 デフォルトリストには `Read`、`Glob`、`Grep`、`LS` などの read-only
-操作が含まれる。拡張するには:
+操作が含まれます。拡張するには次のように指定します。
 
 ```ts
 await client.agent.start(sessionId, {
@@ -47,15 +47,15 @@ await client.agent.start(sessionId, {
 });
 ```
 
-パターンは Claude Code の tool-pattern 構文に従う。同じ文字列リスト
+パターンは Claude Code の tool-pattern 構文に従います。同じ文字列リスト
 がプロバイダ別に正規化されるので、コンシューマ設定をプロバイダで
-分岐させる必要はない。
+分岐させる必要はありません。
 
 ## レンダラパターン (Electron / React)
 
-バンドル済みの `<SnaChatUI>` は権限ダイアログを即座に提供する。
-アプリの周りに `<SnaProvider>` を巻けばプロンプトが自動的に流れる。
-カスタム UI なら:
+バンドル済みの `<SnaChatUI>` は権限ダイアログを即座に提供します。
+アプリの周りに `<SnaProvider>` を巻けばプロンプトが自動的に流れます。
+カスタム UI を使う場合は、次のパターンを参考にしてください。
 
 ```tsx
 function PermissionGuard({ children }: React.PropsWithChildren) {

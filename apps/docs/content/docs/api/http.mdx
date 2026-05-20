@@ -4,74 +4,80 @@ description: Every server endpoint, grouped by surface.
 icon: Network
 ---
 
-The HTTP API is grouped into three surfaces: **sessions** (CRUD on the
-session record), **agent** (lifecycle and control of the spawned
-process), and **permissions** (the approval flow).
+The HTTP API is grouped by surface. Each path below links to a dedicated endpoint specification page.
+
+## System
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | [`/health`](/docs/api/endpoints/health/get) | Health check |
+| `GET` | [`/api/sna-port`](/docs/api/endpoints/api/sna-port/get) | Read the current SNA API port |
 
 ## Sessions
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `POST` | `/agent/sessions` | Create a session record (no process yet) |
-| `GET` | `/agent/sessions` | List sessions (`?include=chain` for runtime history) |
-| `PATCH` | `/agent/sessions/:id` | Update label, meta, cwd |
-| `DELETE` | `/agent/sessions/:id` | Drop the session (history removed) |
+| `POST` | [`/agent/sessions`](/docs/api/endpoints/agent/sessions/post) | Create a session record |
+| `GET` | [`/agent/sessions`](/docs/api/endpoints/agent/sessions/get) | List sessions |
+| `PATCH` | [`/agent/sessions/{id}`](/docs/api/endpoints/agent/sessions/id/patch) | Update label, meta, cwd |
+| `DELETE` | [`/agent/sessions/{id}`](/docs/api/endpoints/agent/sessions/id/delete) | Delete a session and history |
 
 ## Agent lifecycle
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `POST` | `/agent/start` | Spawn the agent into a session |
-| `POST` | `/agent/send` | Send a message (supports `images[]`) |
-| `POST` | `/agent/resume` | Restart with canonical history replayed for the provider |
-| `POST` | `/agent/restart` | Re-spawn with the same `Session.config` (optional overrides) |
-| `PATCH` | `/agent/session` | Unified mutator for `{cwd, model, permissionMode}` |
-| `POST` | `/agent/interrupt` | Cancel the current turn (process stays alive) |
-| `POST` | `/agent/set-model` | Change model at runtime |
-| `POST` | `/agent/set-permission-mode` | Change permission mode at runtime |
-| `POST` | `/agent/kill` | Kill the agent (session record stays) |
-| `GET` | `/agent/status` | Session status snapshot |
+| `POST` | [`/agent/start`](/docs/api/endpoints/agent/start/post) | Spawn an agent into a session |
+| `POST` | [`/agent/send`](/docs/api/endpoints/agent/send/post) | Send a message |
+| `POST` | [`/agent/restart`](/docs/api/endpoints/agent/restart/post) | Kill and re-spawn |
+| `POST` | [`/agent/resume`](/docs/api/endpoints/agent/resume/post) | Resume with normalized history |
+| `POST` | [`/agent/interrupt`](/docs/api/endpoints/agent/interrupt/post) | Cancel the current turn |
+| `POST` | [`/agent/set-model`](/docs/api/endpoints/agent/set-model/post) | Change model at runtime |
+| `POST` | [`/agent/set-permission-mode`](/docs/api/endpoints/agent/set-permission-mode/post) | Change permission mode at runtime |
+| `PATCH` | [`/agent/session`](/docs/api/endpoints/agent/session/patch) | Unified config mutator |
+| `POST` | [`/agent/kill`](/docs/api/endpoints/agent/kill/post) | Kill the agent process |
+| `GET` | [`/agent/status`](/docs/api/endpoints/agent/status/get) | Status snapshot |
 
 ## One-shot calls
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `POST` | `/agent/run-once` | Spawn → run → return result → cleanup |
-| `POST` | `/agent/run-once/stream` | Same lifecycle, SSE feed of `AgentEvent` |
-| `POST` | `/agent/completion` | Lightweight one-shot completion (no session) |
-| `POST` | `/agent/list-models` | Provider model introspection |
-| `GET` | `/agent/events` | SSE event stream for a session |
+| `POST` | [`/agent/run-once`](/docs/api/endpoints/agent/run-once/post) | Run once and return result |
+| `POST` | [`/agent/run-once/stream`](/docs/api/endpoints/agent/run-once/stream/post) | Run once with SSE events |
+| `POST` | [`/agent/completion`](/docs/api/endpoints/agent/completion/post) | One-shot completion |
 
 ## Permissions
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `POST` | `/agent/permission-request` | Blocking: submit a request, wait for verdict |
-| `POST` | `/agent/permission-respond` | UI side: approve or deny |
-| `GET` | `/agent/permission-pending` | List pending (global or per-session) |
+| `POST` | [`/agent/permission-request`](/docs/api/endpoints/agent/permission-request/post) | Submit and wait for approval |
+| `POST` | [`/agent/permission-respond`](/docs/api/endpoints/agent/permission-respond/post) | Approve or deny |
+| `GET` | [`/agent/permission-pending`](/docs/api/endpoints/agent/permission-pending/get) | List pending requests |
+
+## Models and events
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | [`/agent/list-models`](/docs/api/endpoints/agent/list-models/post) | Provider model introspection |
+| `GET` | [`/agent/events`](/docs/api/endpoints/agent/events/get) | Session event SSE stream |
 
 ## Chat (canonical history surface)
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/chat/sessions` | List chat sessions from DB |
-| `POST` | `/chat/sessions` | Create chat session |
-| `DELETE` | `/chat/sessions/:id` | Delete chat session |
-| `GET` | `/chat/sessions/:id/messages` | List messages (`since`, `limit`) |
-| `POST` | `/chat/sessions/:id/messages` | Append a chat message |
-| `DELETE` | `/chat/sessions/:id/messages` | Clear messages |
-| `GET` | `/chat/images/:sessionId/:filename` | Serve an embed |
+| `GET` | [`/chat/sessions`](/docs/api/endpoints/chat/sessions/get) | List chat sessions from DB |
+| `POST` | [`/chat/sessions`](/docs/api/endpoints/chat/sessions/post) | Create chat session |
+| `DELETE` | [`/chat/sessions/{id}`](/docs/api/endpoints/chat/sessions/id/delete) | Delete chat session |
+| `GET` | [`/chat/sessions/{id}/messages`](/docs/api/endpoints/chat/sessions/id/messages/get) | List messages |
+| `POST` | [`/chat/sessions/{id}/messages`](/docs/api/endpoints/chat/sessions/id/messages/post) | Append message |
+| `DELETE` | [`/chat/sessions/{id}/messages`](/docs/api/endpoints/chat/sessions/id/messages/delete) | Clear messages |
+| `GET` | [`/chat/images/{sessionId}/{filename}`](/docs/api/endpoints/chat/images/sessionid/filename/get) | Serve an image embed |
 
 ## Response shape
 
-Every response follows the same envelope, generated from
-`server/api-types.ts` so HTTP and WS can't drift:
+Most SDK-facing responses are wrapped by `server/api-types.ts`, while streaming and binary endpoints use their wire-native response bodies. The live OpenAPI document remains the source of truth for exact schemas.
 
 ```ts
 type ApiResponse<T> =
   | { status: "ok"; data: T }
   | { status: "error"; message: string; code?: string };
 ```
-
-Routes that emit events (start, send, run-once) push to the session's
-event buffer; subscribe via WS or SSE to read them.

@@ -1,86 +1,22 @@
 ---
-title: '@sna-sdk/core'
-description: サーバ、session manager、providers、completion() / runOnce().
-icon: Server
+title: "Core SDK"
+description: "SNA を埋め込むためのランタイム、サーバー、ランチャー、設定サーフェスです。"
 ---
+# Core SDK
 
-ホスト側パッケージ。SQLite DB を所有し、プロバイダプロセスを spawn
-し、HTTP/WS ルートを露出する。
+`@sna-sdk/core` は最も低レベルのパッケージです。別プロセス内で SNA を実行する場合、独自サーバーから SNA を公開する場合、provider/runtime primitive を直接扱う場合に使います。
 
-## サブパス export
+Core は React を前提にせず、ブラウザクライアントも必要としません。サーバー側のランタイム契約を担当します。
 
-| import | 用途 |
-|--------|------|
-| `@sna-sdk/core` | トップレベル: `completion`、`runOnce`、`getConfig`、`setConfig` |
-| `@sna-sdk/core/node` | 普通の Node ホスト用 `startSnaServer()` |
-| `@sna-sdk/core/electron` | asar-aware パス解決つき `startSnaServer()` |
-| `@sna-sdk/core/server` | `createSnaApp`、`attachWebSocket`、`SessionManager`、`runOnce` |
-| `@sna-sdk/core/providers` | `getProvider`、`getRuntimePool` |
-| `@sna-sdk/core/db/schema` | 直接 SQLite アクセス用 `getDb()` (上級者向け) |
+## Install
 
-## 単発 API
+~~~bash
+pnpm add @sna-sdk/core
+~~~
 
-### `completion(opts)`
+## Public surfaces
 
-最も軽い呼び出し: セッションもイベントパイプラインもなく、単一の
-プロンプト → 文字列結果。
-
-```ts
-import { completion } from "@sna-sdk/core";
-
-const result = await completion({
-  prompt: "Summarize this in one sentence: ...",
-  provider: "claude-code",
-  model: "claude-haiku-4-5",
-  reasoningLevel: 0,                 // 0..5、プロバイダ非依存
-  onDelta: (chunk) => render(chunk), // オプションのストリーミング side channel
-});
-// result.text, result.usage, result.costUsd, result.durationMs
-```
-
-各プロバイダが自分に最適な単発経路を選ぶ:
-- Claude: `claude -p`、stateless。
-- Codex: cwd にデーモンがあればプール済み `app-server` thread、
-  なければ `codex exec --json --ephemeral`。
-- OpenCode: プール済み `opencode serve` セッション、なければ
-  ephemeral。
-
-### `runOnce(sessionManager, opts)`
-
-単一プロンプト用のフルセッション機構: 一時セッション、フルイベント
-パイプライン、自動クリーンアップ。単発実行でも `tool_use` /
-`thinking` イベントが必要な場合に有用。
-
-```ts
-import { runOnce } from "@sna-sdk/core/server";
-
-await runOnce(sessionManager, {
-  message: "List the files in this directory.",
-  provider: "codex",
-  onEvent: (event) => render(event),
-});
-```
-
-`onDelta` (テキストチャンク) と `onEvent` (フルイベントストリーム)
-は両方オプションでインプロセス専用。ネットワークコンシューマ向けの
-対応 SSE エンドポイントは `POST /agent/run-once/stream`。クライアント
-側ラッパーは `agent.runOnceStream(opts)`。
-
-## サーバエントリ
-
-```ts
-import { startSnaServer } from "@sna-sdk/core/node";
-
-const sna = await startSnaServer({
-  port: 3099,
-  dbPath: "./data/sna.db",
-  maxSessions: 20,
-  permissionMode: "acceptEdits",
-  onLog: (line) => console.log("[sna]", line),
-});
-
-await sna.stop();
-```
-
-Electron 版とライフサイクル詳細は [クイックスタート →
-組み込み](/docs/quickstart/embedding) 参照。
+- [core-runtime](/ja/docs/sdks/core-runtime)
+- [core-server](/ja/docs/sdks/core-server)
+- [core-launchers](/ja/docs/sdks/core-launchers)
+- [core-config](/ja/docs/sdks/core-config)

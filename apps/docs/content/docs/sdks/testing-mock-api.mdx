@@ -1,0 +1,78 @@
+---
+title: "Testing Mock API"
+description: "Usage for startMockAnthropicServer, runOneshot, and MockServer."
+---
+
+# Testing Mock API
+
+## `startMockAnthropicServer(options?)`
+
+```ts
+const server = await startMockAnthropicServer(options?: { port?: number }): Promise<MockServer>
+```
+
+```ts
+type MockServer = {
+  url: string;
+  port: number;
+  logs: MockLogEntry[];
+  close: () => Promise<void>;
+};
+```
+
+```ts
+type MockLogEntry = {
+  request: unknown;
+  response: unknown;
+  timestamp: number;
+};
+```
+
+```ts
+import { startMockAnthropicServer } from "@sna-sdk/testing";
+
+const mock = await startMockAnthropicServer();
+process.env.ANTHROPIC_BASE_URL = mock.url;
+
+try {
+  // Run code that expects an Anthropic-compatible API.
+} finally {
+  await mock.close();
+}
+```
+
+Behavior:
+
+- Provides a `/v1/messages` endpoint.
+- Normal user text receives deterministic responses.
+- If tools are declared and the prompt contains `[tool:Name]`, the mock can emit a tool-use response.
+
+## `runOneshot(options)`
+
+```ts
+await runOneshot(options: Record<string, unknown>): Promise<unknown>
+```
+
+Use this when a test should exercise the one-shot execution path without starting the full CLI harness.
+
+## Instance helpers
+
+### `generateInstanceName()`
+
+Creates a unique test instance name. Use it to avoid log/config directory collisions in parallel tests.
+
+### `getInstancesDir()` / `getInstanceDir(name)`
+
+Resolve the storage path used by the testing CLI. Prefer these helpers over hard-coded `.sna/instances` paths.
+
+### `listInstances()`
+
+Returns test instance metadata stored on disk. Useful for debug UIs and cleanup scripts.
+
+### `readInstanceMeta(name)` / `writeInstanceMeta(name, meta)`
+
+Read and write test instance metadata. Use them when extra state must be attached to an isolated CLI run.
+
+### `removeInstance(name)`
+
+Removes an instance directory and its logs. Use it during test cleanup.

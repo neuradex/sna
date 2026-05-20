@@ -4,14 +4,14 @@ description: 단발 프롬프트에서 텍스트를 스트리밍하는 세 가�
 icon: WavesHorizontal
 ---
 
-SNA는 단발 호출에 대한 스트리밍을 세 가지 형태로 노출한다. 호스트
+SNA는 단발 호출에 대한 스트리밍을 세 가지 형태로 노출합니다. 호스트
 (인프로세스 vs 네트워크)와 모양(텍스트 전용 vs 전체 이벤트)에 따라
-고르면 된다.
+선택하면 됩니다.
 
 ## 1. 인프로세스, 텍스트 전용: `completion({ onDelta })`
 
-가장 싸고 가장 간단함. 자동완성 미리보기나 타자기 UX처럼 텍스트
-델타만 필요할 때.
+가장 비용이 낮고 가장 간단한 방식입니다. 자동완성 미리보기나 타자기 UX처럼
+텍스트 델타만 필요할 때 사용합니다.
 
 ```ts
 import { completion } from "@sna-sdk/core";
@@ -24,17 +24,17 @@ await completion({
 });
 ```
 
-Promise는 여전히 최종 합쳐진 텍스트와 사용량을 함께 resolve함.
-`onDelta`는 side channel이지 대체물이 아니다.
+Promise는 여전히 최종 합쳐진 텍스트와 사용량을 함께 resolve합니다.
+`onDelta`는 side channel이지 대체물이 아닙니다.
 
-`claude-code`와 `codex` (풀과 ephemeral 양쪽) 둘 다 배선됨.
+`claude-code`와 `codex` (풀과 ephemeral 양쪽) 둘 다 배선되어 있습니다.
 OpenCode SDK 호출은 현재 single-shot이라 거기서 콜백은 문서화된
-no-op.
+no-op입니다.
 
 ## 2. 인프로세스, 전체 이벤트 스트림: `runOnce({ onEvent })`
 
 단발 실행에서 `tool_use` / `thinking` / `permission_needed` 이벤트도
-필요할 때.
+필요할 때 사용합니다.
 
 ```ts
 import { runOnce } from "@sna-sdk/core/server";
@@ -49,7 +49,7 @@ await runOnce(sessionManager, {
 });
 ```
 
-비 텍스트 이벤트가 필요 없으면 `onDelta` 전용 변형도 받음.
+비 텍스트 이벤트가 필요 없으면 `onDelta` 전용 변형도 받을 수 있습니다.
 
 ## 3. 네트워크: SSE 위의 `runOnceStream`
 
@@ -66,7 +66,7 @@ for await (const event of client.agent.runOnceStream({
 ```
 
 `POST /agent/run-once/stream` (Server-Sent Events) 위에 구현. 스트림은
-실행의 최종 `complete` / `error` 이벤트 뒤에 닫힌다.
+실행의 최종 `complete` / `error` 이벤트 뒤에 닫힙니다.
 
 ## 어떤 걸 써야 하나
 
@@ -75,4 +75,4 @@ for await (const event of client.agent.runOnceStream({
 | SNA 서버와 같은 프로세스, 텍스트만 | `completion({ onDelta })` |
 | 같은 프로세스, 전체 이벤트 스트림 | `runOnce({ onEvent })` |
 | 원격 (브라우저, 별도 Node 호스트) | `runOnceStream()` |
-| 장기 실행 멀티 턴 UI | 대신 세션을 열고 WS `agent.subscribe` 쓰기 |
+| 장기 실행 멀티 턴 UI | 세션을 열고 WS `agent.subscribe` 사용 |

@@ -1,0 +1,111 @@
+---
+title: SNA가 뭔가요?
+description: SNA가 무엇인지, 어떤 문제를 해결하는지, 누구를 위한 것인지 설명합니다.
+icon: CircleQuestionMark
+---
+
+**SNA** (*Skills-Native Application*)는 에이전트 런타임 위에 제품을
+만들 때 사용하는 SDK입니다. LLM API를 직접 호출하는 대신, 앱이 작은 서버에
+요청하면 그 서버가 장기 실행되는 **Claude Code**, **Codex**,
+**OpenCode** 프로세스를 관리합니다. SNA는 이 셋 전부에 통하는 하나의
+정규화된 API를 제공합니다.
+
+SNA가 왜 시작되었는지는 **[출발점](/ko/docs/introduction/philosophy/origin)** 에
+정리되어 있습니다.
+
+## 구조
+
+```
+your app
+   │
+   │  HTTP (request/response, ordering)
+   │  WS   (live events, fanout)
+   ▼
+SNA server  ──spawn──►  claude-code | codex | opencode
+   │
+   ▼
+SQLite (canonical history)
+```
+
+서버 하나를 띄우고 **세션**을 한 개 이상 엽니다. 각 세션에서는 실제
+CLI 바이너리(`claude`, `codex`, `opencode`)가 자식 프로세스로 spawn됩니다.
+SNA는 각 런타임의 이벤트, 히스토리, 권한 모델을 하나의 형태로 정규화하므로
+소비자 앱이 프로바이더별로 분기할 필요가 없습니다.
+
+## 어떤 문제를 푸는지
+
+공식 LLM API는 무상태 completion에는 잘 맞지만, 다음과 같은 요구가 생기면
+구현이 복잡해집니다.
+
+- **툴, 파일 편집, 승인이 있는 장기 실행 에이전트**: 결국 Claude
+  Code나 Codex의 루프를 직접 재구현하게 됩니다.
+- **같은 에이전트를 다른 런타임으로 전환** (코드 편집은 Claude, 이미지
+  생성은 Codex, 비용 최적화는 OpenCode): 런타임을 바꿀 때마다 통합
+  코드를 다시 작성해야 합니다.
+- **런타임 교체에도 살아남는 대화 히스토리**: 네이티브 포맷들이 서로
+  호환되지 않기 때문에, 하나의 프로바이더를 계속 사용하거나 교체할 때마다
+  맥락을 잃는 선택지밖에 남지 않습니다.
+- **유저에게 같은 모양으로 보이는 권한 흐름**: Claude의 PreToolUse
+  훅과 Codex의 JSON-RPC 승인은 프로토콜과 UX가 서로 다릅니다.
+
+SNA는 *"실제 CLI를 그대로 사용한다"* 는 방향으로 이 문제를 해결합니다.
+CLI들은 이미 어려운 일(툴 디스패치, 샌드박싱, 권한 게이팅, 히스토리)을
+처리합니다. SNA는 이를 감싸서 하나의 소비자 코드베이스가
+세 런타임 모두에서 동작하게 합니다.
+
+## 무엇을 받게 되는지
+
+- **하나의 정규화된 대화 모델.** 메시지는 두 축의 평탄한 블록으로
+  저장됩니다: `actor` (`user`/`assistant`/`system`) × `kind`
+  (`text`/`thinking`/`tool_use`/`tool_result`/`status`/`error`).
+  프로바이더 네이티브 모양은 필요할 때 여기서 파생됩니다. 설계 배경은
+  **[Actor와 kind](/ko/docs/introduction/philosophy/actor-kind)** 를 참고하세요.
+- **3계층 어트리뷰션.** 모든 블록이 `provider` (런타임),
+  `modelProvider` (벤더), `model` (슬러그)을 기록합니다. 세션 도중 어떤
+  걸 바꿔도 행 단위 진실이 유지됩니다.
+- **정규화된 이벤트 프로토콜.** WebSocket 또는 SSE 위 15가지 이벤트
+  타입: `assistant_delta`, `tool_use`, `permission_needed`,
+  `complete` 등.
+- **정규화된 권한 흐름.** 하나의 API가 Claude의 PreToolUse 훅과
+  Codex의 JSON-RPC 승인 양쪽을 모두 노출합니다. 소비자 앱의 승인
+  다이얼로그는 프로바이더에 따라 바뀌지 않습니다.
+- **재시작 없이 런타임 제어.** 스레드 도중 모델, 권한 모드, 작업
+  디렉토리를 바꿀 수 있습니다. Restart와 resume이 정규화 블록에서
+  프로바이더 네이티브 히스토리를 재구성합니다.
+- **일급 단발 API.** `completion()`과 `runOnce()`는 세션 기계 장치
+  없이 단발 호출을 처리합니다. 자동완성이나 채팅 이름 짓기처럼 짧은
+  단일 프롬프트 작업에 적합하며, 스트리밍 콜백도 옵션으로 사용할 수
+  있습니다.
+
+## 누구를 위한 것
+
+- **에이전트 CLI 위에 채팅/코파일럿을 올리는 제품 빌더.** SNA는
+  통합 경계 역할을 합니다. 앱은 UI를 맡고, SNA는 런타임 연결을 맡습니다.
+- **멀티 런타임 앱.** Claude Code, Codex, OpenCode 사이에서 유저가
+  고르게(혹은 자동 라우팅) 하고 싶으면서, 프로바이더별로 통합 코드를
+  쪼개고 싶지 않은 경우.
+- **Electron / 데스크톱 앱.** 에이전트를 로컬에 임베드합니다. 런처가
+  서버를 자식 프로세스로 fork하고, asar-unpacked 경로 처리, 네이티브
+  바인딩 위치 찾기까지 합니다.
+
+## 무엇이 *아닌지*
+
+- **호스팅된 LLM 엔드포인트가 아닙니다.** SNA는 자신이 도는 호스트에서
+  실제 CLI를 spawn합니다. 바이너리와 인증 정보는 사용자가 제공합니다.
+- **에이전트 프레임워크가 아닙니다.** 에이전트를 어떻게 만들지 알려주지
+  않습니다. 그 역할은 Claude Code / Codex / OpenCode가 담당하며, SNA는
+  앱이 해당 런타임을 제어할 수 있게 해주는 계층입니다.
+- **하위 CLI 동작을 숨기는 래퍼가 아닙니다.** Claude Code가 파일을
+  편집하면 실제 편집이 보입니다. Codex가 이미지를 생성하면 실제 파일
+  경로를 받습니다. SNA는 형태를 정규화하지만 의미를 바꾸지는 않습니다.
+
+SNA를 Zed의 Agent Client Protocol과 비교하고 있다면
+**[SNA와 ACP](/ko/docs/introduction/philosophy/acp)** 를 참고하세요.
+
+## 다음 행선지
+
+5분짜리 실습은 **[Quick Start](/ko/docs/introduction)** 에서 확인할 수
+있습니다. 서버를 부팅하고, 세션을 열고, 프롬프트를 보내고, 이벤트를
+확인하는 흐름을 다룹니다. 그 다음에는 **[Concepts](/ko/docs/introduction/concepts)** 에서
+세션 모델, 정규화 히스토리, 프로바이더를 더 자세히 살펴보세요.
+와이어 레퍼런스는 **[API Spec](/ko/docs/api)** 에 정리되어 있습니다.

@@ -1,0 +1,48 @@
+---
+title: "React hooks"
+description: "Inputs and return values for useAgent, useSessionManager, and useResponsiveChat."
+---
+
+# React hooks
+
+## `useAgent(options?)`
+
+```ts
+const agent = useAgent(options?: {
+  sessionId?: string;
+  baseUrl?: string;
+  provider?: string;
+  permissionMode?: string;
+  reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
+  providerOptions?: Record<string, unknown>;
+  onEvent?: (event: AgentEvent) => void;
+  onThinking?: (event: AgentEvent) => void;
+  onAssistant?: (event: AgentEvent) => void;
+  onToolResult?: (event: AgentEvent) => void;
+  onComplete?: (event: AgentEvent) => void;
+  onError?: (event: AgentEvent) => void;
+  onInit?: (event: AgentEvent) => void;
+});
+```
+
+Returns `{ connected, alive, start, send, kill, completion }`. The hook connects to the SSE event stream on mount. `start` calls `/agent/start`; `send` calls `/agent/send`; `completion` calls `/agent/completion`.
+
+## `useSessionManager(pollInterval?)`
+
+```ts
+const manager = useSessionManager(pollInterval?: number);
+```
+
+Returns `{ sessions, loading, createSession, killSession, deleteSession, refresh }`. `pollInterval` defaults to `3000`; pass `0` to disable polling.
+
+## `useResponsiveChat()`
+
+```ts
+const { mode } = useResponsiveChat(): { mode: "side-by-side" | "overlay" | "fullscreen" }
+```
+
+| Width | Mode | Meaning |
+| --- | --- | --- |
+| `>= 1024px` | `side-by-side` | Chat panel sits beside the main content. |
+| `768px - 1023px` | `overlay` | Chat panel overlays the content. |
+| `< 768px` | `fullscreen` | Chat covers the full viewport. |

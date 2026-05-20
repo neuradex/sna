@@ -1,0 +1,44 @@
+---
+title: "Core ランチャー"
+description: "SNA サーバーを起動するための Node および Electron 起動サーフェスです。"
+---
+# Core ランチャー
+
+ランチャーは host application のライフサイクル内で SNA を一緒に起動する必要がある場合に使います。port 選択、process 処理、Electron packaging の詳細を隠蔽します。
+| import path | サーフェス | 目的 |
+| --- | --- | --- |
+| `@sna-sdk/core/node` | `startSnaServer(options?)` | Node host から SNA を起動します。 |
+| `@sna-sdk/core/electron` | `startSnaServer(options?)` | Electron host から SNA を起動します。 |
+| `@sna-sdk/core/electron` | `startSnaServerInProcess(options?)` | より密な統合のため現在の process 内で SNA を実行します。 |
+| `@sna-sdk/core/electron` | `resolveClaudeCli`, `validateClaudePath`, `cacheClaudePath` | Claude Code CLI のインストールを検出、検証します。 |
+Launcher handle は、サーバー停止と、検出された URL を `@sna-sdk/client` または `@sna-sdk/react` へ渡すために十分な情報を公開します。
+
+## 関数リファレンス
+
+### `@sna-sdk/core/node` の `startSnaServer(options?)`
+
+通常の Node host から SNA を開始し、connection information と shutdown behavior を持つ handle を返します。CLI、desktop host、local development process に使います。
+
+### `@sna-sdk/core/electron` の `startSnaServer(options?)`
+
+Electron host から SNA を開始します。Packaged application の制約を考慮するため、Electron main process では Node launcher よりこちらを優先してください。
+
+### `startSnaServerInProcess(options?)`
+
+現在の Electron process 内で SNA を実行します。Process isolation より密な lifecycle integration が重要な場合のみ使ってください。
+
+### `resolveClaudeCli(options?)`
+
+利用可能な Claude Code CLI path を探します。Provider を開始できない理由を setup または diagnostics 画面で説明する場合に使います。
+
+### `validateClaudePath(path)`
+
+特定の Claude CLI path が利用可能か確認します。ユーザー指定の CLI path を保存する前に使ってください。
+
+### `cacheClaudePath(path)`
+
+解決済み Claude CLI path を後続 launch のため保存します。Validation に成功したあと使ってください。
+
+### `parseCommandVOutput(output)`
+
+shell command discovery output を normalized path result に parse します。主に CLI resolution internals と diagnostics に有用です。

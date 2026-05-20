@@ -1,77 +1,83 @@
 ---
 title: HTTP ルート
-description: すべてのサーバエンドポイント、表面別にグループ化。
+description: すべてのサーバエンドポイントを表面別にグループ化します。
 icon: Network
 ---
 
-HTTP API は 3 つの表面でまとめられる: **セッション** (セッションレコ
-ードの CRUD)、**エージェント** (spawn されたプロセスのライフサイクル
-と制御)、**権限** (承認フロー)。
+HTTP API は表面別にグループ化されています。以下の各パスはエンドポイント別の詳細仕様ページへリンクします。
+
+## システム
+
+| メソッド | パス | 用途 |
+|--------|------|---------|
+| `GET` | [`/health`](/ja/docs/api/endpoints/health/get) | Health check |
+| `GET` | [`/api/sna-port`](/ja/docs/api/endpoints/api/sna-port/get) | 現在の SNA API ポート取得 |
 
 ## セッション
 
 | メソッド | パス | 用途 |
-|----------|------|------|
-| `POST` | `/agent/sessions` | セッションレコード作成 (まだプロセスなし) |
-| `GET` | `/agent/sessions` | セッション一覧 (`?include=chain` で runtime 履歴も) |
-| `PATCH` | `/agent/sessions/:id` | ラベル、meta、cwd を更新 |
-| `DELETE` | `/agent/sessions/:id` | セッション削除 (履歴も削除) |
+|--------|------|---------|
+| `POST` | [`/agent/sessions`](/ja/docs/api/endpoints/agent/sessions/post) | セッションレコード作成 |
+| `GET` | [`/agent/sessions`](/ja/docs/api/endpoints/agent/sessions/get) | セッション一覧取得 |
+| `PATCH` | [`/agent/sessions/{id}`](/ja/docs/api/endpoints/agent/sessions/id/patch) | label、meta、cwd を更新 |
+| `DELETE` | [`/agent/sessions/{id}`](/ja/docs/api/endpoints/agent/sessions/id/delete) | セッションと履歴を削除 |
 
 ## エージェントライフサイクル
 
 | メソッド | パス | 用途 |
-|----------|------|------|
-| `POST` | `/agent/start` | セッション内でエージェントを spawn |
-| `POST` | `/agent/send` | メッセージ送信 (`images[]` 対応) |
-| `POST` | `/agent/resume` | プロバイダ用に正規化履歴を再構築して再起動 |
-| `POST` | `/agent/restart` | 同じ `Session.config` で re-spawn (オプション上書き可能) |
-| `PATCH` | `/agent/session` | `{cwd, model, permissionMode}` の統一 mutator |
-| `POST` | `/agent/interrupt` | 現在のターンを取り消し (プロセスは維持) |
-| `POST` | `/agent/set-model` | ランタイム中にモデル変更 |
-| `POST` | `/agent/set-permission-mode` | ランタイム中に権限モード変更 |
-| `POST` | `/agent/kill` | エージェント終了 (セッションレコードは残る) |
-| `GET` | `/agent/status` | セッション状態スナップショット |
+|--------|------|---------|
+| `POST` | [`/agent/start`](/ja/docs/api/endpoints/agent/start/post) | セッション内でエージェントを spawn |
+| `POST` | [`/agent/send`](/ja/docs/api/endpoints/agent/send/post) | メッセージ送信 |
+| `POST` | [`/agent/restart`](/ja/docs/api/endpoints/agent/restart/post) | 終了後に re-spawn |
+| `POST` | [`/agent/resume`](/ja/docs/api/endpoints/agent/resume/post) | 正規化履歴で再開 |
+| `POST` | [`/agent/interrupt`](/ja/docs/api/endpoints/agent/interrupt/post) | 現在のターンを取り消し |
+| `POST` | [`/agent/set-model`](/ja/docs/api/endpoints/agent/set-model/post) | ランタイム中にモデル変更 |
+| `POST` | [`/agent/set-permission-mode`](/ja/docs/api/endpoints/agent/set-permission-mode/post) | ランタイム中に権限モード変更 |
+| `PATCH` | [`/agent/session`](/ja/docs/api/endpoints/agent/session/patch) | 統一設定 mutator |
+| `POST` | [`/agent/kill`](/ja/docs/api/endpoints/agent/kill/post) | エージェントプロセス終了 |
+| `GET` | [`/agent/status`](/ja/docs/api/endpoints/agent/status/get) | 状態スナップショット |
 
 ## 単発呼び出し
 
 | メソッド | パス | 用途 |
-|----------|------|------|
-| `POST` | `/agent/run-once` | spawn → run → 結果返却 → クリーンアップ |
-| `POST` | `/agent/run-once/stream` | 同じライフサイクル、`AgentEvent` の SSE フィード |
-| `POST` | `/agent/completion` | 軽量な単発 completion (セッションなし) |
-| `POST` | `/agent/list-models` | プロバイダモデルの introspection |
-| `GET` | `/agent/events` | セッションイベントの SSE ストリーム |
+|--------|------|---------|
+| `POST` | [`/agent/run-once`](/ja/docs/api/endpoints/agent/run-once/post) | 1 回実行して結果返却 |
+| `POST` | [`/agent/run-once/stream`](/ja/docs/api/endpoints/agent/run-once/stream/post) | SSE イベントで単発実行 |
+| `POST` | [`/agent/completion`](/ja/docs/api/endpoints/agent/completion/post) | 単発 completion |
 
 ## 権限
 
 | メソッド | パス | 用途 |
-|----------|------|------|
-| `POST` | `/agent/permission-request` | Blocking: 要求を出し、評決を待つ |
-| `POST` | `/agent/permission-respond` | UI 側: 承認または拒否 |
-| `GET` | `/agent/permission-pending` | Pending 一覧 (グローバルまたはセッション別) |
+|--------|------|---------|
+| `POST` | [`/agent/permission-request`](/ja/docs/api/endpoints/agent/permission-request/post) | 権限要求を送信して待機 |
+| `POST` | [`/agent/permission-respond`](/ja/docs/api/endpoints/agent/permission-respond/post) | 承認または拒否 |
+| `GET` | [`/agent/permission-pending`](/ja/docs/api/endpoints/agent/permission-pending/get) | pending 要求一覧 |
+
+## モデルとイベント
+
+| メソッド | パス | 用途 |
+|--------|------|---------|
+| `POST` | [`/agent/list-models`](/ja/docs/api/endpoints/agent/list-models/post) | provider モデル introspection |
+| `GET` | [`/agent/events`](/ja/docs/api/endpoints/agent/events/get) | セッションイベント SSE ストリーム |
 
 ## Chat (正規化履歴表面)
 
 | メソッド | パス | 用途 |
-|----------|------|------|
-| `GET` | `/chat/sessions` | DB の chat セッション一覧 |
-| `POST` | `/chat/sessions` | chat セッション作成 |
-| `DELETE` | `/chat/sessions/:id` | chat セッション削除 |
-| `GET` | `/chat/sessions/:id/messages` | メッセージ一覧 (`since`, `limit`) |
-| `POST` | `/chat/sessions/:id/messages` | chat メッセージを追加 |
-| `DELETE` | `/chat/sessions/:id/messages` | メッセージをクリア |
-| `GET` | `/chat/images/:sessionId/:filename` | embed を提供 |
+|--------|------|---------|
+| `GET` | [`/chat/sessions`](/ja/docs/api/endpoints/chat/sessions/get) | DB の chat セッション一覧 |
+| `POST` | [`/chat/sessions`](/ja/docs/api/endpoints/chat/sessions/post) | chat セッション作成 |
+| `DELETE` | [`/chat/sessions/{id}`](/ja/docs/api/endpoints/chat/sessions/id/delete) | chat セッション削除 |
+| `GET` | [`/chat/sessions/{id}/messages`](/ja/docs/api/endpoints/chat/sessions/id/messages/get) | メッセージ一覧 |
+| `POST` | [`/chat/sessions/{id}/messages`](/ja/docs/api/endpoints/chat/sessions/id/messages/post) | メッセージ追加 |
+| `DELETE` | [`/chat/sessions/{id}/messages`](/ja/docs/api/endpoints/chat/sessions/id/messages/delete) | メッセージをクリア |
+| `GET` | [`/chat/images/{sessionId}/{filename}`](/ja/docs/api/endpoints/chat/images/sessionid/filename/get) | 画像 embed を提供 |
 
 ## レスポンス形
 
-すべてのレスポンスは同じ envelope に従う。`server/api-types.ts` から
-生成されるので HTTP と WS がドリフトしない:
+ほとんどの SDK-facing レスポンスは `server/api-types.ts` の envelope に従い、streaming と binary エンドポイントは wire-native なレスポンス本文を使います。正確な schema の真実の源はライブ OpenAPI ドキュメントです。
 
 ```ts
 type ApiResponse<T> =
   | { status: "ok"; data: T }
   | { status: "error"; message: string; code?: string };
 ```
-
-イベントを emit するルート (start、send、run-once) はセッションの
-イベントバッファに push する。読むには WS か SSE で購読する。

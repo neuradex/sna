@@ -1,0 +1,21 @@
+{
+  "title": "Introduction",
+  "description": "개요, 설치, 임베딩, 핵심 개념, 설계 철학을 처음 읽는 순서로 정리합니다.",
+  "icon": "Rocket",
+  "root": true,
+  "pages": [
+    "---시작하기---",
+    "index",
+    "what-is-sna",
+    "install",
+    "embedding",
+    "---핵심 개념---",
+    "concepts",
+    "sessions",
+    "history",
+    "providers",
+    "permissions",
+    "---철학---",
+    "philosophy"
+  ]
+}

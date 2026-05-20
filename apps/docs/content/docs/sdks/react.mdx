@@ -1,60 +1,21 @@
 ---
-title: '@sna-sdk/react'
-description: React hooks and a drop-in chat UI.
-icon: Atom
+title: "React SDK"
+description: "Provider, session scope, hooks, and reusable chat UI for React applications."
 ---
+# React SDK
 
-React bindings on top of `@sna-sdk/client`. Hooks for state, a context
-provider for the client, and an optional pre-built chat UI.
+`@sna-sdk/react` builds on the client and adds React state boundaries. It is intended for applications that want SNA embedded as part of the UI rather than as a separate CLI window.
 
-## Setup
+The package keeps provider discovery, session scoping, chat panel state, and agent streaming close to React components.
 
-```tsx
-import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
+## Install
 
-<SnaProvider snaUrl="http://localhost:3099">
-  <YourApp />
-</SnaProvider>
-```
+~~~bash
+pnpm add @sna-sdk/react
+~~~
 
-`SnaProvider` is a pure context provider: no UI, no peer deps beyond
-React. It auto-discovers the server URL via `/api/sna-port` if
-`snaUrl` is omitted, otherwise falls back to `http://localhost:3099`.
+## Public surfaces
 
-## Hooks
-
-| Hook | Purpose |
-|------|---------|
-| `useSnaClient()` | Access the underlying `SnaClient`. |
-| `useSessionManager()` | List, create, switch sessions. |
-| `useAgent(sessionId)` | Lifecycle controls (start, send, interrupt) + live state. |
-| `useResponsiveChat(sessionId)` | Higher-level chat state (messages, streaming text, pending tools). |
-
-```tsx
-function ChatInput({ sessionId }: { sessionId: string }) {
-  const { send, status } = useAgent(sessionId);
-  return (
-    <form onSubmit={(e) => { e.preventDefault(); send(input); }}>
-      <input value={input} onChange={(e) => setInput(e.target.value)} />
-      <button disabled={status === "busy"}>Send</button>
-    </form>
-  );
-}
-```
-
-## Drop-in chat UI
-
-For a working chat panel without writing UI from scratch:
-
-```tsx
-import { SnaChatUI } from "@sna-sdk/react/components/sna-chat-ui";
-
-<SnaProvider snaUrl="http://localhost:3099">
-  <SnaChatUI dangerouslySkipPermissions>
-    <YourApp />
-  </SnaChatUI>
-</SnaProvider>
-```
-
-You get: message bubbles, tool-call cards, collapsible thinking
-blocks, markdown rendering, permission dialog. Theme via CSS variables.
+- [react-provider](/docs/sdks/react-provider)
+- [react-hooks](/docs/sdks/react-hooks)
+- [react-components](/docs/sdks/react-components)

@@ -1,30 +1,29 @@
 ---
-title: 概要
-description: 公開済み 4 パッケージのリファレンス。
+title: "概要"
+description: "公開済み 4 パッケージのリファレンスです。"
 icon: LayoutGrid
 ---
-
-SNA は 4 つのパッケージを層別に出荷する。
+SNA は 4 つのパッケージを層別に配布しています。
 
 <Cards>
-  <Card title="@sna-sdk/core" href="/docs/sdks/core" description="サーバ、session manager、providers、completion()." />
-  <Card title="@sna-sdk/client" href="/docs/sdks/client" description="TypeScript クライアント。HTTP + WebSocket トランスポート。" />
-  <Card title="@sna-sdk/react" href="/docs/sdks/react" description="React フック + ドロップイン chat UI。" />
-  <Card title="@sna-sdk/testing" href="/docs/sdks/testing" description="Mock Anthropic API + 隔離された Claude Code テスト環境。" />
+  <Card title="@sna-sdk/core" href="/ja/docs/sdks/core" description="サーバ、session manager、providers、completion()." />
+  <Card title="@sna-sdk/client" href="/ja/docs/sdks/client" description="TypeScript クライアント。HTTP + WebSocket トランスポート。" />
+  <Card title="@sna-sdk/react" href="/ja/docs/sdks/react" description="React フック + ドロップイン chat UI。" />
+  <Card title="@sna-sdk/testing" href="/ja/docs/sdks/testing" description="Mock Anthropic API + 隔離された Claude Code テスト環境。" />
 </Cards>
 
 ## バージョニング
 
-4 パッケージは一緒にリリースされる。バージョンは SNA プロトコル
-バージョンなので、コンシューマは 4 つとも同じメジャーに pin すべき。
+4 パッケージは一緒にリリースされます。バージョンは SNA プロトコル
+バージョンなので、コンシューマは 4 つとも同じメジャーに pin してください。
 リリースごとの表面変更は
 [CHANGELOG](https://github.com/neuradex/sna/blob/main/CHANGELOG.md)
-参照。
+参照してください。
 
 ## ライブ OpenAPI 仕様
 
-稼働中サーバは自身の OpenAPI 3.1 仕様を提供する。Swagger UI は
+稼働中サーバは自身の OpenAPI 3.1 仕様を提供します。Swagger UI は
 `http://localhost:3099/docs`、生 JSON は
 `http://localhost:3099/openapi.json`、プレーンテキストは
 `http://localhost:3099/spec`。仕様はルートが使うのと同じ Zod
-スキーマから生成されるので、実際のハンドラとドリフトすることがない。
+スキーマから生成されるため、実際のハンドラとドリフトすることはありません。

@@ -1,108 +1,22 @@
 ---
-title: '@sna-sdk/client'
-description: フレームワーク非依存の TypeScript クライアント。順序は HTTP、push は WS。
-icon: Plug
+title: "Client SDK"
+description: "セッション、agent ライフサイクル、チャット永続化、ストリーミング、権限を型付きで扱います。"
 ---
+# Client SDK
 
-ブラウザ / Node クライアント。デュアルトランスポートなので reads は
-順序が保たれつつイベントはライブで届く。
+`@sna-sdk/client` は実行中の SNA サーバーと通信します。コマンドと永続化には HTTP、push 購読には WebSocket、長時間ストリームには SSE を使います。
 
-```ts
-import { SnaClient } from "@sna-sdk/client";
+React 以外で使う場合や、独自 UI フレームワークの下位レイヤーとして使う場合に適しています。
 
-const client = new SnaClient({
-  baseUrl: "localhost:3099",
-  http: true,  // POST /agent/* など
-  ws: true,    // ライブイベントストリーム
-});
-client.connect();
-```
+## Install
 
-## 表面
+~~~bash
+pnpm add @sna-sdk/client
+~~~
 
-クライアントはサーバルートに合わせて 3 つの名前空間を露出する:
+## Public surfaces
 
-```ts
-client.sessions   // list, create, update, remove
-client.agent      // start, send, kill, restart, runOnce, completion, ...
-client.permissions // subscribe, respond, list pending
-```
-
-## セッション
-
-```ts
-const { sessionId } = await client.sessions.create({
-  label: "research",
-  cwd: "/path/to/workspace",
-  meta: { project: "alpha" },
-});
-await client.sessions.update(sessionId, { label: "renamed" });
-await client.sessions.remove(sessionId);
-```
-
-## エージェント
-
-```ts
-await client.agent.start(sessionId, {
-  provider: "claude-code",
-  model: "claude-sonnet-4-6",
-  permissionMode: "acceptEdits",
-});
-
-await client.agent.send(sessionId, "Hi", {
-  images: [{ mimeType: "image/png", base64: "..." }],
-});
-
-await client.agent.interrupt(sessionId);
-await client.agent.restart(sessionId);
-await client.agent.resume(sessionId);
-```
-
-### イベント購読
-
-```ts
-const unsub = client.agent.onEvent(({ event }) => {
-  if (event.type === "assistant_delta") render(event.delta);
-});
-await client.agent.subscribe(sessionId);
-
-// 後で:
-unsub();
-await client.agent.unsubscribe(sessionId);
-```
-
-### 単発 API
-
-```ts
-// バッファされた最終結果
-const { result, usage } = await client.agent.runOnce({
-  message: "What is 2 + 2?",
-  model: "claude-haiku-4-5",
-});
-
-// SSE トークン単位ストリーミング (http: true が必要)
-for await (const event of client.agent.runOnceStream({ message: "..." })) {
-  if (event.type === "assistant_delta") render(event.delta);
-  if (event.type === "complete") console.log(event.data);
-}
-
-// Completion エンドポイント
-const { text, costUsd } = await client.agent.completion({
-  prompt: "Summarize: ...",
-  model: "claude-haiku-4-5",
-});
-```
-
-## 権限
-
-```ts
-await client.permissions.subscribe();
-client.permissions.onRequest(async ({ session, tool, input }) => {
-  const approved = await askUser(tool, input);
-  await client.permissions.respond(session, approved);
-});
-```
-
-レスポンス形の詳細は [ライブ OpenAPI 仕様](http://localhost:3099/docs)
-参照。すべてのクライアントメソッドはそこに文書化されたルートと 1:1
-で対応する。
+- [client-transport](/ja/docs/sdks/client-transport)
+- [client-sessions](/ja/docs/sdks/client-sessions)
+- [client-agent](/ja/docs/sdks/client-agent)
+- [client-chat](/ja/docs/sdks/client-chat)

@@ -1,0 +1,95 @@
+---
+title: "Client sessions namespace"
+description: "Inputs, outputs, and examples for every client.sessions method."
+---
+
+# Client sessions namespace
+
+`client.sessions` manages agent session records. A session is the server-side work unit shared by the agent runtime and chat persistence. It is not the process itself.
+
+## `sessions.list()`
+
+```ts
+await client.sessions.list(): Promise<{ sessions: SessionInfo[] }>
+```
+
+Returns a point-in-time snapshot of all sessions. Use `onSnapshot` for live UI updates.
+
+```ts
+const { sessions } = await client.sessions.list();
+const running = sessions.filter((session) => session.alive);
+```
+
+## `sessions.create(opts?)`
+
+```ts
+await client.sessions.create(opts?: {
+  id?: string;
+  label?: string;
+  cwd?: string;
+  meta?: Record<string, unknown>;
+}): Promise<{ status: "created"; sessionId: string; label: string; meta: Record<string, unknown> | null }>
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `id` | no | Pass this when the host app owns session identity. If omitted, the server generates one. |
+| `label` | no | Human-readable label. |
+| `cwd` | no | Default working directory for the agent. |
+| `meta` | no | Application metadata such as project ID, source, or UI state. |
+
+```ts
+const { sessionId } = await client.sessions.create({
+  label: "review: checkout-flow",
+  cwd: "/Users/me/app",
+  meta: { projectId: "checkout" },
+});
+await client.agent.start(sessionId, { provider: "claude-code" });
+```
+
+With HTTP transport enabled, the promise resolves after the database row is committed. Calling `agent.start` immediately after `create` is safe.
+
+## `sessions.update(session, opts)`
+
+```ts
+await client.sessions.update(session: string, opts: {
+  label?: string;
+  meta?: Record<string, unknown>;
+  cwd?: string;
+}): Promise<{ status: "updated"; session: string }>
+```
+
+| Field | Description |
+| --- | --- |
+| `session` | Session ID to update. |
+| `label` | New display label. |
+| `meta` | Replaces the entire metadata object. It is not merged. |
+| `cwd` | New working directory. |
+
+This does not change model or permission mode for a running agent. Use `client.agent.update`, `setModel`, or `setPermissionMode` for runtime settings.
+
+## `sessions.remove(session)`
+
+```ts
+await client.sessions.remove(session: string): Promise<{ status: "removed" }>
+```
+
+Deletes the session record. If an agent process exists, it is stopped before removal. The `default` session cannot be removed.
+
+## `sessions.onSnapshot(callback)`
+
+```ts
+const unsubscribe = client.sessions.onSnapshot((sessions: SessionInfo[]) => void);
+```
+
+The callback receives the full session list every time. Replace local state with the snapshot instead of applying diffs. It fires after WebSocket connection, lifecycle changes, and agent status changes.
+
+## `sessions.onConfigChanged(callback)`
+
+```ts
+const unsubscribe = client.sessions.onConfigChanged(
+  (event: { session: string; [key: string]: unknown }) => void,
+);
+```
+
+Use this when a settings UI needs to reflect model, permission mode, or runtime defaults changed by another client.

@@ -1,0 +1,19 @@
+---
+title: "React Components와 Store"
+description: "Bundled UI component와 chat store export입니다."
+---
+# React Components와 Store
+
+완성된 chat panel을 사용하거나 SNA primitive로 자체 panel을 조합하려면 이 표면을 사용합니다.
+| 표면 | 목적 |
+| --- | --- |
+| `SnaChatUI` | agent auto-start를 포함한 floating chat UI입니다. Props: `children`, `defaultOpen?`, `dangerouslySkipPermissions?`. |
+| `ChatPanel` | main chat panel shell입니다. |
+| `ChatHeader` | panel header입니다. |
+| `MessageBubble` | message renderer입니다. |
+| `ChatInput` | input composer입니다. |
+| `ToolUseCard` | tool-use visualization입니다. |
+| `TypingIndicator` | assistant progress indicator입니다. |
+| `ResizeHandle` | side-by-side panel resize handle입니다. |
+| `useChatStore` | chat UI 상태와 저장된 message hydration을 담당하는 Zustand store입니다. |
+`SnaChatUI`는 peer dependency로 `@radix-ui/react-tooltip`가 필요하며 `SnaProvider` 아래에서 렌더링해야 합니다.

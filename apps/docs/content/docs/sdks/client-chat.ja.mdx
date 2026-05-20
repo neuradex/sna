@@ -1,0 +1,80 @@
+---
+title: "Client chat 名前空間"
+description: "client.chat の全メソッドの入力、出力、使用例。"
+---
+
+# Client chat 名前空間
+
+`client.chat` は UI に表示される conversation history の persistence サーフェスです。agent lifecycle とは分離されているため、agent process がなくても chat session と message は存在できます。
+
+## `chat.listSessions()`
+
+```ts
+await client.chat.listSessions(): Promise<{ sessions: ChatSession[] }>
+```
+
+保存済み chat session row を返します。chat session には `id`、`label`、`type`、`meta`、`cwd`、`created_at` が含まれます。
+
+## `chat.createSession(opts?)`
+
+```ts
+await client.chat.createSession(opts?: {
+  id?: string;
+  label?: string;
+  type?: string;
+  meta?: Record<string, unknown>;
+}): Promise<{ status: "created"; id: string; meta: Record<string, unknown> | null }>
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `id` | no | app が conversation ID を所有する場合に使います。 |
+| `label` | no | UI に表示する label です。 |
+| `type` | no | `background` や `main` などの app-level category です。default は `background` です。 |
+| `meta` | no | 任意の application metadata です。 |
+
+## `chat.removeSession(session)`
+
+```ts
+await client.chat.removeSession(session: string): Promise<{ status: "deleted" }>
+```
+
+保存済み chat session とその messages を削除します。同じ ID の agent runtime が active な場合は、agent lifecycle cleanup を別途調整してください。
+
+## `chat.listMessages(session, opts?)`
+
+```ts
+await client.chat.listMessages(session: string, opts?: { since?: number }): Promise<{ messages: ChatMessage[] }>
+```
+
+保存済み messages を返します。`since` を使うと、最後に見た message より大きい ID の row だけを取得できます。
+
+## `chat.createMessage(session, opts)`
+
+```ts
+await client.chat.createMessage(session: string, opts: {
+  actor: "user" | "assistant" | "system";
+  kind: "text" | "thinking" | "tool_use" | "tool_result" | "status" | "error";
+  content?: string;
+  embeds?: Record<string, { mime_type: string; path: string; meta?: Record<string, unknown> }>;
+  meta?: Record<string, unknown>;
+}): Promise<{ status: "created"; id: number }>
+```
+
+| Field | Description |
+| --- | --- |
+| `actor` | block を生成した主体です。`user`、`assistant`、`system` のいずれかです。 |
+| `kind` | block の種類です。text、thinking、tool use、tool result、status、error を区別します。 |
+| `content` | 表示 text です。`![](embed://id)` reference を含められます。 |
+| `embeds` | binary attachment metadata です。 |
+| `meta` | kind-specific な structured overlay です。 |
+
+Agent が生成した message は通常 server route が自動で保存します。この method は UI が作成した message や imported history に使ってください。[actor と kind の正規化](/ja/docs/introduction/philosophy/actor-kind) も参照してください。
+
+## `chat.clearMessages(session)`
+
+```ts
+await client.chat.clearMessages(session: string): Promise<{ status: "cleared" }>
+```
+
+conversation は選択可能なまま、messages だけを reset したい場合に使います。

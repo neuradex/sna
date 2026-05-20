@@ -1,0 +1,128 @@
+---
+title: Introduction
+description: SNA を理解し、サーバを起動し、セッションを開いて最初のプロンプトを送ります。
+icon: Rocket
+---
+
+何もない状態からライブイベントを受け取るまでの最短経路です。
+このページに沿って進めると、アプリ内で SNA サーバを起動し、Claude Code
+または Codex / OpenCode のセッションを開き、WebSocket でトークンを
+ストリーミングできるようになります。
+
+## 何を作るのか
+
+SNA はアプリに組み込む小さなサーバです。**セッション開始**を要求すると、
+サーバがエージェント CLI を子プロセスとして起動し、1 つの HTTP +
+WebSocket API として公開します。コンシューマアプリからは通常の
+バックエンドにリクエストしているように見えますが、実際の作業は
+Claude Code / Codex / OpenCode プロセスが実行します。
+
+```
+your app
+   │
+   │  HTTP for control (send, interrupt, kill, …)
+   │  WS   for events (assistant_delta, tool_use, complete, …)
+   ▼
+SNA server  ──spawn──►  claude | codex | opencode
+```
+
+以下の 5 ステップに沿って進めてください。正規化履歴、ランタイム切り替え、
+アトリビューションといった設計背景は **[SNA とは？](/ja/docs/introduction/what-is-sna)** を参照してください。
+
+## 前提
+
+- **Node.js 20+**.
+- **`PATH` 上に少なくとも 1 つのランタイム CLI**: `claude`,
+  `codex`, `opencode` のいずれか。
+- パッケージマネージャ。例では `pnpm` を使いますが、npm / yarn / bun でも問題ありません。
+
+## 1. インストール
+
+```bash
+pnpm add @sna-sdk/core @sna-sdk/client
+```
+
+前提一式と CLI パス上書きの詳細は **[インストール](/ja/docs/introduction/install)** 参照してください。
+
+## 2. サーバ起動
+
+アプリ内で:
+
+```ts
+import { startSnaServer } from "@sna-sdk/core/node";
+
+const sna = await startSnaServer({
+  port: 3099,
+  dbPath: "./data/sna.db",
+});
+```
+
+SNA サーバは管理された子プロセスとして fork されます。`sna.port` には
+実際にバインドされたポートが入ります。`port` に `0` を指定した場合は
+自動割り当てになり、`sna.stop()` を呼ぶと SIGTERM でサーバを終了します。
+
+## 3. クライアント接続
+
+```ts
+import { SnaClient } from "@sna-sdk/client";
+
+const client = new SnaClient({
+  baseUrl: `localhost:${sna.port}`,
+  http: true,   // POST /agent/* など
+  ws: true,     // ライブイベントストリーム
+});
+client.connect();
+```
+
+## 4. セッションを開いてエージェントを起動
+
+```ts
+const { sessionId } = await client.sessions.create({ label: "scratch" });
+
+await client.agent.start(sessionId, {
+  provider: "claude-code",
+  model: "claude-sonnet-4-6",
+});
+```
+
+## 5. イベント購読 → 送信
+
+```ts
+client.agent.onEvent(({ event }) => {
+  if (event.type === "assistant_delta") process.stdout.write(event.delta as string);
+  if (event.type === "tool_use") console.log("\n[tool]", event.message);
+  if (event.type === "complete") console.log("\n[done]", event.data);
+});
+await client.agent.subscribe(sessionId);
+
+await client.agent.send(sessionId, "List the files in this directory.");
+```
+
+これがループ全体です。トークンは `assistant_delta` で届き、ツール呼び出し
+は `tool_use` で届きます。ターンが終わると、使用量とコストを含む
+`complete` イベントを受け取れます。
+
+## 単発呼び出しだけが必要な場合
+
+セッションやイベント購読が不要で、回答 1 つだけが必要な場合は `completion()` を使います。
+
+```ts
+import { completion } from "@sna-sdk/core";
+
+const result = await completion({
+  prompt: "Summarize: ...",
+  provider: "claude-code",
+  model: "claude-haiku-4-5",
+  onDelta: (chunk) => process.stdout.write(chunk),
+});
+// result.text, result.usage, result.costUsd, result.durationMs
+```
+
+3 種類のストリーミング（インプロセスコールバック、SSE、フルイベント
+ストリーム）の詳細は **[Cookbook → ストリーミング](/ja/docs/cookbook/streaming)** 参照してください。
+
+## 次に
+
+- **[SNA とは？](/ja/docs/introduction/what-is-sna)**: コンセプトを詳しく説明します。
+- **[組み込み](/ja/docs/introduction/embedding)**: Electron の中で実行します。
+- **[Concepts](/ja/docs/introduction/concepts)**: セッション、履歴、プロバイダ、権限。

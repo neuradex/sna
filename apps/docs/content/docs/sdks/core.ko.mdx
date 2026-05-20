@@ -1,85 +1,22 @@
 ---
-title: '@sna-sdk/core'
-description: 서버, session manager, providers, completion() / runOnce().
-icon: Server
+title: "Core SDK"
+description: "SNA를 임베드하기 위한 런타임, 서버, 런처, 설정 표면입니다."
 ---
+# Core SDK
 
-호스트 측 패키지. SQLite DB를 소유하고, 프로바이더 프로세스를 spawn
-하고, HTTP/WS 라우트를 노출한다.
+`@sna-sdk/core`는 가장 낮은 수준의 패키지입니다. 다른 프로세스 안에서 SNA를 실행하거나, 자체 서버를 통해 SNA를 노출하거나, provider/runtime primitive가 직접 필요할 때 사용합니다.
 
-## 서브경로 export
+Core는 React를 가정하지 않으며 브라우저 클라이언트도 필요로 하지 않습니다. 서버 측 런타임 계약을 담당합니다.
 
-| import | 용도 |
-|--------|------|
-| `@sna-sdk/core` | 최상위: `completion`, `runOnce`, `getConfig`, `setConfig`. |
-| `@sna-sdk/core/node` | 일반 Node 호스트용 `startSnaServer()`. |
-| `@sna-sdk/core/electron` | asar-aware 경로 해석 포함한 `startSnaServer()`. |
-| `@sna-sdk/core/server` | `createSnaApp`, `attachWebSocket`, `SessionManager`, `runOnce`. |
-| `@sna-sdk/core/providers` | `getProvider`, `getRuntimePool`. |
-| `@sna-sdk/core/db/schema` | 직접 SQLite 접근용 `getDb()` (어드밴스드). |
+## Install
 
-## 단발 API
+~~~bash
+pnpm add @sna-sdk/core
+~~~
 
-### `completion(opts)`
+## Public surfaces
 
-가장 가벼운 호출: 세션도, 이벤트 파이프라인도 없이, 단일 프롬프트 →
-문자열 결과.
-
-```ts
-import { completion } from "@sna-sdk/core";
-
-const result = await completion({
-  prompt: "Summarize this in one sentence: ...",
-  provider: "claude-code",
-  model: "claude-haiku-4-5",
-  reasoningLevel: 0,                 // 0..5, 프로바이더 비종속
-  onDelta: (chunk) => render(chunk), // 옵션 스트리밍 side channel
-});
-// result.text, result.usage, result.costUsd, result.durationMs
-```
-
-각 프로바이더는 자기 최적의 단발 경로를 고른다:
-- Claude: `claude -p`, 무상태.
-- Codex: cwd에 데몬이 살아 있으면 pooled `app-server` thread,
-  아니면 `codex exec --json --ephemeral`.
-- OpenCode: pooled `opencode serve` 세션, 아니면 ephemeral.
-
-### `runOnce(sessionManager, opts)`
-
-단일 프롬프트를 위한 전체 세션 기계 장치: 임시 세션, 전체 이벤트
-파이프라인, 자동 정리. 단발 실행에서도 `tool_use` / `thinking`
-이벤트가 필요할 때 유용.
-
-```ts
-import { runOnce } from "@sna-sdk/core/server";
-
-await runOnce(sessionManager, {
-  message: "List the files in this directory.",
-  provider: "codex",
-  onEvent: (event) => render(event),
-});
-```
-
-`onDelta` (텍스트 청크)와 `onEvent` (전체 이벤트 스트림) 둘 다
-옵셔널이고 인프로세스 전용. 네트워크 컨슈머용 대응 SSE 엔드포인트는
-`POST /agent/run-once/stream`. 클라이언트 측 래퍼는
-`agent.runOnceStream(opts)`.
-
-## 서버 진입점
-
-```ts
-import { startSnaServer } from "@sna-sdk/core/node";
-
-const sna = await startSnaServer({
-  port: 3099,
-  dbPath: "./data/sna.db",
-  maxSessions: 20,
-  permissionMode: "acceptEdits",
-  onLog: (line) => console.log("[sna]", line),
-});
-
-await sna.stop();
-```
-
-Electron 변형과 라이프사이클 디테일은 [Quickstart →
-Embedding](/docs/quickstart/embedding) 참고.
+- [core-runtime](/ko/docs/sdks/core-runtime)
+- [core-server](/ko/docs/sdks/core-server)
+- [core-launchers](/ko/docs/sdks/core-launchers)
+- [core-config](/ko/docs/sdks/core-config)

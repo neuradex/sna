@@ -1,0 +1,95 @@
+---
+title: "Client sessions 名前空間"
+description: "client.sessions の全メソッドの入力、出力、使用例。"
+---
+
+# Client sessions 名前空間
+
+`client.sessions` は agent session record を管理します。session は agent runtime と chat persistence が共有する server-side の作業単位であり、process そのものではありません。
+
+## `sessions.list()`
+
+```ts
+await client.sessions.list(): Promise<{ sessions: SessionInfo[] }>
+```
+
+すべての session の point-in-time snapshot を返します。live update が必要な UI では `onSnapshot` を使ってください。
+
+```ts
+const { sessions } = await client.sessions.list();
+const running = sessions.filter((session) => session.alive);
+```
+
+## `sessions.create(opts?)`
+
+```ts
+await client.sessions.create(opts?: {
+  id?: string;
+  label?: string;
+  cwd?: string;
+  meta?: Record<string, unknown>;
+}): Promise<{ status: "created"; sessionId: string; label: string; meta: Record<string, unknown> | null }>
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `id` | no | host app が session identity を所有する場合に渡します。省略すると server が生成します。 |
+| `label` | no | 人間向けの表示名です。 |
+| `cwd` | no | agent の default working directory です。 |
+| `meta` | no | project ID、source、UI state などの application metadata です。 |
+
+```ts
+const { sessionId } = await client.sessions.create({
+  label: "review: checkout-flow",
+  cwd: "/Users/me/app",
+  meta: { projectId: "checkout" },
+});
+await client.agent.start(sessionId, { provider: "claude-code" });
+```
+
+HTTP transport が有効な場合、database row が commit されたあと promise が resolve されます。そのため `create` の直後に `agent.start` を呼んでも安全です。
+
+## `sessions.update(session, opts)`
+
+```ts
+await client.sessions.update(session: string, opts: {
+  label?: string;
+  meta?: Record<string, unknown>;
+  cwd?: string;
+}): Promise<{ status: "updated"; session: string }>
+```
+
+| Field | Description |
+| --- | --- |
+| `session` | 更新する session ID です。 |
+| `label` | 新しい表示名です。 |
+| `meta` | metadata object 全体を置き換えます。merge ではありません。 |
+| `cwd` | 新しい working directory です。 |
+
+これは実行中 agent の model や permission mode を変更する API ではありません。runtime 設定には `client.agent.update`、`setModel`、`setPermissionMode` を使ってください。
+
+## `sessions.remove(session)`
+
+```ts
+await client.sessions.remove(session: string): Promise<{ status: "removed" }>
+```
+
+session record を削除します。agent process が存在する場合は、削除前に停止されます。`default` session は削除できません。
+
+## `sessions.onSnapshot(callback)`
+
+```ts
+const unsubscribe = client.sessions.onSnapshot((sessions: SessionInfo[]) => void);
+```
+
+callback には毎回 session 一覧全体が渡されます。diff を適用するのではなく、local state を snapshot で置き換えてください。WebSocket 接続後、lifecycle 変更後、agent status 変更後に発火します。
+
+## `sessions.onConfigChanged(callback)`
+
+```ts
+const unsubscribe = client.sessions.onConfigChanged(
+  (event: { session: string; [key: string]: unknown }) => void,
+);
+```
+
+別 client が変更した model、permission mode、runtime default を settings UI に反映する場合に使います。

@@ -1,0 +1,196 @@
+---
+title: "Client sessions 네임스페이스"
+description: "client.sessions의 모든 메서드 입력, 출력, 사용 예시."
+---
+
+# Client sessions 네임스페이스
+
+`client.sessions`는 agent session record를 관리합니다. 여기서 말하는 session은 실행 중인 process 자체가 아니라, agent runtime과 chat persistence가 공유하는 서버 측 작업 단위입니다.
+
+## `sessions.list()`
+
+**Signature**
+
+```ts
+await client.sessions.list(): Promise<{ sessions: SessionInfo[] }>
+```
+
+**Returns**
+
+```ts
+type SessionInfo = {
+  id: string;
+  label: string;
+  alive: boolean;
+  state: string;
+  agentStatus: "idle" | "busy" | "disconnected";
+  cwd: string;
+  meta: Record<string, unknown> | null;
+  config: { provider: string; model: string; permissionMode: string; extraArgs?: string[] } | null;
+  ccSessionId: string | null;
+  eventCount: number;
+  messageCount: number;
+  lastMessage: { actor: string; kind: string; content: string; created_at: string } | null;
+  createdAt: number;
+  lastActivityAt: number;
+};
+```
+
+**Example**
+
+```ts
+const { sessions } = await client.sessions.list();
+const running = sessions.filter((session) => session.alive);
+```
+
+**Notes**
+
+- 반환값은 호출 시점의 snapshot입니다.
+- 계속 갱신되는 UI에는 `onSnapshot`을 함께 사용하십시오.
+
+## `sessions.create(opts?)`
+
+**Signature**
+
+```ts
+await client.sessions.create(opts?: {
+  id?: string;
+  label?: string;
+  cwd?: string;
+  meta?: Record<string, unknown>;
+}): Promise<{
+  status: "created";
+  sessionId: string;
+  label: string;
+  meta: Record<string, unknown> | null;
+}>
+```
+
+**Input**
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `id` | no | 외부 앱이 session identity를 직접 관리할 때 전달합니다. 생략하면 서버가 생성합니다. |
+| `label` | no | 사람에게 보여줄 이름입니다. |
+| `cwd` | no | agent의 기본 working directory입니다. |
+| `meta` | no | 프로젝트 ID, source, UI 상태 같은 application metadata입니다. |
+
+**Example**
+
+```ts
+const { sessionId } = await client.sessions.create({
+  label: "review: checkout-flow",
+  cwd: "/Users/me/app",
+  meta: { projectId: "checkout" },
+});
+await client.agent.start(sessionId, { provider: "claude-code" });
+```
+
+**Notes**
+
+- HTTP transport가 켜져 있으면 DB row가 commit된 뒤 promise가 resolve됩니다.
+- 따라서 `create` 직후 `agent.start`를 호출해도 race condition이 없습니다.
+
+## `sessions.update(session, opts)`
+
+**Signature**
+
+```ts
+await client.sessions.update(session: string, opts: {
+  label?: string;
+  meta?: Record<string, unknown>;
+  cwd?: string;
+}): Promise<{ status: "updated"; session: string }>
+```
+
+**Input**
+
+| Field | Description |
+| --- | --- |
+| `session` | 수정할 session ID입니다. |
+| `label` | 새 표시 이름입니다. |
+| `meta` | metadata 전체를 교체합니다. merge가 아닙니다. |
+| `cwd` | 새 working directory입니다. |
+
+**Example**
+
+```ts
+await client.sessions.update("review", {
+  label: "Review checkout flow",
+  meta: { priority: "high" },
+});
+```
+
+**Notes**
+
+- 실행 중인 agent runtime의 model이나 permission mode를 바꾸는 API가 아닙니다.
+- runtime 설정 변경에는 `client.agent.update`, `setModel`, `setPermissionMode`를 사용하십시오.
+
+## `sessions.remove(session)`
+
+**Signature**
+
+```ts
+await client.sessions.remove(session: string): Promise<{ status: "removed" }>
+```
+
+**Example**
+
+```ts
+await client.sessions.remove("temporary-session");
+```
+
+**Notes**
+
+- session에 agent process가 있으면 제거 전에 종료됩니다.
+- `default` session은 제거할 수 없습니다.
+- UI에서는 삭제 후 선택된 session 상태를 함께 정리해야 합니다.
+
+## `sessions.onSnapshot(callback)`
+
+**Signature**
+
+```ts
+const unsubscribe = client.sessions.onSnapshot(
+  (sessions: SessionInfo[]) => void,
+);
+```
+
+**Callback input**
+
+전체 session 목록이 매번 통째로 전달됩니다. diff를 계산하지 말고 local state를 snapshot으로 교체하는 방식이 안전합니다.
+
+**Example**
+
+```ts
+const unsubscribe = client.sessions.onSnapshot((sessions) => {
+  setSessionList(sessions);
+});
+client.connect();
+```
+
+**When it fires**
+
+- WebSocket 연결 직후 초기 snapshot이 도착합니다.
+- session 생성, 삭제, lifecycle 변경 때 다시 도착합니다.
+- agent status가 바뀌어도 다시 도착합니다.
+
+## `sessions.onConfigChanged(callback)`
+
+**Signature**
+
+```ts
+const unsubscribe = client.sessions.onConfigChanged(
+  (event: { session: string; [key: string]: unknown }) => void,
+);
+```
+
+**Example**
+
+```ts
+const unsubscribe = client.sessions.onConfigChanged((event) => {
+  console.log(event.session, event.model, event.permissionMode);
+});
+```
+
+**Use it when** settings UI가 다른 client에서 변경한 model, permission mode, runtime default를 즉시 반영해야 할 때 사용합니다.

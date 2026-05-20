@@ -1,0 +1,28 @@
+---
+title: Origin
+description: Why SNA started as a runtime layer across coding agents.
+icon: Sparkles
+---
+
+SNA started from a simple pain point. We were moving back and forth
+between Claude Code and Codex, and useful assets kept scattering across
+different tools, sessions, and interfaces. The work itself could move,
+but the surrounding context did not move cleanly with it. We wanted to
+cross between coding agents without stress.
+
+Each coding agent was already strong as a CLI, but the CLI was not the
+best interface for every workflow. Some parts were excellent; other
+parts made us want a dedicated GUI with better continuity, visibility,
+and control.
+
+The trigger was Claude Code's VS Code extension. It looked like Claude
+Code, but it was clearly not just the CLI in a terminal. That raised the
+question: how was it built? From there, we started digging through
+Claude Code's options and runtime surfaces. That investigation showed
+that it was possible to integrate Claude Code programmatically, and then
+to put Codex beside it behind the same application-facing layer.
+
+SNA grew from that observation: native coding agents should keep their
+strengths, but the app should own the continuity. Sessions, history,
+permissions, UI, and runtime switching should not be scattered across
+separate tools.

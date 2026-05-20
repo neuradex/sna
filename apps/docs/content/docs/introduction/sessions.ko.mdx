@@ -1,0 +1,54 @@
+---
+title: 세션
+description: SnaSession과 RuntimeSession 체인. 두 계층 세션 모델.
+icon: Users
+---
+
+**SnaSession**은 컨슈머 앱이 알고 있는 영구적인 것 (안정적 id,
+라벨, cwd, meta). **RuntimeSession**은 그 세션 위에 마운트된 하나의
+구체적 런타임 설정입니다: provider, model, permission mode, MCP 서버,
+hooks. SnaSession 하나는 수명 동안 여러 RuntimeSession을 마운트할
+수 있고, **runtime chain**은 그 세션이 입어온 모든 설정의 순서대로
+정렬된 히스토리입니다.
+
+## 왜 두 계층
+
+유저가 Claude Code로 채팅을 시작했다가, 스레드 도중 Codex로 갈아타고,
+그 다음 reasoning 레벨을 올렸다면, 그건 SnaSession 하나에 RuntimeSession
+셋입니다. 어트리뷰션이 행 단위로 정확하게 유지되고, replay 시 각 런타임
+네이티브 히스토리를 이전 턴 손실 없이 재구성할 수 있습니다.
+
+## 라이프사이클
+
+```
+POST /agent/sessions      → SnaSession 생성 (프로세스 없음)
+POST /agent/start         → 초기 RuntimeSession 마운트, 프로세스 spawn
+POST /agent/send          → 메시지 전송, 이벤트 흐름
+POST /agent/set-model     → 인플레이스 오버라이드 또는 새 RuntimeSession
+PATCH /agent/session      → {cwd, model, permissionMode} 통합 mutator
+POST /agent/resume        → 프로바이더 네이티브 히스토리 재구성, respawn
+POST /agent/restart       → 같은 설정으로 respawn (그대로 유지)
+POST /agent/kill          → 프로세스 종료 (세션 레코드는 남음)
+DELETE /agent/sessions/:id → 세션 + 히스토리 삭제
+```
+
+## PATCH 의미론
+
+`PATCH /agent/session`은 통합 mutator입니다. 서버는 활성 프로바이더의
+`applyPatch()` 훅을 통해 필드별로 적용하고, 그 훅이 인플레이스 적용과
+respawn-with-history-replay 중 하나를 결정합니다.
+
+| 필드 | claude-code | codex | opencode |
+|------|-------------|-------|----------|
+| `model` | 인플레이스 | per-turn 오버라이드 | 인플레이스 |
+| `permissionMode` | 인플레이스 | per-turn 오버라이드 | 인플레이스 |
+| `cwd` | respawn + replay | 인플레이스 (per-thread cwd) | respawn |
+
+응답의 `applied` 필드가 어느 경로를 탔는지 알려주므로, 클라이언트가
+"reloading…" 표시를 필요할 때만 보여줄 수 있습니다.
+
+## 왜 이게 중요한가
+
+대부분의 "에이전트 플랫폼" 추상화는 뭐라도 바꾸려면 세션을 부수게
+강제합니다. SNA는 설정을 세션 레코드의 일급 축으로 다루므로, 하위
+런타임 설정이 바뀌어도 UX가 끊김 없이 이어집니다.

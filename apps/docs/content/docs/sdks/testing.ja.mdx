@@ -1,46 +1,20 @@
 ---
-title: '@sna-sdk/testing'
-description: Mock Anthropic API + 隔離実行用の sna-test CLI。
-icon: FlaskConical
+title: "Testing SDK"
+description: "決定的な SNA 統合テストのための Mock provider サーバーと CLI ハーネスです。"
 ---
+# Testing SDK
 
-CI で本物の LLM 呼び出しは予算を焼く。`@sna-sdk/testing` は
-ストリーミング SSE 形式を実装した mock Anthropic Messages API を
-内蔵し、Claude Code を mock と隔離された `CLAUDE_CONFIG_DIR` で
-包む `sna-test` CLI も同梱する。
+`@sna-sdk/testing` は、テストが実際の Anthropic または Claude アカウントに依存しないようにするためのパッケージです。ローカルの Anthropic 互換 API サーバーと、インスタンスごとに設定とログを分離する CLI wrapper を提供します。
 
-## Mock Anthropic API
+スモークテスト、provider adapter テスト、予測可能な agent 出力が必要な UI flow に使ってください。
 
-起動して、Claude Code の `ANTHROPIC_BASE_URL` をそちらに向ける:
+## Install
 
-```ts
-import { startMockAnthropic } from "@sna-sdk/testing";
+~~~bash
+pnpm add @sna-sdk/testing
+~~~
 
-const mock = await startMockAnthropic({ port: 0 });
-process.env.ANTHROPIC_BASE_URL = mock.url;
+## Public surfaces
 
-// 後で
-await mock.stop();
-```
-
-Mock はユーザテキストを逆順にして echo する (`"hello"` →
-`"olleh"`)。テストアサーションを決定的に保つため。
-
-## sna-test CLI
-
-```bash
-pnpm sna-test claude -- --prompt "echo back"
-```
-
-Claude Code を mock API と隔離された config dir で包んで実行する。
-テスト実行が dev アカウントを汚染しない。
-
-## パターン
-
-- テストごとに新しい `SessionManager` を立ち上げ、`dbPath` は
-  `os.tmpdir()` 配下に。スイートの隔離に効く。
-- プロバイダレベルのテストは `packages/core/test/mock-codex-app-server.ts`
-  の stub を使う (自分たちのプロバイダテストが使っているのと同じ)。
-- 統合テストではプロバイダレイヤを mock しないこと。トランスポート
-  レイヤ (Anthropic API、Codex app-server stdio) を mock して
-  プロバイダコードパスが end-to-end で実行されるようにする。
+- [testing-mock-api](/ja/docs/sdks/testing-mock-api)
+- [testing-cli](/ja/docs/sdks/testing-cli)

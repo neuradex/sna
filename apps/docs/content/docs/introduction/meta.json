@@ -1,0 +1,21 @@
+{
+  "title": "Introduction",
+  "description": "Start here: overview, installation, embedding, core concepts, and design philosophy.",
+  "icon": "Rocket",
+  "root": true,
+  "pages": [
+    "---Start---",
+    "index",
+    "what-is-sna",
+    "install",
+    "embedding",
+    "---Core concepts---",
+    "concepts",
+    "sessions",
+    "history",
+    "providers",
+    "permissions",
+    "---Philosophy---",
+    "philosophy"
+  ]
+}

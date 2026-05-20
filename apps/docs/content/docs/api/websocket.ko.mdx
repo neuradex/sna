@@ -1,12 +1,12 @@
 ---
 title: WebSocket 프로토콜
-description: Request/response op, 푸시 채널, 재연결 의미론.
+description: Request/response op, 푸시 채널, 재연결 의미론을 설명합니다.
 icon: Cable
 ---
 
-WebSocket이 라이브 채널이다. 푸시 이벤트(assistant delta, 툴 호출,
+WebSocket이 라이브 채널입니다. 푸시 이벤트(assistant delta, 툴 호출,
 권한 요청)와, HTTP API가 노출하는 같은 제어 op들을 호출 단위 HTTP
-오버헤드 없이 운반한다.
+오버헤드 없이 운반합니다.
 
 ## 엔드포인트
 
@@ -14,11 +14,11 @@ WebSocket이 라이브 채널이다. 푸시 이벤트(assistant delta, 툴 호�
 ws://<host>:<port>/ws
 ```
 
-클라이언트가 한 번 연결하고 그 단일 연결로 모든 세션을 다중화함.
+클라이언트가 한 번 연결하고 그 단일 연결로 모든 세션을 다중화합니다.
 
 ## 와이어 모양
 
-모든 메시지는 `type` + payload를 가진 JSON 객체:
+모든 메시지는 `type`과 payload를 가진 JSON 객체입니다.
 
 ```jsonc
 // Client → server
@@ -32,11 +32,11 @@ ws://<host>:<port>/ws
 ```
 
 `id` 필드는 클라이언트가 선택한 상관 토큰: request/response 페어에는
-있고, 푸시 메시지에는 없음.
+있고, 푸시 메시지에는 없습니다.
 
 ## 제어 op
 
-모든 HTTP 라우트는 WS 동치를 가진다:
+모든 HTTP 라우트에는 대응하는 WS op가 있습니다.
 
 | WS type | HTTP 동치 |
 |---------|----------|
@@ -62,25 +62,25 @@ ws://<host>:<port>/ws
 
 두 채널은 푸시 전용:
 
-- `agent.event`: 구독된 모든 세션의 모든 `AgentEvent`마다 발화.
-  `agent.subscribe`로 구독, `agent.unsubscribe`로 구독 해제.
+- `agent.event`: 구독된 모든 세션의 모든 `AgentEvent`마다 발화합니다.
+  `agent.subscribe`로 구독하고, `agent.unsubscribe`로 구독을 해제합니다.
 - `permission.request`: 어떤 세션이든 `permission_needed`를 emit하면
-  발화. `permission.subscribe`로 구독.
+  발화합니다. `permission.subscribe`로 구독합니다.
 
 ## 재연결
 
-연결이 끊기면 클라이언트가 재연결하고 다시 구독해야 한다. 끊긴
+연결이 끊기면 클라이언트가 재연결하고 다시 구독해야 합니다. 끊긴
 동안 버퍼링된 이벤트는 세션별 ring buffer(기본 1000개)에 여전히
-있음. 새 `agent.subscribe`에 `?since=<cursor>`를 넘기면 replay된다.
+있습니다. 새 `agent.subscribe`에 `?since=<cursor>`를 넘기면 replay됩니다.
 
 ## 왜 HTTP와 WS 둘 다
 
 - **순서와 ACK에는 HTTP.** 뮤테이션은 추론하기 쉬운 request/response
-  계약을 원함. HTTP가 공짜로 그걸 줌.
+  계약이 필요합니다. HTTP는 이 계약을 자연스럽게 제공합니다.
 - **팬아웃에는 WS.** 단일 연결이 N개의 세션 이벤트 + 권한 요청을
-  배달함. N개의 SSE 스트림보다 훨씬 싸다.
+  전달합니다. N개의 SSE 스트림을 여는 것보다 훨씬 효율적입니다.
 
 TypeScript 클라이언트는 모든 뮤테이션에 HTTP, 푸시 채널에 WS를
-쓴다. 둘 중 하나만으로도 동작함 (`http: true, ws: false`는
+씁니다. 둘 중 하나만으로도 동작합니다 (`http: true, ws: false`는
 단명 스크립트용; `ws: true, http: false`는 HTTP를 못 쓰는 클라이언트용).
-하지만 둘 다 쓰는 게 가장 매끈하다.
+하지만 둘을 함께 사용하는 구성이 가장 매끄럽습니다.

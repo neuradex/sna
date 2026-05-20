@@ -1,0 +1,79 @@
+---
+title: プロバイダ
+description: AgentProvider インタフェース、runtime pool、プロバイダごとの差異を説明します。
+icon: Boxes
+---
+
+各ランタイムは共通の `AgentProvider` インタフェースの背後にクラスと
+して実装されています。アダプタは `core/providers/{claude-code,codex,opencode}.ts` です。
+
+## AgentProvider
+
+```ts
+interface AgentProvider {
+  name: string;
+  isAvailable(): Promise<boolean>;
+  spawn(opts: SpawnOptions): AgentProcess;
+  complete(opts: CompleteOptions): Promise<CompletionResult>;
+  // ...
+}
+
+interface AgentProcess {
+  send(message: string, opts?): void;
+  interrupt(): void;
+  setModel(model: string): void;
+  setPermissionMode(mode: PermissionMode): void;
+  applyPatch(patch: SessionPatch): PatchResult;
+  respondToPermission(approved: boolean): void;
+  kill(): void;
+  on(event: string, handler): void;  // AgentEvent を emit
+}
+```
+
+`applyPatch()` は `PATCH /agent/session` が使うフィールドごとの
+ディスパッチフック。各プロバイダがどのフィールドをインプレースで
+適用でき、どれが respawn-with-history-replay を要するかを決めます。
+
+## プロバイダごとの戦略
+
+| ランタイム | 転送 | 状態 | プール? |
+|------------|------|------|---------|
+| **claude-code** | `claude -p` (one-shot) + `claude --resume` (replay) | 呼び出しごとに stateless | いいえ |
+| **codex** | `codex app-server` デーモン、stdio 上の JSON-RPC | 永続デーモン、マルチスレッド | はい |
+| **opencode** | `opencode serve` デーモン + SDK HTTP | 永続デーモン、single-cwd | はい |
+
+Codex と OpenCode プロバイダは `RuntimePool` 経由でデーモンを共有
+します。セッションを開くとき、プールが `(provider, cwd, config)` で
+照会され、互換のデーモンがあれば再利用してコールドスタートコスト
+を節約します(Codex 約 2 秒、OpenCode 約 3 秒)。
+
+## RuntimePool
+
+- `prepare(opts, provider)`: 既知の cwd に対してデーモンを事前
+  warm-up。
+- `findExisting(spawnOpts)`: セッション spawn 用の strict マッチ
+  (設定が揃っている必要)。
+- `findCompatible(provider, cwd)`: `completion()` / `runOnce()` の
+  単発呼び出し用の loose マッチ (MCP、hooks、permission mode は
+  無視)。
+- `shutdown(handle)`: 参照カウントが 0 になったら graceful 終了。
+
+Claude Code はプーリングしません。CLI 自体が stateless なので、典型的
+なセッション粒度では呼び出しごとの spawn がデーモン resume と
+十分に競争力を持ちます。
+
+SNA が ACP だけをプロバイダ層にせず、高忠実度のネイティブプロバイダを
+維持する理由は **[SNA と ACP](/ja/docs/introduction/philosophy/acp)** を参照してください。
+
+## クロスプロバイダのつまみ
+
+すべてのプロバイダを貫く 2 つのレイテンシつまみ:
+
+- **`reasoningLevel: 0..5`**: プロバイダ非依存、最軽量から最重量
+  まで。[reasoning-level.ts](https://github.com/neuradex/sna/blob/main/packages/core/src/core/providers/reasoning-level.ts)
+  が Claude の `--effort` と Codex の `model_reasoning_effort` に
+  翻訳します。
+- **`providerOptions.serviceTier`**: Codex 専用。Codex の `/fast`
+  スラッシュコマンドをミラーする (値: `"priority"`, `"flex"`,
+  `"batch"`)。Claude には意図的に自動マッピングしません。Claude の
+  `/fast` は別の課金プールを持つ別の MODEL バリアントだからです。

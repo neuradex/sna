@@ -1,0 +1,74 @@
+---
+title: Endpoint reference
+description: OpenAPI-rendered HTTP endpoint reference.
+icon: Route
+---
+
+These pages are generated from the same OpenAPI document served by the SNA runtime. Each endpoint page renders request parameters, request bodies, responses, schemas, and example request snippets from the schema.
+
+## System
+
+<Cards>
+  <Card title="GET /health" href="/docs/api/endpoints/health/get" />
+  <Card title="GET /api/sna-port" href="/docs/api/endpoints/api/sna-port/get" />
+</Cards>
+
+## Sessions
+
+<Cards>
+  <Card title="POST /agent/sessions" href="/docs/api/endpoints/agent/sessions/post" />
+  <Card title="GET /agent/sessions" href="/docs/api/endpoints/agent/sessions/get" />
+  <Card title="PATCH /agent/sessions/{id}" href="/docs/api/endpoints/agent/sessions/id/patch" />
+  <Card title="DELETE /agent/sessions/{id}" href="/docs/api/endpoints/agent/sessions/id/delete" />
+</Cards>
+
+## Agent lifecycle
+
+<Cards>
+  <Card title="POST /agent/start" href="/docs/api/endpoints/agent/start/post" />
+  <Card title="POST /agent/send" href="/docs/api/endpoints/agent/send/post" />
+  <Card title="POST /agent/restart" href="/docs/api/endpoints/agent/restart/post" />
+  <Card title="POST /agent/resume" href="/docs/api/endpoints/agent/resume/post" />
+  <Card title="POST /agent/interrupt" href="/docs/api/endpoints/agent/interrupt/post" />
+  <Card title="POST /agent/set-model" href="/docs/api/endpoints/agent/set-model/post" />
+  <Card title="POST /agent/set-permission-mode" href="/docs/api/endpoints/agent/set-permission-mode/post" />
+  <Card title="PATCH /agent/session" href="/docs/api/endpoints/agent/session/patch" />
+  <Card title="POST /agent/kill" href="/docs/api/endpoints/agent/kill/post" />
+  <Card title="GET /agent/status" href="/docs/api/endpoints/agent/status/get" />
+</Cards>
+
+## One-shot calls
+
+<Cards>
+  <Card title="POST /agent/run-once" href="/docs/api/endpoints/agent/run-once/post" />
+  <Card title="POST /agent/run-once/stream" href="/docs/api/endpoints/agent/run-once/stream/post" />
+  <Card title="POST /agent/completion" href="/docs/api/endpoints/agent/completion/post" />
+</Cards>
+
+## Permissions
+
+<Cards>
+  <Card title="POST /agent/permission-request" href="/docs/api/endpoints/agent/permission-request/post" />
+  <Card title="POST /agent/permission-respond" href="/docs/api/endpoints/agent/permission-respond/post" />
+  <Card title="GET /agent/permission-pending" href="/docs/api/endpoints/agent/permission-pending/get" />
+</Cards>
+
+## Models and events
+
+<Cards>
+  <Card title="POST /agent/list-models" href="/docs/api/endpoints/agent/list-models/post" />
+  <Card title="GET /agent/events" href="/docs/api/endpoints/agent/events/get" />
+</Cards>
+
+## Chat history
+
+<Cards>
+  <Card title="GET /chat/sessions" href="/docs/api/endpoints/chat/sessions/get" />
+  <Card title="POST /chat/sessions" href="/docs/api/endpoints/chat/sessions/post" />
+  <Card title="DELETE /chat/sessions/{id}" href="/docs/api/endpoints/chat/sessions/id/delete" />
+  <Card title="GET /chat/sessions/{id}/messages" href="/docs/api/endpoints/chat/sessions/id/messages/get" />
+  <Card title="POST /chat/sessions/{id}/messages" href="/docs/api/endpoints/chat/sessions/id/messages/post" />
+  <Card title="DELETE /chat/sessions/{id}/messages" href="/docs/api/endpoints/chat/sessions/id/messages/delete" />
+  <Card title="GET /chat/images/{sessionId}/{filename}" href="/docs/api/endpoints/chat/images/sessionid/filename/get" />
+</Cards>
+

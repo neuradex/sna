@@ -1,0 +1,55 @@
+---
+title: "Core Server APIs"
+description: "Server-side entry points exported from `@sna-sdk/core/server`."
+---
+# Core Server APIs
+
+Use these APIs when you want to host SNA inside your own server process. The server package exposes the HTTP app, WebSocket attachment, session manager, and local port discovery route.
+| Surface | Purpose |
+| --- | --- |
+| `createSnaApp(options?)` | Creates the SNA HTTP application. |
+| `attachWebSocket(server, options?)` | Attaches the SNA WebSocket protocol to an existing server. |
+| `SessionManager` | Manages server-side agent sessions. |
+| `snaPortRoute` | Exposes the current SNA port for browser auto-discovery. |
+Deprecated compatibility route modules under `@sna-sdk/core/server/routes/*` remain exportable, but new integrations should prefer the server entry point and the generated [API reference](/docs/api/endpoints).
+
+## Minimal host example
+
+~~~ts
+import { createServer } from "node:http";
+import { createSnaApp, attachWebSocket } from "@sna-sdk/core/server";
+
+const app = createSnaApp();
+const server = createServer(async (req, res) => {
+  const response = await app.fetch(new Request(`http://localhost${req.url}`));
+  res.writeHead(response.status, Object.fromEntries(response.headers));
+  res.end(await response.text());
+});
+
+attachWebSocket(server);
+server.listen(3099);
+~~~
+
+Keep the server entry point close to the process that owns the agent lifecycle. Browser clients should connect through `@sna-sdk/client` or `@sna-sdk/react` instead of importing server modules.
+
+## Method reference
+
+### `createSnaApp(options?)`
+
+Creates the HTTP application that exposes SNA routes. Use it when embedding SNA into a custom server. The returned app owns route registration, request validation, and API response envelopes.
+
+### `attachWebSocket(server, options?)`
+
+Attaches the WebSocket protocol to an existing Node server. Call it on the same server that serves `createSnaApp` so HTTP and WebSocket clients share session state.
+
+### `SessionManager`
+
+Coordinates server-side agent session lifecycle. Most hosts should let `createSnaApp` manage it, but advanced hosts can use it to integrate custom lifecycle policies.
+
+### `snaPortRoute`
+
+Exposes the local SNA server port for browser-side discovery. React integrations use this route when `SnaProvider` is mounted without an explicit `snaUrl`.
+
+### Deprecated route modules
+
+`@sna-sdk/core/server/routes/agent` and `@sna-sdk/core/server/routes/chat` remain available for compatibility. New code should prefer `createSnaApp` and the generated OpenAPI pages.

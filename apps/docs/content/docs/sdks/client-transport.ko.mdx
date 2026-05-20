@@ -1,0 +1,148 @@
+---
+title: "Client transport와 SnaClient"
+description: "SnaClient 생성자, 연결 lifecycle, low-level request/push API."
+---
+
+# Client transport와 SnaClient
+
+`SnaClient`는 하나의 `baseUrl`에서 HTTP endpoint와 WebSocket endpoint를 파생합니다. 상태 변경과 CRUD는 HTTP를, push event와 permission request는 WebSocket을, 긴 one-shot stream은 SSE를 사용합니다.
+
+## `new SnaClient(options)`
+
+**Signature**
+
+```ts
+const client = new SnaClient({
+  baseUrl: string;
+  ws: boolean;
+  http: boolean;
+  reconnect?: boolean;
+  reconnectDelay?: number;
+  maxReconnectAttempts?: number;
+});
+```
+
+**Options**
+
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `baseUrl` | yes | none | SNA server 주소입니다. `localhost:3099`, `http://localhost:3099`, `https://example.com` 형태를 지원합니다. |
+| `ws` | yes | none | WebSocket transport를 켭니다. `agent.subscribe`, `onEvent`, permission push에 필요합니다. |
+| `http` | yes | none | HTTP transport를 켭니다. session CRUD와 agent lifecycle 명령의 ordering guarantee를 제공합니다. |
+| `reconnect` | no | `true` | WebSocket이 끊겼을 때 자동 reconnect를 시도합니다. |
+| `reconnectDelay` | no | `2000` | reconnect 사이 대기 시간입니다. 단위는 ms입니다. |
+| `maxReconnectAttempts` | no | `0` | 최대 reconnect 횟수입니다. `0`은 무제한입니다. |
+
+**Derived endpoints**
+
+| `baseUrl` | HTTP | WebSocket |
+| --- | --- | --- |
+| `localhost:3099` | `http://localhost:3099` | `ws://localhost:3099/ws` |
+| `https://sna.example.com` | `https://sna.example.com` | `wss://sna.example.com/ws` |
+
+**Example**
+
+```ts
+import { SnaClient } from "@sna-sdk/client";
+
+const client = new SnaClient({
+  baseUrl: "localhost:3099",
+  http: true,
+  ws: true,
+});
+```
+
+## `client.connect()`
+
+**Signature**
+
+```ts
+client.connect(): void
+```
+
+WebSocket 연결을 시작합니다. 이미 연결 중이거나 연결되어 있으면 no-op입니다. 연결 직후 서버는 `sessions.snapshot` push를 보낼 수 있으므로, session UI가 필요하다면 `sessions.onSnapshot`을 먼저 등록하십시오.
+
+```ts
+client.sessions.onSnapshot((sessions) => setSessions(sessions));
+client.connect();
+```
+
+## `client.disconnect()`
+
+**Signature**
+
+```ts
+client.disconnect(): void
+```
+
+WebSocket을 닫고 자동 reconnect를 중지합니다. 아직 응답을 기다리는 low-level request promise는 `disconnected` error로 reject됩니다.
+
+## `client.status` / `client.connected`
+
+**Signature**
+
+```ts
+client.status: "connecting" | "connected" | "disconnected"
+client.connected: boolean
+```
+
+UI에서 reconnect banner, disabled button, loading state를 표시할 때 사용합니다.
+
+## `client.onConnectionStatus(callback)`
+
+**Signature**
+
+```ts
+const unsubscribe = client.onConnectionStatus(
+  (status: "connecting" | "connected" | "disconnected") => void,
+);
+```
+
+**Example**
+
+```ts
+const unsubscribe = client.onConnectionStatus((status) => {
+  setOnline(status === "connected");
+});
+```
+
+## `client.request(type, payload?)`
+
+**Signature**
+
+```ts
+await client.request<T = Record<string, unknown>>(
+  type: string,
+  payload?: Record<string, unknown>,
+): Promise<T>
+```
+
+WebSocket으로 raw request를 보내고 같은 `rid`를 가진 response를 기다립니다. 일반 앱에서는 직접 사용하지 말고 `client.sessions`, `client.agent`, `client.chat` namespace를 사용하십시오.
+
+**Example**
+
+```ts
+// 권장하지 않음: 타입 안정성이 낮습니다.
+const response = await client.request("sessions.list");
+```
+
+## `client.onPush(type, handler)`
+
+**Signature**
+
+```ts
+const unsubscribe = client.onPush(
+  type: string,
+  handler: (message: WsMessage) => void,
+);
+```
+
+서버가 request 없이 보내는 push message를 직접 구독합니다. 예: `sessions.snapshot`, `agent.event`, `permission.request`. 일반 앱에서는 `sessions.onSnapshot`, `agent.onEvent`, `agent.onPermissionRequest`를 우선 사용하십시오.
+
+## Transport 선택 기준
+
+| Transport | 사용하는 메서드 | 보장 |
+| --- | --- | --- |
+| HTTP | `sessions.create/update/remove`, `agent.start/send/kill/restart/resume/interrupt`, `getStatus`, `setModel`, `setPermissionMode` | 서버 작업이 commit된 뒤 promise가 resolve됩니다. |
+| WebSocket | `connect`, `request`, `onPush`, `agent.subscribe`, `agent.onEvent`, permission subscription | push delivery와 reconnect resubscription을 제공합니다. |
+| SSE | `agent.runOnceStream`, `agent.streamEvents` | HTTP 기반 streaming입니다. Browser와 proxy 친화적입니다. |

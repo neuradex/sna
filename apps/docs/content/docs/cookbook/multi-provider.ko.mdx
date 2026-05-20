@@ -1,13 +1,13 @@
 ---
 title: 멀티 프로바이더 세션
-description: 맥락 잃지 않고 스레드 도중 런타임 교체.
+description: 맥락을 잃지 않고 스레드 도중 런타임을 교체합니다.
 icon: Shuffle
 ---
 
-SnaSession 하나는 수명 동안 여러 RuntimeSession을 마운트할 수 있다.
+SnaSession 하나는 수명 동안 여러 RuntimeSession을 마운트할 수 있습니다.
 **runtime chain**은 그 세션이 입어온 모든 설정의 순서대로 정렬된
-히스토리고, 히스토리는 정규화돼 있다. 프로바이더 네이티브 모양은
-replay마다 파생되므로 런타임 교체는 그냥 respawn이다.
+히스토리고, 히스토리는 정규화돼 있습니다. 프로바이더 네이티브 모양은
+replay마다 파생되므로 런타임 교체는 respawn으로 처리됩니다.
 
 ## 교체
 
@@ -26,36 +26,36 @@ await client.agent.patch(sessionId, { provider: "codex", model: "gpt-5.4" });
 
 `provider` 필드가 있는 `PATCH /agent/session`은 현재 프로세스를
 종료하고 새 런타임으로 respawn해서 정규화 히스토리를 새 프로바이더의
-네이티브 포맷으로 replay한다. 세션 레코드, 이벤트 커서, runtime chain
-모두 살아남는다.
+네이티브 포맷으로 replay합니다. 세션 레코드, 이벤트 커서, runtime chain
+모두 유지됩니다.
 
 ## Resume vs restart
 
 | 동작 | 프로세스 | 히스토리 |
 |------|---------|---------|
-| `restart` | 같은 설정으로 respawn | replay 안 함 (warm restart) |
+| `restart` | 같은 설정으로 respawn | replay하지 않음 (warm restart) |
 | `resume` | 같은 설정으로 respawn | 재구성해서 다시 주입 |
 | `patch` (프로바이더 변경) | 새 설정으로 respawn | 새 프로바이더용으로 재구성 |
 
-긴 유휴 후나 런타임이 죽었을 때는 `resume`. 컨슈머가 런타임 교체를
-원하면 `patch`.
+긴 유휴 후나 런타임이 죽었을 때는 `resume`을 사용합니다. 컨슈머가 런타임
+교체를 원할 때는 `patch`를 사용합니다.
 
 ## 왜 이게 중요한가
 
 대부분의 "에이전트 플랫폼" 추상화는 대화를 런타임마다의 일시적 상태로
-다룬다. 프로세스 잃으면 스레드도 잃는다. SNA의 정규화 히스토리가 진실의
-원천이다: 모든 프로바이더는 플러그인 가능한 replay 타깃이지, 기억의
-보관자가 아니다.
+다룹니다. 프로세스를 잃으면 스레드도 잃습니다. SNA에서는 정규화 히스토리가
+진실의 원천입니다. 모든 프로바이더는 플러그인 가능한 replay 타깃이지, 기억의
+보관자가 아닙니다.
 
 ## 주의
 
-- **호스팅된 툴 상태는 안 따라온다.** Codex의 이미지 생성,
-  web_search 등 호스팅된 툴은 프로바이더 측에 산다. 이전 호출의
+- **호스팅된 툴 상태는 따라오지 않습니다.** Codex의 이미지 생성,
+  web_search 등 호스팅된 툴은 프로바이더 측에 존재합니다. 이전 호출의
   `tool_result`는 히스토리에 있지만, 다음 턴이 이전 호출의 OpenAI
-  대화 id를 기대하면 그건 사라진 상태다.
-- **모델 특정 토큰은 replay에서 살짝 손실됨.** Claude의 확장 thinking
+  대화 id를 기대하면 그건 사라진 상태입니다.
+- **모델 특정 토큰은 replay에서 살짝 손실됩니다.** Claude의 확장 thinking
   `signature`는 Claude→Claude replay에서는 보존되지만 Codex로 갈아탈
-  때 폐기된다 (analog가 없음).
-- **턴별 비용 어트리뷰션은 정직하게 유지됨.** 3계층 어트리뷰션
+  때는 폐기됩니다(대응 개념이 없기 때문입니다).
+- **턴별 비용 어트리뷰션은 정확하게 유지됩니다.** 3계층 어트리뷰션
   (provider × modelProvider × model)이 행 단위로 기록되므로 사후
-  분석에서 런타임별 사용량을 깔끔하게 쪼갤 수 있다.
+  분석에서 런타임별 사용량을 명확히 나눌 수 있습니다.
