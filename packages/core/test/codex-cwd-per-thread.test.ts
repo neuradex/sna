@@ -160,6 +160,39 @@ describe("RuntimePool with supportsCwdPerThread", () => {
     assert.equal(pool.size, 2);
   });
 
+  it("splits codex daemons by providerOptions.config without requiring a manual configHash", async () => {
+    const pool = new RuntimePool();
+    let prepareCount = 0;
+    const provider = {
+      name: "codex",
+      supportsCwdPerThread: true,
+      prepareRuntime: async () => ({
+        provider: "codex",
+        ready: true,
+        activeThreadCount: 0,
+        dispose: () => {},
+        daemon: { pid: ++prepareCount } as unknown as undefined,
+      }),
+    };
+
+    const a = await pool.prepare({
+      cwd: "/x",
+      providerOptions: { config: { model_provider: "openai" } },
+    }, provider);
+    const b = await pool.prepare({
+      cwd: "/x",
+      providerOptions: { config: { model_provider: "anthropic" } },
+    }, provider);
+    const c = await pool.prepare({
+      cwd: "/y",
+      providerOptions: { config: { model_provider: "openai" } },
+    }, provider);
+
+    assert.notStrictEqual(a, b, "different Codex -c overrides need separate daemons");
+    assert.strictEqual(a, c, "same Codex -c overrides still share across cwd");
+    assert.equal(pool.size, 2);
+  });
+
   it("does not affect providers without the flag", async () => {
     const pool = new RuntimePool();
     let prepareCount = 0;

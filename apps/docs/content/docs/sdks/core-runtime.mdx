@@ -43,6 +43,10 @@ Runs one complete agent task through the runtime and returns the final result. U
 
 Common options include `message`, `provider`, `model`, `permissionMode`, `cwd`, `timeout`, `systemPrompt`, `appendSystemPrompt`, `reasoningLevel`, and `providerOptions`.
 
+#### Codex `providerOptions`
+
+When `provider: "codex"` is selected, `providerOptions.profile` is passed to both `codex app-server` and `codex exec` as `--profile <name>`. `providerOptions.config` is a record of Codex `-c key=value` overrides; SNA passes those overrides to both runtime paths and includes the object in the runtime-pool key so sessions with different Codex config do not share the same daemon. `providerOptions.serviceTier` remains the request-priority lane (`"priority"`, `"flex"`, or `"batch"`).
+
 ### `getRuntimePool()`
 
 Returns the shared runtime pool used by the process. Use this when multiple call sites should reuse the same runtime process management instead of creating independent pools.

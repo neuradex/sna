@@ -40,6 +40,8 @@ Returns `{ connected, alive, start, send, kill, completion }`. The hook connects
 | Session default | `sessionId` comes from `SnaContext`; `SnaProvider` defaults it to `default`. |
 | `alive` | Set from `/agent/status` during initialization and set optimistically when `start` or `send` succeeds locally. |
 
+`providerOptions` is passed through unchanged. For Codex, the common keys are `serviceTier`, `profile`, and `config` (`-c key=value` overrides).
+
 ### Methods
 
 | Method | HTTP route | Notes |

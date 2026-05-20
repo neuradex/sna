@@ -71,7 +71,7 @@ OpenCode はストリーミングで例外です。現在の SDK ヘルパが si
 | Tool output streaming | ✗ 最終 `tool_result` のみ | ✓ shell `outputDelta` を `tool_use` update として渡す。file patch delta は捨てる | ✗ 最終 part status のみ | ✗ 最終/update payload のみ | ✗ 最終/update payload のみ |
 | Tool result payload | ✓ `toolUseId`, `isError`, text/JSON content | ✓ item 別の詳細 payload: `exitCode`, `status`, `durationMs`, MCP error, `web_search`, `image_generation.savedPath`, `revisedPrompt`, unknown-tool `raw` | ✓ `title`, `isError`, output/error | ✓ ACP `rawOutput`, `locations`, `status`, `kind`, Grok tool-name unwrap | ✓ ACP `rawOutput`, `locations`, `status`, `kind`, Cursor tool-kind unwrap |
 | セッション完了メタデータ | ✓ duration, API duration, cost, token/cache usage, model, context window | ✓ duration と token/cache usage。cost は報告しない | ⚠ session stream は `provider` フィールドのみ。one-shot `complete()` は OpenCode が返す usage/cost を返す | ✓ ACP `stopReason` のみ | ✓ ACP `stopReason` のみ |
-| 未知の新 tool の可視性 | ✓ native tool name はそのまま出る | ✓ generic `tool_use` / `tool_result` + `raw` payload で fail-open | ✗ 未処理の OpenCode event type は捨てる | ✗ 未知の ACP update type は捨てる | ✗ 未知の ACP update type は捨てる |
+| 未知の新 tool の可視性 | ✓ native tool name はそのまま出る | ✓ generic `tool_use` / `tool_result` + `raw` payload で fail-open | ✓ tool らしい未知の SSE event は `tool_use`、`tool_use_delta`、`tool_result` と raw properties で fail-open | ✓ tool らしい未知の ACP update は `rawUpdate` 付きで fail-open | ✓ tool らしい未知の ACP update は `rawUpdate` 付きで fail-open |
 
 一番大きい非対称は `tool_use_delta` です。tool input の partial JSON を
 ストリーミングできるランタイムは、現時点では Claude Code だけです。
@@ -136,9 +136,9 @@ Claude Code の権限モデルは out-of-band です。SNA が hook スクリプ
 | `disableSlashCommands` | ✓ `--disable-slash-commands` | — | — | — | — |
 | `omlxBaseUrl` | ✓ `ANTHROPIC_BASE_URL` をルーティング | — | — | — | — |
 | `serviceTier` | ✗ 誤課金 (`/fast` はモデルであって tier ではない) | ✓ `priority` / `flex` / `batch` | — | — | — |
-| `profile` | — | ⚠ pool key の分離のみ。adapter は profile を有効化しない | — | — | — |
-| `config` (`-c key=value`) | — | ✗ 現在の adapter には未接続 | — | — | — |
-| `hooksHash` / `configHash` | — | ✓ runtime pool 分離 key | — | — | — |
+| `profile` | — | ✓ `codex app-server` と `codex exec` に `--profile` として渡す。runtime pool も分離 | — | — | — |
+| `config` (`-c key=value`) | — | ✓ `codex app-server` と `codex exec` に渡す。`config` object は pool key にも含まれる | — | — | — |
+| `hooksHash` / `configHash` | — | ✓ 生成された hooks/config 用の手動 runtime pool 分離 key | — | — | — |
 | `serverUrl` | — | — | ✓ spawn を飛ばして既存デーモンに attach | — | — |
 | `modelProviderId` | — | — | ✓ `{providerID, modelID}` の provider 半分 | — | — |
 | `agent` | — | — | ✓ build / plan / etc. | — | — |

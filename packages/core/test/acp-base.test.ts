@@ -74,6 +74,24 @@ rl.on("line", (line) => {
       notify({ sessionUpdate: "tool_call_update", toolCallId: "tool-1", kind: "read", title: "Read", status: "completed", rawOutput: "ok", locations: [{ path: "b.ts" }] });
     }
 
+    if (mode.includes("unknown-tool")) {
+      notify({
+        sessionUpdate: "vendor_tool_started",
+        toolCallId: "unknown-1",
+        kind: "search",
+        title: "Search",
+        rawInput: { query: "SNA" }
+      });
+      notify({
+        sessionUpdate: "vendor_tool_finished",
+        toolCallId: "unknown-1",
+        kind: "search",
+        title: "Search",
+        status: "completed",
+        rawOutput: { count: 2 }
+      });
+    }
+
     if (mode.includes("permission")) {
       send({
         jsonrpc: "2.0",
@@ -209,6 +227,26 @@ describe("ACP shared adapter base", () => {
     assert.ok(events.some((event) => event.type === "tool_use" && event.data?.toolName === "Read" && (event.data as any).fromUpdate === true));
     assert.ok(events.some((event) => event.type === "tool_result" && event.data?.status === "completed" && event.data?.rawOutput === "ok"));
     assert.ok(events.some((event) => event.type === "complete" && event.data?.stopReason === "end_turn"));
+  });
+
+  it("surfaces unknown ACP tool-like updates as generic tool events", async () => {
+    const { proc } = await startProcess({ cwd: process.cwd() }, "unknown-tool");
+    const events: AgentEvent[] = [];
+    proc.on("event", (event) => events.push(event));
+
+    proc.send("run unknown updates");
+    await waitFor(() => events.some((event) => event.type === "complete"));
+
+    const use = events.find((event) => event.type === "tool_use");
+    const result = events.find((event) => event.type === "tool_result");
+    assert.equal(use?.data?.id, "unknown-1");
+    assert.equal(use?.data?.toolName, "Search");
+    assert.deepEqual(use?.data?.input, { query: "SNA" });
+    assert.equal(use?.data?.sessionUpdate, "vendor_tool_started");
+    assert.equal(result?.data?.id, "unknown-1");
+    assert.equal(result?.data?.status, "completed");
+    assert.deepEqual(result?.data?.rawOutput, { count: 2 });
+    assert.equal(result?.data?.sessionUpdate, "vendor_tool_finished");
   });
 
   it("emits permission_needed and responds with the selected ACP outcome", async () => {

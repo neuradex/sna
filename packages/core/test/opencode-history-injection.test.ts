@@ -576,6 +576,62 @@ describe("OpenCodeProvider end-to-end via mock server", () => {
     proc.kill();
   });
 
+  it("surfaces unknown OpenCode tool-like events as generic tool events", async () => {
+    const handle = await provider.prepareRuntime({
+      provider: "opencode",
+      cwd: process.cwd(),
+      providerOptions: { serverUrl: mock.url },
+    });
+    const proc = provider.spawn({ cwd: process.cwd() }, handle);
+    const events = collectEvents(proc);
+    await waitFor(() => events.some((e) => e.type === "init"));
+
+    mock.emit({
+      type: "experimental.tool.started",
+      properties: {
+        sessionID: proc.sessionId!,
+        id: "unknown-tool-1",
+        toolName: "web_search",
+        input: { query: "SNA" },
+        status: "running",
+      },
+    });
+    mock.emit({
+      type: "experimental.tool.input_delta",
+      properties: {
+        sessionID: proc.sessionId!,
+        id: "unknown-tool-1",
+        toolName: "web_search",
+        delta: "{\"query\"",
+      },
+    });
+    mock.emit({
+      type: "experimental.tool.finished",
+      properties: {
+        sessionID: proc.sessionId!,
+        id: "unknown-tool-1",
+        toolName: "web_search",
+        output: "2 results",
+        status: "completed",
+      },
+    });
+
+    await waitFor(() => events.some((e) => e.type === "tool_result"));
+    const use = events.find((e) => e.type === "tool_use")!;
+    const result = events.find((e) => e.type === "tool_result")!;
+    assert.equal(use.data?.id, "unknown-tool-1");
+    assert.equal(use.data?.toolName, "web_search");
+    assert.deepEqual(use.data?.input, { query: "SNA" });
+    assert.equal(use.data?.rawEventType, "experimental.tool.started");
+    assert.equal(events.find((e) => e.type === "tool_use_delta")?.delta, "{\"query\"");
+    assert.equal(result.data?.id, "unknown-tool-1");
+    assert.equal(result.data?.toolName, "web_search");
+    assert.equal(result.message, "2 results");
+    assert.equal(result.data?.rawEventType, "experimental.tool.finished");
+
+    proc.kill();
+  });
+
   it("interrupt() calls /abort and emits 'interrupted'", async () => {
     const handle = await provider.prepareRuntime({
       provider: "opencode",

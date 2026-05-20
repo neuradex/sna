@@ -513,6 +513,11 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
    *   1. Subclass `preHandshake` (e.g. MCP bridge setup + config write)
    *   2. Spawn agent and wire stdio
    *   3. ACP `initialize` + optional `authenticate` + `session/new`
+   *   4. If the caller passed an initial `prompt` in SpawnOptions, send it
+   *      as the first turn. Mirrors claude-code/codex which auto-send the
+   *      prompt from spawn options — without this, `runOnce` paths (which
+   *      hand the message in via SpawnOptions and then only listen for
+   *      events) silently hang because nothing ever calls `.send()`.
    */
   private async initialize(options: SpawnOptions): Promise<void> {
     try {
@@ -524,6 +529,15 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
       // orphaned subclass resources. Trigger cleanup hook before bubbling.
       this.onPreSpawnCleanup();
       throw err;
+    }
+    if (options.prompt) {
+      // sendPrompt is fire-and-forget; surface its async failure as an
+      // error event so the consumer's event listener can react (matches
+      // how send() surfaces errors).
+      this.sendPrompt(options.prompt).catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        this.emitEvent({ type: "error", message, timestamp: Date.now() });
+      });
     }
   }
 
@@ -808,8 +822,47 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
         // of SNA's event vocabulary; ignore.
         return null;
       default:
-        return null;
+        return this.buildUnknownToolLikeUpdateEvent(update, now);
     }
+  }
+
+  private buildUnknownToolLikeUpdateEvent(update: AcpSessionUpdate, now: number): AgentEvent | null {
+    const hasToolSignal =
+      !!update.toolCallId ||
+      !!update.kind ||
+      !!update.title ||
+      update.rawInput !== undefined ||
+      update.rawOutput !== undefined ||
+      update.status !== undefined;
+    if (!hasToolSignal) return null;
+
+    const hasResultSignal = update.status !== undefined || update.rawOutput !== undefined;
+    if (hasResultSignal) {
+      return {
+        type: "tool_result",
+        message: typeof update.rawOutput === "string" ? update.rawOutput : undefined,
+        data: {
+          id: update.toolCallId,
+          status: update.status,
+          content: update.content,
+          rawOutput: update.rawOutput,
+          locations: update.locations,
+          kind: update.kind,
+          title: update.title || undefined,
+          sessionUpdate: update.sessionUpdate,
+          rawUpdate: update,
+        },
+        timestamp: now,
+      };
+    }
+
+    const event = this.buildToolUseEvent(update, now, false);
+    event.data = {
+      ...(event.data ?? {}),
+      sessionUpdate: update.sessionUpdate,
+      rawUpdate: update,
+    };
+    return event;
   }
 
   private buildToolUseEvent(update: AcpSessionUpdate, now: number, fromUpdate: boolean): AgentEvent {

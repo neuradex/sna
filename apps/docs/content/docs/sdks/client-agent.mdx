@@ -41,8 +41,10 @@ await client.agent.start(session: string, config?: AgentStartConfig): Promise<{
 | `config.disallowedTools` | `string[]` | no | Blocks specific tools. |
 | `config.mcpServers` | `Record<string, unknown>` | no | MCP servers made available to the agent. |
 | `config.reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Runtime-neutral reasoning effort. |
-| `config.providerOptions` | `Record<string, unknown>` | no | Runtime-specific options, such as Codex `serviceTier`. |
+| `config.providerOptions` | `Record<string, unknown>` | no | Runtime-specific options, such as Codex `serviceTier`, `profile`, and `config`. |
 | `config.extraArgs` | `string[]` | no | Deprecated raw CLI flags. Prefer typed fields. |
+
+For Codex, `providerOptions` can include `serviceTier`, `profile`, and `config`. `profile` maps to `--profile <name>`, while `config` is passed as repeatable `-c key=value` overrides on both `codex app-server` and `codex exec`.
 
 **Returns**
 

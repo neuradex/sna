@@ -522,9 +522,15 @@ class OpenCodeProcess implements AgentProcess {
       case "permission.replied":
         return; // audit log, no UI action
 
-      default:
-        // Unhandled events are dropped silently — log at debug level only.
+      default: {
+        if (props.part?.type === "tool") {
+          this.normalizePartUpdated(props.part, undefined);
+          return;
+        }
+        const generic = this.normalizeUnknownToolLikeEvent(ev.type, props);
+        if (generic) this.enqueue(generic);
         return;
+      }
     }
   }
 
@@ -647,6 +653,101 @@ class OpenCodeProcess implements AgentProcess {
 
     // step-start / step-finish / snapshot / patch / agent / retry / compaction
     // — no AgentEvent equivalent. Drop.
+  }
+
+  private normalizeUnknownToolLikeEvent(eventType: string, props: any): AgentEvent | null {
+    const lowerType = eventType.toLowerCase();
+    const id =
+      props.toolCallId ??
+      props.toolCallID ??
+      props.callID ??
+      props.callId ??
+      props.id;
+    const rawToolName =
+      props.toolName ??
+      props.tool ??
+      props.name ??
+      props.title ??
+      props.kind ??
+      "tool";
+    const toolName = typeof rawToolName === "string" && rawToolName.length > 0 ? rawToolName : "tool";
+    const input = props.rawInput ?? props.input ?? props.args ?? props.arguments;
+    const output = props.rawOutput ?? props.output ?? props.result ?? props.error;
+    const status = typeof props.status === "string" ? props.status : undefined;
+    const delta = props.inputDelta ?? props.argumentsDelta ?? props.delta;
+    const hasExplicitToolId =
+      props.toolCallId !== undefined ||
+      props.toolCallID !== undefined ||
+      props.callID !== undefined ||
+      props.callId !== undefined;
+    const hasToolSignal =
+      lowerType.includes("tool") ||
+      hasExplicitToolId ||
+      props.toolName !== undefined ||
+      props.tool !== undefined ||
+      input !== undefined ||
+      output !== undefined ||
+      status !== undefined ||
+      delta !== undefined;
+    if (!hasToolSignal) return null;
+
+    const baseData = {
+      id,
+      toolName,
+      status,
+      rawEventType: eventType,
+      rawProperties: props,
+    };
+
+    if (typeof delta === "string" && delta.length > 0) {
+      return {
+        type: "tool_use_delta",
+        delta,
+        message: toolName,
+        data: baseData,
+        timestamp: Date.now(),
+      };
+    }
+
+    const isResult =
+      output !== undefined ||
+      status === "completed" ||
+      status === "failed" ||
+      status === "error" ||
+      status === "rejected" ||
+      status === "cancelled" ||
+      lowerType.includes("finish") ||
+      lowerType.includes("complete") ||
+      lowerType.includes("result");
+
+    if (isResult) {
+      const isError =
+        status === "failed" ||
+        status === "error" ||
+        status === "rejected" ||
+        lowerType.includes("error");
+      return {
+        type: "tool_result",
+        message: typeof output === "string" ? output : "",
+        data: {
+          ...baseData,
+          output,
+          isError,
+        },
+        timestamp: Date.now(),
+      };
+    }
+
+    return {
+      type: "tool_use",
+      message: toolName,
+      data: {
+        ...baseData,
+        input,
+        streaming: true,
+      },
+      timestamp: Date.now(),
+    };
   }
 
   // ── Event queue ──────────────────────────────────────────────────────────

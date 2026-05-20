@@ -43,6 +43,10 @@ runtime 経由で 1 つの agent task を最後まで実行し、最終結果を
 
 主な option は `message`、`provider`、`model`、`permissionMode`、`cwd`、`timeout`、`systemPrompt`、`appendSystemPrompt`、`reasoningLevel`、`providerOptions` です。
 
+#### Codex `providerOptions`
+
+`provider: "codex"` を選ぶと、`providerOptions.profile` は `codex app-server` と `codex exec` の両方に `--profile <name>` として渡されます。`providerOptions.config` は Codex の `-c key=value` override 一覧です。SNA はこの override を両方の実行経路に渡し、runtime pool key にも含めるため、Codex 設定が異なるセッションが同じデーモンを共有しません。`providerOptions.serviceTier` は従来通り、リクエスト優先度レーン (`"priority"`, `"flex"`, `"batch"`) を指定します。
+
 ### `getRuntimePool()`
 
 現在の process が使う shared runtime pool を返します。複数の call site が独立 pool を作らず、同じ runtime process management を再利用したい場合に使います。

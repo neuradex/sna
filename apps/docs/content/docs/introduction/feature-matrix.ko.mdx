@@ -68,7 +68,7 @@ OpenCode는 스트리밍에서 예외입니다. 현재 SDK 헬퍼가 single-shot
 | Tool output streaming | ✗ 최종 `tool_result`만 있음 | ✓ shell `outputDelta`를 `tool_use` update로 전달. file patch delta는 버림 | ✗ 최종 part status만 있음 | ✗ 최종/update payload만 전달 | ✗ 최종/update payload만 전달 |
 | Tool result payload | ✓ `toolUseId`, `isError`, text/JSON content | ✓ item별 상세 payload: `exitCode`, `status`, `durationMs`, MCP error, `web_search`, `image_generation.savedPath`, `revisedPrompt`, unknown-tool `raw` | ✓ `title`, `isError`, output/error | ✓ ACP `rawOutput`, `locations`, `status`, `kind`, Grok tool-name unwrap | ✓ ACP `rawOutput`, `locations`, `status`, `kind`, Cursor tool-kind unwrap |
 | 세션 완료 메타데이터 | ✓ duration, API duration, cost, token/cache usage, model, context window | ✓ duration과 token/cache usage. cost는 보고하지 않음 | ⚠ session stream은 `provider` 필드만 표시. one-shot `complete()`는 OpenCode가 주는 usage/cost 반환 | ✓ ACP `stopReason`만 있음 | ✓ ACP `stopReason`만 있음 |
-| 알 수 없는 새 tool 노출 | ✓ native tool name은 그대로 노출 | ✓ generic `tool_use` / `tool_result` + `raw` payload로 fail-open | ✗ 처리하지 않는 OpenCode event type은 버림 | ✗ 알 수 없는 ACP update type은 버림 | ✗ 알 수 없는 ACP update type은 버림 |
+| 알 수 없는 새 tool 노출 | ✓ native tool name은 그대로 노출 | ✓ generic `tool_use` / `tool_result` + `raw` payload로 fail-open | ✓ tool처럼 보이는 미지의 SSE event는 `tool_use`, `tool_use_delta`, `tool_result`와 raw properties로 fail-open | ✓ tool처럼 보이는 미지의 ACP update는 `rawUpdate`와 함께 fail-open | ✓ tool처럼 보이는 미지의 ACP update는 `rawUpdate`와 함께 fail-open |
 
 가장 큰 비대칭은 `tool_use_delta`입니다. 현재 tool input의 partial JSON을
 스트리밍하는 런타임은 Claude Code뿐입니다. Codex는 item lifecycle
@@ -131,9 +131,9 @@ Claude Code의 권한 모델은 out-of-band입니다. SNA가 hook 스크립트�
 | `disableSlashCommands` | ✓ `--disable-slash-commands` | — | — | — | — |
 | `omlxBaseUrl` | ✓ `ANTHROPIC_BASE_URL` 라우팅 | — | — | — | — |
 | `serviceTier` | ✗ 잘못 과금됨 (`/fast`는 모델, tier가 아님) | ✓ `priority` / `flex` / `batch` | — | — | — |
-| `profile` | — | ⚠ pool key 분리 전용. 어댑터가 profile을 활성화하지는 않음 | — | — | — |
-| `config` (`-c key=value`) | — | ✗ 현재 어댑터에 연결되지 않음 | — | — | — |
-| `hooksHash` / `configHash` | — | ✓ runtime pool 분리 key | — | — | — |
+| `profile` | — | ✓ `codex app-server`와 `codex exec`에 `--profile`로 전달. runtime pool도 분리 | — | — | — |
+| `config` (`-c key=value`) | — | ✓ `codex app-server`와 `codex exec`에 전달. `config` object는 pool key에도 포함 | — | — | — |
+| `hooksHash` / `configHash` | — | ✓ 생성된 hooks/config용 수동 runtime pool 분리 key | — | — | — |
 | `serverUrl` | — | — | ✓ spawn 생략, 기존 데몬에 attach | — | — |
 | `modelProviderId` | — | — | ✓ `{providerID, modelID}`의 provider 절반 | — | — |
 | `agent` | — | — | ✓ build / plan / etc. | — | — |

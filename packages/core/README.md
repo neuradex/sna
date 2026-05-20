@@ -14,7 +14,7 @@ Your app → SNA server → spawn(claude-code | codex | opencode) → events bac
 - **Providers** — `ClaudeCodeProvider`, `CodexProvider`, and `OpenCodeProvider`, all exposing a uniform `AgentProcess` interface (`send`, `setModel`, `setPermissionMode`, `interrupt`, `kill`, `applyPatch`, `respondToPermission`). Codex and OpenCode are pooled through `RuntimePool`; Claude Code is stateless per-session.
 - **Canonical conversation model** — `chat_messages` rows split a message into orthogonal `actor` × `kind` axes. `history/canonical.ts` rebuilds blocks; `history/{claude-code,codex,opencode}.ts` adapters convert canonical → native wire format.
 - **One-shot completion** — `completion({ prompt, model?, provider?, reasoningLevel? })` for short single-prompt jobs. Each provider implements its own optimal one-shot path (Codex `exec --ephemeral` or pooled thread; Claude `-p`; OpenCode pooled session or ephemeral serve). Opportunistically reuses a pooled daemon when one is already alive for the cwd, so high-frequency callers (autocomplete, etc.) don't pay per-call cold-start.
-- **Cross-provider latency knobs** — `reasoningLevel: 0..5` (Claude `--effort` / Codex `model_reasoning_effort`) and Codex-only `providerOptions.serviceTier` (mirrors Codex `/fast` slash command: `"priority"`, `"flex"`, `"batch"`).
+- **Cross-provider latency and Codex config knobs** — `reasoningLevel: 0..5` (Claude `--effort` / Codex `model_reasoning_effort`), Codex-only `providerOptions.serviceTier` (mirrors Codex `/fast`: `"priority"`, `"flex"`, `"batch"`), `providerOptions.profile` (`--profile`), and `providerOptions.config` (repeatable `-c key=value` overrides).
 - **Launcher API** — `startSnaServer({ port, dbPath, ... })` from `@sna-sdk/core/node` or `@sna-sdk/core/electron`. Forks the standalone server, resolves native bindings, waits for ready.
 - **PreToolUse hook** — `scripts/hook.ts`, auto-injected by `ClaudeCodeProvider.spawn()`. No manual `.claude/settings.json` editing needed.
 
@@ -76,7 +76,11 @@ await completion({
   provider: "codex",
   model: "gpt-5.4-mini",
   reasoningLevel: 0,                            // none reasoning on Codex
-  providerOptions: { serviceTier: "priority" }, // Codex `/fast` lane
+  providerOptions: {
+    serviceTier: "priority",                    // Codex `/fast` lane
+    profile: "work",
+    config: { model_provider: "openai" },       // codex -c model_provider=openai
+  },
 });
 ```
 

@@ -41,8 +41,10 @@ await client.agent.start(session: string, config?: AgentStartConfig): Promise<{
 | `config.disallowedTools` | `string[]` | no | 特定の tool をブロックします。 |
 | `config.mcpServers` | `Record<string, unknown>` | no | agent に公開する MCP server。 |
 | `config.reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Runtime-neutral reasoning effort. |
-| `config.providerOptions` | `Record<string, unknown>` | no | Runtime-specific options, such as Codex `serviceTier`. |
+| `config.providerOptions` | `Record<string, unknown>` | no | ランタイム別 option。Codex の `serviceTier`、`profile`、`config` などを渡します。 |
 | `config.extraArgs` | `string[]` | no | deprecated な raw CLI flag。typed field を優先してください。 |
+
+Codex では `providerOptions` で `serviceTier`、`profile`、`config` を指定できます。`profile` は `--profile <name>` として渡され、`config` は `codex app-server` と `codex exec` の両方に、繰り返し指定できる `-c key=value` override として渡されます。
 
 **Returns**
 

@@ -70,7 +70,7 @@ output panes, token/cost meters, and durable replay after reload.
 | Tool output streaming | ✗ final `tool_result` only | ✓ shell `outputDelta` as `tool_use` update; file patch delta is dropped | ✗ final part status only | ✗ final/update payload only | ✗ final/update payload only |
 | Tool result payload | ✓ `toolUseId`, `isError`, text/JSON content | ✓ rich per item: `exitCode`, `status`, `durationMs`, MCP error, `web_search`, `image_generation.savedPath`, `revisedPrompt`, unknown-tool `raw` | ✓ `title`, `isError`, output/error | ✓ ACP `rawOutput`, `locations`, `status`, `kind`, plus Grok tool-name unwrap | ✓ ACP `rawOutput`, `locations`, `status`, `kind`, plus Cursor tool-kind unwrap |
 | Session completion metadata | ✓ duration, API duration, cost, token usage, cache usage, model, context window | ✓ duration and token/cache usage; cost is not reported | ⚠ session stream only carries the `provider` field; one-shot `complete()` returns usage/cost when OpenCode reports it | ✓ ACP `stopReason` only | ✓ ACP `stopReason` only |
-| Unknown/new tool visibility | ✓ native tool name still surfaces | ✓ fail-open generic `tool_use` / `tool_result` with `raw` payload | ✗ unhandled OpenCode event types are dropped | ✗ unknown ACP update types are dropped | ✗ unknown ACP update types are dropped |
+| Unknown/new tool visibility | ✓ native tool name still surfaces | ✓ fail-open generic `tool_use` / `tool_result` with `raw` payload | ✓ tool-like unknown SSE events fail open as `tool_use`, `tool_use_delta`, or `tool_result` with raw properties | ✓ tool-like unknown ACP updates fail open with `rawUpdate` | ✓ tool-like unknown ACP updates fail open with `rawUpdate` |
 
 The most important asymmetry is `tool_use_delta`: only Claude Code
 currently exposes streaming partial JSON for tool inputs. Codex exposes
@@ -136,9 +136,9 @@ agent's turn suspends until SNA sends a permission response.
 | `disableSlashCommands` | ✓ `--disable-slash-commands` | — | — | — | — |
 | `omlxBaseUrl` | ✓ routes `ANTHROPIC_BASE_URL` | — | — | — | — |
 | `serviceTier` | ✗ would mis-bill (`/fast` is a model, not a tier) | ✓ `priority` / `flex` / `batch` | — | — | — |
-| `profile` | — | ⚠ pool-key isolation only; the adapter does not activate a profile | — | — | — |
-| `config` (`-c key=value`) | — | ✗ not wired in the current adapter | — | — | — |
-| `hooksHash` / `configHash` | — | ✓ runtime pool isolation keys | — | — | — |
+| `profile` | — | ✓ passed as `--profile` to `codex app-server` and `codex exec`; also isolates the runtime pool | — | — | — |
+| `config` (`-c key=value`) | — | ✓ passed to `codex app-server` and `codex exec`; the object is included in the pool key | — | — | — |
+| `hooksHash` / `configHash` | — | ✓ manual runtime pool isolation keys for generated hooks/config | — | — | — |
 | `serverUrl` | — | — | ✓ skip spawn, attach to existing daemon | — | — |
 | `modelProviderId` | — | — | ✓ provider half of `{providerID, modelID}` | — | — |
 | `agent` | — | — | ✓ build / plan / etc. | — | — |

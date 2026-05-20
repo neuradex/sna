@@ -60,6 +60,26 @@ const writeLine = (obj) => {
   process.stdout.write(JSON.stringify(obj) + "\\n");
 };
 
+appendLog({
+  startup: {
+    argv: process.argv.slice(2),
+    env: { CODEX_HOME: process.env.CODEX_HOME },
+  },
+});
+
+if (process.argv.slice(2).includes("exec")) {
+  writeLine({ type: "agent_message.delta", delta: "Hello " });
+  writeLine({
+    type: "item.completed",
+    item: { type: "agent_message", text: "Hello world" },
+  });
+  writeLine({
+    type: "turn.completed",
+    usage: { input_tokens: 11, cached_input_tokens: 2, output_tokens: 3 },
+  });
+  process.exit(0);
+}
+
 // Thread counter — each thread/start produces a fresh id.
 let threadCounter = 0;
 let turnCounter = 0;

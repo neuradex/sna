@@ -198,8 +198,10 @@ export interface SpawnOptions {
    *   disableSlashCommands?: boolean — --disable-slash-commands
    *   omlxBaseUrl?: string           — route ANTHROPIC_BASE_URL to oMLX local LLM
    * Codex:
-   *   config?: Record<string, string> — extra `-c key=value` config overrides for `codex exec`
-   *   profile?: string                — config.toml profile name to activate (pool key)
+   *   config?: Record<string, string> — extra `-c key=value` config overrides for `codex app-server`
+   *                                     and `codex exec`; the object contributes to the runtime pool key
+   *   profile?: string                — config.toml profile name passed as `--profile` to app-server
+   *                                     and exec; also contributes to the runtime pool key
    *   serviceTier?: string            — OpenAI request-priority tier (Codex `/fast` slash command
    *                                     equivalent). Common values: "priority" (fastest, premium
    *                                     billing — mirrors `/fast`), "flex" (cheaper, slower),

@@ -113,6 +113,37 @@ function resolveCodexPath(cwd: string): string {
   return result.path;
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function codexConfigValue(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}
+
+/** @internal Exported for tests. Builds top-level Codex CLI args shared by app-server and exec. */
+export function buildCodexGlobalArgs(providerOptions?: Record<string, unknown>): string[] {
+  const args: string[] = [];
+  const profile = providerOptions?.profile;
+  if (typeof profile === "string" && profile.length > 0) {
+    args.push("--profile", profile);
+  }
+
+  const config = providerOptions?.config;
+  if (isPlainRecord(config)) {
+    for (const [key, rawValue] of Object.entries(config)) {
+      if (!key) continue;
+      const value = codexConfigValue(rawValue);
+      if (value === null) continue;
+      args.push("-c", `${key}=${value}`);
+    }
+  }
+  return args;
+}
+
 // ── Permission mode → Codex sandbox mapping ─────────────────────────────────
 
 /** @internal Exported for testing only. Maps SNA permissionMode → thread/start sandbox value (kebab-case). */
@@ -1651,7 +1682,13 @@ export class CodexProvider implements AgentProvider {
     const resolved = resolveCodexCli();
     const codexPath = resolved.path;
 
-    const args = ["exec", "--json", "--ephemeral", "--full-auto"];
+    const args = [
+      ...buildCodexGlobalArgs(options.providerOptions),
+      "exec",
+      "--json",
+      "--ephemeral",
+      "--full-auto",
+    ];
 
     if (options.model) args.push("--model", options.model);
     if (options.reasoningLevel !== undefined) {
@@ -1880,7 +1917,13 @@ export class CodexProvider implements AgentProvider {
     logger.log("agent", `codex: preparing runtime (CODEX_HOME=${codexHome})`);
 
     // Spawn the app-server daemon
-    const daemon = spawn(codexBinary, [...codexPrefix, "app-server"], {
+    const daemonArgs = [
+      ...codexPrefix,
+      ...buildCodexGlobalArgs(config.providerOptions),
+      "app-server",
+    ];
+
+    const daemon = spawn(codexBinary, daemonArgs, {
       cwd: config.cwd,
       env: cleanEnv,
       stdio: ["pipe", "pipe", "pipe"],
@@ -2002,8 +2045,15 @@ export class CodexProvider implements AgentProvider {
 
     // Legacy path: spawn a new app-server (no pooling)
     const codexPath = resolveCodexPath(options.cwd);
+    const codexParts = codexPath.split(/\s+/);
+    const codexBinary = codexParts[0]!;
+    const codexPrefix = codexParts.slice(1);
 
-    const args = ["app-server"];
+    const args = [
+      ...codexPrefix,
+      ...buildCodexGlobalArgs(options.providerOptions),
+      "app-server",
+    ];
 
     const cleanEnv = { ...process.env, ...options.env } as Record<string, string>;
 
@@ -2055,7 +2105,7 @@ export class CodexProvider implements AgentProvider {
     logger.log("agent", `codex: CODEX_HOME=${codexHome}`);
 
     // Ensure codex binary dir is in PATH
-    const codexDir = path.dirname(codexPath);
+    const codexDir = path.dirname(codexBinary);
     if (codexDir && codexDir !== ".") {
       cleanEnv.PATH = `${codexDir}:${cleanEnv.PATH ?? ""}`;
     }
@@ -2069,7 +2119,7 @@ export class CodexProvider implements AgentProvider {
       args.push(...sysInfo.cleanArgs);
     }
 
-    const proc = spawn(codexPath, args, {
+    const proc = spawn(codexBinary, args, {
       cwd: options.cwd,
       env: cleanEnv,
       stdio: ["pipe", "pipe", "pipe"],
