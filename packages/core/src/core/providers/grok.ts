@@ -223,19 +223,22 @@ export class GrokProcess extends EventEmitter implements AgentProcess {
         : null;
 
     const grokPath = resolveGrokPath(options.cwd);
-    const args = ["agent", "stdio"];
+    // grok's top-level flags (`--model`, `--effort`, `--always-approve`) must
+    // come BEFORE the `agent stdio` subcommand — the subcommand itself takes
+    // no options other than `--help`. Putting them after silently fails with
+    // "error: unexpected argument" and the process exits with code 2 before
+    // the ACP handshake even starts.
+    const args: string[] = [];
     if (options.model) {
       args.push("--model", options.model);
     }
     if (options.reasoningLevel !== undefined) {
-      args.push("--reasoning-effort", toGrokEffort(options.reasoningLevel));
+      args.push("--effort", toGrokEffort(options.reasoningLevel));
     }
     if (options.permissionMode === "bypassPermissions") {
-      // grok's `--always-approve` is the closest equivalent; not exposed as
-      // a permission-mode toggle on `agent stdio`, but the agent subcommand
-      // accepts it.
       args.push("--always-approve");
     }
+    args.push("agent", "stdio");
 
     logger.log("agent", `grok: spawning ${grokPath} ${args.join(" ")} (cwd=${options.cwd})`);
 
@@ -250,11 +253,16 @@ export class GrokProcess extends EventEmitter implements AgentProcess {
 
     this.proc.stderr!.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
-      // grok's stderr emits structured `tracing` lines like
-      //   "2026-05-20T... ERROR ..." that are mostly background-worker
-      // chatter (telemetry, memory). Surface ERROR lines so a real failure
-      // isn't silent, but don't promote them to AgentEvent errors.
-      if (text.includes("ERROR")) {
+      // grok's stderr emits two distinct shapes:
+      //   1. Structured tracing — `"2026-05-20T... ERROR ..."` (uppercase) —
+      //      mostly background-worker chatter (telemetry, memory).
+      //   2. Clap arg-parse failures — `"error: unexpected argument '--foo'"`
+      //      (lowercase) — fatal, immediate exit.
+      // Surface both. Matching case-insensitively also catches "Error:" from
+      // panics or auth failures that the CLI prints at startup. Dropping the
+      // 400-char cap on the failure path would be nicer but the truncation
+      // is fine for log triage.
+      if (/error/i.test(text)) {
         logger.log("agent", `grok stderr: ${text.trim().slice(0, 400)}`);
       }
     });
