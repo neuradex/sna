@@ -1,0 +1,141 @@
+---
+title: "Client transport and SnaClient"
+description: "SnaClient constructor, connection lifecycle, and low-level request/push APIs."
+---
+
+# Client transport and SnaClient
+
+`SnaClient` derives HTTP and WebSocket endpoints from a single `baseUrl`. It uses HTTP for state changes and CRUD, WebSocket for push events and permission requests, and SSE for long-running one-shot streams.
+
+## `new SnaClient(options)`
+
+**Signature**
+
+```ts
+const client = new SnaClient({
+  baseUrl: string;
+  ws: boolean;
+  http: boolean;
+  reconnect?: boolean;
+  reconnectDelay?: number;
+  maxReconnectAttempts?: number;
+});
+```
+
+**Options**
+
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `baseUrl` | yes | none | SNA server address. Supports `localhost:3099`, `http://localhost:3099`, and `https://example.com`. |
+| `ws` | yes | none | Enables WebSocket transport. Required for `agent.subscribe`, `onEvent`, and permission pushes. |
+| `http` | yes | none | Enables HTTP transport. Provides ordering guarantees for session CRUD and agent lifecycle commands. |
+| `reconnect` | no | `true` | Automatically tries to reconnect when the WebSocket connection drops. |
+| `reconnectDelay` | no | `2000` | Delay between reconnect attempts, in milliseconds. |
+| `maxReconnectAttempts` | no | `0` | Maximum reconnect attempts. `0` means unlimited. |
+
+**Derived endpoints**
+
+| `baseUrl` | HTTP | WebSocket |
+| --- | --- | --- |
+| `localhost:3099` | `http://localhost:3099` | `ws://localhost:3099/ws` |
+| `https://sna.example.com` | `https://sna.example.com` | `wss://sna.example.com/ws` |
+
+**Example**
+
+```ts
+import { SnaClient } from "@sna-sdk/client";
+
+const client = new SnaClient({
+  baseUrl: "localhost:3099",
+  http: true,
+  ws: true,
+});
+```
+
+## `client.connect()`
+
+**Signature**
+
+```ts
+client.connect(): void
+```
+
+Starts the WebSocket connection. If the client is already connecting or connected, this is a no-op. The server may push `sessions.snapshot` immediately after connection, so register `sessions.onSnapshot` before calling `connect` when the UI depends on session state.
+
+```ts
+client.sessions.onSnapshot((sessions) => setSessions(sessions));
+client.connect();
+```
+
+## `client.disconnect()`
+
+**Signature**
+
+```ts
+client.disconnect(): void
+```
+
+Closes the WebSocket connection and disables automatic reconnect. Pending low-level request promises reject with a `disconnected` error.
+
+## `client.status` / `client.connected`
+
+**Signature**
+
+```ts
+client.status: "connecting" | "connected" | "disconnected"
+client.connected: boolean
+```
+
+Use these values for reconnect banners, disabled buttons, and loading states.
+
+## `client.onConnectionStatus(callback)`
+
+**Signature**
+
+```ts
+const unsubscribe = client.onConnectionStatus(
+  (status: "connecting" | "connected" | "disconnected") => void,
+);
+```
+
+**Example**
+
+```ts
+const unsubscribe = client.onConnectionStatus((status) => {
+  setOnline(status === "connected");
+});
+```
+
+## `client.request(type, payload?)`
+
+**Signature**
+
+```ts
+await client.request<T = Record<string, unknown>>(
+  type: string,
+  payload?: Record<string, unknown>,
+): Promise<T>
+```
+
+Sends a raw WebSocket request and waits for the response with the same `rid`. Most applications should not call this directly. Prefer the typed `client.sessions`, `client.agent`, and `client.chat` namespaces.
+
+## `client.onPush(type, handler)`
+
+**Signature**
+
+```ts
+const unsubscribe = client.onPush(
+  type: string,
+  handler: (message: WsMessage) => void,
+);
+```
+
+Subscribes directly to server push messages such as `sessions.snapshot`, `agent.event`, and `permission.request`. Most applications should prefer `sessions.onSnapshot`, `agent.onEvent`, and `agent.onPermissionRequest`.
+
+## Transport selection
+
+| Transport | Methods | Guarantee |
+| --- | --- | --- |
+| HTTP | `sessions.create/update/remove`, `agent.start/send/kill/restart/resume/interrupt`, `getStatus`, `setModel`, `setPermissionMode` | The promise resolves after the server has committed the operation. |
+| WebSocket | `connect`, `request`, `onPush`, `agent.subscribe`, `agent.onEvent`, permission subscriptions | Provides push delivery and reconnect resubscription. |
+| SSE | `agent.runOnceStream`, `agent.streamEvents` | HTTP-based streaming that works well with browsers and proxies. |

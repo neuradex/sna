@@ -1,0 +1,78 @@
+---
+title: Streaming completions
+description: Three ways to stream text from one-shot prompts.
+icon: WavesHorizontal
+---
+
+SNA exposes streaming for one-shot calls in three flavors. Pick by
+host (in-process vs network) and shape (text-only vs full events).
+
+## 1. In-process, text-only: `completion({ onDelta })`
+
+Cheapest, simplest. Used for autocomplete previews and typewriter UX
+where you just need the text deltas.
+
+```ts
+import { completion } from "@sna-sdk/core";
+
+await completion({
+  prompt: "Draft a commit message for: ...",
+  provider: "claude-code",
+  model: "claude-haiku-4-5",
+  onDelta: (chunk) => process.stdout.write(chunk),
+});
+```
+
+The Promise still resolves with the final concatenated text plus
+usage; `onDelta` is a side channel, not a replacement.
+
+Wired for `claude-code` and `codex` (both pool and ephemeral). On
+OpenCode the SDK call is single-shot today, so the callback is a
+documented no-op there.
+
+## 2. In-process, full event stream: `runOnce({ onEvent })`
+
+When you need `tool_use` / `thinking` / `permission_needed` events on
+a one-shot run.
+
+```ts
+import { runOnce } from "@sna-sdk/core/server";
+
+await runOnce(sessionManager, {
+  message: "List the markdown files and summarize each.",
+  provider: "codex",
+  onEvent: (event) => {
+    if (event.type === "assistant_delta") render(event.delta);
+    if (event.type === "tool_use") showToolCard(event);
+  },
+});
+```
+
+A `onDelta`-only variant is also accepted if you don't care about
+non-text events.
+
+## 3. Network: `runOnceStream` over SSE
+
+For browser / Electron renderer / remote clients that can't import
+`@sna-sdk/core` directly.
+
+```ts
+for await (const event of client.agent.runOnceStream({
+  message: "Draft a commit message for: ...",
+})) {
+  if (event.type === "assistant_delta") write(event.delta as string);
+  if (event.type === "complete") console.log("usage", event.data);
+}
+```
+
+Backed by `POST /agent/run-once/stream` (Server-Sent Events). The
+stream closes after the run's terminal `complete` / `error` event.
+
+## Which one should I use?
+
+| Situation | API |
+|-----------|-----|
+| Same process as the SNA server, text only | `completion({ onDelta })` |
+| Same process, full event stream | `runOnce({ onEvent })` |
+| Remote (browser, separate Node host) | `runOnceStream()` |
+| Long-running multi-turn UI | Open a session and use WS `agent.subscribe` instead |

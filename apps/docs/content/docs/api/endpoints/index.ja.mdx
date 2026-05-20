@@ -1,0 +1,74 @@
+---
+title: エンドポイントリファレンス
+description: OpenAPI からレンダリングした HTTP エンドポイントリファレンスです。
+icon: Route
+---
+
+これらのページは、SNA runtime が提供するものと同じ OpenAPI ドキュメントから生成されます。各エンドポイントページは、リクエストパラメータ、リクエスト本文、レスポンス、schema、リクエスト例 snippet を schema からレンダリングします。
+
+## システム
+
+<Cards>
+  <Card title="GET /health" href="/ja/docs/api/endpoints/health/get" />
+  <Card title="GET /api/sna-port" href="/ja/docs/api/endpoints/api/sna-port/get" />
+</Cards>
+
+## セッション
+
+<Cards>
+  <Card title="POST /agent/sessions" href="/ja/docs/api/endpoints/agent/sessions/post" />
+  <Card title="GET /agent/sessions" href="/ja/docs/api/endpoints/agent/sessions/get" />
+  <Card title="PATCH /agent/sessions/{id}" href="/ja/docs/api/endpoints/agent/sessions/id/patch" />
+  <Card title="DELETE /agent/sessions/{id}" href="/ja/docs/api/endpoints/agent/sessions/id/delete" />
+</Cards>
+
+## エージェントライフサイクル
+
+<Cards>
+  <Card title="POST /agent/start" href="/ja/docs/api/endpoints/agent/start/post" />
+  <Card title="POST /agent/send" href="/ja/docs/api/endpoints/agent/send/post" />
+  <Card title="POST /agent/restart" href="/ja/docs/api/endpoints/agent/restart/post" />
+  <Card title="POST /agent/resume" href="/ja/docs/api/endpoints/agent/resume/post" />
+  <Card title="POST /agent/interrupt" href="/ja/docs/api/endpoints/agent/interrupt/post" />
+  <Card title="POST /agent/set-model" href="/ja/docs/api/endpoints/agent/set-model/post" />
+  <Card title="POST /agent/set-permission-mode" href="/ja/docs/api/endpoints/agent/set-permission-mode/post" />
+  <Card title="PATCH /agent/session" href="/ja/docs/api/endpoints/agent/session/patch" />
+  <Card title="POST /agent/kill" href="/ja/docs/api/endpoints/agent/kill/post" />
+  <Card title="GET /agent/status" href="/ja/docs/api/endpoints/agent/status/get" />
+</Cards>
+
+## 単発呼び出し
+
+<Cards>
+  <Card title="POST /agent/run-once" href="/ja/docs/api/endpoints/agent/run-once/post" />
+  <Card title="POST /agent/run-once/stream" href="/ja/docs/api/endpoints/agent/run-once/stream/post" />
+  <Card title="POST /agent/completion" href="/ja/docs/api/endpoints/agent/completion/post" />
+</Cards>
+
+## 権限
+
+<Cards>
+  <Card title="POST /agent/permission-request" href="/ja/docs/api/endpoints/agent/permission-request/post" />
+  <Card title="POST /agent/permission-respond" href="/ja/docs/api/endpoints/agent/permission-respond/post" />
+  <Card title="GET /agent/permission-pending" href="/ja/docs/api/endpoints/agent/permission-pending/get" />
+</Cards>
+
+## モデルとイベント
+
+<Cards>
+  <Card title="POST /agent/list-models" href="/ja/docs/api/endpoints/agent/list-models/post" />
+  <Card title="GET /agent/events" href="/ja/docs/api/endpoints/agent/events/get" />
+</Cards>
+
+## Chat 履歴
+
+<Cards>
+  <Card title="GET /chat/sessions" href="/ja/docs/api/endpoints/chat/sessions/get" />
+  <Card title="POST /chat/sessions" href="/ja/docs/api/endpoints/chat/sessions/post" />
+  <Card title="DELETE /chat/sessions/{id}" href="/ja/docs/api/endpoints/chat/sessions/id/delete" />
+  <Card title="GET /chat/sessions/{id}/messages" href="/ja/docs/api/endpoints/chat/sessions/id/messages/get" />
+  <Card title="POST /chat/sessions/{id}/messages" href="/ja/docs/api/endpoints/chat/sessions/id/messages/post" />
+  <Card title="DELETE /chat/sessions/{id}/messages" href="/ja/docs/api/endpoints/chat/sessions/id/messages/delete" />
+  <Card title="GET /chat/images/{sessionId}/{filename}" href="/ja/docs/api/endpoints/chat/images/sessionid/filename/get" />
+</Cards>
+

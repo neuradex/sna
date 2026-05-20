@@ -1,0 +1,80 @@
+---
+title: "Client chat namespace"
+description: "Inputs, outputs, and examples for every client.chat method."
+---
+
+# Client chat namespace
+
+`client.chat` is the persistence surface for conversation history shown in the UI. It is separate from the agent lifecycle, so chat sessions and messages can exist even when no agent process is running.
+
+## `chat.listSessions()`
+
+```ts
+await client.chat.listSessions(): Promise<{ sessions: ChatSession[] }>
+```
+
+Returns persisted chat session rows. A chat session has `id`, `label`, `type`, `meta`, `cwd`, and `created_at`.
+
+## `chat.createSession(opts?)`
+
+```ts
+await client.chat.createSession(opts?: {
+  id?: string;
+  label?: string;
+  type?: string;
+  meta?: Record<string, unknown>;
+}): Promise<{ status: "created"; id: string; meta: Record<string, unknown> | null }>
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `id` | no | Use when the app owns the conversation ID. |
+| `label` | no | Display label for the UI. |
+| `type` | no | App-level category such as `background` or `main`. Defaults to `background`. |
+| `meta` | no | Arbitrary application metadata. |
+
+## `chat.removeSession(session)`
+
+```ts
+await client.chat.removeSession(session: string): Promise<{ status: "deleted" }>
+```
+
+Deletes the persisted chat session and its messages. If an agent runtime with the same ID is active, coordinate agent lifecycle cleanup separately.
+
+## `chat.listMessages(session, opts?)`
+
+```ts
+await client.chat.listMessages(session: string, opts?: { since?: number }): Promise<{ messages: ChatMessage[] }>
+```
+
+Returns persisted messages. Use `since` to fetch only rows with an ID greater than the last seen message.
+
+## `chat.createMessage(session, opts)`
+
+```ts
+await client.chat.createMessage(session: string, opts: {
+  actor: "user" | "assistant" | "system";
+  kind: "text" | "thinking" | "tool_use" | "tool_result" | "status" | "error";
+  content?: string;
+  embeds?: Record<string, { mime_type: string; path: string; meta?: Record<string, unknown> }>;
+  meta?: Record<string, unknown>;
+}): Promise<{ status: "created"; id: number }>
+```
+
+| Field | Description |
+| --- | --- |
+| `actor` | Who produced the block: `user`, `assistant`, or `system`. |
+| `kind` | What kind of block it is: text, thinking, tool use, tool result, status, or error. |
+| `content` | Display text. Can contain `![](embed://id)` references. |
+| `embeds` | Binary attachment metadata. |
+| `meta` | Kind-specific structured overlay. |
+
+Agent-generated messages are usually persisted by server routes automatically. Use this method for UI-authored messages or imported history. See [actor and kind normalization](/docs/introduction/philosophy/actor-kind).
+
+## `chat.clearMessages(session)`
+
+```ts
+await client.chat.clearMessages(session: string): Promise<{ status: "cleared" }>
+```
+
+Use this when the conversation should remain selectable but its messages should be reset.

@@ -1,0 +1,61 @@
+---
+title: SNA and ACP
+description: How SNA differs from Zed's Agent Client Protocol.
+icon: Cable
+---
+
+[ACP](https://agentclientprotocol.com/) is an interoperability protocol
+between editors and coding agents. [Zed describes ACP](https://zed.dev/acp)
+as a way for any ACP-speaking agent to plug into ACP-compatible editing
+environments such as Zed, with the editor providing the UI and the agent
+speaking a common protocol.
+
+SNA solves a different problem. It is a runtime server that lets an app
+embed native agent CLIs as a backend. The consumer app hosts SNA, SNA
+spawns and manages agent runtimes, and SNA provides session lifecycle,
+canonical history, permissions, HTTP/WebSocket APIs, and React bindings.
+
+| Axis | ACP | SNA |
+|------|-----|-----|
+| Primary layer | Editor-agent wire protocol | Runtime server and SDK |
+| Primary host | Editor or IDE | Consumer app, Electron app, or service |
+| Main goal | Let editors support many agents through one protocol | Let apps embed and control agent runtimes as a backend |
+| State model | Protocol-level sessions and updates | `SessionManager`, SQLite history, runtime chains, event buffers |
+| Provider strategy | Agent exposes ACP, often through an adapter | SNA uses high-fidelity native providers first, with optional ACP compatibility later |
+| UI target | Editor-native agent panel | App-defined UI, React components, or custom clients |
+
+## Why ACP does not replace SNA
+
+ACP is valuable because it reduces N×M integration work between editors
+and agents. That is not the same as replacing SNA's runtime control
+plane. SNA needs to own concerns that sit around the wire protocol:
+
+- Multi-session lifecycle and per-session runtime configuration.
+- Canonical history that can survive restarts and provider swaps.
+- Provider-native replay adapters for Claude Code, Codex, and OpenCode.
+- Permission normalization across different native approval systems.
+- Electron embedding details such as child-process lifecycle and native
+  SQLite binding resolution.
+- SDK surfaces for web, Node, and React consumers.
+
+If SNA used ACP as its only provider layer too early, it could lose
+access to native control surfaces or wait on ACP wrappers to expose them.
+That conflicts with SNA's philosophy: use the richest native agent
+capabilities first, then normalize only what the app needs to rely on.
+
+## How they can work together
+
+ACP is still useful to SNA. It can be added at two boundaries without
+changing the core philosophy:
+
+- **SNA can expose ACP.** An ACP-compatible editor could connect to SNA
+  and inherit SNA's session management, canonical history, provider
+  switching, and permission model.
+- **SNA can consume ACP.** A generic ACP provider could broaden the set of
+  supported agents, while native providers remain the high-fidelity path
+  for runtimes where SNA needs deeper control.
+
+The intended relationship is therefore not "ACP versus SNA." ACP is a
+standard compatibility surface. SNA is the runtime layer that preserves
+native agent behavior, owns durable app-facing state, and can choose to
+speak ACP at the edges.

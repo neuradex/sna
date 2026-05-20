@@ -1,0 +1,38 @@
+---
+title: Core Concepts
+description: The shape of SNA's runtime. Server, session manager, providers, history.
+icon: LayoutGrid
+---
+
+SNA is a Hono HTTP/WebSocket server that owns a long-lived process per
+session. The server is provider-agnostic. Claude Code, Codex, and
+OpenCode each implement a common `AgentProvider` interface, so a
+single session can swap runtimes without losing context.
+
+```
+SnaClient
+   │   HTTP (request/response, ordering)
+   │   WS   (live events, fanout)
+   ▼
+Hono server  ──►  SessionManager
+                       │
+                       ├─ Session (per session id)
+                       │     ├─ AgentProcess  ◄── spawn(provider, cwd, ...)
+                       │     ├─ Event buffer (in-memory, cursor-keyed)
+                       │     └─ RuntimeSession chain (config history)
+                       │
+                       └─ Canonical history (SQLite)
+```
+
+## Read order
+
+<Cards>
+  <Card title="Philosophy" href="/docs/introduction/philosophy" description="Design principles that guide SNA's provider-neutral architecture." />
+  <Card title="Sessions" href="/docs/introduction/sessions" description="Lifecycle, RuntimeSession chain, PATCH semantics." />
+  <Card title="Canonical history" href="/docs/introduction/history" description="Flat blocks, provider-native rebuild." />
+  <Card title="Providers" href="/docs/introduction/providers" description="AgentProvider interface and runtime pool." />
+  <Card title="Permissions" href="/docs/introduction/permissions" description="Unified permission flow across providers." />
+</Cards>
+
+For the on-the-wire protocol details (HTTP routes, WebSocket ops,
+event types), see **[API Spec](/docs/api)**.

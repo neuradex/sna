@@ -1,0 +1,35 @@
+---
+title: "Core 設定"
+description: "`@sna-sdk/core` が公開する設定ヘルパーと環境変数です。"
+---
+# Core 設定
+
+`getConfig`、`setConfig`、`resetConfig` は、アプリケーションが runtime configuration を参照または上書きする場合に使います。ホストされた process では環境変数が最も単純な設定方法です。
+| 変数 | 意味 |
+| --- | --- |
+| `SNA_PORT` | 優先する server port です。 |
+| `SNA_MODEL` | デフォルト model 名です。 |
+| `SNA_PERMISSION_MODE` | デフォルト permission mode です。 |
+| `SNA_MAX_SESSIONS` | 同時 session の最大数です。 |
+| `SNA_DB_PATH` | 明示的な database path です。 |
+| `SNA_DATA_DIR` | DB path がない場合に使う SNA data directory です。 |
+| `SNA_PERMISSION_TIMEOUT_MS` | permission prompt timeout です。 |
+| `SNA_OMLX_BASE_URL` | OMLX 互換 base URL です。 |
+
+## 関数リファレンス
+
+### `getConfig()`
+
+default、environment variable、runtime override が適用された effective SNA configuration を返します。Diagnostics と server startup logging に使います。
+
+### `setConfig(partial)`
+
+現在の process に runtime override を適用します。Application preferences 画面から設定を受け取り、embedded host が反映する場合に使います。
+
+### `resetConfig()`
+
+runtime override を消去し、configuration resolution を default plus environment variable の状態へ戻します。Test case 間で設定が漏れないよう、テストで使ってください。
+
+### `SnaConfig`
+
+SNA configuration の typed shape です。Host-level settings UI を作る、または configuration object を検証する場合にこの型を優先してください。

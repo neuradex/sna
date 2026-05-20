@@ -1,0 +1,6 @@
+{
+  "title": "철학",
+  "description": "SNA의 설계 원칙.",
+  "icon": "Compass",
+  "pages": ["index", "origin", "actor-kind", "acp"]
+}

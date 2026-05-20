@@ -1,0 +1,44 @@
+---
+title: "Core Launchers"
+description: "Node and Electron launch surfaces for starting an SNA server."
+---
+# Core Launchers
+
+Launchers are for host applications that need to start SNA as part of their own lifecycle. They hide port selection, process handling, and Electron packaging details.
+| Import path | Surface | Purpose |
+| --- | --- | --- |
+| `@sna-sdk/core/node` | `startSnaServer(options?)` | Starts SNA from a Node host. |
+| `@sna-sdk/core/electron` | `startSnaServer(options?)` | Starts SNA from an Electron host. |
+| `@sna-sdk/core/electron` | `startSnaServerInProcess(options?)` | Runs SNA in the current process for tighter integration. |
+| `@sna-sdk/core/electron` | `resolveClaudeCli`, `validateClaudePath`, `cacheClaudePath` | Finds and validates Claude Code CLI installations. |
+Launcher handles expose enough information to stop the server and pass the discovered URL to `@sna-sdk/client` or `@sna-sdk/react`.
+
+## Function reference
+
+### `startSnaServer(options?)` from `@sna-sdk/core/node`
+
+Starts SNA from a plain Node host and returns a handle with connection information and shutdown behavior. Use this for CLIs, desktop hosts, and local development processes.
+
+### `startSnaServer(options?)` from `@sna-sdk/core/electron`
+
+Starts SNA from an Electron host. It accounts for packaged application constraints and should be preferred over the Node launcher inside Electron main processes.
+
+### `startSnaServerInProcess(options?)`
+
+Runs SNA in the current Electron process. Use it only when tighter lifecycle integration is more important than process isolation.
+
+### `resolveClaudeCli(options?)`
+
+Finds a usable Claude Code CLI path. Use it during setup or diagnostics to explain why a provider cannot start.
+
+### `validateClaudePath(path)`
+
+Checks whether a specific Claude CLI path is usable. Use it before saving user-provided CLI paths.
+
+### `cacheClaudePath(path)`
+
+Stores a resolved Claude CLI path for later launches. Use it after a successful validation step.
+
+### `parseCommandVOutput(output)`
+
+Parses shell command discovery output into a normalized path result. It is mainly useful for CLI resolution internals and diagnostics.

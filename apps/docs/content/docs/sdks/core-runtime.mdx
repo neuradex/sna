@@ -1,0 +1,47 @@
+---
+title: "Core Runtime Helpers"
+description: "Direct runtime helpers exported from `@sna-sdk/core`."
+---
+# Core Runtime Helpers
+
+Use these APIs when you want to invoke the agent runtime without going through the HTTP server. They are useful for local orchestration, tests, and tools that already run in the same Node process.
+| Surface | Purpose |
+| --- | --- |
+| `completion(input)` | Runs a single completion-style provider call. |
+| `runOnce(input)` | Runs one agent task and returns the final result. |
+| `getRuntimePool()` | Returns the shared runtime pool used to manage provider processes. |
+| `RuntimePool` | Runtime pool class for advanced lifecycle control. |
+| `toClaudeEffort(level)` | Maps SNA reasoning levels to Claude-oriented effort values. |
+| `toCodexEffort(level)` | Maps SNA reasoning levels to Codex-oriented effort values. |
+| `buildCanonicalFromDb(...)` | Rebuilds canonical history from persisted database rows. |
+The HTTP equivalents are documented under [agent completion](/docs/api/endpoints/agent/completion/post), [run once](/docs/api/endpoints/agent/run-once/post), and [run once stream](/docs/api/endpoints/agent/run-once/stream/post).
+
+## Function reference
+
+### `completion(input)`
+
+Runs a single completion-style call through the configured provider. Use it when the task is closer to text generation or summarization than to a long-lived coding session. It returns after the provider response is complete.
+
+### `runOnce(input)`
+
+Runs one complete agent task through the runtime and returns the final result. Use it for automation where the agent can plan, call tools, and finish without a follow-up conversation.
+
+### `getRuntimePool()`
+
+Returns the shared runtime pool used by the process. Use this when multiple call sites should reuse the same provider process management instead of creating independent pools.
+
+### `RuntimePool`
+
+Owns provider runtime lifecycle. Most applications should use `getRuntimePool`; construct `RuntimePool` directly only when isolation is required for tests or embedded hosts.
+
+### `toClaudeEffort(level)`
+
+Maps SNA reasoning levels into Claude-compatible effort values. Use it in provider adapters rather than scattering provider-specific strings across application code.
+
+### `toCodexEffort(level)`
+
+Maps SNA reasoning levels into Codex-compatible effort values. It keeps UI-level reasoning choices provider-neutral.
+
+### `buildCanonicalFromDb(...)`
+
+Reconstructs canonical history from database rows. Use it when a server process needs to replay persisted history into a provider-neutral actor/kind shape.

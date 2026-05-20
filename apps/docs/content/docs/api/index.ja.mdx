@@ -1,0 +1,34 @@
+---
+title: 概要
+description: HTTP ルート、WebSocket プロトコル、イベントタイプを整理します。
+icon: LayoutGrid
+---
+
+このセクションはワイヤリファレンスです。各形がなぜこのように設計
+されているかを知りたい場合は、[Concepts](/ja/docs/introduction/concepts) を参照してください。
+SNA の HTTP/WebSocket API と ACP を比較している場合は、
+**[SNA と ACP](/ja/docs/introduction/philosophy/acp)** を参照してください。
+
+<Cards>
+  <Card title="エンドポイントリファレンス" href="/ja/docs/api/endpoints" description="すべての HTTP エンドポイントの要求フィールド、レスポンス、備考。" />
+  <Card title="HTTP ルート" href="/ja/docs/api/http" description="すべてのサーバエンドポイント、表面別にグループ化。" />
+  <Card title="WebSocket プロトコル" href="/ja/docs/api/websocket" description="Request/response op、push チャネル、再接続意味論。" />
+  <Card title="イベント" href="/ja/docs/api/events" description="15 種類の AgentEvent enum、delta、final。" />
+  <Card title="OpenAPI 仕様" href="/ja/docs/api/openapi" description="稼働中サーバが直接提供するライブ仕様。" />
+</Cards>
+
+## 真実の源
+
+サーバの Hono アプリは `@hono/zod-openapi` ルート定義からビルドされます。
+稼働中サーバは、同じ Zod スキーマから生成された OpenAPI 3.1 仕様を
+自身で提供します。そのため、ここで見るワイヤ形、SDK 型、ライブ仕様が
+ドリフトすることはありません。
+
+| URL | 用途 |
+|-----|------|
+| `GET /openapi.json` | 生の仕様 JSON |
+| `GET /docs` | Swagger UI |
+| `GET /spec` | プレーンテキスト仕様 |
+
+確認が必要な場合は、ライブサーバのスペックを直接参照してください。
+ライブスペックが常にこのページより権威のある基準です。

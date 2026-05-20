@@ -1,0 +1,101 @@
+---
+title: "Client transport と SnaClient"
+description: "SnaClient constructor、connection lifecycle、low-level request/push API。"
+---
+
+# Client transport と SnaClient
+
+`SnaClient` は 1 つの `baseUrl` から HTTP endpoint と WebSocket endpoint を導出します。状態変更と CRUD には HTTP、push event と permission request には WebSocket、長時間の one-shot stream には SSE を使います。
+
+## `new SnaClient(options)`
+
+**Signature**
+
+```ts
+const client = new SnaClient({
+  baseUrl: string;
+  ws: boolean;
+  http: boolean;
+  reconnect?: boolean;
+  reconnectDelay?: number;
+  maxReconnectAttempts?: number;
+});
+```
+
+**Options**
+
+| Field | Required | Default | Description |
+| --- | --- | --- | --- |
+| `baseUrl` | yes | none | SNA server のアドレスです。`localhost:3099`、`http://localhost:3099`、`https://example.com` を指定できます。 |
+| `ws` | yes | none | WebSocket transport を有効にします。`agent.subscribe`、`onEvent`、permission push に必要です。 |
+| `http` | yes | none | HTTP transport を有効にします。session CRUD と agent lifecycle command に ordering guarantee を提供します。 |
+| `reconnect` | no | `true` | WebSocket 接続が切れたときに自動 reconnect を試みます。 |
+| `reconnectDelay` | no | `2000` | reconnect 試行間の待機時間です。単位は ms です。 |
+| `maxReconnectAttempts` | no | `0` | 最大 reconnect 回数です。`0` は無制限を意味します。 |
+
+**Derived endpoints**
+
+| `baseUrl` | HTTP | WebSocket |
+| --- | --- | --- |
+| `localhost:3099` | `http://localhost:3099` | `ws://localhost:3099/ws` |
+| `https://sna.example.com` | `https://sna.example.com` | `wss://sna.example.com/ws` |
+
+## `client.connect()`
+
+WebSocket 接続を開始します。すでに接続中または接続済みの場合は no-op です。接続直後に server が `sessions.snapshot` を push することがあるため、session state が必要な UI では `connect` の前に `sessions.onSnapshot` を登録してください。
+
+```ts
+client.sessions.onSnapshot((sessions) => setSessions(sessions));
+client.connect();
+```
+
+## `client.disconnect()`
+
+WebSocket を閉じ、自動 reconnect を停止します。応答待ちの low-level request promise は `disconnected` error で reject されます。
+
+## `client.status` / `client.connected`
+
+```ts
+client.status: "connecting" | "connected" | "disconnected"
+client.connected: boolean
+```
+
+Reconnect banner、disabled button、loading state の表示に使います。
+
+## `client.onConnectionStatus(callback)`
+
+```ts
+const unsubscribe = client.onConnectionStatus(
+  (status: "connecting" | "connected" | "disconnected") => void,
+);
+```
+
+## `client.request(type, payload?)`
+
+```ts
+await client.request<T = Record<string, unknown>>(
+  type: string,
+  payload?: Record<string, unknown>,
+): Promise<T>
+```
+
+raw WebSocket request を送り、同じ `rid` を持つ response を待ちます。通常のアプリケーションでは直接使わず、型付きの `client.sessions`、`client.agent`、`client.chat` namespace を使ってください。
+
+## `client.onPush(type, handler)`
+
+```ts
+const unsubscribe = client.onPush(
+  type: string,
+  handler: (message: WsMessage) => void,
+);
+```
+
+`sessions.snapshot`、`agent.event`、`permission.request` など、server が request なしで送る push message を直接購読します。通常は `sessions.onSnapshot`、`agent.onEvent`、`agent.onPermissionRequest` を優先してください。
+
+## Transport 選択基準
+
+| Transport | Methods | Guarantee |
+| --- | --- | --- |
+| HTTP | `sessions.create/update/remove`, `agent.start/send/kill/restart/resume/interrupt`, `getStatus`, `setModel`, `setPermissionMode` | server operation が commit されたあと promise が resolve されます。 |
+| WebSocket | `connect`, `request`, `onPush`, `agent.subscribe`, `agent.onEvent`, permission subscriptions | push delivery と reconnect resubscription を提供します。 |
+| SSE | `agent.runOnceStream`, `agent.streamEvents` | browser と proxy に扱いやすい HTTP-based streaming です。 |

@@ -1,0 +1,35 @@
+---
+title: "Core Configuration"
+description: "Configuration helpers and environment variables exposed by `@sna-sdk/core`."
+---
+# Core Configuration
+
+`getConfig`, `setConfig`, and `resetConfig` let applications inspect or override runtime configuration. Environment variables remain the easiest way to configure hosted processes.
+| Variable | Meaning |
+| --- | --- |
+| `SNA_PORT` | Preferred server port. |
+| `SNA_MODEL` | Default model name. |
+| `SNA_PERMISSION_MODE` | Default permission mode. |
+| `SNA_MAX_SESSIONS` | Maximum concurrent sessions. |
+| `SNA_DB_PATH` | Explicit database path. |
+| `SNA_DATA_DIR` | Directory for SNA data when no DB path is set. |
+| `SNA_PERMISSION_TIMEOUT_MS` | Permission prompt timeout. |
+| `SNA_OMLX_BASE_URL` | OMLX-compatible base URL. |
+
+## Function reference
+
+### `getConfig()`
+
+Returns the effective SNA configuration after defaults, environment variables, and runtime overrides are applied. Use it for diagnostics and server startup logging.
+
+### `setConfig(partial)`
+
+Applies runtime overrides for the current process. Use it in embedded hosts that receive settings from an application preferences screen.
+
+### `resetConfig()`
+
+Clears runtime overrides and returns configuration resolution to defaults plus environment variables. Use it in tests to avoid leaking configuration between cases.
+
+### `SnaConfig`
+
+The typed shape of SNA configuration. Prefer this type when building host-level settings UIs or validating configuration objects.

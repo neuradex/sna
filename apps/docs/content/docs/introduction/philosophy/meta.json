@@ -1,0 +1,6 @@
+{
+  "title": "Philosophy",
+  "description": "Design principles behind SNA.",
+  "icon": "Compass",
+  "pages": ["index", "origin", "actor-kind", "acp"]
+}

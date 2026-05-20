@@ -1,0 +1,88 @@
+---
+title: WebSocket プロトコル
+description: Request/response op、push チャネル、再接続意味論を説明します。
+icon: Cable
+---
+
+WebSocket がライブチャネルです。push イベント (assistant delta、ツール
+呼び出し、権限要求) と、HTTP API が露出するのと同じ制御 op を、
+呼び出しごとの HTTP オーバーヘッドなしで運びます。
+
+## エンドポイント
+
+```
+ws://<host>:<port>/ws
+```
+
+クライアントは一度接続して、その単一接続上にすべてのセッションを
+多重化します。
+
+## ワイヤ形
+
+すべてのメッセージは `type` と payload を持つ JSON オブジェクトです。
+
+```jsonc
+// Client → server
+{ "id": "rpc-7", "type": "agent.send", "payload": { "session": "abc", "message": "hi" } }
+
+// Server → client (reply)
+{ "id": "rpc-7", "type": "agent.send", "status": "ok", "data": { "queued": true } }
+
+// Server → client (push, id なし)
+{ "type": "agent.event", "data": { "session": "abc", "event": { "type": "assistant_delta", "delta": "Hello" } } }
+```
+
+`id` フィールドはクライアントが選ぶ相関トークンで、request/response
+ペアに付き、push メッセージには付きません。
+
+## 制御 op
+
+すべての HTTP ルートは WS 等価を持ちます:
+
+| WS type | HTTP 等価 |
+|---------|----------|
+| `agent.start` | `POST /agent/start` |
+| `agent.send` | `POST /agent/send` |
+| `agent.interrupt` | `POST /agent/interrupt` |
+| `agent.set-model` | `POST /agent/set-model` |
+| `agent.set-permission-mode` | `POST /agent/set-permission-mode` |
+| `agent.restart` | `POST /agent/restart` |
+| `agent.resume` | `POST /agent/resume` |
+| `agent.kill` | `POST /agent/kill` |
+| `agent.run-once` | `POST /agent/run-once` |
+| `agent.completion` | `POST /agent/completion` |
+| `agent.status` | `GET /agent/status` |
+| `sessions.list` | `GET /agent/sessions` |
+| `sessions.create` | `POST /agent/sessions` |
+| `sessions.update` | `PATCH /agent/sessions/:id` |
+| `sessions.remove` | `DELETE /agent/sessions/:id` |
+| `permission.subscribe` | (push チャネル; HTTP 等価なし) |
+| `permission.respond` | `POST /agent/permission-respond` |
+
+## Push チャネル
+
+2 つのチャネルは push 専用:
+
+- `agent.event`: 購読中の全セッションが出す全 `AgentEvent` ごとに
+  発火します。`agent.subscribe` で購読し、`agent.unsubscribe` で解除します。
+- `permission.request`: どのセッションが `permission_needed` を emit
+  しても発火します。`permission.subscribe` で購読します。
+
+## 再接続
+
+接続が切れたらクライアントは再接続して再購読する必要があります。切断中
+にバッファされたイベントはセッションごとの ring buffer (デフォルト
+1000 件) に残ります。新規 `agent.subscribe` に `?since=<cursor>` を渡せば
+replay されます。
+
+## なぜ HTTP と WS の両方か
+
+- **順序と ACK には HTTP。** ミューテーションには推論しやすい
+  request/response の契約が必要です。HTTP はこの契約を自然に提供します。
+- **fanout には WS.** 単一接続が N 個のセッションのイベント + 権限
+  要求を配ります。N 本の SSE ストリームを開くよりはるかに効率的です。
+
+TypeScript クライアントはすべてのミューテーションに HTTP、push
+チャネルに WS を使います。片方だけでも動きます (`http: true, ws: false` は
+短命スクリプト用; `ws: true, http: false` は HTTP が使えない
+クライアント用) が、両方使う構成が最もスムーズです。

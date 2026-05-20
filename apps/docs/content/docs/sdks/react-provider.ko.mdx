@@ -1,0 +1,94 @@
+---
+title: "React provider와 context"
+description: "SnaProvider, SnaSession, useSnaContext의 props와 반환값."
+---
+
+# React provider와 context
+
+## `<SnaProvider>`
+
+**Signature**
+
+```tsx
+<SnaProvider snaUrl?: string sessionId?: string hydrate?: boolean>
+  {children}
+</SnaProvider>
+```
+
+**Props**
+
+| Prop | Type | Default | Description |
+| --- | --- | --- | --- |
+| `children` | `React.ReactNode` | required | SNA context를 받을 subtree입니다. |
+| `snaUrl` | `string` | auto-discovery | SNA internal API server URL입니다. 생략하면 `/api/sna-port`를 먼저 조회하고, 실패하면 `http://localhost:3099`를 사용합니다. |
+| `sessionId` | `string` | `default` | subtree의 기본 session ID입니다. |
+| `hydrate` | `boolean` | `true` | mount 시 chat store가 저장된 session/message를 가져올지 결정합니다. Chat store를 쓰지 않으면 `false`로 둘 수 있습니다. |
+
+**Example**
+
+```tsx
+import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
+
+export function Root({ children }: { children: React.ReactNode }) {
+  return <SnaProvider snaUrl="http://localhost:3099">{children}</SnaProvider>;
+}
+```
+
+**Output**
+
+`SnaProvider` 자체는 UI를 렌더링하지 않습니다. React context에 `{ apiUrl, sessionId }`를 넣고, 필요하면 `useChatStore`를 hydrate합니다.
+
+## `<SnaSession>`
+
+**Signature**
+
+```tsx
+<SnaSession id="review-panel">
+  {children}
+</SnaSession>
+```
+
+**Props**
+
+| Prop | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | `string` | yes | descendant hook이 사용할 session ID입니다. |
+| `children` | `React.ReactNode` | yes | session scope가 적용될 subtree입니다. |
+
+**Example**
+
+```tsx
+<SnaProvider>
+  <SnaSession id="default"><MainChat /></SnaSession>
+  <SnaSession id="review"><ReviewAssistant /></SnaSession>
+</SnaProvider>
+```
+
+**Notes**
+
+- API URL은 parent provider 값을 재사용합니다.
+- session ID만 subtree 단위로 바꿉니다.
+
+## `useSnaContext()`
+
+**Signature**
+
+```ts
+const context = useSnaContext(): { apiUrl: string; sessionId: string }
+```
+
+**Returns**
+
+| Field | Description |
+| --- | --- |
+| `apiUrl` | 현재 SNA server base URL입니다. |
+| `sessionId` | 현재 subtree의 active session ID입니다. |
+
+**Example**
+
+```tsx
+function DebugInfo() {
+  const { apiUrl, sessionId } = useSnaContext();
+  return <pre>{JSON.stringify({ apiUrl, sessionId }, null, 2)}</pre>;
+}
+```

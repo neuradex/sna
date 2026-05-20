@@ -1,0 +1,84 @@
+---
+title: Permission flows
+description: Wire an approval UI without diverging per provider.
+icon: ShieldCheck
+---
+
+The user-facing pattern is the same across providers: the consumer
+app subscribes to permission events, shows a dialog, posts back the
+verdict. SNA hides Claude's PreToolUse hook vs Codex's JSON-RPC
+approval behind one event.
+
+## Server side
+
+Pick a permission mode when starting the agent:
+
+```ts
+await client.agent.start(sessionId, {
+  provider: "claude-code",
+  permissionMode: "default", // prompts; alternatives: "acceptEdits" | "bypassPermissions"
+});
+```
+
+## Subscribe + respond
+
+```ts
+await client.permissions.subscribe();
+
+client.permissions.onRequest(async ({ session, tool, input, decisionId }) => {
+  const approved = await showApprovalDialog({ tool, input });
+  await client.permissions.respond(session, approved, { decisionId });
+});
+```
+
+The same callback fires for Claude PreToolUse hooks and Codex
+`approval/request` notifications.
+
+## Safe-tool allowlist
+
+Tools that match the configured allowlist bypass the prompt entirely.
+The default list includes `Read`, `Glob`, `Grep`, `LS` and other
+read-only operations. To extend:
+
+```ts
+await client.agent.start(sessionId, {
+  provider: "claude-code",
+  allowedTools: ["Read", "Glob", "Grep", "Bash(ls:*)", "Bash(git status:*)"],
+});
+```
+
+Patterns use Claude Code's tool-pattern syntax. The same string list
+is normalized per-provider, so the consumer config doesn't need to
+fork by provider.
+
+## Renderer pattern (Electron / React)
+
+The bundled `<SnaChatUI>` ships a permission dialog out of the box.
+Wire `<SnaProvider>` around your app and the prompt flows
+automatically. For custom UI:
+
+```tsx
+function PermissionGuard({ children }: React.PropsWithChildren) {
+  const [pending, setPending] = useState(null);
+
+  useEffect(() => {
+    const client = getSnaClient();
+    client.permissions.subscribe();
+    return client.permissions.onRequest(setPending);
+  }, []);
+
+  return (
+    <>
+      {children}
+      {pending && (
+        <Dialog
+          tool={pending.tool}
+          input={pending.input}
+          onApprove={() => respond(true)}
+          onDeny={() => respond(false)}
+        />
+      )}
+    </>
+  );
+}
+```

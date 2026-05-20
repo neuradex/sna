@@ -1,0 +1,55 @@
+---
+title: "Core 서버 API"
+description: "`@sna-sdk/core/server`에서 export되는 서버 측 진입점입니다."
+---
+# Core 서버 API
+
+자체 서버 프로세스 안에서 SNA를 호스팅하려면 이 API를 사용합니다. server 패키지는 HTTP app, WebSocket 부착, session manager, 로컬 포트 탐색 route를 노출합니다.
+| 표면 | 목적 |
+| --- | --- |
+| `createSnaApp(options?)` | SNA HTTP 애플리케이션을 생성합니다. |
+| `attachWebSocket(server, options?)` | 기존 서버에 SNA WebSocket 프로토콜을 부착합니다. |
+| `SessionManager` | 서버 측 agent session을 관리합니다. |
+| `snaPortRoute` | 브라우저 자동 탐색을 위해 현재 SNA port를 노출합니다. |
+`@sna-sdk/core/server/routes/*` 아래의 deprecated compatibility route module은 계속 export되지만, 새 통합은 server entry point와 생성된 [API 레퍼런스](/ko/docs/api/endpoints)를 우선 사용하십시오.
+
+## 최소 host 예시
+
+~~~ts
+import { createServer } from "node:http";
+import { createSnaApp, attachWebSocket } from "@sna-sdk/core/server";
+
+const app = createSnaApp();
+const server = createServer(async (req, res) => {
+  const response = await app.fetch(new Request(`http://localhost${req.url}`));
+  res.writeHead(response.status, Object.fromEntries(response.headers));
+  res.end(await response.text());
+});
+
+attachWebSocket(server);
+server.listen(3099);
+~~~
+
+서버 entry point는 agent lifecycle을 소유하는 process 가까이에 두십시오. Browser client는 server module을 직접 import하지 말고 `@sna-sdk/client` 또는 `@sna-sdk/react`를 통해 연결하는 편이 안전합니다.
+
+## 메서드 레퍼런스
+
+### `createSnaApp(options?)`
+
+SNA route를 노출하는 HTTP application을 생성합니다. Custom server에 SNA를 embed할 때 사용합니다. 반환된 app은 route registration, request validation, API response envelope을 담당합니다.
+
+### `attachWebSocket(server, options?)`
+
+기존 Node server에 WebSocket protocol을 부착합니다. HTTP와 WebSocket client가 같은 session state를 공유해야 하므로 `createSnaApp`을 serve하는 server와 같은 server에 호출하십시오.
+
+### `SessionManager`
+
+server-side agent session lifecycle을 조율합니다. 대부분의 host는 `createSnaApp`이 관리하게 두면 됩니다. 고급 host가 custom lifecycle policy를 통합해야 할 때 직접 사용할 수 있습니다.
+
+### `snaPortRoute`
+
+browser-side discovery를 위해 local SNA server port를 노출합니다. `SnaProvider`가 명시적 `snaUrl` 없이 mount될 때 React integration이 이 route를 사용합니다.
+
+### Deprecated route modules
+
+`@sna-sdk/core/server/routes/agent`와 `@sna-sdk/core/server/routes/chat`은 compatibility를 위해 남아 있습니다. 새 코드는 `createSnaApp`과 생성된 OpenAPI 문서를 우선 사용하십시오.

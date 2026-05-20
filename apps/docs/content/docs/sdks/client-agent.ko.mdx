@@ -1,0 +1,641 @@
+---
+title: "Client agent 네임스페이스"
+description: "client.agent의 각 메서드 이용법, 입력, 출력 레퍼런스."
+---
+
+# Client agent 네임스페이스
+
+`client.agent`는 실행 중인 coding agent를 제어하는 주 표면입니다. 이 페이지는 모든 public method의 호출 형태, input, return value, 사용 예시, 주의사항을 정리합니다.
+
+## Lifecycle 메서드
+
+### `agent.start(session, config?)`
+
+**Signature**
+
+```ts
+await client.agent.start(session: string, config?: AgentStartConfig): Promise<{
+  status: "started" | "already_running";
+  provider: string;
+  sessionId: string;
+}>
+```
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `session` | `string` | yes | Target SNA session ID. The server auto-creates it if it does not exist. |
+| `config.provider` | `string` | no | Runtime provider such as `claude-code`, `codex`, `opencode`, or `omlx`. |
+| `config.modelProvider` | `string` | no | Attribution metadata for the model vendor. Stored on assistant-authored canonical rows. |
+| `config.prompt` | `string` | no | Initial prompt sent immediately after startup. |
+| `config.model` | `string` | no | Provider model slug. |
+| `config.permissionMode` | `string` | no | Permission behavior, for example `acceptEdits` or `bypassPermissions`. |
+| `config.configDir` | `string` | no | Provider config directory override. Claude uses `CLAUDE_CONFIG_DIR`; Codex uses `CODEX_HOME`. |
+| `config.force` | `boolean` | no | Kill an existing runtime and start fresh. |
+| `config.cwd` | `string` | no | Working directory for this runtime. |
+| `config.history` | `unknown[]` | no | Provider-neutral history to resume from. |
+| `config.systemPrompt` | `string` | no | Replaces the base system prompt. |
+| `config.appendSystemPrompt` | `string` | no | Appends text to the system prompt. |
+| `config.allowedTools` | `string[]` | no | Restricts the agent to these tools. |
+| `config.disallowedTools` | `string[]` | no | Blocks specific tools. |
+| `config.mcpServers` | `Record<string, unknown>` | no | MCP servers made available to the agent. |
+| `config.reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Provider-neutral reasoning effort. |
+| `config.providerOptions` | `Record<string, unknown>` | no | Provider-specific options, such as Codex `serviceTier`. |
+| `config.extraArgs` | `string[]` | no | Deprecated raw CLI flags. Prefer typed fields. |
+
+**Returns**
+
+| Field | Description |
+| --- | --- |
+| `status` | `started` when a process was spawned, `already_running` when the session already had a runtime. |
+| `provider` | Provider used for the runtime. |
+| `sessionId` | Provider runtime session ID. |
+
+**Example**
+
+```ts
+const started = await client.agent.start("default", {
+  provider: "claude-code",
+  model: "claude-sonnet-4-6",
+  permissionMode: "acceptEdits",
+  cwd: "/Users/me/project",
+  reasoningLevel: 3,
+});
+```
+
+**Notes**
+
+- With HTTP enabled, the promise resolves after the process has been spawned.
+- It does not guarantee the provider init handshake has reached an idle state. If the UI must wait for readiness, call `getStatus` until `agentStatus === "idle"`.
+- Calling `send` immediately after `start` is safe in normal usage because stdin queues the message.
+
+### `agent.send(session, message, opts?)`
+
+**Signature**
+
+```ts
+await client.agent.send(
+  session: string,
+  message: string,
+  opts?: { images?: Array<{ base64: string; mimeType: string }>; meta?: Record<string, unknown> },
+): Promise<{ status: "sent" }>
+```
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `session` | `string` | yes | Running session ID. |
+| `message` | `string` | yes | User message to send to the agent. |
+| `opts.images` | `{ base64: string; mimeType: string }[]` | no | Image attachments for providers that support multimodal input. |
+| `opts.meta` | `Record<string, unknown>` | no | Extra metadata stored with the user message. |
+
+**Returns**
+
+`{ status: "sent" }` after the message has been accepted. With HTTP enabled, the message has also been persisted before the promise resolves.
+
+**Example**
+
+```ts
+await client.agent.send("default", "Please inspect the failing test.");
+await client.agent.send("default", "What is in this screenshot?", {
+  images: [{ base64: pngBase64, mimeType: "image/png" }],
+});
+```
+
+**Notes**
+
+- Use this only for stateful interactive sessions.
+- For a stateless one-shot task, use `runOnce` or `runOnceStream`.
+
+### `agent.kill(session)`
+
+**Signature**
+
+```ts
+await client.agent.kill(session: string): Promise<{ status: "killed" | "no_session" }>
+```
+
+**Input**: `session` is the session ID whose agent process should be terminated.
+
+**Returns**: `killed` if a runtime was stopped, `no_session` if the session does not exist.
+
+**Example**
+
+```ts
+await client.agent.kill("default");
+```
+
+**Notes**: The session record remains. Only the running process is terminated.
+
+### `agent.restart(session, config?)`
+
+**Signature**
+
+```ts
+await client.agent.restart(session: string, config?: Partial<AgentStartConfig>): Promise<{
+  status: "restarted";
+  provider: string;
+  sessionId: string;
+}>
+```
+
+**Input**: same config shape as `start`, but every field is optional.
+
+**Returns**: provider and new runtime session ID after restart.
+
+**Example**
+
+```ts
+await client.agent.restart("default", { model: "claude-opus-4-6" });
+```
+
+**Notes**: Use this after changing provider-level settings or when the CLI process becomes unhealthy.
+
+### `agent.interrupt(session)`
+
+**Signature**
+
+```ts
+await client.agent.interrupt(session: string): Promise<{ status: "interrupted" | "no_session" }>
+```
+
+**Use it when** a user presses a stop button and the session should stay alive for the next message.
+
+**Example**
+
+```ts
+await client.agent.interrupt("default");
+await client.agent.send("default", "Try a simpler approach.");
+```
+
+### `agent.resume(session, opts?)`
+
+**Signature**
+
+```ts
+await client.agent.resume(session: string, opts?: {
+  provider?: string;
+  model?: string;
+  permissionMode?: string;
+  configDir?: string;
+  prompt?: string;
+  extraArgs?: string[];
+  providerOptions?: Record<string, unknown>;
+}): Promise<{
+  status: "resumed";
+  provider: string;
+  sessionId: string;
+  historyCount: number;
+}>
+```
+
+**Input**
+
+| Field | Description |
+| --- | --- |
+| `session` | Session to resume from stored history. |
+| `opts.provider` | Provider override. |
+| `opts.model` | Model override. |
+| `opts.permissionMode` | Permission mode override. |
+| `opts.configDir` | Provider config directory override. |
+| `opts.prompt` | Optional prompt sent during resume. |
+| `opts.providerOptions` | Provider-specific options. |
+
+**Returns**
+
+| Field | Description |
+| --- | --- |
+| `status` | Always `resumed` on success. |
+| `provider` | Provider used for the resumed runtime. |
+| `sessionId` | Runtime session ID. |
+| `historyCount` | Number of persisted messages loaded. |
+
+**Example**
+
+```ts
+const resumed = await client.agent.resume("default", { provider: "codex" });
+console.log(resumed.historyCount);
+```
+
+### `agent.getStatus(session)`
+
+**Signature**
+
+```ts
+await client.agent.getStatus(session: string): Promise<{
+  alive: boolean;
+  agentStatus: "idle" | "busy" | "disconnected";
+  sessionId: string | null;
+  ccSessionId: string | null;
+  eventCount: number;
+  messageCount: number;
+  lastMessage: { actor: string; kind: string; content: string; created_at: string } | null;
+  config: { provider: string; model: string; permissionMode: string; extraArgs?: string[] } | null;
+}>
+```
+
+**Use it when** rendering controls that depend on runtime state or when waiting after `start`.
+
+**Example**
+
+```ts
+const status = await client.agent.getStatus("default");
+if (status.alive && status.agentStatus === "idle") {
+  await client.agent.send("default", "Next task");
+}
+```
+
+## One-shot 및 completion 메서드
+
+### `agent.completion(opts)`
+
+**Signature**
+
+```ts
+await client.agent.completion(opts: CompletionOptions): Promise<CompletionResult>
+```
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `prompt` | `string` | yes | Prompt to send. |
+| `model` | `string` | no | Model slug. |
+| `systemPrompt` | `string` | no | Replaces system prompt. |
+| `appendSystemPrompt` | `string` | no | Appends to system prompt. |
+| `label` | `string` | no | Trace label. |
+| `timeout` | `number` | no | Timeout in milliseconds. |
+| `extraArgs` | `string[]` | no | Deprecated raw CLI flags. |
+| `env` | `Record<string, string>` | no | Environment overrides. |
+| `reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Provider-neutral reasoning effort. |
+| `providerOptions` | `Record<string, unknown>` | no | Provider-specific options. |
+
+**Returns**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `text` | `string` | Generated text. |
+| `usage.inputTokens` | `number` | Input token count. |
+| `usage.outputTokens` | `number` | Output token count. |
+| `usage.cacheReadTokens` | `number` | Cache read token count. |
+| `usage.cacheCreationTokens` | `number` | Cache creation token count. |
+| `costUsd` | `number` | Estimated cost in USD. |
+| `durationMs` | `number` | Total duration. |
+| `durationApiMs` | `number` | Provider API duration. |
+| `model` | `string` | Model used. |
+
+**Example**
+
+```ts
+const result = await client.agent.completion({
+  prompt: "Summarize this changelog.",
+  model: "claude-haiku-4-5-20251001",
+  label: "summary",
+});
+console.log(result.text, result.costUsd);
+```
+
+**Use `completion` instead of `runOnce` when** the task does not need an agent session, tools, or event streaming.
+
+### `agent.runOnce(opts)`
+
+**Signature**
+
+```ts
+await client.agent.runOnce(opts: RunOnceOptions): Promise<{
+  result: string;
+  usage: Record<string, unknown> | null;
+}>
+```
+
+**Input**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `message` | `string` | yes | Task prompt. |
+| `model` | `string` | no | Model slug. |
+| `systemPrompt` | `string` | no | Replaces system prompt. |
+| `appendSystemPrompt` | `string` | no | Appends to system prompt. |
+| `permissionMode` | `string` | no | Permission behavior. |
+| `cwd` | `string` | no | Working directory. |
+| `timeout` | `number` | no | Timeout in milliseconds. |
+| `provider` | `string` | no | Runtime provider. |
+| `extraArgs` | `string[]` | no | Deprecated raw CLI flags. |
+| `reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Provider-neutral reasoning effort. |
+| `providerOptions` | `Record<string, unknown>` | no | Provider-specific options. |
+
+**Example**
+
+```ts
+const { result } = await client.agent.runOnce({
+  provider: "claude-code",
+  message: "Find the most likely cause of the failing build.",
+  cwd: process.cwd(),
+  timeout: 60_000,
+});
+```
+
+**Notes**: The server creates a temporary session, waits for completion, and cleans it up.
+
+### `agent.runOnceStream(opts)`
+
+**Signature**
+
+```ts
+for await (const event of client.agent.runOnceStream(opts: RunOnceOptions)) {
+  // event is Record<string, unknown>
+}
+```
+
+**Returns**: an `AsyncGenerator<Record<string, unknown>>` of SSE events.
+
+**Example**
+
+```ts
+for await (const event of client.agent.runOnceStream({ message: "Explain this file." })) {
+  if (event.type === "assistant_delta") process.stdout.write(String(event.delta ?? ""));
+  if (event.type === "complete") break;
+}
+```
+
+**Notes**: Requires `http: true`; it uses `POST /agent/run-once/stream`.
+
+## Model 및 configuration 메서드
+
+### `agent.listModels(runtime, config?)`
+
+**Signature**
+
+```ts
+await client.agent.listModels(runtime: string, config?: ListModelsConfig): Promise<ListModelsResult>
+```
+
+**Input**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `runtime` | `string` | Runtime to inspect, for example `claude-code`, `codex`, `opencode`, or `omlx`. |
+| `config.cliPath` | `string` | Runtime CLI path override. |
+| `config.baseUrl` | `string` | API base URL for OMLX-style runtimes. |
+| `config.apiKey` | `string` | API key for OMLX-style runtimes. |
+| `config.refresh` | `boolean` | Bypass cache. |
+
+**Returns**
+
+```ts
+type ListModelsResult = {
+  models: Array<{
+    id: string;
+    label: string;
+    provider: string;
+    source: "static" | "api" | "cli";
+    contextWindow?: number;
+    deprecated?: boolean;
+    notes?: string;
+  }>;
+  source: "static" | "api" | "cli" | "mixed";
+  fetchedAt: number;
+  error?: string;
+};
+```
+
+**Example**
+
+```ts
+const catalog = await client.agent.listModels("omlx", {
+  baseUrl: "http://localhost:11434",
+  refresh: true,
+});
+if (catalog.error) console.warn(catalog.error);
+```
+
+### `agent.setModel(session, model)`
+
+**Signature**
+
+```ts
+await client.agent.setModel(session: string, model: string): Promise<{
+  status: "updated" | "no_session";
+  model: string;
+}>
+```
+
+**Example**
+
+```ts
+await client.agent.setModel("default", "claude-opus-4-6");
+```
+
+### `agent.setPermissionMode(session, permissionMode)`
+
+**Signature**
+
+```ts
+await client.agent.setPermissionMode(session: string, permissionMode: string): Promise<{
+  status: "updated" | "no_session";
+  permissionMode: string;
+}>
+```
+
+**Example**
+
+```ts
+await client.agent.setPermissionMode("default", "acceptEdits");
+```
+
+### `agent.update(session, patch)`
+
+**Signature**
+
+```ts
+await client.agent.update(
+  session: string,
+  patch: { cwd?: string; model?: string; permissionMode?: string },
+): Promise<{
+  status: "updated";
+  applied: "in-place" | "respawn";
+  runtimeId: string;
+  fields: string[];
+}>
+```
+
+**Example**
+
+```ts
+const updated = await client.agent.update("default", {
+  cwd: "/Users/me/other-project",
+  model: "gpt-5.5",
+});
+console.log(updated.applied); // "in-place" or "respawn"
+```
+
+**Notes**: Some providers can apply changes in place. Others require a respawn with DB-backed history replay.
+
+## Event streaming 메서드
+
+### `agent.streamEvents(session, since?)`
+
+**Signature**
+
+```ts
+for await (const event of client.agent.streamEvents(session: string, since?: number)) {
+  // event is Record<string, unknown>
+}
+```
+
+**Use it when** you want SSE instead of WebSocket. Requires `http: true`.
+
+### `agent.subscribe(session, opts?)`
+
+**Signature**
+
+```ts
+await client.agent.subscribe(session: string, opts?: {
+  since?: number;
+  includeHistory?: boolean;
+  tail?: number;
+}): Promise<{ cursor: number; oldestCursor?: number; hasMore: boolean }>
+```
+
+**Input**
+
+| Field | Description |
+| --- | --- |
+| `since` | Start from this event cursor. |
+| `includeHistory` | Replay persisted history as events. |
+| `tail` | Replay only the last N persisted messages. Mutually exclusive with `since` and `includeHistory`. |
+
+**Example**
+
+```ts
+client.agent.onEvent(({ session, cursor, event, isHistory }) => {
+  if (!isHistory) renderEvent(session, cursor, event);
+});
+const sub = await client.agent.subscribe("default", { tail: 20 });
+```
+
+### `agent.getMessages(session, opts?)`
+
+**Signature**
+
+```ts
+await client.agent.getMessages(session: string, opts?: {
+  before?: number;
+  limit?: number;
+}): Promise<{
+  events: Array<{ cursor: number; event: Record<string, unknown> }>;
+  oldestCursor?: number;
+  hasMore: boolean;
+}>
+```
+
+**Use it when** implementing reverse pagination for older persisted messages.
+
+### `agent.unsubscribe(session)`
+
+**Signature**
+
+```ts
+await client.agent.unsubscribe(session: string): Promise<void>
+```
+
+**Notes**: Also removes the session from reconnect resubscription state.
+
+### `agent.onEvent(handler)`
+
+**Signature**
+
+```ts
+const unsubscribe = client.agent.onEvent((event: {
+  session: string;
+  cursor: number;
+  event: Record<string, unknown>;
+  isHistory?: boolean;
+}) => void);
+```
+
+**Common event types**
+
+| Type | Meaning |
+| --- | --- |
+| `thinking` | Agent internal reasoning block. |
+| `assistant` | Assistant-visible response block. |
+| `assistant_delta` | Streaming text fragment. |
+| `tool_use` | Agent is calling a tool. |
+| `tool_result` | Tool execution result. |
+| `complete` | Turn completed. |
+| `error` | Runtime or provider error. |
+| `user_message` | Echoed user message for multi-client sync. |
+
+## Permission 메서드
+
+### `agent.subscribePermissions()`
+
+**Signature**
+
+```ts
+await client.agent.subscribePermissions(): Promise<{ pendingCount: number }>
+```
+
+**Use it when** the UI needs to receive tool approval prompts. Subscribe before starting an agent if the first permission prompt must not be missed.
+
+### `agent.unsubscribePermissions()`
+
+**Signature**
+
+```ts
+await client.agent.unsubscribePermissions(): Promise<void>
+```
+
+### `agent.getPendingPermissions(session?)`
+
+**Signature**
+
+```ts
+await client.agent.getPendingPermissions(session?: string): Promise<{
+  pending: Array<{
+    sessionId: string;
+    request: Record<string, unknown>;
+    createdAt: number;
+  }>;
+}>
+```
+
+**Use it when** reconnecting a UI and recovering prompts that arrived while disconnected.
+
+### `agent.respondPermission(session, approved)`
+
+**Signature**
+
+```ts
+await client.agent.respondPermission(
+  session: string,
+  approved: boolean,
+): Promise<{ status: "approved" | "denied" }>
+```
+
+**Example**
+
+```ts
+client.agent.onPermissionRequest(({ session, request }) => {
+  const safe = request.tool === "Edit";
+  client.agent.respondPermission(session, safe);
+});
+```
+
+### `agent.onPermissionRequest(handler)`
+
+**Signature**
+
+```ts
+const unsubscribe = client.agent.onPermissionRequest((event: {
+  session: string;
+  request: Record<string, unknown>;
+  createdAt: number;
+  isHistory?: boolean;
+}) => void);
+```
+
+**Use it when** opening a modal, notification, or command palette prompt for human approval.

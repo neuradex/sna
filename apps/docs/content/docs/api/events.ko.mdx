@@ -1,0 +1,62 @@
+---
+title: 이벤트
+description: WS와 SSE 위로 흐르는 15가지 AgentEvent 프로토콜입니다.
+icon: Activity
+---
+
+모든 프로바이더가 정규화된 `AgentEvent` 스트림을 emit합니다. 컨슈머는
+WebSocket (푸시) 또는 `GET /agent/events` (SSE)로 구독하고, 둘 다 같은
+와이어 형태를 전달합니다.
+
+## 이벤트 타입
+
+| 타입 | 발생 시점 | 운반하는 것 |
+|------|----------|------------|
+| `init` | 세션 시작 | provider, model, capabilities |
+| `assistant` | 확정된 assistant 텍스트 블록 | 전체 텍스트 |
+| `assistant_delta` | 스트리밍 텍스트 청크 | `delta` |
+| `text_delta` | 일부 어댑터가 쓰는 별칭 | `delta` |
+| `thinking` | 확장 thinking 최종 블록 | 전체 thinking |
+| `thinking_delta` | 스트리밍 thinking 청크 | `delta` |
+| `tool_use` | 툴 invocation | 툴 이름, 입력 |
+| `tool_use_delta` | 스트리밍 툴 입력 (JSON) | partial 입력 |
+| `tool_result` | 툴 응답 | result, isError, durationMs |
+| `permission_needed` | 툴이 승인을 요구 | 툴 이름, 입력, decisionId |
+| `milestone` | 프로바이더 정의 마커 | label |
+| `user_message` | (정규화 후) 유저측 에코 | content |
+| `interrupted` | 턴 취소됨 | reason |
+| `error` | 프로바이더 에러 | message |
+| `complete` | 턴 종료 | usage, costUsd, durationMs |
+
+## 델타 vs 파이널
+
+text와 thinking은 `_delta` 청크와 최종 `assistant` / `thinking`
+이벤트가 모두 도착합니다. 최종 이벤트가 정규본이며, 히스토리에도 최종
+이벤트가 저장됩니다. 델타는 라이브 렌더링에만 사용됩니다.
+
+툴 사용의 경우 `tool_use_delta`는 partial JSON 입력(Anthropic의
+`input_json_delta`)을 운반합니다. 최종 `tool_use` 이벤트는 파싱된
+완전한 입력을 갖습니다.
+
+## 구독
+
+WebSocket (라이브 UI에 권장):
+
+```ts
+client.agent.onEvent(({ event }) => {
+  if (event.type === "assistant_delta") render(event.delta);
+});
+await client.agent.subscribe(sessionId);
+```
+
+SSE (WS를 못 쓸 때):
+
+```ts
+for await (const event of client.agent.streamEvents(sessionId)) {
+  if (event.type === "complete") break;
+}
+```
+
+세션 없는 단발 실행에는 SSE 엔드포인트 `POST /agent/run-once/stream`
+과 그 클라이언트 래퍼 `agent.runOnceStream(opts)`이 같은 이벤트
+프로토콜을 전달합니다.

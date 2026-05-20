@@ -1,0 +1,22 @@
+---
+title: "Client SDK"
+description: "세션, agent 생명주기, 채팅 영속화, 스트리밍, 권한을 타입이 있는 방식으로 다룹니다."
+---
+# Client SDK
+
+`@sna-sdk/client`는 실행 중인 SNA 서버와 통신합니다. 명령과 영속화에는 HTTP를, push 구독에는 WebSocket을, 긴 스트림에는 SSE를 사용합니다.
+
+React 밖에서 사용하거나 자체 UI 프레임워크의 하위 계층으로 사용할 때 적합합니다.
+
+## Install
+
+~~~bash
+pnpm add @sna-sdk/client
+~~~
+
+## Public surfaces
+
+- [client-transport](/ko/docs/sdks/client-transport)
+- [client-sessions](/ko/docs/sdks/client-sessions)
+- [client-agent](/ko/docs/sdks/client-agent)
+- [client-chat](/ko/docs/sdks/client-chat)

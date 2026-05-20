@@ -1,0 +1,78 @@
+---
+title: ストリーミング completion
+description: 単発プロンプトからテキストをストリーミングする 3 つの方法。
+icon: WavesHorizontal
+---
+
+SNA は単発呼び出し向けのストリーミングを 3 つの形で公開します。ホスト
+(インプロセス vs ネットワーク) と形 (テキストのみ vs フルイベント)
+に応じて選択してください。
+
+## 1. インプロセス、テキストのみ: `completion({ onDelta })`
+
+最も低コストで、最もシンプルな方式です。自動補完プレビューやタイプライタ
+UX のように、テキスト delta だけが必要なときに使います。
+
+```ts
+import { completion } from "@sna-sdk/core";
+
+await completion({
+  prompt: "Draft a commit message for: ...",
+  provider: "claude-code",
+  model: "claude-haiku-4-5",
+  onDelta: (chunk) => process.stdout.write(chunk),
+});
+```
+
+Promise はやはり最終的に結合されたテキストと使用量で resolve します。
+`onDelta` は side channel であり、最終結果の置き換えではありません。
+
+`claude-code` と `codex` (プールと ephemeral の両方) で配線済みです。
+OpenCode の SDK 呼び出しは現状 single-shot なので、コールバックは
+そこでは文書化されている no-op です。
+
+## 2. インプロセス、フルイベントストリーム: `runOnce({ onEvent })`
+
+単発実行でも `tool_use` / `thinking` / `permission_needed` イベント
+が必要なときに使います。
+
+```ts
+import { runOnce } from "@sna-sdk/core/server";
+
+await runOnce(sessionManager, {
+  message: "List the markdown files and summarize each.",
+  provider: "codex",
+  onEvent: (event) => {
+    if (event.type === "assistant_delta") render(event.delta);
+    if (event.type === "tool_use") showToolCard(event);
+  },
+});
+```
+
+非テキストイベントが不要な場合は、`onDelta` 専用の変種も使えます。
+
+## 3. ネットワーク: SSE 上の `runOnceStream`
+
+`@sna-sdk/core` を直接 import できないブラウザ / Electron レンダラ /
+リモートクライアント向け。
+
+```ts
+for await (const event of client.agent.runOnceStream({
+  message: "Draft a commit message for: ...",
+})) {
+  if (event.type === "assistant_delta") write(event.delta as string);
+  if (event.type === "complete") console.log("usage", event.data);
+}
+```
+
+`POST /agent/run-once/stream` (Server-Sent Events) で実装されています。
+ストリームは実行の最終 `complete` / `error` イベントの後に閉じます。
+
+## どれを使うべきか
+
+| 状況 | API |
+|------|-----|
+| SNA サーバと同じプロセス、テキストのみ | `completion({ onDelta })` |
+| 同じプロセス、フルイベントストリーム | `runOnce({ onEvent })` |
+| リモート (ブラウザ、別の Node ホスト) | `runOnceStream()` |
+| 長期稼働のマルチターン UI | 代わりにセッションを開いて WS `agent.subscribe` を使う |

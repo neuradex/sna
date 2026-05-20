@@ -1,0 +1,14 @@
+{
+  "title": "API Spec",
+  "description": "HTTP routes, WebSocket ops, event types.",
+  "icon": "Plug",
+  "root": true,
+  "pages": [
+    "index",
+    "http",
+    "endpoints",
+    "websocket",
+    "events",
+    "openapi"
+  ]
+}

@@ -1,0 +1,44 @@
+---
+title: OpenAPI spec
+description: Live spec served by the running server.
+icon: FileCode
+---
+
+The Hono server publishes its own OpenAPI 3.1 spec, generated from
+the same Zod schemas the routes use. There is no separate spec file
+to keep in sync: the spec, the SDK types, and the route handlers all
+derive from one source.
+
+## Where to find it
+
+When the server is running:
+
+| URL | Format |
+|-----|--------|
+| `http://localhost:3099/openapi.json` | Raw JSON (machine-readable) |
+| `http://localhost:3099/docs` | Swagger UI (interactive) |
+| `http://localhost:3099/spec` | Plain text dump |
+
+Replace `3099` with whatever port `startSnaServer({ port })` returned.
+
+## Use cases
+
+- **Generate clients in other languages.** Point any OpenAPI codegen
+  at `/openapi.json`. The schemas are strict (Zod-derived) so the
+  output is type-safe.
+- **Explore the API interactively.** The Swagger UI lets you fire
+  every route from the browser with auth and body editors.
+- **Pin the contract in CI.** Snapshot the spec to disk, diff on
+  every build. Any unintended public-surface change shows up as a
+  diff.
+
+## Stability
+
+Routes follow semver across the SNA workspace. A non-backwards-
+compatible route change ships as a major version. The OpenAPI tags
+group routes by surface (Sessions, Agent, Permissions, Chat) so
+generated clients have sensible groupings.
+
+For the full list of routes with one-line descriptions, see
+[HTTP routes](/docs/api/http). For the event types each route can
+emit, see [Events](/docs/api/events).

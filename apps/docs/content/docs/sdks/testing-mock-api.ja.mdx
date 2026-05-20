@@ -1,0 +1,78 @@
+---
+title: "Testing Mock API"
+description: "startMockAnthropicServer、runOneshot、MockServer の使い方。"
+---
+
+# Testing Mock API
+
+## `startMockAnthropicServer(options?)`
+
+```ts
+const server = await startMockAnthropicServer(options?: { port?: number }): Promise<MockServer>
+```
+
+```ts
+type MockServer = {
+  url: string;
+  port: number;
+  logs: MockLogEntry[];
+  close: () => Promise<void>;
+};
+```
+
+```ts
+type MockLogEntry = {
+  request: unknown;
+  response: unknown;
+  timestamp: number;
+};
+```
+
+```ts
+import { startMockAnthropicServer } from "@sna-sdk/testing";
+
+const mock = await startMockAnthropicServer();
+process.env.ANTHROPIC_BASE_URL = mock.url;
+
+try {
+  // Anthropic 互換 API を期待する code を実行します。
+} finally {
+  await mock.close();
+}
+```
+
+動作:
+
+- `/v1/messages` endpoint を提供します。
+- 通常の user text には deterministic response を返します。
+- tools が宣言され、prompt に `[tool:Name]` が含まれる場合、tool-use response を生成できます。
+
+## `runOneshot(options)`
+
+```ts
+await runOneshot(options: Record<string, unknown>): Promise<unknown>
+```
+
+full CLI harness を起動せずに one-shot execution path だけを検証したい test で使います。
+
+## Instance helpers
+
+### `generateInstanceName()`
+
+一意な test instance 名を作成します。並列 test で log/config directory の衝突を避けるために使います。
+
+### `getInstancesDir()` / `getInstanceDir(name)`
+
+testing CLI が使う storage path を解決します。`.sna/instances` path を hard-code せず、この helper を優先してください。
+
+### `listInstances()`
+
+disk に保存された test instance metadata を返します。debug UI や cleanup script に有用です。
+
+### `readInstanceMeta(name)` / `writeInstanceMeta(name, meta)`
+
+test instance metadata を読み書きします。隔離された CLI run に追加 state を結び付ける場合に使います。
+
+### `removeInstance(name)`
+
+instance directory と log を削除します。test cleanup で使います。

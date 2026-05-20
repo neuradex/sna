@@ -1,0 +1,22 @@
+---
+title: "Client SDK"
+description: "Typed access to sessions, agent lifecycle, chat persistence, streaming, and permissions."
+---
+# Client SDK
+
+`@sna-sdk/client` talks to a running SNA server. It combines HTTP for commands and persistence, WebSocket for push subscriptions, and SSE for long-running streams.
+
+Use this package outside React or underneath custom UI frameworks.
+
+## Install
+
+~~~bash
+pnpm add @sna-sdk/client
+~~~
+
+## Public surfaces
+
+- [client-transport](/docs/sdks/client-transport)
+- [client-sessions](/docs/sdks/client-sessions)
+- [client-agent](/docs/sdks/client-agent)
+- [client-chat](/docs/sdks/client-chat)

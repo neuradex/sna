@@ -1,0 +1,62 @@
+---
+title: Permissions
+description: Unified permission flow across Claude Code and Codex.
+icon: Lock
+---
+
+Both Claude Code and Codex support per-tool permission gating, but
+they speak different protocols. SNA abstracts both behind one API.
+
+## The flow
+
+```
+agent invokes tool
+   │
+   ▼
+provider raises permission request
+   │
+   ▼
+SessionManager emits `permission_needed` event  ──► UI shows prompt
+   │
+   ▼
+UI calls POST /agent/permission-respond { approved: bool }
+   │
+   ▼
+SessionManager resolves the pending request
+   │
+   ▼
+provider receives the verdict, tool executes (or is denied)
+```
+
+## Per-provider wiring
+
+- **Claude Code** uses a `PreToolUse` hook, a separate Node process
+  the CLI spawns to evaluate each tool call. SNA ships
+  `packages/core/dist/scripts/hook.js`, which posts a blocking
+  `permission-request` to the server and waits for the response.
+- **Codex** speaks JSON-RPC over stdio and emits an `approval/request`
+  notification; SNA replies with `approval/respond`.
+
+The consumer app never sees these protocol differences. Both surface
+as the same `permission_needed` event and respond through the same
+`POST /agent/permission-respond` endpoint.
+
+## Modes
+
+`permissionMode` controls the gate's default verdict:
+
+| Mode | Meaning |
+|------|---------|
+| `default` | Prompt for every tool not on the safe-tool allowlist |
+| `acceptEdits` | Auto-approve file edits, prompt for everything else |
+| `bypassPermissions` | Auto-approve all (test envs, demos) |
+
+Modes are per-session and switchable mid-thread via
+`POST /agent/set-permission-mode` or `PATCH /agent/session`.
+
+## Safe-tool allowlist
+
+Tools that match the configured allowlist (Read, Glob, Grep,
+ListFiles, ...) bypass the permission gate entirely: no event, no
+round-trip. The allowlist is per-provider but normalized so the
+consumer config is one list.

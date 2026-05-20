@@ -1,0 +1,47 @@
+---
+title: "Core ランタイムヘルパー"
+description: "`@sna-sdk/core` から直接 export されるランタイムヘルパーです。"
+---
+# Core ランタイムヘルパー
+
+HTTP サーバーを経由せずに agent runtime を呼び出したい場合に使います。同じ Node プロセス内で動くローカル orchestration、テスト、ツールに適しています。
+| サーフェス | 目的 |
+| --- | --- |
+| `completion(input)` | completion 形式の provider 呼び出しを 1 回実行します。 |
+| `runOnce(input)` | agent タスクを 1 回実行し、最終結果を返します。 |
+| `getRuntimePool()` | provider プロセスを管理する共有 runtime pool を返します。 |
+| `RuntimePool` | 高度なライフサイクル制御に使う runtime pool クラスです。 |
+| `toClaudeEffort(level)` | SNA reasoning level を Claude 系の effort 値へ変換します。 |
+| `toCodexEffort(level)` | SNA reasoning level を Codex 系の effort 値へ変換します。 |
+| `buildCanonicalFromDb(...)` | DB に保存された row から canonical history を再構築します。 |
+HTTP 対応サーフェスは [agent completion](/ja/docs/api/endpoints/agent/completion/post)、[run once](/ja/docs/api/endpoints/agent/run-once/post)、[run once stream](/ja/docs/api/endpoints/agent/run-once/stream/post) に記載されています。
+
+## 関数リファレンス
+
+### `completion(input)`
+
+設定済み provider を通じて completion-style call を 1 回実行します。長期的な coding session より text generation や summarization に近い作業に使います。Provider 応答が完了すると返ります。
+
+### `runOnce(input)`
+
+runtime を通じて 1 つの agent task を最後まで実行し、最終結果を返します。Agent が plan、tool call、finish を 1 つの流れで処理できる automation に使ってください。
+
+### `getRuntimePool()`
+
+現在の process が使う shared runtime pool を返します。複数の call site が独立 pool を作らず、同じ provider process management を再利用する場合に使います。
+
+### `RuntimePool`
+
+provider runtime lifecycle を所有します。ほとんどのアプリケーションでは `getRuntimePool` で十分です。Test や embedded host で隔離が必要な場合のみ直接作成してください。
+
+### `toClaudeEffort(level)`
+
+SNA reasoning level を Claude 互換 effort 値へ変換します。Application code の各所に provider-specific string を散らさず、provider adapter で使ってください。
+
+### `toCodexEffort(level)`
+
+SNA reasoning level を Codex 互換 effort 値へ変換します。UI-level reasoning choice を provider-neutral に保ちます。
+
+### `buildCanonicalFromDb(...)`
+
+database row から canonical history を再構築します。Server process が保存済み history を provider-neutral な actor/kind 形式で replay する場合に使います。

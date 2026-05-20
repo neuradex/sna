@@ -1,0 +1,34 @@
+---
+title: Overview
+description: HTTP routes, WebSocket protocol, event types.
+icon: LayoutGrid
+---
+
+This section is the on-the-wire reference. For the *why* behind any
+of these shapes, jump to [Concepts](/docs/introduction/concepts).
+If you are comparing SNA's HTTP/WebSocket API with ACP, see
+**[SNA and ACP](/docs/introduction/philosophy/acp)**.
+
+<Cards>
+  <Card title="Endpoint reference" href="/docs/api/endpoints" description="Request fields, responses, and notes for every HTTP endpoint." />
+  <Card title="HTTP routes" href="/docs/api/http" description="Every server endpoint, grouped by surface." />
+  <Card title="WebSocket protocol" href="/docs/api/websocket" description="Request/response ops, push channels, reconnect semantics." />
+  <Card title="Events" href="/docs/api/events" description="The 15-type AgentEvent enum, deltas, finals." />
+  <Card title="OpenAPI spec" href="/docs/api/openapi" description="Live spec served by the running server." />
+</Cards>
+
+## Source of truth
+
+The server's Hono app is built from `@hono/zod-openapi` route
+definitions. The running server publishes its own OpenAPI 3.1 spec
+that's generated from those same Zod schemas, so the wire shapes you
+see here, the SDK types, and the live spec can't drift.
+
+| URL | Purpose |
+|-----|---------|
+| `GET /openapi.json` | Raw spec JSON |
+| `GET /docs` | Swagger UI |
+| `GET /spec` | Plain text spec |
+
+When in doubt, hit the live server: it's always more authoritative than
+this page.

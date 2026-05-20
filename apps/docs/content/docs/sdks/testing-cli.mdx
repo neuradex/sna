@@ -1,0 +1,36 @@
+---
+title: "Testing CLI"
+description: "`sna-test` command line surfaces."
+---
+# Testing CLI
+
+The testing package also exposes a `sna-test` binary. It creates isolated Claude-compatible instances, points them at the mock API, and stores logs under `.sna/instances/name/`.
+| Command | Purpose |
+| --- | --- |
+| `sna-test claude [args...]` | Runs Claude-compatible CLI arguments in an isolated test instance. |
+| `sna-test ls` | Lists known test instances. |
+| `sna-test logs name [-f] [--api]` | Reads or follows logs for an instance. |
+| `sna-test rm name|--all` | Removes one instance or all instances. |
+The instance helpers `generateInstanceName`, `getInstanceDir`, `getInstancesDir`, `listInstances`, `readInstanceMeta`, `writeInstanceMeta`, and `removeInstance` are exported for programmatic workflows.
+
+## Helper reference
+
+### `generateInstanceName()`
+
+Creates a unique test instance name. Use it when each test should receive isolated logs and configuration.
+
+### `getInstancesDir()` and `getInstanceDir(name)`
+
+Resolve the storage directories used by the CLI harness. Use these helpers instead of hard-coding `.sna/instances` paths.
+
+### `listInstances()`
+
+Returns known test instances from disk. Useful for cleanup tests and debugging tools.
+
+### `readInstanceMeta(name)` and `writeInstanceMeta(name, meta)`
+
+Read and write instance metadata. Use this when a test harness needs to associate extra state with an isolated CLI run.
+
+### `removeInstance(name)`
+
+Deletes a test instance directory and its logs. Prefer this in test cleanup instead of deleting paths manually.

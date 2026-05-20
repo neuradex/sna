@@ -1,0 +1,30 @@
+{
+  "title": "SDK",
+  "description": "Core、client、React、testing パッケージのリファレンス。",
+  "icon": "Package",
+  "root": true,
+  "pages": [
+    "index",
+    "---@sna-sdk/core---",
+    "core",
+    "core-runtime",
+    "core-server",
+    "core-launchers",
+    "core-config",
+    "---@sna-sdk/client---",
+    "client",
+    "client-transport",
+    "client-sessions",
+    "client-agent",
+    "client-chat",
+    "---@sna-sdk/react---",
+    "react",
+    "react-provider",
+    "react-hooks",
+    "react-components",
+    "---@sna-sdk/testing---",
+    "testing",
+    "testing-mock-api",
+    "testing-cli"
+  ]
+}

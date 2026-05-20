@@ -1,0 +1,62 @@
+---
+title: Events
+description: The 15-type AgentEvent protocol. What flows over WS and SSE.
+icon: Activity
+---
+
+Every provider emits a normalized `AgentEvent` stream. Consumers
+subscribe through `WebSocket` (push) or `GET /agent/events` (SSE),
+both of which carry the same wire shape.
+
+## Event types
+
+| Type | When | Carries |
+|------|------|---------|
+| `init` | session started | provider, model, capabilities |
+| `assistant` | finalized assistant text block | full text |
+| `assistant_delta` | streaming text chunk | `delta` |
+| `text_delta` | alias used by some adapters | `delta` |
+| `thinking` | extended-thinking final block | full thinking |
+| `thinking_delta` | streaming thinking chunk | `delta` |
+| `tool_use` | tool invocation | tool name, input |
+| `tool_use_delta` | streaming tool input (JSON) | partial input |
+| `tool_result` | tool response | result, isError, durationMs |
+| `permission_needed` | tool requires approval | tool name, input, decisionId |
+| `milestone` | provider-defined marker | label |
+| `user_message` | user-side echo (after canonicalization) | content |
+| `interrupted` | turn cancelled | reason |
+| `error` | provider error | message |
+| `complete` | turn done | usage, costUsd, durationMs |
+
+## Deltas vs finals
+
+For text and thinking, both `_delta` chunks and a final `assistant` /
+`thinking` event arrive. The final is the canonical version, it's
+what gets persisted in history. The deltas are for live rendering.
+
+For tool use, `tool_use_delta` carries partial JSON input (Anthropic's
+`input_json_delta`). The final `tool_use` event has the parsed
+complete input.
+
+## Subscribing
+
+WebSocket (recommended for live UI):
+
+```ts
+client.agent.onEvent(({ event }) => {
+  if (event.type === "assistant_delta") render(event.delta);
+});
+await client.agent.subscribe(sessionId);
+```
+
+SSE (when WS is not available):
+
+```ts
+for await (const event of client.agent.streamEvents(sessionId)) {
+  if (event.type === "complete") break;
+}
+```
+
+For one-shot runs without a session, the SSE endpoint
+`POST /agent/run-once/stream` and its client wrapper
+`agent.runOnceStream(opts)` ship the same event protocol.

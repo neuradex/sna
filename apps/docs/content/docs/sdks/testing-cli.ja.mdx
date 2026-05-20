@@ -1,0 +1,36 @@
+---
+title: "Testing CLI"
+description: "`sna-test` command line サーフェスです。"
+---
+# Testing CLI
+
+testing package は `sna-test` binary も公開します。この CLI は隔離された Claude 互換 instance を作り、mock API を参照させ、log を `.sna/instances/name/` 配下に保存します。
+| Command | 目的 |
+| --- | --- |
+| `sna-test claude [args...]` | 隔離された test instance で Claude 互換 CLI argument を実行します。 |
+| `sna-test ls` | 既知の test instance 一覧を取得します。 |
+| `sna-test logs name [-f] [--api]` | instance log を読み取る、または follow します。 |
+| `sna-test rm name|--all` | 1 つの instance またはすべての instance を削除します。 |
+Programmatic workflow のために `generateInstanceName`、`getInstanceDir`、`getInstancesDir`、`listInstances`、`readInstanceMeta`、`writeInstanceMeta`、`removeInstance` helper が export されます。
+
+## Helper リファレンス
+
+### `generateInstanceName()`
+
+一意な test instance 名を作成します。各 test に隔離された log と configuration を持たせたい場合に使います。
+
+### `getInstancesDir()` / `getInstanceDir(name)`
+
+CLI harness が使う storage directory を resolve します。`.sna/instances` path を直接ハードコードせず、この helper を使ってください。
+
+### `listInstances()`
+
+ディスク上の test instance 一覧を返します。Cleanup test や debugging tool に有用です。
+
+### `readInstanceMeta(name)` / `writeInstanceMeta(name, meta)`
+
+instance metadata を読み書きします。隔離された CLI run に追加状態を関連付ける test harness で使います。
+
+### `removeInstance(name)`
+
+test instance directory と log を削除します。Test cleanup では path を直接削除するより、この helper を優先してください。

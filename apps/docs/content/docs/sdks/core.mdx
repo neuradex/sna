@@ -1,0 +1,22 @@
+---
+title: "Core SDK"
+description: "Runtime, server, launcher, and configuration surfaces for embedding SNA."
+---
+# Core SDK
+
+`@sna-sdk/core` is the lowest-level package. Use it when you run SNA inside another process, expose SNA through your own server, or need provider/runtime primitives directly.
+
+Core does not assume React and does not require the browser client. It owns the server-side runtime contract.
+
+## Install
+
+~~~bash
+pnpm add @sna-sdk/core
+~~~
+
+## Public surfaces
+
+- [core-runtime](/docs/sdks/core-runtime)
+- [core-server](/docs/sdks/core-server)
+- [core-launchers](/docs/sdks/core-launchers)
+- [core-config](/docs/sdks/core-config)

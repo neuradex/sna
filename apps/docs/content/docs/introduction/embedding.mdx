@@ -1,0 +1,63 @@
+---
+title: Embedding
+description: Run SNA inside an Electron app or Node service.
+icon: Box
+---
+
+`startSnaServer()` forks the standalone server as a managed child
+process. Two entry points, depending on host:
+
+```ts
+import { startSnaServer } from "@sna-sdk/core/node";      // Plain Node
+import { startSnaServer } from "@sna-sdk/core/electron";  // Electron
+```
+
+The Electron variant resolves asar-unpacked paths and locates the
+consumer app's electron-rebuilt `better-sqlite3` binary.
+
+## Lifecycle
+
+```ts
+const sna = await startSnaServer({
+  port: 3099,
+  dbPath: path.join(app.getPath("userData"), "sna.db"),
+  maxSessions: 20,
+  permissionMode: "acceptEdits",
+  onLog: (line) => console.log("[sna]", line),
+});
+
+// sna.process : the spawned ChildProcess
+// sna.port    : actual port (after auto-pick)
+// sna.stop()  : graceful SIGTERM
+```
+
+## Electron checklist
+
+- Add `node_modules/@sna-sdk/core/**` to electron-builder's
+  `asarUnpack`. The server's `dist/` must be reachable at runtime.
+- Rebuild native deps for the Electron runtime:
+  ```bash
+  npx electron-rebuild -f -w better-sqlite3
+  ```
+- `dbPath` should land under `app.getPath("userData")` so the SQLite
+  file survives upgrades.
+- Pass `nativeBinding` if you ship a custom-built `better_sqlite3.node`
+  outside the default location.
+
+## Connecting from the renderer
+
+The renderer process talks to the embedded server like any other
+HTTP/WS host:
+
+```ts
+import { SnaClient } from "@sna-sdk/client";
+
+const client = new SnaClient({
+  baseUrl: `localhost:${snaPort}`,
+  http: true,
+  ws: true,
+});
+```
+
+A helper endpoint `GET /api/sna-port` is wired by `<SnaProvider>` for
+React apps so the renderer can auto-discover the port without IPC.
