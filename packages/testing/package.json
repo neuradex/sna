@@ -21,6 +21,7 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
+    "test": "node --import tsx --test test/**/*.test.ts",
     "prepublishOnly": "pnpm build"
   },
   "engines": {

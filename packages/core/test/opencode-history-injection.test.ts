@@ -208,6 +208,129 @@ describe("OpenCodeProvider end-to-end via mock server", () => {
     assert.deepEqual(body.model, { providerID: "anthropic", modelID: "claude-sonnet-4-6" });
   });
 
+  it("uses providerOptions.modelProviderId as the provider half for bare OpenAI model slugs", async () => {
+    const handle = await provider.prepareRuntime({
+      provider: "opencode",
+      cwd: process.cwd(),
+      providerOptions: { serverUrl: mock.url, modelProviderId: "openai" },
+    });
+    const proc = provider.spawn({
+      cwd: process.cwd(),
+      prompt: "hi",
+      model: "gpt-5.4",
+      providerOptions: { modelProviderId: "openai" },
+    }, handle);
+    const events = collectEvents(proc);
+    try {
+      await waitFor(() => events.some((e) => e.type === "complete"));
+    } finally {
+      proc.kill();
+    }
+
+    const promptCalls = mock.requestsFor((r) => r.method === "POST" && /\/prompt_async/.test(r.url));
+    const body = promptCalls[0].body as { model?: { providerID: string; modelID: string } };
+    assert.deepEqual(body.model, { providerID: "openai", modelID: "gpt-5.4" });
+  });
+
+  it("sends image ContentBlock input as an OpenCode file part", async () => {
+    const handle = await provider.prepareRuntime({
+      provider: "opencode",
+      cwd: process.cwd(),
+      providerOptions: { serverUrl: mock.url },
+    });
+    const proc = provider.spawn({ cwd: process.cwd() }, handle);
+    const events = collectEvents(proc);
+    await waitFor(() => events.some((e) => e.type === "init"));
+
+    proc.send([
+      { type: "text", text: "inspect this image" },
+      {
+        type: "image",
+        source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" },
+      },
+    ]);
+    try {
+      await waitFor(() => events.some((e) => e.type === "complete"));
+    } finally {
+      proc.kill();
+    }
+
+    const promptCalls = mock.requestsFor((r) => r.method === "POST" && /\/prompt_async/.test(r.url));
+    const body = promptCalls[0].body as { parts: Array<{ type: string; text?: string; mime?: string; url?: string }> };
+    assert.deepEqual(body.parts[0], { type: "text", text: "inspect this image" });
+    assert.equal(body.parts[1].type, "file");
+    assert.equal(body.parts[1].mime, "image/png");
+    assert.equal(body.parts[1].url, "data:image/png;base64,iVBORw0KGgo=");
+  });
+
+  it("maps permissionMode=plan to body.agent=plan for the first prompt", async () => {
+    const handle = await provider.prepareRuntime({
+      provider: "opencode",
+      cwd: process.cwd(),
+      providerOptions: { serverUrl: mock.url },
+    });
+    const proc = provider.spawn({
+      cwd: process.cwd(),
+      prompt: "plan it",
+      permissionMode: "plan",
+    }, handle);
+    const events = collectEvents(proc);
+    try {
+      await waitFor(() => events.some((e) => e.type === "complete"));
+    } finally {
+      proc.kill();
+    }
+
+    const promptCalls = mock.requestsFor((r) => r.method === "POST" && /\/prompt_async/.test(r.url));
+    const body = promptCalls[0].body as { agent?: string };
+    assert.equal(body.agent, "plan");
+  });
+
+  it("setModel applies a one-turn model override and then clears it", async () => {
+    const handle = await provider.prepareRuntime({
+      provider: "opencode",
+      cwd: process.cwd(),
+      providerOptions: { serverUrl: mock.url },
+    });
+    const proc = provider.spawn({ cwd: process.cwd() }, handle);
+    const events = collectEvents(proc);
+    await waitFor(() => events.some((e) => e.type === "init"));
+
+    proc.setModel("openai/gpt-5.4");
+    proc.send("first");
+    await waitFor(() => events.filter((e) => e.type === "complete").length >= 1);
+    proc.send("second");
+    await waitFor(() => events.filter((e) => e.type === "complete").length >= 2);
+    proc.kill();
+
+    const promptCalls = mock.requestsFor((r) => r.method === "POST" && /\/prompt_async/.test(r.url));
+    assert.equal(promptCalls.length, 2);
+    assert.deepEqual((promptCalls[0].body as any).model, { providerID: "openai", modelID: "gpt-5.4" });
+    assert.equal((promptCalls[1].body as any).model, undefined);
+  });
+
+  it("setPermissionMode(plan) applies agent=plan to the next prompt only", async () => {
+    const handle = await provider.prepareRuntime({
+      provider: "opencode",
+      cwd: process.cwd(),
+      providerOptions: { serverUrl: mock.url },
+    });
+    const proc = provider.spawn({ cwd: process.cwd() }, handle);
+    const events = collectEvents(proc);
+    await waitFor(() => events.some((e) => e.type === "init"));
+
+    proc.setPermissionMode("plan");
+    proc.send("first");
+    await waitFor(() => events.filter((e) => e.type === "complete").length >= 1);
+    proc.send("second");
+    await waitFor(() => events.filter((e) => e.type === "complete").length >= 2);
+    proc.kill();
+
+    const promptCalls = mock.requestsFor((r) => r.method === "POST" && /\/prompt_async/.test(r.url));
+    assert.equal((promptCalls[0].body as any).agent, "plan");
+    assert.equal((promptCalls[1].body as any).agent, undefined);
+  });
+
   it("permission events propagate as permission_needed and respond via HTTP", async () => {
     const handle = await provider.prepareRuntime({
       provider: "opencode",
@@ -252,6 +375,203 @@ describe("OpenCodeProvider end-to-end via mock server", () => {
     assert.equal(respCalls.length, 1);
     const body = respCalls[0].body as { response: string };
     assert.equal(body.response, "once");
+
+    proc.kill();
+  });
+
+  it("bypassPermissions auto-approves permission events without emitting permission_needed", async () => {
+    const handle = await provider.prepareRuntime({
+      provider: "opencode",
+      cwd: process.cwd(),
+      providerOptions: { serverUrl: mock.url },
+    });
+    const proc = provider.spawn({ cwd: process.cwd(), permissionMode: "bypassPermissions" }, handle);
+    const events = collectEvents(proc);
+    await waitFor(() => events.some((e) => e.type === "init"));
+
+    mock.emit({
+      type: "permission.updated",
+      properties: {
+        id: "perm-auto",
+        type: "shell",
+        sessionID: proc.sessionId!,
+        title: "Run command",
+        metadata: { command: "echo ok" },
+      },
+    });
+
+    await waitFor(() => mock.requestsFor((r) =>
+      r.method === "POST" && /\/permissions\/perm-auto/.test(r.url),
+    ).length > 0);
+
+    assert.equal(events.some((e) => e.type === "permission_needed"), false);
+    const body = mock.requestsFor((r) =>
+      r.method === "POST" && /\/permissions\/perm-auto/.test(r.url),
+    )[0].body as { response: string };
+    assert.equal(body.response, "once");
+
+    proc.kill();
+  });
+
+  it("session.error SSE events are normalized to AgentEvent error", async () => {
+    const handle = await provider.prepareRuntime({
+      provider: "opencode",
+      cwd: process.cwd(),
+      providerOptions: { serverUrl: mock.url },
+    });
+    const proc = provider.spawn({ cwd: process.cwd() }, handle);
+    const events = collectEvents(proc);
+    await waitFor(() => events.some((e) => e.type === "init"));
+
+    mock.emit({
+      type: "session.error",
+      properties: {
+        sessionID: proc.sessionId!,
+        error: { name: "ProviderError", data: { message: "OpenAI rejected request" } },
+      },
+    });
+
+    await waitFor(() => events.some((e) => e.type === "error"));
+    const error = events.find((e) => e.type === "error")!;
+    assert.equal(error.message, "OpenAI rejected request");
+
+    proc.kill();
+  });
+
+  it("reasoning part deltas and final reasoning part become thinking events", async () => {
+    const handle = await provider.prepareRuntime({
+      provider: "opencode",
+      cwd: process.cwd(),
+      providerOptions: { serverUrl: mock.url },
+    });
+    const proc = provider.spawn({ cwd: process.cwd() }, handle);
+    const events = collectEvents(proc);
+    await waitFor(() => events.some((e) => e.type === "init"));
+
+    mock.emit({
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "reason-1",
+          sessionID: proc.sessionId!,
+          messageID: "m-reason",
+          type: "reasoning",
+          text: "",
+          time: { start: Date.now() },
+        },
+      },
+    });
+    mock.emit({
+      type: "message.part.delta",
+      properties: {
+        sessionID: proc.sessionId!,
+        messageID: "m-reason",
+        partID: "reason-1",
+        field: "reasoning",
+        delta: "thinking...",
+      },
+    });
+    mock.emit({
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "reason-1",
+          sessionID: proc.sessionId!,
+          messageID: "m-reason",
+          type: "reasoning",
+          text: "thinking...done",
+          time: { start: Date.now() - 10, end: Date.now() },
+        },
+      },
+    });
+
+    await waitFor(() => events.some((e) => e.type === "thinking"));
+    assert.equal(events.find((e) => e.type === "thinking_delta")?.message, "thinking...");
+    assert.equal(events.find((e) => e.type === "thinking")?.message, "thinking...done");
+
+    proc.kill();
+  });
+
+  it("tool part running/completed updates become tool_use and tool_result", async () => {
+    const handle = await provider.prepareRuntime({
+      provider: "opencode",
+      cwd: process.cwd(),
+      providerOptions: { serverUrl: mock.url },
+    });
+    const proc = provider.spawn({ cwd: process.cwd() }, handle);
+    const events = collectEvents(proc);
+    await waitFor(() => events.some((e) => e.type === "init"));
+
+    mock.emit({
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "tool-part-1",
+          sessionID: proc.sessionId!,
+          messageID: "m-tool",
+          type: "tool",
+          tool: "bash",
+          callID: "call-1",
+          state: { status: "running", input: { command: "pwd" } },
+        },
+      },
+    });
+    mock.emit({
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "tool-part-1",
+          sessionID: proc.sessionId!,
+          messageID: "m-tool",
+          type: "tool",
+          tool: "bash",
+          callID: "call-1",
+          state: { status: "completed", output: "/repo", title: "pwd" },
+        },
+      },
+    });
+
+    await waitFor(() => events.some((e) => e.type === "tool_result"));
+    const use = events.find((e) => e.type === "tool_use")!;
+    const result = events.find((e) => e.type === "tool_result")!;
+    assert.equal(use.message, "bash");
+    assert.deepEqual(use.data?.input, { command: "pwd" });
+    assert.equal(result.message, "/repo");
+    assert.equal(result.data?.isError, false);
+
+    proc.kill();
+  });
+
+  it("tool part error updates become error tool_result", async () => {
+    const handle = await provider.prepareRuntime({
+      provider: "opencode",
+      cwd: process.cwd(),
+      providerOptions: { serverUrl: mock.url },
+    });
+    const proc = provider.spawn({ cwd: process.cwd() }, handle);
+    const events = collectEvents(proc);
+    await waitFor(() => events.some((e) => e.type === "init"));
+
+    mock.emit({
+      type: "message.part.updated",
+      properties: {
+        part: {
+          id: "tool-part-err",
+          sessionID: proc.sessionId!,
+          messageID: "m-tool",
+          type: "tool",
+          tool: "bash",
+          callID: "call-err",
+          state: { status: "error", error: "permission denied" },
+        },
+      },
+    });
+
+    await waitFor(() => events.some((e) => e.type === "tool_result"));
+    const result = events.find((e) => e.type === "tool_result")!;
+    assert.equal(result.message, "permission denied");
+    assert.equal(result.data?.toolName, "bash");
+    assert.equal(result.data?.isError, true);
 
     proc.kill();
   });
