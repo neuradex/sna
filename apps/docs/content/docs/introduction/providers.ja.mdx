@@ -5,7 +5,9 @@ icon: Boxes
 ---
 
 各ランタイムは共通の `AgentProvider` インタフェースの背後にクラスと
-して実装されています。アダプタは `core/providers/{claude-code,codex,opencode,grok}.ts` です。
+して実装されています。アダプタは `core/providers/{claude-code,codex,opencode,grok,cursor}.ts`、
+ACP を話すプロバイダ (Grok Build と Cursor) は `core/providers/acp/base.ts`
+を共有します。
 
 ## AgentProvider
 
@@ -42,26 +44,40 @@ interface AgentProcess {
 | **codex** | `codex app-server` デーモン、stdio 上の JSON-RPC | 永続デーモン、マルチスレッド | はい |
 | **opencode** | `opencode serve` デーモン + SDK HTTP | 永続デーモン、single-cwd | はい |
 | **grok** | `grok agent stdio` (stdio 上の Agent Client Protocol — Grok Build CLI) | セッションごとに stateless | いいえ |
+| **cursor** | `agent acp` (stdio 上の Agent Client Protocol — Cursor CLI) | セッションごとに stateless | いいえ |
 
 Codex と OpenCode プロバイダは `RuntimePool` 経由でデーモンを共有
 します。セッションを開くとき、プールが `(provider, cwd, config)` で
 照会され、互換のデーモンがあれば再利用してコールドスタートコスト
 を節約します(Codex 約 2 秒、OpenCode 約 3 秒)。
 
-Grok Build は SNA で初めてワイヤプロトコルに公開標準
-([ACP](https://agentclientprotocol.com))を採用したプロバイダです。
-そのためアダプタの大部分は ACP の `session/update` 通知を SNA の
-正規化された `AgentEvent` ストリームへ変換する薄いブリッジに留まり
-ます。`core/providers/grok.ts` の Grok Build 固有部分(CLI パス探索、
-`--effort` フラグマッピング、`_x.ai/*` 拡張通知のフィルタリング)は
-分離してあるので、2 番目の ACP-スピーキングエージェントが登場した
-ときには共通基底に抽出しやすい形に保っています。
+Grok Build が SNA で初めてワイヤプロトコルに公開標準
+([ACP](https://agentclientprotocol.com))を採用したプロバイダでした。
+2 番目の ACP-スピーキングプロバイダとして Cursor が加わったことで、
+共有ロジックは `core/providers/acp/base.ts` に抽出されました — JSON-RPC
+pump、`initialize`/`session/new` ハンドシェイク、`session/update` →
+`AgentEvent` 変換、双方向 `session/request_permission`
+(+`bypassPermissions` 自動承認)、プロバイダ間 `resource` block history
+インジェクションまで。各サブクラスは本当に違う部分だけを保持します:
+CLI パス探索、spawn 引数、任意の認証ステップ (Cursor の
+`authenticate({methodId:"cursor_login"})`)、ベンダ拡張通知の prefix
+(`_x.ai/*` Grok、`cursor/*` Cursor)、プロバイダ固有の tool-call unwrap。
 
-プロバイダ間の history replay は、Grok Build セッションの最初の
+プロバイダ間の history replay は、ACP セッションの最初の
 `session/prompt` に正規化された会話履歴を 1 個の ACP `resource`
 content block として埋め込む方式で扱います — 機能マトリクスページの
 [プロバイダ間 history replay](/ja/docs/introduction/feature-matrix#cross-provider-history-replay)
 を参照してください。
+
+Cursor はユーザがすでに済ませた `agent login` をそのまま使います
+(macOS Keychain の `cursor-access-token` / `cursor-refresh-token` →
+Cursor サブスクリプションを利用)。`CURSOR_API_KEY` を別途発行する必要は
+ありません。SNA は spawn の環境変数をそのまま通過させ、子プロセスは
+ユーザがインタラクティブに使うときと同じ資格情報を拾います。Reasoning
+level はモデル ID 自体にエンコードされます (`gpt-5.3-codex` →
+level 4 なら `gpt-5.3-codex-high` に変換)。`reasoning-level.ts` の
+`applyCursorReasoning` がその変換を行い、effort family に属さないモデル
+(`composer-*`、`auto` など) はそのまま通過します。
 
 ## RuntimePool
 
@@ -88,8 +104,9 @@ SNA が ACP だけをプロバイダ層にせず、高忠実度のネイティ�
 - **`reasoningLevel: 0..5`**: プロバイダ非依存、最軽量から最重量
   まで。[reasoning-level.ts](https://github.com/neuradex/sna/blob/main/packages/core/src/core/providers/reasoning-level.ts)
   が Claude Code の `--effort`、Codex の `model_reasoning_effort`、
-  Grok Build の `--reasoning-effort` に翻訳します。OpenCode はこの
-  フィールドを無視します。
+  Grok Build の `--effort`、Cursor のモデル ID サフィックス
+  (`gpt-5.3-codex-high` 等) に翻訳します。OpenCode はこのフィールドを
+  無視します。
 - **`providerOptions.serviceTier`**: Codex 専用。Codex の `/fast`
   スラッシュコマンドをミラーする (値: `"priority"`, `"flex"`,
   `"batch"`)。Claude Code には意図的に自動マッピングしません。

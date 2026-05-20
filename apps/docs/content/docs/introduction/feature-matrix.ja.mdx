@@ -1,11 +1,11 @@
 ---
 title: 機能 × プロバイダマトリクス
-description: SNA の各機能が Claude Code、Codex、OpenCode、Grok Build でどう動くか — 行ごとの注意点付き。
+description: SNA の各機能が Claude Code、Codex、OpenCode、Grok Build、Cursor でどう動くか — 行ごとの注意点付き。
 icon: TableProperties
 ---
 
 SNA のすべての機能は同じ `AgentProvider` インタフェースを通りますが、
-各ランタイムは自前のネイティブ表面を持っているため、4 つのプロバイダ
+各ランタイムは自前のネイティブ表面を持っているため、5 つのプロバイダ
 の能力が完全に揃うわけではありません。このページでは、どの機能が
 どこで実際に動くかを行ごとの注意点付きで列挙します。
 
@@ -14,39 +14,40 @@ SNA のすべての機能は同じ `AgentProvider` インタフェースを通�
 ネイティブ表面そのものを持たないことを意味します。
 
 > 最終検証対象: Claude Code 1.x, Codex 0.x (`app-server`),
-> OpenCode 0.x (`serve`), Grok Build CLI 0.1.x.
+> OpenCode 0.x (`serve`), Grok Build CLI 0.1.x, Cursor CLI 2026.05.
 
 ## ランタイム特性
 
-| 能力 | Claude Code | Codex | OpenCode | Grok Build |
-|---|---|---|---|---|
-| ワイヤプロトコル | `claude -p` stream-json / `--resume` JSONL | `codex app-server` JSON-RPC stdio | `opencode serve` HTTP + SDK | `grok agent stdio` ACP JSON-RPC stdio |
-| `supportsRuntimePooling` | ✗ | ✓ | ✓ | ✗ |
-| `supportsCwdPerThread` | 該当なし | ✓ | ✗ | 該当なし |
-| 公開標準プロトコル | ✗ ベンダ | ✗ ベンダ | ✗ ベンダ | ✓ [ACP](https://agentclientprotocol.com) |
-| Cold-start コスト | 呼び出しごとに約 1 秒 spawn | デーモン約 2 秒 spawn、再利用 | デーモン約 3 秒 spawn、再利用 | セッションごとに約 2 秒 spawn |
+| 能力 | Claude Code | Codex | OpenCode | Grok Build | Cursor |
+|---|---|---|---|---|---|
+| ワイヤプロトコル | `claude -p` stream-json / `--resume` JSONL | `codex app-server` JSON-RPC stdio | `opencode serve` HTTP + SDK | `grok agent stdio` ACP JSON-RPC stdio | `agent acp` ACP JSON-RPC stdio |
+| `supportsRuntimePooling` | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `supportsCwdPerThread` | 該当なし | ✓ | ✗ | 該当なし | 該当なし |
+| 公開標準プロトコル | ✗ ベンダ | ✗ ベンダ | ✗ ベンダ | ✓ [ACP](https://agentclientprotocol.com) | ✓ [ACP](https://agentclientprotocol.com) |
+| Cold-start コスト | 呼び出しごとに約 1 秒 spawn | デーモン約 2 秒 spawn、再利用 | デーモン約 3 秒 spawn、再利用 | セッションごとに約 2 秒 spawn | セッションごとに約 2 秒 spawn |
 
-Claude Code と Grok Build は呼び出し/セッション単位で stateless —
+Claude Code、Grok Build、Cursor は呼び出し/セッション単位で stateless —
 spawn ごとに新しい子プロセス。Codex と OpenCode は `RuntimePool` を
 通じてデーモンを共有します。Codex のデーモンだけが `cwd`-非依存なの
 で、単一プールのデーモン上で異なる作業ディレクトリのセッションを
-ホストできる唯一のプロバイダです。
+ホストできる唯一のプロバイダです。2 つの ACP-スピーキングプロバイダ
+(Grok Build, Cursor) は `core/providers/acp/base.ts` を共有します。
 
 ## セッションライフサイクル
 
-| 能力 | Claude Code | Codex | OpenCode | Grok Build |
-|---|---|---|---|---|
-| `spawn(opts)` → AgentProcess | ✓ | ✓ | ✓ | ✓ |
-| セッション中の `AgentEvent` ストリーミング | ✓ | ✓ | ✓ | ✓ |
-| turn 中の `interrupt()` | ✓ | ✓ | ✓ | ✓ (ACP `session/cancel`) |
-| `kill()` / `closeThread()` | ✓ | ✓ (プール refcount 認識) | ✓ (プール refcount 認識) | ✓ |
-| `complete(opts)` one-shot | ✓ | ✓ | ✓ | ✓ (`grok -p`) |
-| `complete()` `onDelta` ストリーミング | ✓ stream-json | ✓ `item/agentMessage/delta` | ✗ 現状の SDK 呼び出しは single-shot | ✓ streaming-json text イベント |
-| `listModels()` | ✓ static + oMLX API | ✓ static catalog | ✓ `opencode` CLI プローブ | ✓ static (単一: `grok-build`) |
+| 能力 | Claude Code | Codex | OpenCode | Grok Build | Cursor |
+|---|---|---|---|---|---|
+| `spawn(opts)` → AgentProcess | ✓ | ✓ | ✓ | ✓ | ✓ |
+| セッション中の `AgentEvent` ストリーミング | ✓ | ✓ | ✓ | ✓ | ✓ |
+| turn 中の `interrupt()` | ✓ | ✓ | ✓ | ✓ (ACP `session/cancel`) | ✓ (ACP `session/cancel`) |
+| `kill()` / `closeThread()` | ✓ | ✓ (プール refcount 認識) | ✓ (プール refcount 認識) | ✓ | ✓ |
+| `complete(opts)` one-shot | ✓ | ✓ | ✓ | ✓ (`grok -p`) | ✓ (`agent -p`) |
+| `complete()` `onDelta` ストリーミング | ✓ stream-json | ✓ `item/agentMessage/delta` | ✗ 現状の SDK 呼び出しは single-shot | ✓ streaming-json text イベント | ✓ stream-json `assistant` チャンク (`model_call_id` なし) |
+| `listModels()` | ✓ static + oMLX API | ✓ static catalog | ✓ `opencode` CLI プローブ | ✓ static (単一: `grok-build`) | ✓ `agent models` テキストパース + static fallback |
 
 OpenCode はストリーミングで例外です。現在の SDK ヘルパが single-shot
 のため、`complete()` に `onDelta` を渡しても成功はしますがコール
-バックは発火しません。`complete()` の戻り値自体は正しいです。
+バックは発火しません。
 
 ## インプレース変更 (`applyPatch`)
 
@@ -55,61 +56,64 @@ OpenCode はストリーミングで例外です。現在の SDK ヘルパが si
 フィールドは、セッションマネージャが kill して history replay と
 ともに respawn する必要があります。
 
-| フィールド | Claude Code | Codex | OpenCode | Grok Build |
-|---|---|---|---|---|
-| `model` | ✓ control_request `set_model` | ✓ 次 turn override | ✓ per-session override | ✗ leftover (respawn) |
-| `permissionMode` | ✓ control_request | ✓ 次 turn sandbox policy | ✓ per-session override | ✗ leftover (respawn) |
-| `cwd` | ✗ leftover | ✓ 次 turn override (唯一可能なプロバイダ) | ✗ leftover | ✗ leftover |
+| フィールド | Claude Code | Codex | OpenCode | Grok Build | Cursor |
+|---|---|---|---|---|---|
+| `model` | ✓ control_request `set_model` | ✓ 次 turn override | ✓ per-session override | ✗ leftover (respawn) | ✗ leftover (respawn) |
+| `permissionMode` | ✓ control_request | ✓ 次 turn sandbox policy | ✓ per-session override | ✗ leftover (respawn) | ✗ leftover (respawn) |
+| `cwd` | ✗ leftover | ✓ 次 turn override (唯一可能なプロバイダ) | ✗ leftover | ✗ leftover | ✗ leftover |
 
-Grok Build はすべてのフィールドを leftover として返します。ACP には
-ランタイム変更メソッドがなく、カタログにモデルが 1 つしかないため
-`setModel` で切り替える先もないからです。2 つ目のモデルが追加されても、
-history replay 付きの respawn は変わらず動きます。
+2 つの ACP-スピーキングプロバイダはすべてのフィールドを leftover と
+して返します。ACP にランタイム変更メソッドがないためです。
+respawn-with-history-replay は変わらず動きます。
 
 ## 権限フロー
 
-| 能力 | Claude Code | Codex | OpenCode | Grok Build |
-|---|---|---|---|---|
-| `permission_needed` AgentEvent emit | ✓ hook ブリッジ経由 | ✓ JSON-RPC server-request 経由 | ✓ HTTP webhook 経由 | ✓ ACP `session/request_permission` 経由 |
-| `respondToPermission(id, approved)` | ✗ 外部 hook スクリプトが承認処理 | ✓ JSON-RPC response | ✓ POST `/permissions/:id` | ✓ ACP `{outcome:{outcome:"selected",optionId}}` |
-| 双方向 (プロバイダがこちらを待つ) | ✗ hook スクリプトが決定 | ✓ | ✓ | ✓ |
+| 能力 | Claude Code | Codex | OpenCode | Grok Build | Cursor |
+|---|---|---|---|---|---|
+| `permission_needed` AgentEvent emit | ✓ hook ブリッジ経由 | ✓ JSON-RPC server-request 経由 | ✓ HTTP webhook 経由 | ✓ ACP `session/request_permission` 経由 | ✓ ACP `session/request_permission` 経由 |
+| `respondToPermission(id, approved)` | ✗ 外部 hook スクリプトが承認処理 | ✓ JSON-RPC response | ✓ POST `/permissions/:id` | ✓ ACP `{outcome:{outcome:"selected",optionId}}` | ✓ ACP `{outcome:{outcome:"selected",optionId}}` |
+| 双方向 (プロバイダがこちらを待つ) | ✗ hook スクリプトが決定 | ✓ | ✓ | ✓ | ✓ |
+| `bypassPermissions` 自動承認 | ✓ hook スクリプトが常に許可 | ✓ 次 turn override | ✓ per-session override | ✓ ACP base が自動で `allow_*` を返す | ✓ ACP base が自動で `allow_*` を返す |
 
 Claude Code の権限モデルは out-of-band です — SNA が hook スクリプトを
 書いておくと CLI がそれを呼び、スクリプトが (permissionMode と
 allow/deny ルールに基づいて) 自分で判断し、CLI は SNA プロセスを
-待ちません。他の 3 つは双方向です: エージェントの turn は SNA の
-権限レスポンス到着まで一時停止します。Claude Code の
-`respondToPermission` は設計上 no-op です。
+待ちません。他の 4 つは双方向です。
 
 ## 設定ノブ (SpawnOptions)
 
-| フィールド | Claude Code | Codex | OpenCode | Grok Build |
-|---|---|---|---|---|
-| `systemPrompt` | ✓ `--system-prompt` | ✓ `thread/start` の `baseInstructions` | ✓ `appendSystemPrompt` と結合 | ✓ `--system-prompt-override` |
-| `appendSystemPrompt` | ✓ `--append-system-prompt` | ✓ `thread/start` の `developerInstructions` | ✓ `systemPrompt` と結合 | ✓ `--rules` |
-| `allowedTools` | ✓ ネイティブ `--allowedTools` | ✓ PreToolUse hook (他を deny) | ⚠ best-effort (既知のツールのみトグル) | ✓ `--tools` 許可リスト |
-| `disallowedTools` | ✓ ネイティブ `--disallowedTools` | ✓ PreToolUse hook | ✓ 列挙されたツールを無効化 | ✓ `--disallowed-tools` |
-| `mcpServers` | ✓ `--mcp-config` JSON | ✓ `config.toml` `[mcp_servers.*]` に書き出し | ✓ SDK 経由 | ⚠ `session/new` は受け付けるが SNA からはまだ配線していない |
-| `reasoningLevel` (0..5) | ✓ `toClaudeEffort` → `--effort` | ✓ `toCodexEffort` → `model_reasoning_effort` | ✗ 無視 | ✓ `toGrokEffort` → `--reasoning-effort` |
-| `configDir` | ✓ `CLAUDE_CONFIG_DIR` | ✓ `CODEX_HOME` | ✗ 対応なし | ✗ 対応なし (Grok Build は `~/.grok` 固定) |
-| `resumeSessionId` | ✓ JSONL replay ファイル経由 | ✓ `thread/resume` API | ✓ session id | ⚠ Grok Build 自身のセッション id で resume は動くが、クロスプロバイダ history は下記 `resource` block 経路 |
+| フィールド | Claude Code | Codex | OpenCode | Grok Build | Cursor |
+|---|---|---|---|---|---|
+| `systemPrompt` | ✓ `--system-prompt` | ✓ `thread/start` の `baseInstructions` | ✓ `appendSystemPrompt` と結合 | ✓ `--system-prompt-override` | ⚠ CLI フラグ無し。ユーザの `AGENTS.md` か最初のプロンプトに fold (SNA からはまだ配線していない) |
+| `appendSystemPrompt` | ✓ `--append-system-prompt` | ✓ `thread/start` の `developerInstructions` | ✓ `systemPrompt` と結合 | ✓ `--rules` | ⚠ `systemPrompt` と同様 |
+| `allowedTools` | ✓ ネイティブ `--allowedTools` | ✓ PreToolUse hook (他を deny) | ⚠ best-effort (既知のツールのみトグル) | ✓ `--tools` 許可リスト | ⚠ `~/.cursor/cli-config.json` の `permissions.allow` 経由 (user-global、SNA は管理しない) |
+| `disallowedTools` | ✓ ネイティブ `--disallowedTools` | ✓ PreToolUse hook | ✓ 列挙されたツールを無効化 | ✓ `--disallowed-tools` | ⚠ `allowedTools` と同様 (または `--mode plan` でセッション全体 read-only) |
+| `mcpServers` | ✓ `--mcp-config` JSON | ✓ `config.toml` `[mcp_servers.*]` に書き出し | ✓ SDK 経由 | ✓ stdio→HTTP bridge + `<cwd>/.grok/config.toml` | ⚠ ユーザの `~/.cursor/mcp.json` に依存; per-session stdio MCP 注入は後続タスク |
+| `reasoningLevel` (0..5) | ✓ `toClaudeEffort` → `--effort` | ✓ `toCodexEffort` → `model_reasoning_effort` | ✗ 無視 | ✓ `toGrokEffort` → `--effort` | ✓ `applyCursorReasoning` → モデル ID サフィックス (`gpt-5.3-codex` → `gpt-5.3-codex-high`) |
+| `configDir` | ✓ `CLAUDE_CONFIG_DIR` | ✓ `CODEX_HOME` | ✗ 対応なし | ✗ 対応なし (Grok Build は `~/.grok` 固定) | ✗ 対応なし (Cursor は `~/.cursor` 固定; `CURSOR_CONFIG_DIR` は `cli-config.json` だけリルート、hook はリルートしない) |
+| `resumeSessionId` | ✓ JSONL replay ファイル経由 | ✓ `thread/resume` API | ✓ session id | ⚠ Grok Build chat id で resume は動くが、クロスプロバイダ history は下記 `resource` block 経路 | ⚠ Cursor `chatId` で resume 動作 (`--resume <id>` / `session/load`)、クロスプロバイダ history は同じ経路 |
 
 ### `providerOptions` (プロバイダごとの escape hatch)
 
-| キー | Claude Code | Codex | OpenCode | Grok Build |
-|---|---|---|---|---|
-| `settings` | ✓ `--settings` JSON にマージ | ✓ 同じ hook shape | — | — |
-| `settingSources` | ✓ `--setting-sources` | — | — | — |
-| `strictMcpConfig` | ✓ `--strict-mcp-config` | — | — | — |
-| `maxTurns` | ✓ `--max-turns` | — | — | — |
-| `omlxBaseUrl` | ✓ `ANTHROPIC_BASE_URL` をルーティング | — | — | — |
-| `serviceTier` | ✗ 誤課金 (`/fast` はモデルであって tier ではない) | ✓ `priority` / `flex` / `batch` | — | — |
-| `profile` | — | ✓ `config.toml` プロファイル | — | — |
-| `config` (`-c key=value`) | — | ✓ `codex exec` オーバーライド | — | — |
-| `serverUrl` | — | — | ✓ spawn を飛ばして既存デーモンに attach | — |
-| `modelProviderId` | — | — | ✓ `{providerID, modelID}` の provider 半分 | — |
-| `agent` | — | — | ✓ build / plan / etc. | — |
-| `logLevel` | — | — | ✓ `opencode serve --log-level` | — |
+| キー | Claude Code | Codex | OpenCode | Grok Build | Cursor |
+|---|---|---|---|---|---|
+| `settings` | ✓ `--settings` JSON にマージ | ✓ 同じ hook shape | — | — | — |
+| `settingSources` | ✓ `--setting-sources` | — | — | — | — |
+| `strictMcpConfig` | ✓ `--strict-mcp-config` | — | — | — | — |
+| `maxTurns` | ✓ `--max-turns` | — | — | — | — |
+| `omlxBaseUrl` | ✓ `ANTHROPIC_BASE_URL` をルーティング | — | — | — | — |
+| `serviceTier` | ✗ 誤課金 (`/fast` はモデルであって tier ではない) | ✓ `priority` / `flex` / `batch` | — | — | — |
+| `profile` | — | ✓ `config.toml` プロファイル | — | — | — |
+| `config` (`-c key=value`) | — | ✓ `codex exec` オーバーライド | — | — | — |
+| `serverUrl` | — | — | ✓ spawn を飛ばして既存デーモンに attach | — | — |
+| `modelProviderId` | — | — | ✓ `{providerID, modelID}` の provider 半分 | — | — |
+| `agent` | — | — | ✓ build / plan / etc. | — | — |
+| `logLevel` | — | — | ✓ `opencode serve --log-level` | — | — |
+
+Cursor には現状 SNA-specific の `providerOptions` キーはありません —
+CLI が受け付けるすべてのつまみ (model、reasoning、mode) は型付きの
+`SpawnOptions` フィールドにマップされます。将来 Cursor に新しいフラグ
+が増えればここに登場します。
 
 ## クロスプロバイダ history replay
 
@@ -122,25 +126,31 @@ allow/deny ルールに基づいて) 自分で判断し、CLI は SNA プロセ�
 | Claude Code | Anthropic フォーマットの JSONL を書き出し、パスを `--resume <filepath>` に渡す | `history/claude-code.ts` |
 | Codex | `thread/resume(history=ResponseItems)` JSON-RPC | `history/codex.ts` |
 | OpenCode | SDK 経由の experimental `thread/resume(history=...)` | `history/opencode.ts` |
-| Grok Build | 最初の `session/prompt` で transcript を 1 個の ACP `resource` content block にシリアライズ | `core/providers/grok.ts` インライン (デザイン probe のオプション B) |
+| Grok Build / Cursor | 最初の `session/prompt` で transcript を 1 個の ACP `resource` content block にシリアライズ | `core/providers/acp/base.ts` 共有 (`serializeHistoryForAcp` + `buildHistoryPromptBlock`) |
 
-Grok Build の経路は意図的に異なります: ACP の `session/load` は UI
-イベントを replay するだけでモデルコンテキストを復元せず、その下の
-`chat_history.jsonl` ストレージは xAI 内部フォーマットで session load
-時に再生成されるため — ストレージ層には触れない方針です。代わりに
-最初の turn で過去の transcript をインラインで埋め込み、そのコンテキ
-ストは同じセッションの後続 turn でも保持されるため、再注入は不要です。
+ACP 経路はネイティブ resume 経路と意図的に異なります: ACP の
+`session/load` は UI イベントを replay するだけでモデルコンテキストを
+復元せず、その下の session storage はベンダ内部フォーマット (Grok は
+xAI 内部、Cursor は `~/.cursor/chats/` 下の SQLite) で session load 時
+に再生成されるため — ストレージ層には触れない方針です。代わりに最初
+の turn で過去の transcript をインラインで埋め込み、そのコンテキスト
+は同じセッションの後続 turn でも保持されるため、再注入は不要です。
 
 ## まだマトリクスに無いもの
 
-- **plan mode のランタイム切り替え** (Claude Code `--permission-mode plan`、
-  Grok Build `--permission-mode plan`): CLI フラグは spawn 時に反映
-  されますが、インプレース切り替えには `permissionMode` patch サポート
-  が必要で、Grok Build はまだ持っていません。
-- **Grok Build の MCP 配線**: ACP `session/new` は `mcpServers` 配列
-  を受け付けますが、現在 SNA は `[]` を渡しています。SNA の MCP 設定
-  を経路で渡すのは後続タスクです。
-- **プロンプトへの画像入力**: 4 つのプロバイダはすべて何らかの形で
+- **plan mode のランタイム切り替え** (Claude Code
+  `--permission-mode plan`、Grok Build `--permission-mode plan`、
+  Cursor `--mode plan`): CLI フラグは spawn 時に反映されますが、
+  インプレース切り替えには `permissionMode` patch サポートが必要で、
+  ACP-スピーキングプロバイダはまだ持っていません。
+- **Cursor の MCP 配線**: Cursor の ACP は起動時にユーザの
+  `~/.cursor/mcp.json` を読みます。Per-session stdio MCP 注入 (Grok が
+  `.grok/config.toml` + stdio→HTTP bridge で扱う方式) は後続タスク。
+- **Cursor の `systemPrompt` / `appendSystemPrompt`**: Cursor には
+  エージェントのシステムプロンプトを CLI で override する手段が
+  ありません。`AGENTS.md` (プロジェクト単位、侵襲的) や最初の turn
+  への fold は可能ですが、まだ配線していません。
+- **プロンプトへの画像入力**: 5 つのプロバイダはすべて何らかの形で
   画像 block を受け付けますが、プロバイダごとの添付エンコーディング
   はまだ揃っていません — 現状は
   [セッション › 添付](/ja/docs/introduction/sessions) を参照。

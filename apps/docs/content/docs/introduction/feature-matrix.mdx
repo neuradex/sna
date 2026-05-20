@@ -1,6 +1,6 @@
 ---
 title: Feature × provider matrix
-description: Which SNA features work with Claude Code, Codex, OpenCode, and Grok Build — with the caveats spelled out per row.
+description: Which SNA features work with Claude Code, Codex, OpenCode, Grok Build, and Cursor — with the caveats spelled out per row.
 icon: TableProperties
 ---
 
@@ -14,35 +14,37 @@ provider either ignores it, falls back to respawn, or has no equivalent
 native surface.
 
 > Last verified against: Claude Code 1.x, Codex 0.x (`app-server`),
-> OpenCode 0.x (`serve`), Grok Build CLI 0.1.x.
+> OpenCode 0.x (`serve`), Grok Build CLI 0.1.x, Cursor CLI 2026.05.
 
 ## Runtime characteristics
 
-| Capability | Claude Code | Codex | OpenCode | Grok Build |
-|---|---|---|---|---|
-| Wire protocol | `claude -p` stream-json / `--resume` JSONL | `codex app-server` JSON-RPC stdio | `opencode serve` HTTP + SDK | `grok agent stdio` ACP JSON-RPC stdio |
-| `supportsRuntimePooling` | ✗ | ✓ | ✓ | ✗ |
-| `supportsCwdPerThread` | n/a | ✓ | ✗ | n/a |
-| Public-standard protocol | ✗ vendor | ✗ vendor | ✗ vendor | ✓ [ACP](https://agentclientprotocol.com) |
-| Cold-start cost | ≈1s spawn per call | ≈2s daemon spawn, reused | ≈3s daemon spawn, reused | ≈2s spawn per session |
+| Capability | Claude Code | Codex | OpenCode | Grok Build | Cursor |
+|---|---|---|---|---|---|
+| Wire protocol | `claude -p` stream-json / `--resume` JSONL | `codex app-server` JSON-RPC stdio | `opencode serve` HTTP + SDK | `grok agent stdio` ACP JSON-RPC stdio | `agent acp` ACP JSON-RPC stdio |
+| `supportsRuntimePooling` | ✗ | ✓ | ✓ | ✗ | ✗ |
+| `supportsCwdPerThread` | n/a | ✓ | ✗ | n/a | n/a |
+| Public-standard protocol | ✗ vendor | ✗ vendor | ✗ vendor | ✓ [ACP](https://agentclientprotocol.com) | ✓ [ACP](https://agentclientprotocol.com) |
+| Cold-start cost | ≈1s spawn per call | ≈2s daemon spawn, reused | ≈3s daemon spawn, reused | ≈2s spawn per session | ≈2s spawn per session |
 
-Claude Code and Grok Build are stateless per call/session — a fresh
-child process per spawn. Codex and OpenCode share daemons through
+Claude Code, Grok Build, and Cursor are stateless per call/session — a
+fresh child process per spawn. Codex and OpenCode share daemons through
 `RuntimePool`. Only Codex's daemon is `cwd`-agnostic, which is why it's
 the only provider that can host sessions for different working
-directories on a single pooled daemon.
+directories on a single pooled daemon. The two ACP-speaking providers
+(Grok Build and Cursor) share `core/providers/acp/base.ts` — see
+[Providers](/docs/introduction/providers) for the split.
 
 ## Session lifecycle
 
-| Capability | Claude Code | Codex | OpenCode | Grok Build |
-|---|---|---|---|---|
-| `spawn(opts)` → AgentProcess | ✓ | ✓ | ✓ | ✓ |
-| Streaming `AgentEvent` during session | ✓ | ✓ | ✓ | ✓ |
-| `interrupt()` mid-turn | ✓ | ✓ | ✓ | ✓ (ACP `session/cancel`) |
-| `kill()` / `closeThread()` | ✓ | ✓ (pool refcount aware) | ✓ (pool refcount aware) | ✓ |
-| `complete(opts)` one-shot | ✓ | ✓ | ✓ | ✓ (`grok -p`) |
-| `complete()` `onDelta` streaming | ✓ stream-json | ✓ `item/agentMessage/delta` | ✗ SDK call is single-shot today | ✓ streaming-json text events |
-| `listModels()` | ✓ static + oMLX API | ✓ static catalog | ✓ probes `opencode` CLI | ✓ static (single entry: `grok-build`) |
+| Capability | Claude Code | Codex | OpenCode | Grok Build | Cursor |
+|---|---|---|---|---|---|
+| `spawn(opts)` → AgentProcess | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Streaming `AgentEvent` during session | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `interrupt()` mid-turn | ✓ | ✓ | ✓ | ✓ (ACP `session/cancel`) | ✓ (ACP `session/cancel`) |
+| `kill()` / `closeThread()` | ✓ | ✓ (pool refcount aware) | ✓ (pool refcount aware) | ✓ | ✓ |
+| `complete(opts)` one-shot | ✓ | ✓ | ✓ | ✓ (`grok -p`) | ✓ (`agent -p`) |
+| `complete()` `onDelta` streaming | ✓ stream-json | ✓ `item/agentMessage/delta` | ✗ SDK call is single-shot today | ✓ streaming-json text events | ✓ stream-json `assistant` chunks (no `model_call_id`) |
+| `listModels()` | ✓ static + oMLX API | ✓ static catalog | ✓ probes `opencode` CLI | ✓ static (single entry: `grok-build`) | ✓ parses `agent models` (plain text) + static fallback |
 
 OpenCode is the odd one out on streaming: its current SDK helper is
 single-shot, so passing `onDelta` to `complete()` succeeds but never
@@ -54,61 +56,66 @@ Each provider declares which `SessionPatch` fields can be applied in
 place without a respawn. Fields returned as "leftover" require the
 session manager to kill and re-spawn with history replay.
 
-| Field | Claude Code | Codex | OpenCode | Grok Build |
-|---|---|---|---|---|
-| `model` | ✓ control_request `set_model` | ✓ next-turn override | ✓ per-session override | ✗ leftover (respawn) |
-| `permissionMode` | ✓ control_request | ✓ next-turn sandbox policy | ✓ per-session override | ✗ leftover (respawn) |
-| `cwd` | ✗ leftover | ✓ next-turn override (the only provider that can) | ✗ leftover | ✗ leftover |
+| Field | Claude Code | Codex | OpenCode | Grok Build | Cursor |
+|---|---|---|---|---|---|
+| `model` | ✓ control_request `set_model` | ✓ next-turn override | ✓ per-session override | ✗ leftover (respawn) | ✗ leftover (respawn) |
+| `permissionMode` | ✓ control_request | ✓ next-turn sandbox policy | ✓ per-session override | ✗ leftover (respawn) | ✗ leftover (respawn) |
+| `cwd` | ✗ leftover | ✓ next-turn override (the only provider that can) | ✗ leftover | ✗ leftover | ✗ leftover |
 
-Grok Build returns every field as leftover because ACP does not expose
-runtime mutation methods, and there is currently only one model in the
-catalog so `setModel` would have nothing to switch to anyway. If a
-second model appears, respawn-with-history-replay still works.
+Both ACP-speaking providers return every field as leftover because ACP
+does not expose runtime mutation methods. Respawn-with-history-replay
+keeps working as expected for the session manager.
 
 ## Permission flow
 
-| Capability | Claude Code | Codex | OpenCode | Grok Build |
-|---|---|---|---|---|
-| `permission_needed` AgentEvent emit | ✓ via hook bridge | ✓ via JSON-RPC server-request | ✓ via HTTP webhook | ✓ via ACP `session/request_permission` |
-| `respondToPermission(id, approved)` | ✗ external hook script handles approval | ✓ JSON-RPC response | ✓ POST `/permissions/:id` | ✓ ACP `{outcome:{outcome:"selected",optionId}}` |
-| Bidirectional (provider waits on us) | ✗ hook script makes the decision | ✓ | ✓ | ✓ |
+| Capability | Claude Code | Codex | OpenCode | Grok Build | Cursor |
+|---|---|---|---|---|---|
+| `permission_needed` AgentEvent emit | ✓ via hook bridge | ✓ via JSON-RPC server-request | ✓ via HTTP webhook | ✓ via ACP `session/request_permission` | ✓ via ACP `session/request_permission` |
+| `respondToPermission(id, approved)` | ✗ external hook script handles approval | ✓ JSON-RPC response | ✓ POST `/permissions/:id` | ✓ ACP `{outcome:{outcome:"selected",optionId}}` | ✓ ACP `{outcome:{outcome:"selected",optionId}}` |
+| Bidirectional (provider waits on us) | ✗ hook script makes the decision | ✓ | ✓ | ✓ | ✓ |
+| `bypassPermissions` auto-approve | ✓ hook script always allows | ✓ next-turn override | ✓ per-session override | ✓ shared ACP base auto-replies `allow_*` | ✓ shared ACP base auto-replies `allow_*` |
 
 Claude Code's permission model is out-of-band — SNA writes a hook
 script the CLI calls, the script decides on its own (based on
 `permissionMode` and allow/deny rules), and the CLI never waits on
-the SNA process. The other three are bidirectional: the agent's turn
-suspends until SNA sends a permission response. `respondToPermission`
-is a no-op for Claude Code by design.
+the SNA process. The other four providers are bidirectional: the
+agent's turn suspends until SNA sends a permission response.
+`respondToPermission` is a no-op for Claude Code by design.
 
 ## Configuration knobs (SpawnOptions)
 
-| Field | Claude Code | Codex | OpenCode | Grok Build |
-|---|---|---|---|---|
-| `systemPrompt` | ✓ `--system-prompt` | ✓ `baseInstructions` on `thread/start` | ✓ joined with `appendSystemPrompt` | ✓ `--system-prompt-override` |
-| `appendSystemPrompt` | ✓ `--append-system-prompt` | ✓ `developerInstructions` on `thread/start` | ✓ joined with `systemPrompt` | ✓ `--rules` |
-| `allowedTools` | ✓ native `--allowedTools` | ✓ via PreToolUse hook (deny-others) | ⚠ best-effort (toggles known tools) | ✓ `--tools` allow-list |
-| `disallowedTools` | ✓ native `--disallowedTools` | ✓ via PreToolUse hook | ✓ disables listed tools | ✓ `--disallowed-tools` |
-| `mcpServers` | ✓ `--mcp-config` JSON | ✓ written to `config.toml` `[mcp_servers.*]` | ✓ via SDK | ⚠ accepted by `session/new` but not yet wired from SNA |
-| `reasoningLevel` (0..5) | ✓ `toClaudeEffort` → `--effort` | ✓ `toCodexEffort` → `model_reasoning_effort` | ✗ ignored | ✓ `toGrokEffort` → `--reasoning-effort` |
-| `configDir` | ✓ `CLAUDE_CONFIG_DIR` | ✓ `CODEX_HOME` | ✗ no equivalent | ✗ no equivalent (Grok Build uses `~/.grok`) |
-| `resumeSessionId` | ✓ via JSONL replay file | ✓ `thread/resume` API | ✓ session id | ⚠ resume from a Grok Build session id works, but cross-provider history goes via the `resource` block path below |
+| Field | Claude Code | Codex | OpenCode | Grok Build | Cursor |
+|---|---|---|---|---|---|
+| `systemPrompt` | ✓ `--system-prompt` | ✓ `baseInstructions` on `thread/start` | ✓ joined with `appendSystemPrompt` | ✓ `--system-prompt-override` | ⚠ no CLI flag; use the user's `AGENTS.md` or fold into the first prompt (not yet wired by SNA) |
+| `appendSystemPrompt` | ✓ `--append-system-prompt` | ✓ `developerInstructions` on `thread/start` | ✓ joined with `systemPrompt` | ✓ `--rules` | ⚠ same as `systemPrompt` |
+| `allowedTools` | ✓ native `--allowedTools` | ✓ via PreToolUse hook (deny-others) | ⚠ best-effort (toggles known tools) | ✓ `--tools` allow-list | ⚠ via `~/.cursor/cli-config.json` `permissions.allow` (user-global, not yet managed by SNA) |
+| `disallowedTools` | ✓ native `--disallowedTools` | ✓ via PreToolUse hook | ✓ disables listed tools | ✓ `--disallowed-tools` | ⚠ same as `allowedTools` (or `--mode plan` to make the whole session read-only) |
+| `mcpServers` | ✓ `--mcp-config` JSON | ✓ written to `config.toml` `[mcp_servers.*]` | ✓ via SDK | ✓ stdio→HTTP bridge + `<cwd>/.grok/config.toml` | ⚠ relies on the user's `~/.cursor/mcp.json`; per-session injection of stdio MCP is a follow-up |
+| `reasoningLevel` (0..5) | ✓ `toClaudeEffort` → `--effort` | ✓ `toCodexEffort` → `model_reasoning_effort` | ✗ ignored | ✓ `toGrokEffort` → `--effort` | ✓ `applyCursorReasoning` → model-id suffix (`gpt-5.3-codex` → `gpt-5.3-codex-high`) |
+| `configDir` | ✓ `CLAUDE_CONFIG_DIR` | ✓ `CODEX_HOME` | ✗ no equivalent | ✗ no equivalent (Grok Build uses `~/.grok`) | ✗ no equivalent (Cursor uses `~/.cursor`; `CURSOR_CONFIG_DIR` only reroutes `cli-config.json`, not hooks) |
+| `resumeSessionId` | ✓ via JSONL replay file | ✓ `thread/resume` API | ✓ session id | ⚠ Grok Build chat id works, but cross-provider history goes via the `resource` block path below | ⚠ Cursor `chatId` works (`--resume <id>` / `session/load`), but cross-provider history goes via the same `resource` block path |
 
 ### `providerOptions` (per-provider escape hatches)
 
-| Key | Claude Code | Codex | OpenCode | Grok Build |
-|---|---|---|---|---|
-| `settings` | ✓ merged into `--settings` JSON | ✓ same hook shape | — | — |
-| `settingSources` | ✓ `--setting-sources` | — | — | — |
-| `strictMcpConfig` | ✓ `--strict-mcp-config` | — | — | — |
-| `maxTurns` | ✓ `--max-turns` | — | — | — |
-| `omlxBaseUrl` | ✓ routes `ANTHROPIC_BASE_URL` | — | — | — |
-| `serviceTier` | ✗ would mis-bill (`/fast` is a model, not a tier) | ✓ `priority` / `flex` / `batch` | — | — |
-| `profile` | — | ✓ `config.toml` profile | — | — |
-| `config` (`-c key=value`) | — | ✓ `codex exec` overrides | — | — |
-| `serverUrl` | — | — | ✓ skip spawn, attach to existing daemon | — |
-| `modelProviderId` | — | — | ✓ provider half of `{providerID, modelID}` | — |
-| `agent` | — | — | ✓ build / plan / etc. | — |
-| `logLevel` | — | — | ✓ `opencode serve --log-level` | — |
+| Key | Claude Code | Codex | OpenCode | Grok Build | Cursor |
+|---|---|---|---|---|---|
+| `settings` | ✓ merged into `--settings` JSON | ✓ same hook shape | — | — | — |
+| `settingSources` | ✓ `--setting-sources` | — | — | — | — |
+| `strictMcpConfig` | ✓ `--strict-mcp-config` | — | — | — | — |
+| `maxTurns` | ✓ `--max-turns` | — | — | — | — |
+| `omlxBaseUrl` | ✓ routes `ANTHROPIC_BASE_URL` | — | — | — | — |
+| `serviceTier` | ✗ would mis-bill (`/fast` is a model, not a tier) | ✓ `priority` / `flex` / `batch` | — | — | — |
+| `profile` | — | ✓ `config.toml` profile | — | — | — |
+| `config` (`-c key=value`) | — | ✓ `codex exec` overrides | — | — | — |
+| `serverUrl` | — | — | ✓ skip spawn, attach to existing daemon | — | — |
+| `modelProviderId` | — | — | ✓ provider half of `{providerID, modelID}` | — | — |
+| `agent` | — | — | ✓ build / plan / etc. | — | — |
+| `logLevel` | — | — | ✓ `opencode serve --log-level` | — | — |
+
+Cursor has no SNA-specific `providerOptions` keys today — every knob the
+CLI accepts (model, reasoning, mode) maps to a typed `SpawnOptions`
+field. New escape hatches will surface here if a future Cursor flag
+needs them.
 
 ## Cross-provider history replay
 
@@ -121,12 +128,13 @@ translated into the native shape at the adapter layer.
 | Claude Code | Write Anthropic-format JSONL, pass path to `--resume <filepath>` | `history/claude-code.ts` |
 | Codex | `thread/resume(history=ResponseItems)` JSON-RPC | `history/codex.ts` |
 | OpenCode | Experimental `thread/resume(history=...)` via SDK | `history/opencode.ts` |
-| Grok Build | Serialise transcript into a single ACP `resource` content block on the first `session/prompt` | inline in `core/providers/grok.ts` (option B from the design probe) |
+| Grok Build / Cursor | Serialise transcript into a single ACP `resource` content block on the first `session/prompt` | shared in `core/providers/acp/base.ts` (`serializeHistoryForAcp` + `buildHistoryPromptBlock`) |
 
-The Grok Build path is intentionally different: probing showed that
-ACP's `session/load` only replays UI events without restoring model
-context, and the underlying `chat_history.jsonl` storage is xAI-internal
-and gets regenerated on session load — so we avoid touching the storage
+The ACP path is intentionally different from the native-resume paths:
+probing showed that ACP's `session/load` only replays UI events without
+restoring model context, and the underlying session storage is
+vendor-internal (xAI for Grok, SQLite under `~/.cursor/chats/` for
+Cursor) and gets regenerated on load — so we avoid touching the storage
 layer entirely. Instead we embed the prior transcript inline on turn 1;
 the context persists across subsequent turns within the same session,
 so re-injection is not required.
@@ -134,13 +142,18 @@ so re-injection is not required.
 ## What's not in the matrix yet
 
 - **Plan mode toggling at runtime** (Claude Code `--permission-mode plan`,
-  Grok Build `--permission-mode plan`): the CLI flag is honored at spawn
-  but in-place toggling needs `permissionMode` patch support, which
-  Grok Build does not yet have.
-- **MCP wiring through Grok Build**: ACP `session/new` accepts an
-  `mcpServers` array but SNA passes `[]` today. Threading SNA's MCP
-  config through is a follow-up.
-- **Image input in prompts**: all four providers accept image blocks
+  Grok Build `--permission-mode plan`, Cursor `--mode plan`): the CLI
+  flag is honored at spawn but in-place toggling needs `permissionMode`
+  patch support, which the ACP-speaking providers do not yet have.
+- **MCP wiring through Cursor**: Cursor's ACP reads from the user's
+  `~/.cursor/mcp.json` at startup. Per-session injection of stdio MCP
+  (the way Grok handles it via `.grok/config.toml` + the stdio→HTTP
+  bridge) is a follow-up.
+- **`systemPrompt` / `appendSystemPrompt` for Cursor**: Cursor has no
+  CLI override for the agent system prompt. Routes via `AGENTS.md`
+  (project-scoped, intrusive) or first-turn folding are possible but
+  not yet wired.
+- **Image input in prompts**: all five providers accept image blocks
   in some form, but the per-provider attachment encoding is still
   inconsistent — see [Sessions › Attachments](/docs/introduction/sessions)
   for the current state.
