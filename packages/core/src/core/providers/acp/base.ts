@@ -251,6 +251,21 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
   protected assistantTurnBuffer = "";
   /** Captured permission mode — see design decision (3). */
   protected readonly permissionMode: string | undefined;
+  /**
+   * Optional allow-list of tool names. When set, any tool whose unwrapped
+   * `toolName` (see {@link unwrapToolCall}) is NOT in this list gets
+   * auto-rejected at the `session/request_permission` boundary — the
+   * `permission_needed` event is never emitted, no UI prompt is shown.
+   *
+   * Takes precedence over `disallowedTools` (matching the contract
+   * documented on `SpawnOptions.allowedTools`).
+   */
+  protected readonly allowedTools: ReadonlySet<string> | null;
+  /**
+   * Optional deny-list of tool names. When set without `allowedTools`,
+   * any matching tool is auto-rejected at the permission boundary.
+   */
+  protected readonly disallowedTools: ReadonlySet<string> | null;
   /** Set true after initialize + (optional authenticate) + session/new succeed. */
   protected ready: Promise<void>;
 
@@ -412,6 +427,50 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
     };
   }
 
+  /**
+   * Resolve the tool name a filter rule should match against, for a
+   * given incoming `session/request_permission` toolCall. Defaults to
+   * the unwrapped name (`unwrapToolCall(...).toolName`), so the string
+   * the user sees on a `tool_use` AgentEvent is the same one they put
+   * in `allowedTools` / `disallowedTools`.
+   */
+  protected toolNameForFilter(toolCall: AcpPermissionRequest["toolCall"]): string {
+    // Synthesize an AcpSessionUpdate from the permission payload so the
+    // shared unwrap path applies (subclasses already know how to strip
+    // their vendor dispatch wrappers).
+    const synthetic: AcpSessionUpdate = {
+      sessionUpdate: "tool_call",
+      toolCallId: toolCall.toolCallId,
+      kind: toolCall.kind,
+      title: toolCall.title,
+      rawInput: toolCall.rawInput,
+    };
+    return this.unwrapToolCall(synthetic).toolName;
+  }
+
+  /**
+   * Apply the configured `allowedTools` / `disallowedTools` rules to a
+   * permission request. Returns `"deny"` to short-circuit with an
+   * auto-reject, or `null` to fall through to bypass/UI handling.
+   *
+   * Semantics match {@link SpawnOptions.allowedTools}:
+   *   - `allowedTools` set: only listed names pass; everything else
+   *     auto-rejected. `allowedTools` takes precedence over
+   *     `disallowedTools` per the type docstring.
+   *   - `disallowedTools` set (without allowedTools): listed names
+   *     auto-rejected; everything else falls through.
+   *   - Neither set: no filtering.
+   */
+  protected applyToolFilter(toolCall: AcpPermissionRequest["toolCall"]): "deny" | null {
+    if (!this.allowedTools && !this.disallowedTools) return null;
+    const name = this.toolNameForFilter(toolCall);
+    if (this.allowedTools) {
+      return this.allowedTools.has(name) ? null : "deny";
+    }
+    if (this.disallowedTools && this.disallowedTools.has(name)) return "deny";
+    return null;
+  }
+
   // ──── Constructor + initialize ────
 
   constructor(options: SpawnOptions) {
@@ -425,6 +484,14 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
       options.systemPrompt,
       options.appendSystemPrompt,
     );
+    this.allowedTools =
+      options.allowedTools && options.allowedTools.length > 0
+        ? new Set(options.allowedTools)
+        : null;
+    this.disallowedTools =
+      options.disallowedTools && options.disallowedTools.length > 0
+        ? new Set(options.disallowedTools)
+        : null;
 
     this.ready = this.initialize(options);
     this.ready.catch((err) => {
@@ -604,6 +671,29 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
     if (req.method === "session/request_permission") {
       const params = req.params as AcpPermissionRequest;
       const requestId = params.toolCall.toolCallId;
+
+      // Tool-filter shortcut: enforce allowedTools / disallowedTools at the
+      // permission boundary before bypassPermissions, so even bypass-mode
+      // sessions still respect the deny-list. The tool name we compare
+      // against is whatever `unwrapToolCall` resolves to — same canonical
+      // string consumers see on the `tool_use` AgentEvent's
+      // `data.toolName`, so the contract is symmetric.
+      const filterDecision = this.applyToolFilter(params.toolCall);
+      if (filterDecision === "deny") {
+        const rejectOpt =
+          params.options.find((o) => o.kind === "reject_always") ??
+          params.options.find((o) => o.kind === "reject_once") ??
+          params.options[params.options.length - 1];
+        if (rejectOpt) {
+          this.write({
+            jsonrpc: "2.0",
+            id: req.id,
+            result: { outcome: { outcome: "selected", optionId: rejectOpt.optionId } },
+          });
+          logger.log("agent", `${this.name}: auto-denied tool "${this.toolNameForFilter(params.toolCall)}" via SpawnOptions tool filter`);
+          return;
+        }
+      }
 
       // Bypass-mode shortcut: pick whichever option carries an "allow"
       // intent (or fall back to the first option) and reply immediately,
