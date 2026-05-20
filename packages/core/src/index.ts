@@ -24,7 +24,13 @@ export type { Session, SessionInfo, SessionManagerOptions, SessionState } from "
 // Consumers building their own latency-tuning layers can introspect or
 // reuse the same translation tables that codex.ts / claude-code.ts use.
 export type { ReasoningLevel } from "./core/providers/reasoning-level.js";
-export { toClaudeEffort, toCodexEffort, toGrokEffort } from "./core/providers/reasoning-level.js";
+export {
+  toClaudeEffort,
+  toCodexEffort,
+  toGrokEffort,
+  toCursorEffortSuffix,
+  applyCursorReasoning,
+} from "./core/providers/reasoning-level.js";
 
 // Runtime pool — exposed so consumer apps can pre-warm daemons (warmup
 // `prepare()` once at startup so subsequent completion()/spawn() calls hit

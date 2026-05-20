@@ -19,6 +19,7 @@ export { ClaudeCodeProvider } from "./claude-code.js";
 export { CodexProvider } from "./codex.js";
 export { OpenCodeProvider } from "./opencode.js";
 export { GrokProvider } from "./grok.js";
+export { CursorProvider } from "./cursor.js";
 export { spawnWithPool } from "./spawn-helper.js";
 
 import type { AgentProvider } from "./types.js";
@@ -26,6 +27,7 @@ import { ClaudeCodeProvider } from "./claude-code.js";
 import { CodexProvider } from "./codex.js";
 import { OpenCodeProvider } from "./opencode.js";
 import { GrokProvider } from "./grok.js";
+import { CursorProvider } from "./cursor.js";
 
 const providers: Record<string, AgentProvider> = {
   "claude-code": new ClaudeCodeProvider(),
@@ -33,6 +35,7 @@ const providers: Record<string, AgentProvider> = {
   "opencode": new OpenCodeProvider(),
   "omlx": new ClaudeCodeProvider(),
   "grok": new GrokProvider(),
+  "cursor": new CursorProvider(),
 };
 
 /**

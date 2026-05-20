@@ -6,7 +6,8 @@ icon: Boxes
 
 Each runtime is implemented as a class behind a common
 `AgentProvider` interface. Adapters live in
-`core/providers/{claude-code,codex,opencode,grok}.ts`.
+`core/providers/{claude-code,codex,opencode,grok,cursor}.ts`.
+ACP-speaking providers (Grok Build, Cursor) share `core/providers/acp/base.ts`.
 
 ## AgentProvider
 
@@ -43,24 +44,39 @@ apply in-place vs which require a respawn-with-history-replay.
 | **codex** | `codex app-server` daemon, JSON-RPC over stdio | persistent daemon, multi-thread | yes |
 | **opencode** | `opencode serve` daemon plus SDK HTTP | persistent daemon, single-cwd | yes |
 | **grok** | `grok agent stdio` (Agent Client Protocol over stdio — Grok Build CLI) | stateless per session | no |
+| **cursor** | `agent acp` (Agent Client Protocol over stdio — Cursor CLI) | stateless per session | no |
 
 The Codex and OpenCode providers share daemons through `RuntimePool`.
 When a session opens, the pool is queried by `(provider, cwd, config)`
 and an existing daemon is reused if compatible, sparing the cold-start
 cost (≈2s for Codex, ≈3s for OpenCode).
 
-Grok Build is the first SNA provider whose wire protocol is a public
-standard ([ACP](https://agentclientprotocol.com)), so the adapter is
-mostly a thin translator between ACP `session/update` notifications and
-SNA's normalized `AgentEvent` stream. The bulk of `core/providers/grok.ts`
-is ACP-standard; the Grok Build-specific pieces (CLI discovery,
-`--effort` flag mapping, `_x.ai/*` extension filtering) are kept
-separable so a second ACP-speaking agent could share the same foundation
-with modest effort. Resume across providers is handled by serialising the
-canonical history into a single ACP `resource` content block on the first
-`session/prompt` of a Grok Build session — see
+Grok Build was the first SNA provider whose wire protocol is a public
+standard ([ACP](https://agentclientprotocol.com)). With Cursor added as
+the second ACP-speaking provider, the shared logic now lives in
+`core/providers/acp/base.ts` — a JSON-RPC pump, the
+`initialize`/`session/new` handshake, the `session/update` →
+`AgentEvent` translation, bidirectional `session/request_permission`
+(with `bypassPermissions` auto-approve), and the cross-provider
+`resource`-block history injection. Each subclass keeps only what
+genuinely differs: CLI path resolution, spawn args, optional auth step
+(Cursor's `authenticate({methodId:"cursor_login"})`), vendor extension
+notification prefixes (`_x.ai/*` for Grok, `cursor/*` for Cursor), and
+provider-specific tool-call unwraps. Cross-provider resume serialises
+SNA's canonical history into a single ACP `resource` block on the first
+`session/prompt` — see
 [Cross-provider history replay](/docs/introduction/feature-matrix#cross-provider-history-replay)
 on the feature matrix page.
+
+Cursor uses the user's existing `agent login` (macOS Keychain entries
+`cursor-access-token` / `cursor-refresh-token`) — and therefore the
+Cursor subscription. No `CURSOR_API_KEY` is required; SNA passes the
+spawn's environment through unchanged, and the child process picks up
+the same credentials the user would use interactively. Reasoning level
+is encoded into the model id itself (`gpt-5.3-codex` → `gpt-5.3-codex-high`
+for level 4); `applyCursorReasoning` in `reasoning-level.ts` does that
+rewrite, and models outside the effort family (`composer-*`, `auto`, etc.)
+are left unchanged.
 
 ## RuntimePool
 
@@ -82,7 +98,8 @@ Two latency knobs flow through every provider:
 
 - **`reasoningLevel: 0..5`**: provider-agnostic, lightest to heaviest.
   Translates to Claude Code's `--effort`, Codex's `model_reasoning_effort`,
-  and Grok Build's `--reasoning-effort` via
+  Grok Build's `--effort`, and Cursor's model-id suffix (e.g.
+  `gpt-5.3-codex-high`) via
   [reasoning-level.ts](https://github.com/neuradex/sna/blob/main/packages/core/src/core/providers/reasoning-level.ts).
   OpenCode currently ignores this field.
 - **`providerOptions.serviceTier`**: Codex-only. Mirrors Codex's
