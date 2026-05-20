@@ -4,7 +4,7 @@ description: WS と SSE 上を流れる 15 種類の AgentEvent プロトコル�
 icon: Activity
 ---
 
-すべてのプロバイダが正規化された `AgentEvent` ストリームを emit します。
+すべてのランタイムが正規化された `AgentEvent` ストリームを emit します。
 アプリは WebSocket (push) または `GET /agent/events` (SSE) で
 購読し、どちらも同じワイヤ形を運びます。
 
@@ -22,10 +22,10 @@ icon: Activity
 | `tool_use_delta` | ストリーミングツール入力 (JSON) | partial 入力 |
 | `tool_result` | ツール応答 | result、isError、durationMs |
 | `permission_needed` | ツールが承認を要求 | ツール名、入力、decisionId |
-| `milestone` | プロバイダ定義のマーカー | label |
+| `milestone` | ランタイム定義のマーカー | label |
 | `user_message` | (正規化後の) ユーザー側エコー | content |
 | `interrupted` | ターン取り消し | reason |
-| `error` | プロバイダエラー | message |
+| `error` | ランタイムエラー | message |
 | `complete` | ターン終了 | usage、costUsd、durationMs |
 
 ## delta vs final

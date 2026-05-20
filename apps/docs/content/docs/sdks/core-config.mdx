@@ -31,8 +31,8 @@ Configuration is resolved in this order:
 | Field | Default | Description |
 | --- | --- | --- |
 | `port` | `3099` | HTTP server port used by the standalone server and browser discovery. |
-| `model` | `claude-sonnet-4-6` | Default model passed to provider adapters when a call does not specify one. |
-| `defaultProvider` | `claude-code` | Provider used by routes and helpers unless overridden. |
+| `model` | `claude-sonnet-4-6` | Default model passed to runtime adapters when a call does not specify one. |
+| `defaultProvider` | `claude-code` | Default runtime id used by routes and helpers unless overridden. |
 | `defaultPermissionMode` | `default` | Baseline permission policy for agent operations. |
 | `maxSessions` | `5` | Maximum number of concurrent server-side sessions. |
 | `maxEventBuffer` | `500` | In-memory event buffer size per session. |

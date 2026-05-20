@@ -1,13 +1,13 @@
 ---
-title: Providers
-description: AgentProvider interface, runtime pool, and per-provider quirks.
+title: Runtimes
+description: Runtime adapters, AgentProvider internals, and runtime-specific behavior.
 icon: Boxes
 ---
 
 Each runtime is implemented as a class behind a common
 `AgentProvider` interface. Adapters live in
 `core/providers/{claude-code,codex,opencode,grok,cursor}.ts`.
-ACP-speaking providers (Grok Build, Cursor) share `core/providers/acp/base.ts`.
+ACP-speaking runtimes (Grok Build, Cursor) share `core/providers/acp/base.ts`.
 
 ## AgentProvider
 
@@ -33,10 +33,10 @@ interface AgentProcess {
 ```
 
 `applyPatch()` is the per-field dispatch hook used by
-`PATCH /agent/session`. Each provider decides which fields it can
+`PATCH /agent/session`. Each runtime adapter decides which fields it can
 apply in-place vs which require a respawn-with-history-replay.
 
-## Per-provider strategy
+## Runtime strategy
 
 | Runtime | Transport | State | Pool? |
 |---------|-----------|-------|-------|
@@ -46,26 +46,26 @@ apply in-place vs which require a respawn-with-history-replay.
 | **grok** | `grok agent stdio` (Agent Client Protocol over stdio — Grok Build CLI) | stateless per session | no |
 | **cursor** | `agent acp` (Agent Client Protocol over stdio — Cursor CLI) | stateless per session | no |
 
-The Codex and OpenCode providers share daemons through `RuntimePool`.
+The Codex and OpenCode runtime adapters share daemons through `RuntimePool`.
 When a session opens, the pool is queried by `(provider, cwd, config)`
 and an existing daemon is reused if compatible, sparing the cold-start
 cost (≈2s for Codex, ≈3s for OpenCode).
 
-Grok Build was the first SNA provider whose wire protocol is a public
+Grok Build was the first SNA runtime whose wire protocol is a public
 standard ([ACP](https://agentclientprotocol.com)). With Cursor added as
-the second ACP-speaking provider, the shared logic now lives in
+the second ACP-speaking runtime, the shared logic now lives in
 `core/providers/acp/base.ts` — a JSON-RPC pump, the
 `initialize`/`session/new` handshake, the `session/update` →
 `AgentEvent` translation, bidirectional `session/request_permission`
-(with `bypassPermissions` auto-approve), and the cross-provider
+(with `bypassPermissions` auto-approve), and the cross-runtime
 `resource`-block history injection. Each subclass keeps only what
 genuinely differs: CLI path resolution, spawn args, optional auth step
 (Cursor's `authenticate({methodId:"cursor_login"})`), vendor extension
 notification prefixes (`_x.ai/*` for Grok, `cursor/*` for Cursor), and
-provider-specific tool-call unwraps. Cross-provider resume serialises
+runtime-specific tool-call unwraps. Cross-runtime resume serialises
 SNA's canonical history into a single ACP `resource` block on the first
 `session/prompt` — see
-[Cross-provider history replay](/docs/introduction/feature-matrix#cross-provider-history-replay)
+[Cross-runtime history replay](/docs/introduction/feature-matrix)
 on the feature matrix page.
 
 Cursor uses the user's existing `agent login` (macOS Keychain entries
@@ -89,14 +89,14 @@ are left unchanged.
 Claude Code does not pool. Its CLI is stateless, so per-call spawns
 are competitive with daemon-resume for typical session granularity.
 
-For why SNA keeps high-fidelity native providers instead of treating ACP
-as the only provider layer, see **[SNA and ACP](/docs/introduction/philosophy/acp)**.
+For why SNA keeps high-fidelity native runtime adapters instead of treating
+ACP as the only runtime layer, see **[SNA and ACP](/docs/introduction/philosophy/acp)**.
 
-## Cross-provider knobs
+## Cross-runtime knobs
 
-Two latency knobs flow through every provider:
+Two latency knobs flow through every runtime:
 
-- **`reasoningLevel: 0..5`**: provider-agnostic, lightest to heaviest.
+- **`reasoningLevel: 0..5`**: runtime-agnostic, lightest to heaviest.
   Translates to Claude Code's `--effort`, Codex's `model_reasoning_effort`,
   Grok Build's `--effort`, and Cursor's model-id suffix (e.g.
   `gpt-5.3-codex-high`) via
@@ -107,5 +107,5 @@ Two latency knobs flow through every provider:
   Intentionally not auto-mapped to Claude Code because Claude Code's
   `/fast` is a different MODEL variant with separate billing.
 
-For a per-feature compatibility view across all four runtimes, see
-**[Feature × provider matrix](/docs/introduction/feature-matrix)**.
+For a per-feature compatibility view across all runtimes, see
+**[Feature × runtime matrix](/docs/introduction/feature-matrix)**.

@@ -13,7 +13,7 @@ Claude Code と Codex はどちらもツール単位の権限ゲートをサポ�
 エージェントがツールを呼び出す
    │
    ▼
-プロバイダが権限要求を生成
+ランタイムが権限要求を生成
    │
    ▼
 SessionManager が `permission_needed` イベントを emit  ──► UI がプロンプトを表示
@@ -25,10 +25,10 @@ UI が POST /agent/permission-respond { approved: bool } を呼ぶ
 SessionManager が pending 要求を解決
    │
    ▼
-プロバイダが決定を受け取り、ツールを実行 (または拒否)
+ランタイムが決定を受け取り、ツールを実行 (または拒否)
 ```
 
-## プロバイダごとの配線
+## ランタイムごとの配線
 
 - **Claude Code** は `PreToolUse` フックを使います。CLI は各ツール呼び出しを
   評価するために別の Node プロセスを spawn します。SNA は
@@ -58,5 +58,5 @@ SessionManager が pending 要求を解決
 
 設定された allowlist にマッチするツール (Read、Glob、Grep、ListFiles
 など) は権限ゲートを完全にスキップします。イベントもラウンドトリップ
-も発生しません。allowlist はプロバイダごとに異なりますが正規化されて
+も発生しません。allowlist はランタイムごとに異なりますが正規化されて
 いるため、アプリ設定では 1 つのリストだけを管理すれば十分です。

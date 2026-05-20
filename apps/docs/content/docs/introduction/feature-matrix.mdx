@@ -1,5 +1,5 @@
 ---
-title: Feature × provider matrix
+title: Feature × runtime matrix
 description: Which SNA features work with Claude Code, Codex, OpenCode, Grok Build, and Cursor — with the caveats spelled out per row.
 icon: TableProperties
 ---
@@ -10,11 +10,11 @@ perfectly across the five. This page enumerates what actually works
 where, with the caveats spelled out per row.
 
 If a row says **✗**, the field is accepted at the SNA API but the
-provider either ignores it, falls back to respawn, or has no equivalent
+runtime either ignores it, falls back to respawn, or has no equivalent
 native surface.
 
 > Code audit: 2026-05-21, based on `packages/core/src/core/providers/*`,
-> `core/providers/acp/base.ts`, and the provider test suite. Runtime notes
+> `core/providers/acp/base.ts`, and the runtime adapter test suite. Runtime notes
 > still refer to Claude Code 1.x, Codex 0.x (`app-server`), OpenCode 0.x
 > (`serve`), Grok Build CLI 0.1.x, and Cursor CLI 2026.05.
 
@@ -31,10 +31,10 @@ native surface.
 Claude Code, Grok Build, and Cursor are stateless per call/session — a
 fresh child process per spawn. Codex and OpenCode share daemons through
 `RuntimePool`. Only Codex's daemon is `cwd`-agnostic, which is why it's
-the only provider that can host sessions for different working
-directories on a single pooled daemon. The two ACP-speaking providers
+the only runtime that can host sessions for different working
+directories on a single pooled daemon. The two ACP-speaking runtimes
 (Grok Build and Cursor) share `core/providers/acp/base.ts` — see
-[Providers](/docs/introduction/providers) for the split.
+[Runtimes](/docs/introduction/providers) for the split.
 
 ## Session lifecycle
 
@@ -54,7 +54,7 @@ fires the callback. The `complete()` return value is still correct.
 
 ## Event richness
 
-Every provider emits the same `AgentEvent` union, but the native stream
+Every runtime emits the same `AgentEvent` union, but the native stream
 does not expose the same granularity. This is the part that matters most
 for rich UIs: live tool-call cards, streaming JSON arguments, command
 output panes, token/cost meters, and durable replay after reload.
@@ -69,19 +69,19 @@ output panes, token/cost meters, and durable replay after reload.
 | Tool input delta | ✓ `tool_use_delta` from Anthropic `input_json_delta` | ✗ no native input delta | ✗ no native input delta | ⚠ ACP `tool_call_update` can refresh input, but not byte/token deltas | ⚠ ACP `tool_call_update` can refresh input, but not byte/token deltas |
 | Tool output streaming | ✗ final `tool_result` only | ✓ shell `outputDelta` as `tool_use` update; file patch delta is dropped | ✗ final part status only | ✗ final/update payload only | ✗ final/update payload only |
 | Tool result payload | ✓ `toolUseId`, `isError`, text/JSON content | ✓ rich per item: `exitCode`, `status`, `durationMs`, MCP error, `web_search`, `image_generation.savedPath`, `revisedPrompt`, unknown-tool `raw` | ✓ `title`, `isError`, output/error | ✓ ACP `rawOutput`, `locations`, `status`, `kind`, plus Grok tool-name unwrap | ✓ ACP `rawOutput`, `locations`, `status`, `kind`, plus Cursor tool-kind unwrap |
-| Session completion metadata | ✓ duration, API duration, cost, token usage, cache usage, model, context window | ✓ duration and token/cache usage; cost is not reported | ⚠ session stream only says provider; one-shot `complete()` returns usage/cost when OpenCode reports it | ✓ ACP `stopReason` only | ✓ ACP `stopReason` only |
+| Session completion metadata | ✓ duration, API duration, cost, token usage, cache usage, model, context window | ✓ duration and token/cache usage; cost is not reported | ⚠ session stream only carries the `provider` field; one-shot `complete()` returns usage/cost when OpenCode reports it | ✓ ACP `stopReason` only | ✓ ACP `stopReason` only |
 | Unknown/new tool visibility | ✓ native tool name still surfaces | ✓ fail-open generic `tool_use` / `tool_result` with `raw` payload | ✗ unhandled OpenCode event types are dropped | ✗ unknown ACP update types are dropped | ✗ unknown ACP update types are dropped |
 
 The most important asymmetry is `tool_use_delta`: only Claude Code
 currently exposes streaming partial JSON for tool inputs. Codex exposes
 richer item lifecycle metadata and live shell output, but not partial
-tool arguments. The ACP providers expose useful `tool_call_update`
+tool arguments. The ACP runtimes expose useful `tool_call_update`
 refreshes and final raw outputs, but SNA treats them as whole-event
 updates rather than fine-grained deltas.
 
 ## In-place mutation (`applyPatch`)
 
-Each provider declares which `SessionPatch` fields can be applied in
+Each runtime declares which `SessionPatch` fields can be applied in
 place without a respawn. Fields returned as "leftover" require the
 session manager to kill and re-spawn with history replay.
 
@@ -89,9 +89,9 @@ session manager to kill and re-spawn with history replay.
 |---|---|---|---|---|---|
 | `model` | ✓ control_request `set_model` | ✓ next-turn override | ✓ next-prompt override | ✗ leftover (respawn) | ✗ leftover (respawn) |
 | `permissionMode` | ✓ control_request | ✓ next-turn sandbox policy | ✓ next-prompt agent override | ✗ leftover (respawn) | ✗ leftover (respawn) |
-| `cwd` | ✗ leftover | ✓ next-turn override (the only provider that can) | ✗ leftover | ✗ leftover | ✗ leftover |
+| `cwd` | ✗ leftover | ✓ next-turn override (the only runtime that can) | ✗ leftover | ✗ leftover | ✗ leftover |
 
-Both ACP-speaking providers return every field as leftover because ACP
+Both ACP-speaking runtimes return every field as leftover because ACP
 does not expose runtime mutation methods. Respawn-with-history-replay
 keeps working as expected for the session manager.
 
@@ -101,13 +101,13 @@ keeps working as expected for the session manager.
 |---|---|---|---|---|---|
 | `permission_needed` AgentEvent emit | ✓ via hook bridge | ✓ via JSON-RPC server-request | ✓ via SSE `permission.updated` | ✓ via ACP `session/request_permission` | ✓ via ACP `session/request_permission` |
 | `respondToPermission(id, approved)` | ✗ external hook script handles approval | ✓ JSON-RPC response | ✓ POST `/permissions/:id` | ✓ ACP `{outcome:{outcome:"selected",optionId}}` | ✓ ACP `{outcome:{outcome:"selected",optionId}}` |
-| Bidirectional (provider waits on us) | ✗ hook script makes the decision | ✓ | ✓ | ✓ | ✓ |
+| Bidirectional (runtime waits on us) | ✗ hook script makes the decision | ✓ | ✓ | ✓ | ✓ |
 | `bypassPermissions` auto-approve | ✓ hook script always allows | ✓ auto-responds to server requests | ✓ auto-replies through the HTTP permission API | ✓ shared ACP base auto-replies `allow_*` | ✓ shared ACP base auto-replies `allow_*` |
 
 Claude Code's permission model is out-of-band — SNA writes a hook
 script the CLI calls, the script decides on its own (based on
 `permissionMode` and allow/deny rules), and the CLI never waits on
-the SNA process. The other four providers are bidirectional: the
+the SNA process. The other four runtimes are bidirectional: the
 agent's turn suspends until SNA sends a permission response.
 `respondToPermission` is a no-op for Claude Code by design.
 
@@ -125,7 +125,7 @@ agent's turn suspends until SNA sends a permission response.
 | `configDir` | ✓ `CLAUDE_CONFIG_DIR` | ✓ `CODEX_HOME` | ✗ no equivalent | ✗ no equivalent (Grok Build uses `~/.grok`) | ✗ no equivalent (Cursor uses `~/.cursor`; `CURSOR_CONFIG_DIR` only reroutes `cli-config.json`, not hooks) |
 | `resumeSessionId` | ✓ native `--resume <sessionId>` | ✓ `thread/resume` API | ✓ existing OpenCode session id | ✗ not wired in the adapter | ✗ not wired in the adapter |
 
-### `providerOptions` (per-provider escape hatches)
+### `providerOptions` (runtime-specific escape hatches)
 
 | Key | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
@@ -151,13 +151,13 @@ CLI accepts (model, reasoning, mode) maps to a typed `SpawnOptions`
 field. New escape hatches will surface here if a future Cursor flag
 needs them.
 
-## Cross-provider history replay
+## Cross-runtime history replay
 
-Every provider has its own mechanism for seeding a fresh session with a
+Every runtime has its own mechanism for seeding a fresh session with a
 prior conversation. SNA's canonical `CanonicalBlock[]` history is
 translated into the native shape at the adapter layer.
 
-| Provider | Mechanism | Adapter |
+| Runtime | Mechanism | Adapter |
 |---|---|---|
 | Claude Code | Write Anthropic-format JSONL, pass path to `--resume <filepath>` | `history/claude-code.ts` |
 | Codex | `thread/resume(history=ResponseItems)` JSON-RPC | `history/codex.ts` |
@@ -178,10 +178,10 @@ so re-injection is not required.
 - **Plan mode is not uniform**: Claude Code supports native plan mode,
   and OpenCode maps it to the `plan` agent. Codex treats `plan` like the
   default read-only sandbox, and the Grok Build / Cursor adapters do not
-  wire a plan-mode flag today. ACP providers still need respawn-with-history
+  wire a plan-mode flag today. ACP runtimes still need respawn-with-history
   for any runtime `permissionMode` change.
 - **Glob/pattern matching in `allowedTools` / `disallowedTools`** for
-  the ACP providers — today the auto-deny intercept matches tool names
+  the ACP runtimes — today the auto-deny intercept matches tool names
   by exact string equality. Glob patterns (e.g. `"shell.*"`) are a
   natural follow-up if real workloads need them.
 - **Image input minimum dimensions** — Grok Build rejects images smaller

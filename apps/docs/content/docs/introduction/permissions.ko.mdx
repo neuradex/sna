@@ -13,7 +13,7 @@ Claude Code와 Codex 모두 툴 단위 권한 게이팅을 지원하지만 프�
 에이전트가 툴 호출
    │
    ▼
-프로바이더가 권한 요청 생성
+런타임이 권한 요청 생성
    │
    ▼
 SessionManager가 `permission_needed` 이벤트 emit  ──► UI가 프롬프트 표시
@@ -25,10 +25,10 @@ UI가 POST /agent/permission-respond { approved: bool } 호출
 SessionManager가 pending 요청을 resolve
    │
    ▼
-프로바이더가 결정을 받아 툴 실행 (또는 거부)
+런타임이 결정을 받아 툴 실행 (또는 거부)
 ```
 
-## 프로바이더별 배선
+## 런타임별 배선
 
 - **Claude Code**는 `PreToolUse` 훅을 씁니다. CLI가 각 툴 호출을
   평가하기 위해 별도의 Node 프로세스를 spawn합니다. SNA는
@@ -58,5 +58,5 @@ SessionManager가 pending 요청을 resolve
 
 설정된 allowlist에 매치되는 툴(Read, Glob, Grep, ListFiles 등)은
 권한 게이트를 완전히 건너뜁니다. 이벤트도 없고 round-trip도 없습니다.
-allowlist는 프로바이더별이지만 정규화돼 있어 앱 설정은 하나의
+allowlist는 런타임별이지만 정규화돼 있어 앱 설정은 하나의
 리스트만 관리하면 됩니다.

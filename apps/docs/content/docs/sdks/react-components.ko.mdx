@@ -51,7 +51,7 @@ Runtime behavior:
 
 | 항목 | 설명 |
 | --- | --- |
-| Agent startup | Mount 시 provider `claude-code`로 `POST /agent/start?session=<provider session>`을 호출합니다. |
+| Agent startup | Mount 시 runtime id `claude-code`로 `POST /agent/start?session=<runtime session>`을 호출합니다. |
 | Loading state | Startup request가 resolve 또는 fail될 때까지 full-screen connecting overlay를 보여줍니다. |
 | Open state | `useChatStore.isOpen`을 사용합니다. Panel이 닫혀 있으면 floating button이 나타납니다. |
 | Keyboard shortcut | `Cmd/Ctrl + .`로 panel을 toggle합니다. |

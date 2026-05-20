@@ -50,7 +50,7 @@ Runtime behavior:
 
 | Concern | Detail |
 | --- | --- |
-| Agent startup | Calls `POST /agent/start?session=<provider session>` on mount with provider `claude-code`. |
+| Agent startup | Calls `POST /agent/start?session=<runtime session>` on mount with runtime id `claude-code`. |
 | Loading state | Shows a full-screen connecting overlay until the startup request resolves or fails. |
 | Open state | Uses `useChatStore.isOpen`; a floating button appears when the panel is closed. |
 | Keyboard shortcut | `Cmd/Ctrl + .` toggles the panel. |

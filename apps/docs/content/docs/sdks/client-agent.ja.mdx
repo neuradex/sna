@@ -25,32 +25,32 @@ await client.agent.start(session: string, config?: AgentStartConfig): Promise<{
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `session` | `string` | yes | Target SNA session ID. The server auto-creates it if it does not exist. |
-| `config.provider` | `string` | no | Runtime provider such as `claude-code`, `codex`, `opencode`, or `omlx`. |
-| `config.modelProvider` | `string` | no | Attribution metadata for the model vendor. Stored on assistant-authored canonical rows. |
-| `config.prompt` | `string` | no | Initial prompt sent immediately after startup. |
-| `config.model` | `string` | no | Provider model slug. |
+| `session` | `string` | yes | 対象の SNA session ID。存在しない場合は server が自動作成します。 |
+| `config.provider` | `string` | no | `claude-code`、`codex`、`opencode`、`omlx` などの runtime id。 |
+| `config.modelProvider` | `string` | no | モデルベンダのアトリビューション metadata。assistant が書いた canonical row に保存されます。 |
+| `config.prompt` | `string` | no | 起動直後に送る初期 prompt。 |
+| `config.model` | `string` | no | ランタイムの model slug。 |
 | `config.permissionMode` | `string` | no | Permission behavior, for example `acceptEdits` or `bypassPermissions`. |
-| `config.configDir` | `string` | no | Provider config directory override. Claude uses `CLAUDE_CONFIG_DIR`; Codex uses `CODEX_HOME`. |
-| `config.force` | `boolean` | no | Kill an existing runtime and start fresh. |
-| `config.cwd` | `string` | no | Working directory for this runtime. |
-| `config.history` | `unknown[]` | no | Provider-neutral history to resume from. |
-| `config.systemPrompt` | `string` | no | Replaces the base system prompt. |
-| `config.appendSystemPrompt` | `string` | no | Appends text to the system prompt. |
-| `config.allowedTools` | `string[]` | no | Restricts the agent to these tools. |
-| `config.disallowedTools` | `string[]` | no | Blocks specific tools. |
-| `config.mcpServers` | `Record<string, unknown>` | no | MCP servers made available to the agent. |
-| `config.reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Provider-neutral reasoning effort. |
-| `config.providerOptions` | `Record<string, unknown>` | no | Provider-specific options, such as Codex `serviceTier`. |
-| `config.extraArgs` | `string[]` | no | Deprecated raw CLI flags. Prefer typed fields. |
+| `config.configDir` | `string` | no | ランタイム config directory の override。Claude は `CLAUDE_CONFIG_DIR`、Codex は `CODEX_HOME` を使います。 |
+| `config.force` | `boolean` | no | 既存ランタイムを終了して新しく起動します。 |
+| `config.cwd` | `string` | no | このランタイムの作業ディレクトリ。 |
+| `config.history` | `unknown[]` | no | resume に使う runtime-neutral history。 |
+| `config.systemPrompt` | `string` | no | base system prompt を置き換えます。 |
+| `config.appendSystemPrompt` | `string` | no | system prompt にテキストを追記します。 |
+| `config.allowedTools` | `string[]` | no | agent が使える tool をこの一覧に制限します。 |
+| `config.disallowedTools` | `string[]` | no | 特定の tool をブロックします。 |
+| `config.mcpServers` | `Record<string, unknown>` | no | agent に公開する MCP server。 |
+| `config.reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Runtime-neutral reasoning effort. |
+| `config.providerOptions` | `Record<string, unknown>` | no | Runtime-specific options, such as Codex `serviceTier`. |
+| `config.extraArgs` | `string[]` | no | deprecated な raw CLI flag。typed field を優先してください。 |
 
 **Returns**
 
 | Field | Description |
 | --- | --- |
-| `status` | `started` when a process was spawned, `already_running` when the session already had a runtime. |
-| `provider` | Provider used for the runtime. |
-| `sessionId` | Provider runtime session ID. |
+| `status` | process を spawn した場合は `started`、session にすでにランタイムがある場合は `already_running`。 |
+| `provider` | 使用されたランタイム。 |
+| `sessionId` | ランタイム session ID。 |
 
 **Example**
 
@@ -67,7 +67,7 @@ const started = await client.agent.start("default", {
 **Notes**
 
 - With HTTP enabled, the promise resolves after the process has been spawned.
-- It does not guarantee the provider init handshake has reached an idle state. If the UI must wait for readiness, call `getStatus` until `agentStatus === "idle"`.
+- It does not guarantee the runtime init handshake has reached an idle state. If the UI must wait for readiness, call `getStatus` until `agentStatus === "idle"`.
 - Calling `send` immediately after `start` is safe in normal usage because stdin queues the message.
 
 ### `agent.send(session, message, opts?)`
@@ -86,14 +86,14 @@ await client.agent.send(
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `session` | `string` | yes | Running session ID. |
-| `message` | `string` | yes | User message to send to the agent. |
-| `opts.images` | `{ base64: string; mimeType: string }[]` | no | Image attachments for providers that support multimodal input. |
-| `opts.meta` | `Record<string, unknown>` | no | Extra metadata stored with the user message. |
+| `session` | `string` | yes | 実行中の session ID。 |
+| `message` | `string` | yes | agent に送る user message。 |
+| `opts.images` | `{ base64: string; mimeType: string }[]` | no | multimodal input をサポートするランタイムに渡す画像添付。 |
+| `opts.meta` | `Record<string, unknown>` | no | user message と一緒に保存する追加 metadata。 |
 
 **Returns**
 
-`{ status: "sent" }` after the message has been accepted. With HTTP enabled, the message has also been persisted before the promise resolves.
+message が受理されると `{ status: "sent" }` を返します。HTTP が有効な場合、promise が resolve する前に message も保存されます。
 
 **Example**
 
@@ -117,9 +117,9 @@ await client.agent.send("default", "What is in this screenshot?", {
 await client.agent.kill(session: string): Promise<{ status: "killed" | "no_session" }>
 ```
 
-**Input**: `session` is the session ID whose agent process should be terminated.
+**Input**: `session` は終了したい agent process の session ID です。
 
-**Returns**: `killed` if a runtime was stopped, `no_session` if the session does not exist.
+**Returns**: ランタイムを停止した場合は `killed`、session が存在しない場合は `no_session`。
 
 **Example**
 
@@ -127,7 +127,7 @@ await client.agent.kill(session: string): Promise<{ status: "killed" | "no_sessi
 await client.agent.kill("default");
 ```
 
-**Notes**: The session record remains. Only the running process is terminated.
+**Notes**: session record は残り、実行中の process だけが終了します。
 
 ### `agent.restart(session, config?)`
 
@@ -141,9 +141,9 @@ await client.agent.restart(session: string, config?: Partial<AgentStartConfig>):
 }>
 ```
 
-**Input**: same config shape as `start`, but every field is optional.
+**Input**: `start` と同じ config shape ですが、すべての field が optional です。
 
-**Returns**: provider and new runtime session ID after restart.
+**Returns**: restart 後の runtime id と新しい runtime session ID を返します。
 
 **Example**
 
@@ -151,7 +151,7 @@ await client.agent.restart(session: string, config?: Partial<AgentStartConfig>):
 await client.agent.restart("default", { model: "claude-opus-4-6" });
 ```
 
-**Notes**: Use this after changing provider-level settings or when the CLI process becomes unhealthy.
+**Notes**: runtime-level 設定を変更した後、または CLI process が不健全になったときに使います。
 
 ### `agent.interrupt(session)`
 
@@ -161,7 +161,7 @@ await client.agent.restart("default", { model: "claude-opus-4-6" });
 await client.agent.interrupt(session: string): Promise<{ status: "interrupted" | "no_session" }>
 ```
 
-**Use it when** a user presses a stop button and the session should stay alive for the next message.
+**Use it when** ユーザーが stop button を押したが、次の message のために session は残したいときに使います。
 
 **Example**
 
@@ -195,22 +195,22 @@ await client.agent.resume(session: string, opts?: {
 
 | Field | Description |
 | --- | --- |
-| `session` | Session to resume from stored history. |
-| `opts.provider` | Provider override. |
-| `opts.model` | Model override. |
-| `opts.permissionMode` | Permission mode override. |
-| `opts.configDir` | Provider config directory override. |
-| `opts.prompt` | Optional prompt sent during resume. |
-| `opts.providerOptions` | Provider-specific options. |
+| `session` | 保存済み history から resume する session。 |
+| `opts.provider` | ランタイム override。 |
+| `opts.model` | モデル override。 |
+| `opts.permissionMode` | permission mode override。 |
+| `opts.configDir` | ランタイム config directory override。 |
+| `opts.prompt` | resume 中に送る optional prompt。 |
+| `opts.providerOptions` | ランタイム別 option。 |
 
 **Returns**
 
 | Field | Description |
 | --- | --- |
-| `status` | Always `resumed` on success. |
-| `provider` | Provider used for the resumed runtime. |
-| `sessionId` | Runtime session ID. |
-| `historyCount` | Number of persisted messages loaded. |
+| `status` | 成功時は常に `resumed`。 |
+| `provider` | resumed session に使われたランタイム。 |
+| `sessionId` | ランタイム session ID。 |
+| `historyCount` | 読み込んだ persisted message 数。 |
 
 **Example**
 
@@ -236,7 +236,7 @@ await client.agent.getStatus(session: string): Promise<{
 }>
 ```
 
-**Use it when** rendering controls that depend on runtime state or when waiting after `start`.
+**Use it when** runtime state に依存する control を描画する、または `start` 後に準備完了を待つときに使います。
 
 **Example**
 
@@ -261,30 +261,30 @@ await client.agent.completion(opts: CompletionOptions): Promise<CompletionResult
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `prompt` | `string` | yes | Prompt to send. |
-| `model` | `string` | no | Model slug. |
-| `systemPrompt` | `string` | no | Replaces system prompt. |
-| `appendSystemPrompt` | `string` | no | Appends to system prompt. |
-| `label` | `string` | no | Trace label. |
-| `timeout` | `number` | no | Timeout in milliseconds. |
-| `extraArgs` | `string[]` | no | Deprecated raw CLI flags. |
-| `env` | `Record<string, string>` | no | Environment overrides. |
-| `reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Provider-neutral reasoning effort. |
-| `providerOptions` | `Record<string, unknown>` | no | Provider-specific options. |
+| `prompt` | `string` | yes | 送信する prompt。 |
+| `model` | `string` | no | モデル slug。 |
+| `systemPrompt` | `string` | no | system prompt を置き換えます。 |
+| `appendSystemPrompt` | `string` | no | system prompt に追記します。 |
+| `label` | `string` | no | trace label。 |
+| `timeout` | `number` | no | millisecond 単位の timeout。 |
+| `extraArgs` | `string[]` | no | deprecated な raw CLI flag。 |
+| `env` | `Record<string, string>` | no | environment override。 |
+| `reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Runtime-neutral reasoning effort. |
+| `providerOptions` | `Record<string, unknown>` | no | ランタイム別 option。 |
 
 **Returns**
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `text` | `string` | Generated text. |
-| `usage.inputTokens` | `number` | Input token count. |
-| `usage.outputTokens` | `number` | Output token count. |
-| `usage.cacheReadTokens` | `number` | Cache read token count. |
-| `usage.cacheCreationTokens` | `number` | Cache creation token count. |
-| `costUsd` | `number` | Estimated cost in USD. |
-| `durationMs` | `number` | Total duration. |
-| `durationApiMs` | `number` | Provider API duration. |
-| `model` | `string` | Model used. |
+| `text` | `string` | 生成された text。 |
+| `usage.inputTokens` | `number` | input token 数。 |
+| `usage.outputTokens` | `number` | output token 数。 |
+| `usage.cacheReadTokens` | `number` | cache read token 数。 |
+| `usage.cacheCreationTokens` | `number` | cache creation token 数。 |
+| `costUsd` | `number` | USD ベースの推定コスト。 |
+| `durationMs` | `number` | 総所要時間。 |
+| `durationApiMs` | `number` | ランタイム API の所要時間。 |
+| `model` | `string` | 使用されたモデル。 |
 
 **Example**
 
@@ -297,7 +297,7 @@ const result = await client.agent.completion({
 console.log(result.text, result.costUsd);
 ```
 
-**Use `completion` instead of `runOnce` when** the task does not need an agent session, tools, or event streaming.
+**Use `completion` instead of `runOnce` when** agent session、tool、event streaming が不要なタスクでは `runOnce` より `completion` を使います。
 
 ### `agent.runOnce(opts)`
 
@@ -314,17 +314,17 @@ await client.agent.runOnce(opts: RunOnceOptions): Promise<{
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `message` | `string` | yes | Task prompt. |
-| `model` | `string` | no | Model slug. |
-| `systemPrompt` | `string` | no | Replaces system prompt. |
-| `appendSystemPrompt` | `string` | no | Appends to system prompt. |
-| `permissionMode` | `string` | no | Permission behavior. |
-| `cwd` | `string` | no | Working directory. |
-| `timeout` | `number` | no | Timeout in milliseconds. |
-| `provider` | `string` | no | Runtime provider. |
-| `extraArgs` | `string[]` | no | Deprecated raw CLI flags. |
-| `reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Provider-neutral reasoning effort. |
-| `providerOptions` | `Record<string, unknown>` | no | Provider-specific options. |
+| `message` | `string` | yes | タスク prompt。 |
+| `model` | `string` | no | モデル slug。 |
+| `systemPrompt` | `string` | no | system prompt を置き換えます。 |
+| `appendSystemPrompt` | `string` | no | system prompt に追記します。 |
+| `permissionMode` | `string` | no | permission の動作。 |
+| `cwd` | `string` | no | 作業ディレクトリ。 |
+| `timeout` | `number` | no | millisecond 単位の timeout。 |
+| `provider` | `string` | no | runtime id。 |
+| `extraArgs` | `string[]` | no | deprecated な raw CLI flag。 |
+| `reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Runtime-neutral reasoning effort. |
+| `providerOptions` | `Record<string, unknown>` | no | ランタイム別 option。 |
 
 **Example**
 
@@ -337,7 +337,7 @@ const { result } = await client.agent.runOnce({
 });
 ```
 
-**Notes**: The server creates a temporary session, waits for completion, and cleans it up.
+**Notes**: server が temporary session を作成し、完了を待ってから片付けます。
 
 ### `agent.runOnceStream(opts)`
 
@@ -360,7 +360,7 @@ for await (const event of client.agent.runOnceStream({ message: "Explain this fi
 }
 ```
 
-**Notes**: Requires `http: true`; it uses `POST /agent/run-once/stream`.
+**Notes**: `http: true` が必要です。`POST /agent/run-once/stream` を使います。
 
 ## Model と configuration メソッド
 
@@ -376,11 +376,11 @@ await client.agent.listModels(runtime: string, config?: ListModelsConfig): Promi
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `runtime` | `string` | Runtime to inspect, for example `claude-code`, `codex`, `opencode`, or `omlx`. |
-| `config.cliPath` | `string` | Runtime CLI path override. |
-| `config.baseUrl` | `string` | API base URL for OMLX-style runtimes. |
-| `config.apiKey` | `string` | API key for OMLX-style runtimes. |
-| `config.refresh` | `boolean` | Bypass cache. |
+| `runtime` | `string` | 調べるランタイム。例: `claude-code`、`codex`、`opencode`、`omlx`。 |
+| `config.cliPath` | `string` | ランタイム CLI path override。 |
+| `config.baseUrl` | `string` | OMLX-style ランタイムの API base URL。 |
+| `config.apiKey` | `string` | OMLX-style ランタイムの API key。 |
+| `config.refresh` | `boolean` | cache を使わず再取得します。 |
 
 **Returns**
 
@@ -471,7 +471,7 @@ const updated = await client.agent.update("default", {
 console.log(updated.applied); // "in-place" or "respawn"
 ```
 
-**Notes**: Some providers can apply changes in place. Others require a respawn with DB-backed history replay.
+**Notes**: 一部のランタイムは変更を in-place で適用できます。その他のランタイムでは DB-backed history replay を使った respawn が必要です。
 
 ## Event streaming メソッド
 
@@ -485,7 +485,7 @@ for await (const event of client.agent.streamEvents(session: string, since?: num
 }
 ```
 
-**Use it when** you want SSE instead of WebSocket. Requires `http: true`.
+**Use it when** WebSocket ではなく SSE を使いたいときに使います。`http: true` が必要です。
 
 ### `agent.subscribe(session, opts?)`
 
@@ -503,9 +503,9 @@ await client.agent.subscribe(session: string, opts?: {
 
 | Field | Description |
 | --- | --- |
-| `since` | Start from this event cursor. |
-| `includeHistory` | Replay persisted history as events. |
-| `tail` | Replay only the last N persisted messages. Mutually exclusive with `since` and `includeHistory`. |
+| `since` | この event cursor から開始します。 |
+| `includeHistory` | persisted history を event として replay します。 |
+| `tail` | 最後の N 件の persisted message だけを replay します。`since` と `includeHistory` とは同時に使えません。 |
 
 **Example**
 
@@ -531,7 +531,7 @@ await client.agent.getMessages(session: string, opts?: {
 }>
 ```
 
-**Use it when** implementing reverse pagination for older persisted messages.
+**Use it when** 古い persisted message の reverse pagination を実装するときに使います。
 
 ### `agent.unsubscribe(session)`
 
@@ -541,7 +541,7 @@ await client.agent.getMessages(session: string, opts?: {
 await client.agent.unsubscribe(session: string): Promise<void>
 ```
 
-**Notes**: Also removes the session from reconnect resubscription state.
+**Notes**: reconnect resubscription state からもその session を削除します。
 
 ### `agent.onEvent(handler)`
 
@@ -560,14 +560,14 @@ const unsubscribe = client.agent.onEvent((event: {
 
 | Type | Meaning |
 | --- | --- |
-| `thinking` | Agent internal reasoning block. |
-| `assistant` | Assistant-visible response block. |
-| `assistant_delta` | Streaming text fragment. |
-| `tool_use` | Agent is calling a tool. |
-| `tool_result` | Tool execution result. |
-| `complete` | Turn completed. |
-| `error` | Runtime or provider error. |
-| `user_message` | Echoed user message for multi-client sync. |
+| `thinking` | agent 内部の reasoning block。 |
+| `assistant` | assistant に見える response block。 |
+| `assistant_delta` | streaming text fragment。 |
+| `tool_use` | agent が tool を呼び出しています。 |
+| `tool_result` | tool 実行結果。 |
+| `complete` | turn が完了しました。 |
+| `error` | runtime error。 |
+| `user_message` | multi-client sync のために echo された user message。 |
 
 ## Permission メソッド
 
@@ -579,7 +579,7 @@ const unsubscribe = client.agent.onEvent((event: {
 await client.agent.subscribePermissions(): Promise<{ pendingCount: number }>
 ```
 
-**Use it when** the UI needs to receive tool approval prompts. Subscribe before starting an agent if the first permission prompt must not be missed.
+**Use it when** UI が tool approval prompt を受け取る必要があるときに使います。最初の permission prompt を逃せない場合は、agent を開始する前に subscribe してください。
 
 ### `agent.unsubscribePermissions()`
 
@@ -603,7 +603,7 @@ await client.agent.getPendingPermissions(session?: string): Promise<{
 }>
 ```
 
-**Use it when** reconnecting a UI and recovering prompts that arrived while disconnected.
+**Use it when** UI の reconnect 時に、disconnected の間に届いた prompt を復元するときに使います。
 
 ### `agent.respondPermission(session, approved)`
 
@@ -638,4 +638,4 @@ const unsubscribe = client.agent.onPermissionRequest((event: {
 }) => void);
 ```
 
-**Use it when** opening a modal, notification, or command palette prompt for human approval.
+**Use it when** human approval のために modal、notification、command palette prompt を開くときに使います。

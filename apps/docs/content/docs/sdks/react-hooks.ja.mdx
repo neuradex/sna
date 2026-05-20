@@ -52,10 +52,10 @@ Returns:
 | --- | --- | --- |
 | `sessionId` | context `sessionId` | 接続する agent session。 |
 | `baseUrl` | `${apiUrl}/agent` | agent HTTP API base URL。 |
-| `provider` | `claude-code` | start/completion に使う provider。 |
-| `permissionMode` | provider default | tool permission mode。 |
-| `reasoningLevel` | provider default | provider-neutral reasoning effort。 |
-| `providerOptions` | none | provider-specific option。Codex `serviceTier` などを渡せます。 |
+| `provider` | `claude-code` | start/completion に使う runtime id。 |
+| `permissionMode` | runtime default | tool permission mode。 |
+| `reasoningLevel` | runtime default | runtime-neutral reasoning effort。 |
+| `providerOptions` | none | runtime-specific option。Codex `serviceTier` などを渡せます。 |
 
 ### 動作
 
@@ -64,7 +64,7 @@ Returns:
 | Event transport | `/agent/events?session=<id>&since=<cursor>` に `EventSource` を開きます。 |
 | Cursor 処理 | 先に `/agent/status` を読み、現在の event count から始めるため、initial mount では過去 event を skip します。 |
 | Reconnect | SSE error が起きると stream を閉じ、`3000ms` 後に再接続します。 |
-| Provider default | `provider` のデフォルトは `claude-code` です。 |
+| Runtime default | `provider` のデフォルトは `claude-code` です。 |
 | Session default | `sessionId` は `SnaContext` から取得します。`SnaProvider` のデフォルトは `default` です。 |
 | `alive` | 初期化時に `/agent/status` から設定し、`start` または `send` が local で成功すると optimistic に `true` にします。 |
 
@@ -75,7 +75,7 @@ Returns:
 | `start(prompt?)` | `POST /agent/start?session=<id>` | `provider`、`prompt`、`permissionMode`、`reasoningLevel`、`providerOptions` を送ります。 |
 | `send(message)` | `POST /agent/send?session=<id>` | Plain text message を送ります。この hook は image attachment を公開しないため、multimodal send には `SnaClient.agent.send` を使ってください。 |
 | `kill()` | `POST /agent/kill?session=<id>` | Runtime を止め、`alive` を `false` にします。 |
-| `completion(opts)` | `POST /agent/completion` | Hook の provider と reasoning default を使って stateless completion request を送ります。 |
+| `completion(opts)` | `POST /agent/completion` | Hook の runtime と reasoning default を使って stateless completion request を送ります。 |
 
 ### Event callbacks
 

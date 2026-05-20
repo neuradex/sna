@@ -36,7 +36,7 @@ Returns `{ connected, alive, start, send, kill, completion }`. The hook connects
 | Event transport | Opens `EventSource` against `/agent/events?session=<id>&since=<cursor>`. |
 | Cursor handling | Reads `/agent/status` first and starts from the current event count, so old events are skipped on initial mount. |
 | Reconnect | If SSE errors, the hook closes the stream and retries after `3000ms`. |
-| Provider default | `provider` defaults to `claude-code`. |
+| Runtime default | `provider` defaults to `claude-code`. |
 | Session default | `sessionId` comes from `SnaContext`; `SnaProvider` defaults it to `default`. |
 | `alive` | Set from `/agent/status` during initialization and set optimistically when `start` or `send` succeeds locally. |
 
@@ -47,7 +47,7 @@ Returns `{ connected, alive, start, send, kill, completion }`. The hook connects
 | `start(prompt?)` | `POST /agent/start?session=<id>` | Sends `provider`, `prompt`, `permissionMode`, `reasoningLevel`, and `providerOptions`. |
 | `send(message)` | `POST /agent/send?session=<id>` | Sends a plain text message. This hook does not expose image attachments; use `SnaClient.agent.send` for multimodal sends. |
 | `kill()` | `POST /agent/kill?session=<id>` | Stops the runtime and sets `alive` to `false`. |
-| `completion(opts)` | `POST /agent/completion` | Sends a stateless completion request using the hook provider and reasoning defaults. |
+| `completion(opts)` | `POST /agent/completion` | Sends a stateless completion request using the hook runtime and reasoning defaults. |
 
 ### Event callbacks
 

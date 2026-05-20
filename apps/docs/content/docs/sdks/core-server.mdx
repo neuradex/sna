@@ -64,7 +64,7 @@ The WebSocket server:
 
 ## `SessionManager`
 
-`SessionManager` coordinates server-side session records, provider runtimes, event buffers, persisted history, and lifecycle callbacks.
+`SessionManager` coordinates server-side session records, runtimes, event buffers, persisted history, and lifecycle callbacks.
 
 ```ts
 const sessionManager = new SessionManager({ maxSessions: 10 });
@@ -75,7 +75,7 @@ Important concepts:
 | Concept | Meaning |
 | --- | --- |
 | Session record | Durable SNA session metadata: id, label, cwd, meta, config, message counts, and timestamps. |
-| Runtime session | The provider process or runtime handle currently attached to a session. A session can have a runtime chain when config changes require respawn. |
+| Runtime session | The runtime process or runtime handle currently attached to a session. A session can have a runtime chain when config changes require respawn. |
 | `SessionInfo` | Public snapshot shape returned to clients. It includes `alive`, `state`, `agentStatus`, `cwd`, `config`, counts, last message, and optional runtime chain. |
 | `SessionState` | Server state such as `idle`, `processing`, `waiting`, or `permission`. |
 | `AgentStatus` | UI-oriented state: `idle`, `busy`, or `disconnected`. |

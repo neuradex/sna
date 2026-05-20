@@ -31,8 +31,8 @@ Configuration は次の順序で決まります。
 | Field | Default | 説明 |
 | --- | --- | --- |
 | `port` | `3099` | Standalone server と browser discovery が使う HTTP server port。 |
-| `model` | `claude-sonnet-4-6` | call が model を指定しない場合に provider adapter へ渡されるデフォルト model。 |
-| `defaultProvider` | `claude-code` | override がない場合に route と helper が使う provider。 |
+| `model` | `claude-sonnet-4-6` | call が model を指定しない場合に runtime adapter へ渡されるデフォルト model。 |
+| `defaultProvider` | `claude-code` | override がない場合に route と helper が使うデフォルト runtime id。 |
 | `defaultPermissionMode` | `default` | Agent operation の標準 permission policy。 |
 | `maxSessions` | `5` | 同時に保持できる server-side session 数。 |
 | `maxEventBuffer` | `500` | Session ごとの in-memory event buffer size。 |

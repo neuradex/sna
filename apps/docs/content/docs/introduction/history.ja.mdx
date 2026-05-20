@@ -1,6 +1,6 @@
 ---
 title: 正規化履歴
-description: すべてのプロバイダネイティブ形式へ戻せるフラットブロック形式。
+description: すべてのランタイムネイティブ形式へ戻せるフラットブロック形式。
 icon: Database
 ---
 
@@ -12,20 +12,20 @@ SNA は会話履歴を SQLite 内の **正規化ブロック** のシーケン�
 
 バイナリコンテンツ (画像、ファイル) は id をキーにした別の `embeds`
 JSON に置かれ、ブロックの `content` テキストには `![](embed://<id>)`
-のインライン参照が入ります。プロバイダネイティブの形 (Anthropic content
+のインライン参照が入ります。ランタイムネイティブの形 (Anthropic content
 配列、Codex `ResponseItem`、OpenCode parts) は **要求時に派生** されます。
 保存上の基準は正規化ブロックです。
 
 ## なぜフラットブロックか
 
-ほとんどのプロバイダは text、tool_use、thinking を 1 つの "message"
-オブジェクトにまとめるネストしたメッセージ形式を使います。単一プロバイダ
-では大きな問題になりませんが、クロスプロバイダ replay では複雑になります。
-プロバイダごとに順序、signature、optional フィールドのルールが異なるためです。
+ほとんどのランタイムは text、tool_use、thinking を 1 つの "message"
+オブジェクトにまとめるネストしたメッセージ形式を使います。単一ランタイム
+では大きな問題になりませんが、クロスランタイム replay では複雑になります。
+ランタイムごとに順序、signature、optional フィールドのルールが異なるためです。
 
 フラットブロックリストは 3 つのランタイムすべてで round-trip 可能な
-最小の表現です。各プロバイダのアダプタがフラットリストを歩いて、
-そのプロバイダが期待するネストした形を再構築します。
+最小の表現です。各ランタイムのアダプタがフラットリストを歩いて、
+そのランタイムが期待するネストした形を再構築します。
 
 `actor` と `kind` の設計背景は **[Actor と kind](/ja/docs/introduction/philosophy/actor-kind)** で
 扱います。
@@ -40,7 +40,7 @@ JSON に置かれ、ブロックの `content` テキストには `![](embed://<i
 
 `POST /agent/resume` は、新たに spawn したプロセスに履歴を replay
 する経路です。入力はセッション id と正規化ブロックだけで、アダプタが
-プロバイダ固有の注意点 (signature フィールド、tool_use 順序、partial-text
+ランタイム固有の注意点 (signature フィールド、tool_use 順序、partial-text
 の合体) をすべて処理します。
 
 ## 3 層アトリビューション
@@ -51,6 +51,6 @@ JSON に置かれ、ブロックの `content` テキストには `![](embed://<i
 - `modelProvider`: モデルを所有したベンダ (anthropic / openai / google)
 - `model`: 正確なスラッグ (`claude-sonnet-4-6`、`gpt-5.4` 等)
 
-これにより、ユーザーがスレッド途中でプロバイダを切り替えても各ブロックの
+これにより、ユーザーがスレッド途中でランタイムを切り替えても各ブロックの
 出どころを失いません。UI は「ここで Codex の gpt-5.4 に切り替えました」
 のような表示を正確に出せます。

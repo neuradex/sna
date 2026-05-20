@@ -1,12 +1,12 @@
 ---
-title: マルチプロバイダセッション
+title: マルチランタイムセッション
 description: 会話履歴を保ったままスレッド途中でランタイムを切り替えます。
 icon: Shuffle
 ---
 
 SnaSession 1 つは生涯の中で複数の RuntimeSession をマウントできます。
 **runtime chain** は、そのセッションに適用されたすべてのランタイム設定の
-順序付き記録です。会話履歴は正規化されています。プロバイダネイティブの
+順序付き記録です。会話履歴は正規化されています。ランタイムネイティブの
 形式は replay ごとに派生するため、ランタイム切り替えは respawn として
 処理されます。
 
@@ -26,7 +26,7 @@ await client.agent.patch(sessionId, { provider: "codex", model: "gpt-5.4" });
 ```
 
 `provider` フィールドを持つ `PATCH /agent/session` は現在のプロセス
-を終了し、新ランタイムで respawn し、正規化履歴を新プロバイダのネイティブ
+を終了し、新ランタイムで respawn し、正規化履歴を新ランタイムのネイティブ
 形に replay します。セッションレコード、イベントカーソル、runtime chain
 はすべて維持されます。
 
@@ -36,7 +36,7 @@ await client.agent.patch(sessionId, { provider: "codex", model: "gpt-5.4" });
 |------|----------|------|
 | `restart` | 同じ設定で respawn | replay しない (warm restart) |
 | `resume` | 同じ設定で respawn | 再構築して再注入 |
-| `patch` (プロバイダ変更) | 新設定で respawn | 新プロバイダ用に再構築 |
+| `patch` (ランタイム変更) | 新設定で respawn | 新ランタイム用に再構築 |
 
 長いアイドル後やランタイムが終了したときは `resume` を使います。
 アプリがランタイム切り替えを必要とするときは `patch` を使います。
@@ -45,13 +45,13 @@ await client.agent.patch(sessionId, { provider: "codex", model: "gpt-5.4" });
 
 ほとんどの「エージェントプラットフォーム」抽象は、会話をランタイムごとの
 一時的状態として扱います。プロセスを失うとスレッドも失います。SNA では
-正規化履歴が基準です。すべてのプロバイダは replay 対象であり、記憶の
+正規化履歴が基準です。すべてのランタイムは replay 対象であり、記憶の
 保管者ではありません。
 
 ## 注意
 
 - **ホスト型ツールの状態は引き継がれません。** Codex の画像生成、
-  web_search といったホスト型ツールはプロバイダ側に存在します。前回
+  web_search といったホスト型ツールはランタイム側に存在します。前回
   呼び出しの `tool_result` は履歴にありますが、次のターンが前回の OpenAI
   会話 id を期待する場合、その状態は失われています。
 - **モデル固有のトークンは replay で一部失われます。** Claude の拡張

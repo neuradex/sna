@@ -27,7 +27,7 @@ POST /agent/start         → 初期 RuntimeSession マウント、プロセス 
 POST /agent/send          → メッセージ送信、イベントストリーム
 POST /agent/set-model     → インプレース上書き または 新 RuntimeSession
 PATCH /agent/session      → {cwd, model, permissionMode} 統一 mutator
-POST /agent/resume        → プロバイダネイティブ履歴を再構築、respawn
+POST /agent/resume        → ランタイムネイティブ履歴を再構築、respawn
 POST /agent/restart       → 同じ設定で respawn (そのまま保持)
 POST /agent/kill          → プロセスを止める (セッションレコードは残る)
 DELETE /agent/sessions/:id → セッション + 履歴を削除
@@ -36,7 +36,7 @@ DELETE /agent/sessions/:id → セッション + 履歴を削除
 ## PATCH 意味論
 
 `PATCH /agent/session` は統一 mutator。サーバはアクティブな
-プロバイダの `applyPatch()` フック経由で各フィールドを適用します。
+ランタイムアダプタの `applyPatch()` フック経由で各フィールドを適用します。
 このフックがインプレース適用と respawn-with-history-replay のどちら
 を取るかを決めます。
 

@@ -4,9 +4,9 @@ description: "SNA を埋め込むためのランタイム、サーバー、ラ�
 ---
 # Core SDK
 
-`@sna-sdk/core` は最も低レイヤーのパッケージです。別プロセス内で SNA を起動する、独自サーバーから SNA を公開する、provider/runtime primitive を直接扱う、といった場合に使います。
+`@sna-sdk/core` は最も低レイヤーのパッケージです。別プロセス内で SNA を起動する、独自サーバーから SNA を公開する、runtime-adapter primitive を直接扱う、といった場合に使います。
 
-Core は React もブラウザクライアントも前提にしません。設定、provider process lifecycle、HTTP/WS server assembly、SQLite ベースの history、Node/Electron host 向け launcher まで含めたサーバー側ランタイム契約を担当します。
+Core は React もブラウザクライアントも前提にしません。設定、runtime process lifecycle、HTTP/WS server assembly、SQLite ベースの history、Node/Electron host 向け launcher まで含めたサーバー側ランタイム契約を担当します。
 
 ## Install
 
@@ -27,12 +27,12 @@ Host application 側にも `better-sqlite3` をインストールしてくださ
 
 | import path | 用途 |
 | --- | --- |
-| `@sna-sdk/core` | Runtime helper、shared type、configuration helper、provider-neutral data shape。 |
+| `@sna-sdk/core` | Runtime helper、shared type、configuration helper、runtime-neutral data shape。 |
 | `@sna-sdk/core/server` | SNA HTTP app の作成、WebSocket の接続、server-side session の管理。 |
 | `@sna-sdk/core/node` | 通常の Node process から standalone SNA server を起動。 |
 | `@sna-sdk/core/electron` | Electron から SNA を起動。Packaged app path の処理と in-process mode を含みます。 |
 | `@sna-sdk/core/db/schema` | 直接 migration や inspection が必要な host 向けの database schema helper。 |
-| `@sna-sdk/core/providers` | 高度な provider/runtime primitive。多くの app では server API または client API を優先してください。 |
+| `@sna-sdk/core/providers` | 高度な runtime-adapter primitive。多くの app では server API または client API を優先してください。 |
 
 ## Core を選ぶ場面
 

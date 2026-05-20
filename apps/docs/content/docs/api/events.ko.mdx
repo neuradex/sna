@@ -4,7 +4,7 @@ description: WS와 SSE 위로 흐르는 15가지 AgentEvent 프로토콜입니�
 icon: Activity
 ---
 
-모든 프로바이더가 정규화된 `AgentEvent` 스트림을 emit합니다. 앱은
+모든 런타임이 정규화된 `AgentEvent` 스트림을 emit합니다. 앱은
 WebSocket (푸시) 또는 `GET /agent/events` (SSE)로 구독하고, 둘 다 같은
 와이어 형태를 전달합니다.
 
@@ -22,10 +22,10 @@ WebSocket (푸시) 또는 `GET /agent/events` (SSE)로 구독하고, 둘 다 같
 | `tool_use_delta` | 스트리밍 툴 입력 (JSON) | partial 입력 |
 | `tool_result` | 툴 응답 | result, isError, durationMs |
 | `permission_needed` | 툴이 승인을 요구 | 툴 이름, 입력, decisionId |
-| `milestone` | 프로바이더 정의 마커 | label |
+| `milestone` | 런타임 정의 마커 | label |
 | `user_message` | (정규화 후) 사용자 측 에코 | content |
 | `interrupted` | 턴 취소됨 | reason |
-| `error` | 프로바이더 에러 | message |
+| `error` | 런타임 에러 | message |
 | `complete` | 턴 종료 | usage, costUsd, durationMs |
 
 ## 델타 vs 파이널

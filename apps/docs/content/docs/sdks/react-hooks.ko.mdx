@@ -54,10 +54,10 @@ declare function useAgent(options?: {
 | --- | --- | --- |
 | `sessionId` | context `sessionId` | 연결할 agent session입니다. |
 | `baseUrl` | `${apiUrl}/agent` | agent HTTP API base URL입니다. |
-| `provider` | `claude-code` | start/completion에 사용할 provider입니다. |
-| `permissionMode` | provider default | tool permission mode입니다. |
-| `reasoningLevel` | provider default | provider-neutral reasoning effort입니다. |
-| `providerOptions` | none | provider-specific option입니다. Codex `serviceTier` 등이 들어갑니다. |
+| `provider` | `claude-code` | start/completion에 사용할 runtime id입니다. |
+| `permissionMode` | runtime default | tool permission mode입니다. |
+| `reasoningLevel` | runtime default | runtime-neutral reasoning effort입니다. |
+| `providerOptions` | none | runtime-specific option입니다. Codex `serviceTier` 등이 들어갑니다. |
 
 ### 동작
 
@@ -66,7 +66,7 @@ declare function useAgent(options?: {
 | Event transport | `/agent/events?session=<id>&since=<cursor>`에 `EventSource`를 엽니다. |
 | Cursor 처리 | 먼저 `/agent/status`를 읽고 현재 event count부터 시작하므로 initial mount에서 과거 event를 건너뜁니다. |
 | Reconnect | SSE error가 발생하면 stream을 닫고 `3000ms` 뒤 다시 연결합니다. |
-| Provider default | `provider` 기본값은 `claude-code`입니다. |
+| Runtime default | `provider` 기본값은 `claude-code`입니다. |
 | Session default | `sessionId`는 `SnaContext`에서 오며, `SnaProvider`의 기본값은 `default`입니다. |
 | `alive` | 초기화 중 `/agent/status`로 설정하고, `start` 또는 `send`가 local에서 성공하면 optimistic하게 `true`로 둡니다. |
 

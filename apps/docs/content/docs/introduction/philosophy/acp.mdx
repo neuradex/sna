@@ -21,7 +21,7 @@ canonical history, permissions, HTTP/WebSocket APIs, and React bindings.
 | Primary host | Editor or IDE | Consumer app, Electron app, or service |
 | Main goal | Let editors support many agents through one protocol | Let apps embed and control agent runtimes as a backend |
 | State model | Protocol-level sessions and updates | `SessionManager`, SQLite history, runtime chains, event buffers |
-| Provider strategy | Agent exposes ACP, often through an adapter | SNA uses high-fidelity native providers first, with optional ACP compatibility later |
+| Runtime strategy | Agent exposes ACP, often through an adapter | SNA uses high-fidelity native runtime adapters first, with optional ACP compatibility later |
 | UI target | Editor-native agent panel | App-defined UI, React components, or custom clients |
 
 ## Why ACP does not replace SNA
@@ -31,14 +31,14 @@ and agents. That is not the same as replacing SNA's runtime control
 plane. SNA needs to own concerns that sit around the wire protocol:
 
 - Multi-session lifecycle and per-session runtime configuration.
-- Canonical history that can survive restarts and provider swaps.
-- Provider-native replay adapters for Claude Code, Codex, and OpenCode.
+- Canonical history that can survive restarts and runtime swaps.
+- Runtime-native replay adapters for Claude Code, Codex, and OpenCode.
 - Permission normalization across different native approval systems.
 - Electron embedding details such as child-process lifecycle and native
   SQLite binding resolution.
 - SDK surfaces for web, Node, and React consumers.
 
-If SNA used ACP as its only provider layer too early, it could lose
+If SNA used ACP as its only runtime layer too early, it could lose
 access to native control surfaces or wait on ACP wrappers to expose them.
 That conflicts with SNA's philosophy: use the richest native agent
 capabilities first, then normalize only what the app needs to rely on.
@@ -49,10 +49,10 @@ ACP is still useful to SNA. It can be added at two boundaries without
 changing the core philosophy:
 
 - **SNA can expose ACP.** An ACP-compatible editor could connect to SNA
-  and inherit SNA's session management, canonical history, provider
+  and inherit SNA's session management, canonical history, runtime
   switching, and permission model.
-- **SNA can consume ACP.** A generic ACP provider could broaden the set of
-  supported agents, while native providers remain the high-fidelity path
+- **SNA can consume ACP.** A generic ACP runtime adapter could broaden the set of
+  supported agents, while native runtime adapters remain the high-fidelity path
   for runtimes where SNA needs deeper control.
 
 The intended relationship is therefore not "ACP versus SNA." ACP is a

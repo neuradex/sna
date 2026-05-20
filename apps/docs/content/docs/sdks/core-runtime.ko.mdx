@@ -8,9 +8,9 @@ HTTP 서버를 거치지 않고 agent runtime을 호출하려면 이 API를 사�
 
 | 표면 | 목적 |
 | --- | --- |
-| `completion(input)` | completion 형태의 provider 호출을 한 번 실행합니다. |
+| `completion(input)` | completion 형태의 runtime 호출을 한 번 실행합니다. |
 | `runOnce(input)` | agent 작업 하나를 실행하고 최종 결과를 반환합니다. |
-| `getRuntimePool()` | provider 프로세스를 관리하는 공유 runtime pool을 반환합니다. |
+| `getRuntimePool()` | runtime 프로세스를 관리하는 공유 runtime pool을 반환합니다. |
 | `RuntimePool` | 고급 생명주기 제어에 사용하는 runtime pool 클래스입니다. |
 | `toClaudeEffort(level)` | SNA reasoning level을 Claude 계열 effort 값으로 매핑합니다. |
 | `toCodexEffort(level)` | SNA reasoning level을 Codex 계열 effort 값으로 매핑합니다. |
@@ -27,13 +27,13 @@ HTTP 대응 표면은 [agent completion](/ko/docs/api/endpoints/agent/completion
 | Tool이나 persistent session이 필요 없는 text generation | `completion` |
 | Tool을 사용하고 끝날 수 있는 self-contained agent task | `runOnce` |
 | 긴 interactive session | `createSnaApp` 또는 `SnaClient.agent.start/send` |
-| 여러 direct call 사이의 provider process reuse | `getRuntimePool()` |
+| 여러 direct call 사이의 runtime process reuse | `getRuntimePool()` |
 
 ## 함수 레퍼런스
 
 ### `completion(input)`
 
-설정된 provider를 통해 completion-style call을 한 번 실행합니다. 장기적인 coding session보다 text generation, summarization, classification, lightweight transformation에 가까운 작업에 사용합니다. Provider 응답이 완료되면 반환됩니다.
+설정된 runtime을 통해 completion-style call을 한 번 실행합니다. 장기적인 coding session보다 text generation, summarization, classification, lightweight transformation에 가까운 작업에 사용합니다. Runtime 응답이 완료되면 반환됩니다.
 
 주요 option은 `prompt`, `model`, `systemPrompt`, `appendSystemPrompt`, `label`, `timeout`, `env`, `reasoningLevel`, `providerOptions`입니다.
 
@@ -45,31 +45,31 @@ runtime을 통해 하나의 agent task를 끝까지 실행하고 최종 결과�
 
 ### `getRuntimePool()`
 
-현재 process가 사용하는 shared runtime pool을 반환합니다. 여러 call site가 독립 pool을 만들지 않고 같은 provider process management를 재사용해야 할 때 사용합니다.
+현재 process가 사용하는 shared runtime pool을 반환합니다. 여러 call site가 독립 pool을 만들지 않고 같은 runtime process management를 재사용해야 할 때 사용합니다.
 
 ### `RuntimePool`
 
-provider runtime lifecycle을 소유합니다. 대부분의 애플리케이션은 `getRuntimePool`을 사용하면 충분합니다. Test나 embedded host에서 격리가 필요할 때만 직접 생성하십시오.
+runtime lifecycle을 소유합니다. 대부분의 애플리케이션은 `getRuntimePool`을 사용하면 충분합니다. Test나 embedded host에서 격리가 필요할 때만 직접 생성하십시오.
 
 ### `toClaudeEffort(level)`
 
-SNA reasoning level을 Claude 호환 effort 값으로 매핑합니다. Application code 곳곳에 provider-specific string을 흩뜨리지 말고 provider adapter에서 사용하십시오.
+SNA reasoning level을 Claude 호환 effort 값으로 매핑합니다. Application code 곳곳에 runtime-specific string을 흩뜨리지 말고 runtime adapter에서 사용하십시오.
 
 ### `toCodexEffort(level)`
 
-SNA reasoning level을 Codex 호환 effort 값으로 매핑합니다. UI-level reasoning choice를 provider-neutral하게 유지합니다.
+SNA reasoning level을 Codex 호환 effort 값으로 매핑합니다. UI-level reasoning choice를 runtime-neutral하게 유지합니다.
 
 ### `toGrokEffort(level)`
 
-Grok provider adapter가 사용할 수 있도록 SNA reasoning level을 Grok-compatible effort value로 매핑합니다.
+Grok runtime adapter가 사용할 수 있도록 SNA reasoning level을 Grok-compatible effort value로 매핑합니다.
 
 ### `toCursorEffortSuffix(level)` / `applyCursorReasoning(...)`
 
-Provider-neutral reasoning level에서 Cursor CLI reasoning argument를 만듭니다. Provider adapter 또는 Cursor를 직접 실행하는 host code에서만 사용하십시오.
+Runtime-neutral reasoning level에서 Cursor CLI reasoning argument를 만듭니다. Runtime adapter 또는 Cursor를 직접 실행하는 host code에서만 사용하십시오.
 
 ## Reasoning level
 
-SNA는 UI와 SDK caller가 provider-specific effort string을 알 필요 없도록 하나의 `reasoningLevel` scale을 제공합니다.
+SNA는 UI와 SDK caller가 runtime-specific effort string을 알 필요 없도록 하나의 `reasoningLevel` scale을 제공합니다.
 
 | Level | 의미 | Claude mapping | Codex mapping |
 | --- | --- | --- | --- |
@@ -80,10 +80,10 @@ SNA는 UI와 SDK caller가 provider-specific effort string을 알 필요 없도�
 | `4` | 강한 reasoning | `xhigh` | `high` |
 | `5` | 최대 reasoning | `max` | `xhigh` |
 
-Provider adapter는 지원하지 않는 level을 무시할 수 있습니다. Codex `minimal`은 일부 built-in tool과 맞지 않을 수 있으므로, production UI에서는 allowed tool set까지 통제할 때만 level `1`을 노출하는 편이 좋습니다.
+Runtime adapter는 지원하지 않는 level을 무시할 수 있습니다. Codex `minimal`은 일부 built-in tool과 맞지 않을 수 있으므로, production UI에서는 allowed tool set까지 통제할 때만 level `1`을 노출하는 편이 좋습니다.
 
 ### `buildCanonicalFromDb(...)`
 
-database row에서 canonical history를 재구성합니다. Server process가 저장된 history를 provider-neutral actor/kind 형태로 replay해야 할 때 사용합니다.
+database row에서 canonical history를 재구성합니다. Server process가 저장된 history를 runtime-neutral actor/kind 형태로 replay해야 할 때 사용합니다.
 
-Canonical history는 provider-specific message name 대신 `actor`와 `kind`를 사용합니다. 그래서 같은 stored session을 Claude Code, Codex, OpenCode 또는 다른 adapter로 replay할 때 database row를 다시 쓸 필요가 없습니다.
+Canonical history는 runtime-specific message name 대신 `actor`와 `kind`를 사용합니다. 그래서 같은 stored session을 Claude Code, Codex, OpenCode 또는 다른 adapter로 replay할 때 database row를 다시 쓸 필요가 없습니다.

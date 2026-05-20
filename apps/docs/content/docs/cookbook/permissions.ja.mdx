@@ -1,10 +1,10 @@
 ---
 title: 権限フロー
-description: プロバイダ別の分岐なしで承認 UI を接続します。
+description: ランタイム別の分岐なしで承認 UI を接続します。
 icon: ShieldCheck
 ---
 
-ユーザーに見える承認フローは、プロバイダが変わっても同じです。アプリが
+ユーザーに見える承認フローは、ランタイムが変わっても同じです。アプリが
 権限イベントを購読し、ダイアログを出し、決定を POST します。SNA は
 Claude の PreToolUse フックと Codex の JSON-RPC 承認を 1 つのイベントに
 そろえます。
@@ -48,7 +48,7 @@ await client.agent.start(sessionId, {
 ```
 
 パターンは Claude Code の tool-pattern 構文に従います。同じ文字列リスト
-がプロバイダ別に正規化されるので、アプリ設定をプロバイダで
+がランタイム別に正規化されるので、アプリ設定をランタイムで
 分岐させる必要はありません。
 
 ## レンダラパターン (Electron / React)

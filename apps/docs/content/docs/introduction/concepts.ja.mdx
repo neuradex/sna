@@ -1,11 +1,11 @@
 ---
 title: 中心モデル
-description: SNA ランタイムのサーバ、session manager、provider、履歴構造を整理します。
+description: SNA ランタイムのサーバ、session manager、runtime、履歴構造を整理します。
 icon: LayoutGrid
 ---
 
 SNA は、セッションごとにエージェントプロセスを管理する Hono HTTP/WebSocket
-サーバです。サーバ自体は特定のプロバイダに依存しません。Claude Code、
+サーバです。サーバ自体は特定のランタイムに依存しません。Claude Code、
 Codex、OpenCode はすべて同じ `AgentProvider` インタフェースを実装するため、
 1 つのセッションで会話履歴を保ったままランタイムを切り替えられます。
 
@@ -27,11 +27,11 @@ Hono server  ──►  SessionManager
 ## 読む順序
 
 <Cards>
-  <Card title="哲学" href="/ja/docs/introduction/philosophy" description="プロバイダ中立の構造を保つための設計原則。" />
+  <Card title="哲学" href="/ja/docs/introduction/philosophy" description="ランタイム中立の構造を保つための設計原則。" />
   <Card title="セッション" href="/ja/docs/introduction/sessions" description="ライフサイクル、RuntimeSession チェーン、PATCH の意味。" />
-  <Card title="正規化履歴" href="/ja/docs/introduction/history" description="フラットなブロックとプロバイダ別履歴の再構築。" />
-  <Card title="プロバイダ" href="/ja/docs/introduction/providers" description="AgentProvider インタフェースと runtime pool。" />
-  <Card title="権限" href="/ja/docs/introduction/permissions" description="プロバイダ差分を隠す承認フロー。" />
+  <Card title="正規化履歴" href="/ja/docs/introduction/history" description="フラットなブロックとランタイム別履歴の再構築。" />
+  <Card title="ランタイム" href="/ja/docs/introduction/providers" description="ランタイムアダプタ、AgentProvider 内部構造、runtime pool。" />
+  <Card title="権限" href="/ja/docs/introduction/permissions" description="ランタイム差分を隠す承認フロー。" />
 </Cards>
 
 ワイヤプロトコルの詳細 (HTTP ルート、WebSocket op、イベントタイプ)

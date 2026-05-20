@@ -64,7 +64,7 @@ WebSocket server가 push하는 message:
 
 ## `SessionManager`
 
-`SessionManager`는 server-side session record, provider runtime, event buffer, persisted history, lifecycle callback을 조율합니다.
+`SessionManager`는 server-side session record, runtime, event buffer, persisted history, lifecycle callback을 조율합니다.
 
 ```ts
 const sessionManager = new SessionManager({ maxSessions: 10 });
@@ -75,7 +75,7 @@ const sessionManager = new SessionManager({ maxSessions: 10 });
 | Concept | 의미 |
 | --- | --- |
 | Session record | Durable SNA session metadata: id, label, cwd, meta, config, message count, timestamp. |
-| Runtime session | Session에 현재 붙어 있는 provider process 또는 runtime handle. Config 변경으로 respawn이 필요하면 runtime chain이 생길 수 있습니다. |
+| Runtime session | Session에 현재 붙어 있는 runtime process 또는 runtime handle. Config 변경으로 respawn이 필요하면 runtime chain이 생길 수 있습니다. |
 | `SessionInfo` | Client로 반환되는 public snapshot shape. `alive`, `state`, `agentStatus`, `cwd`, `config`, count, last message, optional runtime chain을 포함합니다. |
 | `SessionState` | `idle`, `processing`, `waiting`, `permission` 같은 server state. |
 | `AgentStatus` | UI-oriented state: `idle`, `busy`, `disconnected`. |

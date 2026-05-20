@@ -1,6 +1,6 @@
 ---
 title: Actor and kind
-description: Why SNA normalizes messages with provider-neutral actor and kind fields.
+description: Why SNA normalizes messages with runtime-neutral actor and kind fields.
 icon: Blocks
 ---
 
@@ -8,19 +8,19 @@ SNA could have chosen either the OpenAI shape or the Anthropic shape as
 the internal source of truth. They are not just different field names,
 though. They differ in how tool calls can run in parallel, what each
 role means, and how thinking or tool results are represented. If SNA
-adopted one provider's model directly, the other provider's semantics
+adopted one runtime's model directly, the other runtime's semantics
 would have to be forced into it.
 
 SNA's philosophy is to use as much of each native agent's rich feature
 set as possible. When a runtime is missing a capability, SNA may use a
 small workaround so the same kind of work can still be performed. That
-means the canonical layer should not be a copy of one provider's wire
+means the canonical layer should not be a copy of one runtime's wire
 shape. It should preserve the useful parts of multiple runtimes while
 remaining neutral between them.
 
 This is why `actor` and `kind` are separate. `actor` records who
 produced the block; `kind` records what the block means. OpenAI and
 Anthropic roles are natural inside their own APIs, but they are not
-neutral enough for cross-provider history. SNA intentionally keeps the
-internal model provider-neutral while borrowing the useful ideas from
+neutral enough for cross-runtime history. SNA intentionally keeps the
+internal model runtime-neutral while borrowing the useful ideas from
 both sides.

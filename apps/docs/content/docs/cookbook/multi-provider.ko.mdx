@@ -1,12 +1,12 @@
 ---
-title: 멀티 프로바이더 세션
+title: 멀티 런타임 세션
 description: 대화 히스토리를 유지한 채 스레드 도중 런타임을 교체합니다.
 icon: Shuffle
 ---
 
 SnaSession 하나는 생애 동안 여러 RuntimeSession을 마운트할 수 있습니다.
 **runtime chain**은 그 세션에 적용된 모든 런타임 설정의 순서 있는 기록이고,
-대화 히스토리는 정규화되어 있습니다. 프로바이더 네이티브 포맷은 replay마다
+대화 히스토리는 정규화되어 있습니다. 런타임 네이티브 포맷은 replay마다
 파생되므로 런타임 교체는 respawn으로 처리됩니다.
 
 ## 교체
@@ -25,7 +25,7 @@ await client.agent.patch(sessionId, { provider: "codex", model: "gpt-5.4" });
 ```
 
 `provider` 필드가 있는 `PATCH /agent/session`은 현재 프로세스를
-종료하고 새 런타임으로 respawn해서 정규화 히스토리를 새 프로바이더의
+종료하고 새 런타임으로 respawn해서 정규화 히스토리를 새 런타임의
 네이티브 포맷으로 replay합니다. 세션 레코드, 이벤트 커서, runtime chain
 모두 유지됩니다.
 
@@ -35,7 +35,7 @@ await client.agent.patch(sessionId, { provider: "codex", model: "gpt-5.4" });
 |------|---------|---------|
 | `restart` | 같은 설정으로 respawn | replay하지 않음 (warm restart) |
 | `resume` | 같은 설정으로 respawn | 재구성해서 다시 주입 |
-| `patch` (프로바이더 변경) | 새 설정으로 respawn | 새 프로바이더용으로 재구성 |
+| `patch` (런타임 변경) | 새 설정으로 respawn | 새 런타임용으로 재구성 |
 
 긴 유휴 후나 런타임이 죽었을 때는 `resume`을 사용합니다. 앱이 런타임
 교체를 원할 때는 `patch`를 사용합니다.
@@ -44,12 +44,12 @@ await client.agent.patch(sessionId, { provider: "codex", model: "gpt-5.4" });
 
 대부분의 "에이전트 플랫폼" 추상화는 대화를 런타임별 일시 상태로 다룹니다.
 프로세스를 잃으면 스레드도 잃습니다. SNA에서는 정규화 히스토리가 기준입니다.
-모든 프로바이더는 replay 대상이지, 기억의 보관자가 아닙니다.
+모든 런타임은 replay 대상이지, 기억의 보관자가 아닙니다.
 
 ## 주의
 
 - **호스팅된 툴 상태는 따라오지 않습니다.** Codex의 이미지 생성,
-  web_search 등 호스팅된 툴은 프로바이더 측에 존재합니다. 이전 호출의
+  web_search 등 호스팅된 툴은 런타임 측에 존재합니다. 이전 호출의
   `tool_result`는 히스토리에 있지만, 다음 턴이 이전 호출의 OpenAI
   대화 id를 기대하면 그건 사라진 상태입니다.
 - **모델 특정 토큰은 replay에서 살짝 손실됩니다.** Claude의 확장 thinking

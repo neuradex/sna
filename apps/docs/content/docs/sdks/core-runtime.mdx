@@ -8,9 +8,9 @@ Use these APIs when you want to invoke the agent runtime without going through t
 
 | Surface | Purpose |
 | --- | --- |
-| `completion(input)` | Runs a single completion-style provider call. |
+| `completion(input)` | Runs a single completion-style runtime call. |
 | `runOnce(input)` | Runs one agent task and returns the final result. |
-| `getRuntimePool()` | Returns the shared runtime pool used to manage provider processes. |
+| `getRuntimePool()` | Returns the shared runtime pool used to manage runtime processes. |
 | `RuntimePool` | Runtime pool class for advanced lifecycle control. |
 | `toClaudeEffort(level)` | Maps SNA reasoning levels to Claude-oriented effort values. |
 | `toCodexEffort(level)` | Maps SNA reasoning levels to Codex-oriented effort values. |
@@ -27,13 +27,13 @@ The HTTP equivalents are documented under [agent completion](/docs/api/endpoints
 | Text generation without tools or a persistent session | `completion` |
 | A self-contained agent task that can use tools and then finish | `runOnce` |
 | Long-lived interactive sessions | `createSnaApp` or `SnaClient.agent.start/send` |
-| Provider process reuse across several direct calls | `getRuntimePool()` |
+| Runtime process reuse across several direct calls | `getRuntimePool()` |
 
 ## Function reference
 
 ### `completion(input)`
 
-Runs a single completion-style call through the configured provider. Use it when the task is closer to text generation, summarization, classification, or lightweight transformation than to a long-lived coding session. It returns after the provider response is complete.
+Runs a single completion-style call through the configured runtime. Use it when the task is closer to text generation, summarization, classification, or lightweight transformation than to a long-lived coding session. It returns after the runtime response is complete.
 
 Common options include `prompt`, `model`, `systemPrompt`, `appendSystemPrompt`, `label`, `timeout`, `env`, `reasoningLevel`, and `providerOptions`.
 
@@ -45,31 +45,31 @@ Common options include `message`, `provider`, `model`, `permissionMode`, `cwd`, 
 
 ### `getRuntimePool()`
 
-Returns the shared runtime pool used by the process. Use this when multiple call sites should reuse the same provider process management instead of creating independent pools.
+Returns the shared runtime pool used by the process. Use this when multiple call sites should reuse the same runtime process management instead of creating independent pools.
 
 ### `RuntimePool`
 
-Owns provider runtime lifecycle. Most applications should use `getRuntimePool`; construct `RuntimePool` directly only when isolation is required for tests or embedded hosts.
+Owns runtime lifecycle. Most applications should use `getRuntimePool`; construct `RuntimePool` directly only when isolation is required for tests or embedded hosts.
 
 ### `toClaudeEffort(level)`
 
-Maps SNA reasoning levels into Claude-compatible effort values. Use it in provider adapters rather than scattering provider-specific strings across application code.
+Maps SNA reasoning levels into Claude-compatible effort values. Use it in runtime adapters rather than scattering runtime-specific strings across application code.
 
 ### `toCodexEffort(level)`
 
-Maps SNA reasoning levels into Codex-compatible effort values. It keeps UI-level reasoning choices provider-neutral.
+Maps SNA reasoning levels into Codex-compatible effort values. It keeps UI-level reasoning choices runtime-neutral.
 
 ### `toGrokEffort(level)`
 
-Maps SNA reasoning levels into Grok-compatible effort values for the Grok provider adapter.
+Maps SNA reasoning levels into Grok-compatible effort values for the Grok runtime adapter.
 
 ### `toCursorEffortSuffix(level)` / `applyCursorReasoning(...)`
 
-Builds Cursor CLI reasoning arguments from the provider-neutral reasoning level. Use these helpers only in provider adapters or host code that launches Cursor directly.
+Builds Cursor CLI reasoning arguments from the runtime-neutral reasoning level. Use these helpers only in runtime adapters or host code that launches Cursor directly.
 
 ## Reasoning levels
 
-SNA exposes one `reasoningLevel` scale so UI and SDK callers do not need provider-specific effort strings.
+SNA exposes one `reasoningLevel` scale so UI and SDK callers do not need runtime-specific effort strings.
 
 | Level | Meaning | Claude mapping | Codex mapping |
 | --- | --- | --- | --- |
@@ -80,10 +80,10 @@ SNA exposes one `reasoningLevel` scale so UI and SDK callers do not need provide
 | `4` | Heavy reasoning | `xhigh` | `high` |
 | `5` | Maximum reasoning | `max` | `xhigh` |
 
-Provider adapters may ignore unsupported levels. Codex `minimal` can be incompatible with some built-in tools, so production UIs should expose level `1` only when they also control the allowed tool set.
+Runtime adapters may ignore unsupported levels. Codex `minimal` can be incompatible with some built-in tools, so production UIs should expose level `1` only when they also control the allowed tool set.
 
 ### `buildCanonicalFromDb(...)`
 
-Reconstructs canonical history from database rows. Use it when a server process needs to replay persisted history into a provider-neutral actor/kind shape.
+Reconstructs canonical history from database rows. Use it when a server process needs to replay persisted history into a runtime-neutral actor/kind shape.
 
-Canonical history uses `actor` and `kind` rather than provider-specific message names. That lets the same stored session replay into Claude Code, Codex, OpenCode, or another adapter without rewriting the database rows.
+Canonical history uses `actor` and `kind` rather than runtime-specific message names. That lets the same stored session replay into Claude Code, Codex, OpenCode, or another adapter without rewriting the database rows.

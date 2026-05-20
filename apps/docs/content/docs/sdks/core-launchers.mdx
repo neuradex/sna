@@ -43,10 +43,10 @@ type SnaServerOptions = {
 | --- | --- | --- |
 | `port` | `3099` | API port passed to the server. |
 | `dbPath` | required | Absolute SQLite path. The launcher also derives `cwd` from this path when `cwd` is omitted. |
-| `cwd` | `dirname(dbPath)` | Working directory for the server process and provider sessions. |
+| `cwd` | `dirname(dbPath)` | Working directory for the server process and runtime sessions. |
 | `maxSessions` | `5` | Maximum concurrent agent sessions. |
 | `permissionMode` | SDK default | Default permission mode for new agent sessions. |
-| `model` | SDK default | Default model for provider calls. |
+| `model` | SDK default | Default model for runtime calls. |
 | `permissionTimeoutMs` | `0` | `0` leaves permission prompts under host control; positive values auto-deny after the timeout. |
 | `nativeBinding` | auto-detected | Explicit `better-sqlite3` native binding path. Use this for custom Electron builds. |
 | `env` | `{}` | Extra environment variables. These override launcher-generated values. |
@@ -124,11 +124,11 @@ type InProcessSnaServerHandle = {
 };
 ```
 
-`stop()` kills sessions, disposes provider runtimes, flushes tracing, clears the logger callback, and closes the HTTP server. Call it from the host shutdown path.
+`stop()` kills sessions, disposes runtimes, flushes tracing, clears the logger callback, and closes the HTTP server. Call it from the host shutdown path.
 
 ### `resolveClaudeCli(options?)`
 
-Finds a usable Claude Code CLI path. Use it during setup or diagnostics to explain why a provider cannot start.
+Finds a usable Claude Code CLI path. Use it during setup or diagnostics to explain why a runtime cannot start.
 
 ### `validateClaudePath(path)`
 

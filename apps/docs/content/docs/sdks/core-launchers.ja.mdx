@@ -43,10 +43,10 @@ type SnaServerOptions = {
 | --- | --- | --- |
 | `port` | `3099` | Server に渡す API port。 |
 | `dbPath` | required | Absolute SQLite path。`cwd` がない場合、launcher はこの path から `cwd` を計算します。 |
-| `cwd` | `dirname(dbPath)` | Server process と provider session の working directory。 |
+| `cwd` | `dirname(dbPath)` | Server process と runtime session の working directory。 |
 | `maxSessions` | `5` | 同時に保持できる agent session 数。 |
 | `permissionMode` | SDK default | 新しい agent session のデフォルト permission mode。 |
-| `model` | SDK default | Provider call のデフォルト model。 |
+| `model` | SDK default | Runtime call のデフォルト model。 |
 | `permissionTimeoutMs` | `0` | `0` の場合、permission prompt response は host が管理します。正の値なら timeout 後に自動 deny します。 |
 | `nativeBinding` | auto-detected | 明示的な `better-sqlite3` native binding path。Custom Electron build で使います。 |
 | `env` | `{}` | 追加 environment variable。Launcher が生成した値を override します。 |
@@ -124,11 +124,11 @@ type InProcessSnaServerHandle = {
 };
 ```
 
-`stop()` は session を終了し、provider runtime を dispose し、tracing を flush し、logger callback を整理してから HTTP server を閉じます。Host shutdown path で呼んでください。
+`stop()` は session を終了し、runtime を dispose し、tracing を flush し、logger callback を整理してから HTTP server を閉じます。Host shutdown path で呼んでください。
 
 ### `resolveClaudeCli(options?)`
 
-利用可能な Claude Code CLI path を探します。Provider を開始できない理由を setup または diagnostics 画面で説明する場合に使います。
+利用可能な Claude Code CLI path を探します。ランタイムを開始できない理由を setup または diagnostics 画面で説明する場合に使います。
 
 ### `validateClaudePath(path)`
 

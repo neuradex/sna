@@ -25,32 +25,32 @@ await client.agent.start(session: string, config?: AgentStartConfig): Promise<{
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `session` | `string` | yes | Target SNA session ID. The server auto-creates it if it does not exist. |
-| `config.provider` | `string` | no | Runtime provider such as `claude-code`, `codex`, `opencode`, or `omlx`. |
-| `config.modelProvider` | `string` | no | Attribution metadata for the model vendor. Stored on assistant-authored canonical rows. |
-| `config.prompt` | `string` | no | Initial prompt sent immediately after startup. |
-| `config.model` | `string` | no | Provider model slug. |
+| `session` | `string` | yes | 대상 SNA session ID. 없으면 서버가 자동으로 생성합니다. |
+| `config.provider` | `string` | no | `claude-code`, `codex`, `opencode`, `omlx` 같은 runtime id입니다. |
+| `config.modelProvider` | `string` | no | 모델 벤더 어트리뷰션 메타데이터입니다. assistant가 작성한 canonical row에 저장됩니다. |
+| `config.prompt` | `string` | no | 시작 직후 바로 보낼 초기 prompt입니다. |
+| `config.model` | `string` | no | 런타임 모델 slug입니다. |
 | `config.permissionMode` | `string` | no | Permission behavior, for example `acceptEdits` or `bypassPermissions`. |
-| `config.configDir` | `string` | no | Provider config directory override. Claude uses `CLAUDE_CONFIG_DIR`; Codex uses `CODEX_HOME`. |
-| `config.force` | `boolean` | no | Kill an existing runtime and start fresh. |
-| `config.cwd` | `string` | no | Working directory for this runtime. |
-| `config.history` | `unknown[]` | no | Provider-neutral history to resume from. |
-| `config.systemPrompt` | `string` | no | Replaces the base system prompt. |
-| `config.appendSystemPrompt` | `string` | no | Appends text to the system prompt. |
-| `config.allowedTools` | `string[]` | no | Restricts the agent to these tools. |
-| `config.disallowedTools` | `string[]` | no | Blocks specific tools. |
-| `config.mcpServers` | `Record<string, unknown>` | no | MCP servers made available to the agent. |
-| `config.reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Provider-neutral reasoning effort. |
-| `config.providerOptions` | `Record<string, unknown>` | no | Provider-specific options, such as Codex `serviceTier`. |
-| `config.extraArgs` | `string[]` | no | Deprecated raw CLI flags. Prefer typed fields. |
+| `config.configDir` | `string` | no | 런타임 config directory override입니다. Claude는 `CLAUDE_CONFIG_DIR`, Codex는 `CODEX_HOME`를 사용합니다. |
+| `config.force` | `boolean` | no | 기존 런타임을 종료하고 새로 시작합니다. |
+| `config.cwd` | `string` | no | 이 런타임의 작업 디렉토리입니다. |
+| `config.history` | `unknown[]` | no | resume에 사용할 runtime-neutral history입니다. |
+| `config.systemPrompt` | `string` | no | 기본 system prompt를 교체합니다. |
+| `config.appendSystemPrompt` | `string` | no | system prompt 뒤에 텍스트를 덧붙입니다. |
+| `config.allowedTools` | `string[]` | no | agent가 이 tool들만 사용하도록 제한합니다. |
+| `config.disallowedTools` | `string[]` | no | 특정 tool을 차단합니다. |
+| `config.mcpServers` | `Record<string, unknown>` | no | agent에 노출할 MCP server입니다. |
+| `config.reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Runtime-neutral reasoning effort. |
+| `config.providerOptions` | `Record<string, unknown>` | no | Runtime-specific options, such as Codex `serviceTier`. |
+| `config.extraArgs` | `string[]` | no | deprecated된 raw CLI flag입니다. typed field를 우선 사용하세요. |
 
 **Returns**
 
 | Field | Description |
 | --- | --- |
-| `status` | `started` when a process was spawned, `already_running` when the session already had a runtime. |
-| `provider` | Provider used for the runtime. |
-| `sessionId` | Provider runtime session ID. |
+| `status` | 프로세스를 spawn했다면 `started`, 세션에 이미 런타임이 있으면 `already_running`입니다. |
+| `provider` | 사용된 런타임입니다. |
+| `sessionId` | 런타임 session ID입니다. |
 
 **Example**
 
@@ -67,7 +67,7 @@ const started = await client.agent.start("default", {
 **Notes**
 
 - With HTTP enabled, the promise resolves after the process has been spawned.
-- It does not guarantee the provider init handshake has reached an idle state. If the UI must wait for readiness, call `getStatus` until `agentStatus === "idle"`.
+- It does not guarantee the runtime init handshake has reached an idle state. If the UI must wait for readiness, call `getStatus` until `agentStatus === "idle"`.
 - Calling `send` immediately after `start` is safe in normal usage because stdin queues the message.
 
 ### `agent.send(session, message, opts?)`
@@ -86,14 +86,14 @@ await client.agent.send(
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `session` | `string` | yes | Running session ID. |
-| `message` | `string` | yes | User message to send to the agent. |
-| `opts.images` | `{ base64: string; mimeType: string }[]` | no | Image attachments for providers that support multimodal input. |
-| `opts.meta` | `Record<string, unknown>` | no | Extra metadata stored with the user message. |
+| `session` | `string` | yes | 실행 중인 session ID입니다. |
+| `message` | `string` | yes | agent에 보낼 사용자 message입니다. |
+| `opts.images` | `{ base64: string; mimeType: string }[]` | no | multimodal input을 지원하는 런타임에 전달할 이미지 첨부입니다. |
+| `opts.meta` | `Record<string, unknown>` | no | 사용자 message와 함께 저장할 추가 metadata입니다. |
 
 **Returns**
 
-`{ status: "sent" }` after the message has been accepted. With HTTP enabled, the message has also been persisted before the promise resolves.
+message가 수락되면 `{ status: "sent" }`를 반환합니다. HTTP가 켜져 있으면 promise가 resolve되기 전에 message도 저장됩니다.
 
 **Example**
 
@@ -117,9 +117,9 @@ await client.agent.send("default", "What is in this screenshot?", {
 await client.agent.kill(session: string): Promise<{ status: "killed" | "no_session" }>
 ```
 
-**Input**: `session` is the session ID whose agent process should be terminated.
+**Input**: `session`은 종료할 agent process의 session ID입니다.
 
-**Returns**: `killed` if a runtime was stopped, `no_session` if the session does not exist.
+**Returns**: 런타임을 중단했다면 `killed`, 세션이 없으면 `no_session`입니다.
 
 **Example**
 
@@ -127,7 +127,7 @@ await client.agent.kill(session: string): Promise<{ status: "killed" | "no_sessi
 await client.agent.kill("default");
 ```
 
-**Notes**: The session record remains. Only the running process is terminated.
+**Notes**: session record는 남고, 실행 중인 process만 종료됩니다.
 
 ### `agent.restart(session, config?)`
 
@@ -141,9 +141,9 @@ await client.agent.restart(session: string, config?: Partial<AgentStartConfig>):
 }>
 ```
 
-**Input**: same config shape as `start`, but every field is optional.
+**Input**: `start`와 같은 config shape이지만 모든 필드가 optional입니다.
 
-**Returns**: provider and new runtime session ID after restart.
+**Returns**: restart 후 runtime id와 새 runtime session ID를 반환합니다.
 
 **Example**
 
@@ -151,7 +151,7 @@ await client.agent.restart(session: string, config?: Partial<AgentStartConfig>):
 await client.agent.restart("default", { model: "claude-opus-4-6" });
 ```
 
-**Notes**: Use this after changing provider-level settings or when the CLI process becomes unhealthy.
+**Notes**: runtime-level 설정을 바꾼 뒤나 CLI process가 비정상 상태가 되었을 때 사용합니다.
 
 ### `agent.interrupt(session)`
 
@@ -161,7 +161,7 @@ await client.agent.restart("default", { model: "claude-opus-4-6" });
 await client.agent.interrupt(session: string): Promise<{ status: "interrupted" | "no_session" }>
 ```
 
-**Use it when** a user presses a stop button and the session should stay alive for the next message.
+**Use it when** 사용자가 stop button을 눌렀지만 다음 message를 위해 session은 유지해야 할 때 사용합니다.
 
 **Example**
 
@@ -195,22 +195,22 @@ await client.agent.resume(session: string, opts?: {
 
 | Field | Description |
 | --- | --- |
-| `session` | Session to resume from stored history. |
-| `opts.provider` | Provider override. |
-| `opts.model` | Model override. |
-| `opts.permissionMode` | Permission mode override. |
-| `opts.configDir` | Provider config directory override. |
-| `opts.prompt` | Optional prompt sent during resume. |
-| `opts.providerOptions` | Provider-specific options. |
+| `session` | 저장된 history에서 resume할 session입니다. |
+| `opts.provider` | 런타임 override입니다. |
+| `opts.model` | 모델 override입니다. |
+| `opts.permissionMode` | permission mode override입니다. |
+| `opts.configDir` | 런타임 config directory override입니다. |
+| `opts.prompt` | resume 중 보낼 optional prompt입니다. |
+| `opts.providerOptions` | 런타임별 option입니다. |
 
 **Returns**
 
 | Field | Description |
 | --- | --- |
-| `status` | Always `resumed` on success. |
-| `provider` | Provider used for the resumed runtime. |
-| `sessionId` | Runtime session ID. |
-| `historyCount` | Number of persisted messages loaded. |
+| `status` | 성공하면 항상 `resumed`입니다. |
+| `provider` | resumed session에 사용된 런타임입니다. |
+| `sessionId` | 런타임 session ID입니다. |
+| `historyCount` | 로드한 persisted message 수입니다. |
 
 **Example**
 
@@ -236,7 +236,7 @@ await client.agent.getStatus(session: string): Promise<{
 }>
 ```
 
-**Use it when** rendering controls that depend on runtime state or when waiting after `start`.
+**Use it when** runtime state에 의존하는 control을 렌더링하거나 `start` 이후 준비 상태를 기다릴 때 사용합니다.
 
 **Example**
 
@@ -261,30 +261,30 @@ await client.agent.completion(opts: CompletionOptions): Promise<CompletionResult
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `prompt` | `string` | yes | Prompt to send. |
-| `model` | `string` | no | Model slug. |
-| `systemPrompt` | `string` | no | Replaces system prompt. |
-| `appendSystemPrompt` | `string` | no | Appends to system prompt. |
-| `label` | `string` | no | Trace label. |
-| `timeout` | `number` | no | Timeout in milliseconds. |
-| `extraArgs` | `string[]` | no | Deprecated raw CLI flags. |
-| `env` | `Record<string, string>` | no | Environment overrides. |
-| `reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Provider-neutral reasoning effort. |
-| `providerOptions` | `Record<string, unknown>` | no | Provider-specific options. |
+| `prompt` | `string` | yes | 보낼 prompt입니다. |
+| `model` | `string` | no | 모델 slug입니다. |
+| `systemPrompt` | `string` | no | system prompt를 교체합니다. |
+| `appendSystemPrompt` | `string` | no | system prompt 뒤에 덧붙입니다. |
+| `label` | `string` | no | trace label입니다. |
+| `timeout` | `number` | no | millisecond 단위 timeout입니다. |
+| `extraArgs` | `string[]` | no | deprecated된 raw CLI flag입니다. |
+| `env` | `Record<string, string>` | no | environment override입니다. |
+| `reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Runtime-neutral reasoning effort. |
+| `providerOptions` | `Record<string, unknown>` | no | 런타임별 option입니다. |
 
 **Returns**
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `text` | `string` | Generated text. |
-| `usage.inputTokens` | `number` | Input token count. |
-| `usage.outputTokens` | `number` | Output token count. |
-| `usage.cacheReadTokens` | `number` | Cache read token count. |
-| `usage.cacheCreationTokens` | `number` | Cache creation token count. |
-| `costUsd` | `number` | Estimated cost in USD. |
-| `durationMs` | `number` | Total duration. |
-| `durationApiMs` | `number` | Provider API duration. |
-| `model` | `string` | Model used. |
+| `text` | `string` | 생성된 text입니다. |
+| `usage.inputTokens` | `number` | input token 수입니다. |
+| `usage.outputTokens` | `number` | output token 수입니다. |
+| `usage.cacheReadTokens` | `number` | cache read token 수입니다. |
+| `usage.cacheCreationTokens` | `number` | cache creation token 수입니다. |
+| `costUsd` | `number` | USD 기준 예상 비용입니다. |
+| `durationMs` | `number` | 전체 소요 시간입니다. |
+| `durationApiMs` | `number` | 런타임 API 소요 시간입니다. |
+| `model` | `string` | 사용된 모델입니다. |
 
 **Example**
 
@@ -297,7 +297,7 @@ const result = await client.agent.completion({
 console.log(result.text, result.costUsd);
 ```
 
-**Use `completion` instead of `runOnce` when** the task does not need an agent session, tools, or event streaming.
+**Use `completion` instead of `runOnce` when** 작업에 agent session, tool, event streaming이 필요 없을 때는 `runOnce`보다 `completion`을 사용합니다.
 
 ### `agent.runOnce(opts)`
 
@@ -314,17 +314,17 @@ await client.agent.runOnce(opts: RunOnceOptions): Promise<{
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `message` | `string` | yes | Task prompt. |
-| `model` | `string` | no | Model slug. |
-| `systemPrompt` | `string` | no | Replaces system prompt. |
-| `appendSystemPrompt` | `string` | no | Appends to system prompt. |
-| `permissionMode` | `string` | no | Permission behavior. |
-| `cwd` | `string` | no | Working directory. |
-| `timeout` | `number` | no | Timeout in milliseconds. |
-| `provider` | `string` | no | Runtime provider. |
-| `extraArgs` | `string[]` | no | Deprecated raw CLI flags. |
-| `reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Provider-neutral reasoning effort. |
-| `providerOptions` | `Record<string, unknown>` | no | Provider-specific options. |
+| `message` | `string` | yes | 작업 prompt입니다. |
+| `model` | `string` | no | 모델 slug입니다. |
+| `systemPrompt` | `string` | no | system prompt를 교체합니다. |
+| `appendSystemPrompt` | `string` | no | system prompt 뒤에 덧붙입니다. |
+| `permissionMode` | `string` | no | permission 동작입니다. |
+| `cwd` | `string` | no | 작업 디렉토리입니다. |
+| `timeout` | `number` | no | millisecond 단위 timeout입니다. |
+| `provider` | `string` | no | runtime id입니다. |
+| `extraArgs` | `string[]` | no | deprecated된 raw CLI flag입니다. |
+| `reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Runtime-neutral reasoning effort. |
+| `providerOptions` | `Record<string, unknown>` | no | 런타임별 option입니다. |
 
 **Example**
 
@@ -337,7 +337,7 @@ const { result } = await client.agent.runOnce({
 });
 ```
 
-**Notes**: The server creates a temporary session, waits for completion, and cleans it up.
+**Notes**: 서버가 temporary session을 만들고 완료를 기다린 뒤 정리합니다.
 
 ### `agent.runOnceStream(opts)`
 
@@ -360,7 +360,7 @@ for await (const event of client.agent.runOnceStream({ message: "Explain this fi
 }
 ```
 
-**Notes**: Requires `http: true`; it uses `POST /agent/run-once/stream`.
+**Notes**: `http: true`가 필요하며 `POST /agent/run-once/stream`을 사용합니다.
 
 ## Model 및 configuration 메서드
 
@@ -376,11 +376,11 @@ await client.agent.listModels(runtime: string, config?: ListModelsConfig): Promi
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `runtime` | `string` | Runtime to inspect, for example `claude-code`, `codex`, `opencode`, or `omlx`. |
-| `config.cliPath` | `string` | Runtime CLI path override. |
-| `config.baseUrl` | `string` | API base URL for OMLX-style runtimes. |
-| `config.apiKey` | `string` | API key for OMLX-style runtimes. |
-| `config.refresh` | `boolean` | Bypass cache. |
+| `runtime` | `string` | 조회할 런타임입니다. 예: `claude-code`, `codex`, `opencode`, `omlx`. |
+| `config.cliPath` | `string` | 런타임 CLI path override입니다. |
+| `config.baseUrl` | `string` | OMLX-style 런타임의 API base URL입니다. |
+| `config.apiKey` | `string` | OMLX-style 런타임의 API key입니다. |
+| `config.refresh` | `boolean` | cache를 건너뜁니다. |
 
 **Returns**
 
@@ -471,7 +471,7 @@ const updated = await client.agent.update("default", {
 console.log(updated.applied); // "in-place" or "respawn"
 ```
 
-**Notes**: Some providers can apply changes in place. Others require a respawn with DB-backed history replay.
+**Notes**: 일부 런타임은 변경을 in-place로 적용할 수 있습니다. 다른 런타임은 DB-backed history replay를 사용한 respawn이 필요합니다.
 
 ## Event streaming 메서드
 
@@ -485,7 +485,7 @@ for await (const event of client.agent.streamEvents(session: string, since?: num
 }
 ```
 
-**Use it when** you want SSE instead of WebSocket. Requires `http: true`.
+**Use it when** WebSocket 대신 SSE를 쓰고 싶을 때 사용합니다. `http: true`가 필요합니다.
 
 ### `agent.subscribe(session, opts?)`
 
@@ -503,9 +503,9 @@ await client.agent.subscribe(session: string, opts?: {
 
 | Field | Description |
 | --- | --- |
-| `since` | Start from this event cursor. |
-| `includeHistory` | Replay persisted history as events. |
-| `tail` | Replay only the last N persisted messages. Mutually exclusive with `since` and `includeHistory`. |
+| `since` | 이 event cursor부터 시작합니다. |
+| `includeHistory` | persisted history를 event로 replay합니다. |
+| `tail` | 마지막 N개의 persisted message만 replay합니다. `since`, `includeHistory`와 함께 사용할 수 없습니다. |
 
 **Example**
 
@@ -531,7 +531,7 @@ await client.agent.getMessages(session: string, opts?: {
 }>
 ```
 
-**Use it when** implementing reverse pagination for older persisted messages.
+**Use it when** 오래된 persisted message를 위한 reverse pagination을 구현할 때 사용합니다.
 
 ### `agent.unsubscribe(session)`
 
@@ -541,7 +541,7 @@ await client.agent.getMessages(session: string, opts?: {
 await client.agent.unsubscribe(session: string): Promise<void>
 ```
 
-**Notes**: Also removes the session from reconnect resubscription state.
+**Notes**: reconnect resubscription state에서도 해당 session을 제거합니다.
 
 ### `agent.onEvent(handler)`
 
@@ -560,14 +560,14 @@ const unsubscribe = client.agent.onEvent((event: {
 
 | Type | Meaning |
 | --- | --- |
-| `thinking` | Agent internal reasoning block. |
-| `assistant` | Assistant-visible response block. |
-| `assistant_delta` | Streaming text fragment. |
-| `tool_use` | Agent is calling a tool. |
-| `tool_result` | Tool execution result. |
-| `complete` | Turn completed. |
-| `error` | Runtime or provider error. |
-| `user_message` | Echoed user message for multi-client sync. |
+| `thinking` | agent 내부 reasoning block입니다. |
+| `assistant` | assistant에게 보이는 response block입니다. |
+| `assistant_delta` | streaming text fragment입니다. |
+| `tool_use` | agent가 tool을 호출 중입니다. |
+| `tool_result` | tool 실행 결과입니다. |
+| `complete` | turn이 완료되었습니다. |
+| `error` | runtime error입니다. |
+| `user_message` | multi-client sync를 위해 echo된 user message입니다. |
 
 ## Permission 메서드
 
@@ -579,7 +579,7 @@ const unsubscribe = client.agent.onEvent((event: {
 await client.agent.subscribePermissions(): Promise<{ pendingCount: number }>
 ```
 
-**Use it when** the UI needs to receive tool approval prompts. Subscribe before starting an agent if the first permission prompt must not be missed.
+**Use it when** UI가 tool approval prompt를 받아야 할 때 사용합니다. 첫 permission prompt를 놓치면 안 된다면 agent 시작 전에 subscribe하세요.
 
 ### `agent.unsubscribePermissions()`
 
@@ -603,7 +603,7 @@ await client.agent.getPendingPermissions(session?: string): Promise<{
 }>
 ```
 
-**Use it when** reconnecting a UI and recovering prompts that arrived while disconnected.
+**Use it when** UI가 reconnect하면서 disconnected 상태에 도착한 prompt를 복구할 때 사용합니다.
 
 ### `agent.respondPermission(session, approved)`
 
@@ -638,4 +638,4 @@ const unsubscribe = client.agent.onPermissionRequest((event: {
 }) => void);
 ```
 
-**Use it when** opening a modal, notification, or command palette prompt for human approval.
+**Use it when** 사람의 승인을 받기 위해 modal, notification, command palette prompt를 열 때 사용합니다.

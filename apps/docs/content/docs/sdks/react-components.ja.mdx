@@ -51,7 +51,7 @@ Runtime behavior:
 
 | 項目 | 説明 |
 | --- | --- |
-| Agent startup | Mount 時に provider `claude-code` で `POST /agent/start?session=<provider session>` を呼びます。 |
+| Agent startup | Mount 時に runtime id `claude-code` で `POST /agent/start?session=<runtime session>` を呼びます。 |
 | Loading state | Startup request が resolve または fail するまで full-screen connecting overlay を表示します。 |
 | Open state | `useChatStore.isOpen` を使います。Panel が閉じている場合は floating button が出ます。 |
 | Keyboard shortcut | `Cmd/Ctrl + .` で panel を toggle します。 |

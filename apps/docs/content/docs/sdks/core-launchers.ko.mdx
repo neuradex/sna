@@ -43,10 +43,10 @@ type SnaServerOptions = {
 | --- | --- | --- |
 | `port` | `3099` | Server에 전달할 API port. |
 | `dbPath` | required | Absolute SQLite path. `cwd`가 없으면 launcher가 이 path에서 `cwd`를 계산합니다. |
-| `cwd` | `dirname(dbPath)` | Server process와 provider session의 working directory. |
+| `cwd` | `dirname(dbPath)` | Server process와 runtime session의 working directory. |
 | `maxSessions` | `5` | 동시에 유지할 수 있는 agent session 수. |
 | `permissionMode` | SDK default | 새 agent session의 기본 permission mode. |
-| `model` | SDK default | Provider call의 기본 model. |
+| `model` | SDK default | Runtime call의 기본 model. |
 | `permissionTimeoutMs` | `0` | `0`이면 permission prompt 응답을 host가 직접 관리합니다. 양수면 timeout 뒤 자동 deny됩니다. |
 | `nativeBinding` | auto-detected | 명시적인 `better-sqlite3` native binding path. Custom Electron build에서 사용합니다. |
 | `env` | `{}` | 추가 environment variable. Launcher가 만든 값을 override합니다. |
@@ -124,7 +124,7 @@ type InProcessSnaServerHandle = {
 };
 ```
 
-`stop()`은 session을 종료하고, provider runtime을 dispose하고, tracing을 flush하고, logger callback을 정리한 뒤 HTTP server를 닫습니다. Host shutdown path에서 호출하십시오.
+`stop()`은 session을 종료하고, runtime을 dispose하고, tracing을 flush하고, logger callback을 정리한 뒤 HTTP server를 닫습니다. Host shutdown path에서 호출하십시오.
 
 ### `resolveClaudeCli(options?)`
 

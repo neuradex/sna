@@ -8,9 +8,9 @@ HTTP server を経由せずに agent runtime を呼び出したい場合に使�
 
 | サーフェス | 目的 |
 | --- | --- |
-| `completion(input)` | completion 形式の provider call を 1 回実行します。 |
+| `completion(input)` | completion 形式の runtime call を 1 回実行します。 |
 | `runOnce(input)` | agent task を 1 つ実行し、最終結果を返します。 |
-| `getRuntimePool()` | provider process を管理する shared runtime pool を返します。 |
+| `getRuntimePool()` | runtime process を管理する shared runtime pool を返します。 |
 | `RuntimePool` | 高度な lifecycle control に使う runtime pool class です。 |
 | `toClaudeEffort(level)` | SNA reasoning level を Claude 系 effort value へ mapping します。 |
 | `toCodexEffort(level)` | SNA reasoning level を Codex 系 effort value へ mapping します。 |
@@ -27,13 +27,13 @@ HTTP 側の対応 API は [agent completion](/ja/docs/api/endpoints/agent/comple
 | Tool や persistent session が不要な text generation | `completion` |
 | Tool を使い、完了して終了できる self-contained agent task | `runOnce` |
 | 長く続く interactive session | `createSnaApp` または `SnaClient.agent.start/send` |
-| 複数の direct call 間で provider process を reuse する | `getRuntimePool()` |
+| 複数の direct call 間で runtime process を reuse する | `getRuntimePool()` |
 
 ## 関数リファレンス
 
 ### `completion(input)`
 
-設定された provider 経由で completion-style call を 1 回実行します。長期の coding session よりも text generation、summarization、classification、lightweight transformation に近い作業に使います。Provider response が完了すると返ります。
+設定された runtime 経由で completion-style call を 1 回実行します。長期の coding session よりも text generation、summarization、classification、lightweight transformation に近い作業に使います。Runtime response が完了すると返ります。
 
 主な option は `prompt`、`model`、`systemPrompt`、`appendSystemPrompt`、`label`、`timeout`、`env`、`reasoningLevel`、`providerOptions` です。
 
@@ -45,31 +45,31 @@ runtime 経由で 1 つの agent task を最後まで実行し、最終結果を
 
 ### `getRuntimePool()`
 
-現在の process が使う shared runtime pool を返します。複数の call site が独立 pool を作らず、同じ provider process management を再利用したい場合に使います。
+現在の process が使う shared runtime pool を返します。複数の call site が独立 pool を作らず、同じ runtime process management を再利用したい場合に使います。
 
 ### `RuntimePool`
 
-provider runtime lifecycle を所有します。ほとんどの application では `getRuntimePool` で十分です。Test や embedded host で隔離が必要な場合だけ直接作成してください。
+runtime lifecycle を所有します。ほとんどの application では `getRuntimePool` で十分です。Test や embedded host で隔離が必要な場合だけ直接作成してください。
 
 ### `toClaudeEffort(level)`
 
-SNA reasoning level を Claude-compatible effort value へ mapping します。Application code に provider-specific string を散らさず、provider adapter で使ってください。
+SNA reasoning level を Claude-compatible effort value へ mapping します。Application code に runtime-specific string を散らさず、runtime adapter で使ってください。
 
 ### `toCodexEffort(level)`
 
-SNA reasoning level を Codex-compatible effort value へ mapping します。UI-level reasoning choice を provider-neutral に保ちます。
+SNA reasoning level を Codex-compatible effort value へ mapping します。UI-level reasoning choice を runtime-neutral に保ちます。
 
 ### `toGrokEffort(level)`
 
-Grok provider adapter が使えるように、SNA reasoning level を Grok-compatible effort value へ mapping します。
+Grok runtime adapter が使えるように、SNA reasoning level を Grok-compatible effort value へ mapping します。
 
 ### `toCursorEffortSuffix(level)` / `applyCursorReasoning(...)`
 
-Provider-neutral reasoning level から Cursor CLI reasoning argument を作ります。Provider adapter または Cursor を直接起動する host code だけで使ってください。
+Runtime-neutral reasoning level から Cursor CLI reasoning argument を作ります。Runtime adapter または Cursor を直接起動する host code だけで使ってください。
 
 ## Reasoning level
 
-SNA は、UI や SDK caller が provider-specific effort string を知らなくて済むよう、単一の `reasoningLevel` scale を提供します。
+SNA は、UI や SDK caller が runtime-specific effort string を知らなくて済むよう、単一の `reasoningLevel` scale を提供します。
 
 | Level | 意味 | Claude mapping | Codex mapping |
 | --- | --- | --- | --- |
@@ -80,10 +80,10 @@ SNA は、UI や SDK caller が provider-specific effort string を知らなく�
 | `4` | 強い reasoning | `xhigh` | `high` |
 | `5` | 最大 reasoning | `max` | `xhigh` |
 
-Provider adapter は、未対応の level を無視する場合があります。Codex `minimal` は一部の built-in tool と相性が悪いことがあるため、production UI では allowed tool set まで制御できる場合にだけ level `1` を出すのが安全です。
+Runtime adapter は、未対応の level を無視する場合があります。Codex `minimal` は一部の built-in tool と相性が悪いことがあるため、production UI では allowed tool set まで制御できる場合にだけ level `1` を出すのが安全です。
 
 ### `buildCanonicalFromDb(...)`
 
-database row から canonical history を再構成します。Server process が保存済み history を provider-neutral な actor/kind 形式で replay する必要がある場合に使います。
+database row から canonical history を再構成します。Server process が保存済み history を runtime-neutral な actor/kind 形式で replay する必要がある場合に使います。
 
-Canonical history は provider-specific message name ではなく `actor` と `kind` を使います。そのため、同じ stored session を Claude Code、Codex、OpenCode、その他 adapter へ replay するときに database row を書き換える必要がありません。
+Canonical history は runtime-specific message name ではなく `actor` と `kind` を使います。そのため、同じ stored session を Claude Code、Codex、OpenCode、その他 adapter へ replay するときに database row を書き換える必要がありません。

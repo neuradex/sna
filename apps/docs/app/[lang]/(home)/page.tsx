@@ -39,8 +39,8 @@ const copy: Record<string, HomeCopy> = {
         path: 'introduction/embedding',
       },
       {
-        title: 'Provider harness orchestration',
-        description: 'Use the CLI harnesses tuned by model providers instead of rebuilding tool use, context handling, and approvals from raw APIs.',
+        title: 'Runtime harness orchestration',
+        description: 'Use the CLI harnesses tuned by model vendors instead of rebuilding tool use, context handling, and approvals from raw APIs.',
         path: 'introduction/what-is-sna',
       },
       {
@@ -69,7 +69,7 @@ const copy: Record<string, HomeCopy> = {
       },
       {
         title: 'Cookbook',
-        description: 'Streaming, permissions, multi-provider sessions, Electron embedding.',
+        description: 'Streaming, permissions, multi-runtime sessions, Electron embedding.',
         path: 'cookbook',
       },
     ],
@@ -93,7 +93,7 @@ const copy: Record<string, HomeCopy> = {
         path: 'introduction/embedding',
       },
       {
-        title: 'Provider harness 오케스트레이션',
+        title: 'Runtime harness 오케스트레이션',
         description: '낮은 수준의 모델 API 위에 툴 사용, 컨텍스트 처리, 승인 흐름을 직접 만들지 않고 모델 제공사가 다듬어 둔 CLI harness를 활용합니다.',
         path: 'introduction/what-is-sna',
       },
@@ -147,8 +147,8 @@ const copy: Record<string, HomeCopy> = {
         path: 'introduction/embedding',
       },
       {
-        title: 'Provider harness のオーケストレーション',
-        description: '低レベルのモデル API の上にツール利用、コンテキスト処理、承認フローを作り直さず、model provider が調整した CLI harness を活用します。',
+        title: 'Runtime harness のオーケストレーション',
+        description: '低レベルのモデル API の上にツール利用、コンテキスト処理、承認フローを作り直さず、model vendor が調整した CLI harness を活用します。',
         path: 'introduction/what-is-sna',
       },
       {

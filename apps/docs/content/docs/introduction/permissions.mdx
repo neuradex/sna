@@ -13,7 +13,7 @@ they speak different protocols. SNA abstracts both behind one API.
 agent invokes tool
    │
    ▼
-provider raises permission request
+runtime raises permission request
    │
    ▼
 SessionManager emits `permission_needed` event  ──► UI shows prompt
@@ -25,10 +25,10 @@ UI calls POST /agent/permission-respond { approved: bool }
 SessionManager resolves the pending request
    │
    ▼
-provider receives the verdict, tool executes (or is denied)
+runtime receives the verdict, tool executes (or is denied)
 ```
 
-## Per-provider wiring
+## Per-runtime wiring
 
 - **Claude Code** uses a `PreToolUse` hook, a separate Node process
   the CLI spawns to evaluate each tool call. SNA ships
@@ -58,5 +58,5 @@ Modes are per-session and switchable mid-thread via
 
 Tools that match the configured allowlist (Read, Glob, Grep,
 ListFiles, ...) bypass the permission gate entirely: no event, no
-round-trip. The allowlist is per-provider but normalized so the
+round-trip. The allowlist is per-runtime but normalized so the
 consumer config is one list.

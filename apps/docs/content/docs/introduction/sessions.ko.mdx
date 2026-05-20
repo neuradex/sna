@@ -25,7 +25,7 @@ POST /agent/start         → 초기 RuntimeSession 마운트, 프로세스 spaw
 POST /agent/send          → 메시지 전송, 이벤트 흐름
 POST /agent/set-model     → 인플레이스 오버라이드 또는 새 RuntimeSession
 PATCH /agent/session      → {cwd, model, permissionMode} 통합 mutator
-POST /agent/resume        → 프로바이더 네이티브 히스토리 재구성, respawn
+POST /agent/resume        → 런타임 네이티브 히스토리 재구성, respawn
 POST /agent/restart       → 같은 설정으로 respawn (그대로 유지)
 POST /agent/kill          → 프로세스 종료 (세션 레코드는 남음)
 DELETE /agent/sessions/:id → 세션 + 히스토리 삭제
@@ -33,7 +33,7 @@ DELETE /agent/sessions/:id → 세션 + 히스토리 삭제
 
 ## PATCH 의미론
 
-`PATCH /agent/session`은 통합 mutator입니다. 서버는 활성 프로바이더의
+`PATCH /agent/session`은 통합 mutator입니다. 서버는 활성 런타임 어댑터의
 `applyPatch()` 훅을 통해 필드별로 적용하고, 그 훅이 인플레이스 적용과
 respawn-with-history-replay 중 하나를 결정합니다.
 

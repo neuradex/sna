@@ -1,10 +1,10 @@
 ---
 title: Permission flows
-description: Wire an approval UI without diverging per provider.
+description: Wire an approval UI without diverging per runtime.
 icon: ShieldCheck
 ---
 
-The user-facing pattern is the same across providers: the consumer
+The user-facing pattern is the same across runtimes: the consumer
 app subscribes to permission events, shows a dialog, posts back the
 verdict. SNA hides Claude's PreToolUse hook vs Codex's JSON-RPC
 approval behind one event.
@@ -48,8 +48,8 @@ await client.agent.start(sessionId, {
 ```
 
 Patterns use Claude Code's tool-pattern syntax. The same string list
-is normalized per-provider, so the consumer config doesn't need to
-fork by provider.
+is normalized per-runtime, so the consumer config doesn't need to
+fork by runtime.
 
 ## Renderer pattern (Electron / React)
 
