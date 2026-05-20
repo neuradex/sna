@@ -5,26 +5,37 @@ description: "startMockAnthropicServer、runOneshot、MockServer の使い方。
 
 # Testing Mock API
 
-## `startMockAnthropicServer(options?)`
+## `startMockAnthropicServer()`
 
 ```ts
-const server = await startMockAnthropicServer(options?: { port?: number }): Promise<MockServer>
+declare function startMockAnthropicServer(): Promise<MockServer>;
 ```
 
 ```ts
 type MockServer = {
-  url: string;
   port: number;
-  logs: MockLogEntry[];
-  close: () => Promise<void>;
+  server: http.Server;
+  close: () => void;
+  requests: Array<{ model: string; messages: unknown[]; stream: boolean; timestamp: string }>;
+  onLog: (handler: (line: string) => void) => void;
 };
 ```
 
 ```ts
 type MockLogEntry = {
-  request: unknown;
-  response: unknown;
-  timestamp: number;
+  ts: string;
+  type: "request" | "response" | "error" | "info";
+  method?: string;
+  url?: string;
+  model?: string;
+  stream?: boolean;
+  messageCount?: number;
+  userText?: string;
+  systemPromptLength?: number;
+  replyText?: string;
+  requestBody?: unknown;
+  error?: string;
+  message?: string;
 };
 ```
 
@@ -32,28 +43,48 @@ type MockLogEntry = {
 import { startMockAnthropicServer } from "@sna-sdk/testing";
 
 const mock = await startMockAnthropicServer();
-process.env.ANTHROPIC_BASE_URL = mock.url;
+process.env.ANTHROPIC_BASE_URL = `http://localhost:${mock.port}`;
+process.env.ANTHROPIC_API_KEY = "sk-test";
+
+mock.onLog((line) => {
+  process.stdout.write(`${line}\n`);
+});
 
 try {
-  // Anthropic 互換 API を期待する code を実行します。
+  // Anthropic-compatible API を期待する code を実行します。
 } finally {
-  await mock.close();
+  mock.close();
 }
 ```
 
 動作:
 
-- `/v1/messages` endpoint を提供します。
-- 通常の user text には deterministic response を返します。
-- tools が宣言され、prompt に `[tool:Name]` が含まれる場合、tool-use response を生成できます。
+- OS が選んだ空き port で起動します。現在の実装は fixed port option を受け取りません。
+- Anthropic-compatible `POST /v1/messages` endpoint を提供します。
+- CORS preflight request をサポートします。
+- Parsed request を `mock.requests` に記録します。
+- `mock.onLog` から JSONL log line を emit します。
+- 通常 text には最後の user text を反転した文字列で応答します。Realistic な返答ではなく deterministic test fixture です。
+- Tool が宣言され、最新の user text に `[tool:Name]` が含まれる場合、その tool の `tool_use` block を返すか stream します。
+- Streaming SSE と non-streaming JSON response の両方をサポートします。
 
-## `runOneshot(options)`
+## `runOneshot(cliArgs?)`
 
 ```ts
-await runOneshot(options: Record<string, unknown>): Promise<unknown>
+declare function runOneshot(cliArgs?: string[]): Promise<void>;
 ```
 
-full CLI harness を起動せずに one-shot execution path だけを検証したい test で使います。
+full interactive CLI harness を起動せず、mock Anthropic API に接続した Claude 実行だけを検証したい場合に使います。
+
+`runOneshot` は mock server を起動し、`ANTHROPIC_BASE_URL` をその server に向け、渡された CLI argument で `claude` を実行します。stdout/stderr を capture し、Claude の exit code で process を終了します。`CLAUDE_CONFIG_DIR` には `.sna/mock-claude-oneshot` を使います。
+
+Written files:
+
+| File | Contents |
+| --- | --- |
+| `.sna/mock-claude-stdout.log` | Captured Claude stdout. |
+| `.sna/mock-claude-stderr.log` | Captured Claude stderr. |
+| `.sna/mock-claude-oneshot/` | Temporary Claude config directory. |
 
 ## Instance helpers
 

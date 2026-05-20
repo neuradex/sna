@@ -6,7 +6,7 @@ description: "Runtime, server, launcher, and configuration surfaces for embeddin
 
 `@sna-sdk/core` is the lowest-level package. Use it when you run SNA inside another process, expose SNA through your own server, or need provider/runtime primitives directly.
 
-Core does not assume React and does not require the browser client. It owns the server-side runtime contract.
+Core does not assume React and does not require the browser client. It owns the server-side runtime contract: configuration, provider process lifecycle, HTTP/WS server assembly, SQLite-backed history, and launcher utilities for Node and Electron hosts.
 
 ## Install
 
@@ -14,9 +14,28 @@ Core does not assume React and does not require the browser client. It owns the 
 pnpm add @sna-sdk/core
 ~~~
 
+Install `better-sqlite3` in the host application as well. The package is a peer dependency because Electron apps often need a native binding rebuilt for their runtime.
+
 ## Public surfaces
 
 - [core-runtime](/docs/sdks/core-runtime)
 - [core-server](/docs/sdks/core-server)
 - [core-launchers](/docs/sdks/core-launchers)
 - [core-config](/docs/sdks/core-config)
+
+## Import map
+
+| Import path | Use it for |
+| --- | --- |
+| `@sna-sdk/core` | Runtime helpers, shared types, configuration helpers, and provider-neutral data shapes. |
+| `@sna-sdk/core/server` | Creating the SNA HTTP app, attaching WebSocket support, and managing server-side sessions. |
+| `@sna-sdk/core/node` | Starting the standalone SNA server from a plain Node process. |
+| `@sna-sdk/core/electron` | Starting SNA from Electron, including packaged app path handling and in-process mode. |
+| `@sna-sdk/core/db/schema` | Database schema helpers for hosts that need direct migration or inspection access. |
+| `@sna-sdk/core/providers` | Advanced provider/runtime primitives. Most applications should prefer the server or client APIs. |
+
+## When to choose Core
+
+Choose Core when the host owns the local server lifecycle. Typical examples are desktop apps, internal CLIs, test harnesses, and custom backend processes that need to expose SNA over their own HTTP server.
+
+Use `@sna-sdk/client` when a server is already running and you only need typed HTTP, WebSocket, and SSE access. Use `@sna-sdk/react` when the integration lives inside a React UI.

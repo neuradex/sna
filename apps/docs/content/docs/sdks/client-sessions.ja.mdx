@@ -82,7 +82,7 @@ session record を削除します。agent process が存在する場合は、削
 const unsubscribe = client.sessions.onSnapshot((sessions: SessionInfo[]) => void);
 ```
 
-callback には毎回 session 一覧全体が渡されます。diff を適用するのではなく、local state を snapshot で置き換えてください。WebSocket 接続後、lifecycle 変更後、agent status 変更後に発火します。
+callback には毎回 session 一覧全体が渡されます。diff を適用するのではなく、local state を snapshot で置き換えてください。WebSocket 接続後、lifecycle 変更後、agent status 変更後に呼ばれます。
 
 ## `sessions.onConfigChanged(callback)`
 

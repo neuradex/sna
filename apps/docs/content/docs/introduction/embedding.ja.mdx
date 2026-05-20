@@ -5,7 +5,7 @@ icon: Box
 ---
 
 `startSnaServer()` は standalone サーバを管理された子プロセスとして
-fork します。ホストに応じて、2 つのエントリポイントを使えます。
+fork します。ホストに応じて、2 つのエントリポイントから選びます。
 
 ```ts
 import { startSnaServer } from "@sna-sdk/core/node";      // 普通の Node
@@ -13,7 +13,7 @@ import { startSnaServer } from "@sna-sdk/core/electron";  // Electron
 ```
 
 Electron 用エントリポイントは asar-unpacked パスを解決し、
-コンシューマアプリが Electron ランタイム向けにリビルドした
+アプリが Electron ランタイム向けにリビルドした
 `better-sqlite3` バイナリを見つけます。
 
 ## ライフサイクル
@@ -35,7 +35,7 @@ const sna = await startSnaServer({
 ## Electron チェックリスト
 
 - `node_modules/@sna-sdk/core/**` を electron-builder の `asarUnpack`
-  に追加します。サーバの `dist/` が実行時に到達可能である必要があります。
+  に追加します。実行時にサーバの `dist/` を読める必要があります。
 - Electron ランタイム用にネイティブ依存をリビルド:
   ```bash
   npx electron-rebuild -f -w better-sqlite3
@@ -47,7 +47,7 @@ const sna = await startSnaServer({
 
 ## レンダラから接続
 
-レンダラプロセスは組み込みサーバを通常の HTTP/WS ホストとして扱います。
+レンダラプロセスは組み込みサーバを通常の HTTP/WS ホストとして使います。
 
 ```ts
 import { SnaClient } from "@sna-sdk/client";
@@ -61,4 +61,4 @@ const client = new SnaClient({
 
 `<SnaProvider>` はヘルパーエンドポイント `GET /api/sna-port` を
 自動的に使います。そのため、React アプリでは IPC なしでレンダラが
-ポートを自動検出できます。
+ポートを検出できます。

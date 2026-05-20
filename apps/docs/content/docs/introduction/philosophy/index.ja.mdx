@@ -1,19 +1,18 @@
 ---
 title: 哲学
-description: SNA アーキテクチャを導く設計原則です。
+description: SNA アーキテクチャを支える設計原則です。
 icon: Compass
 ---
 
 SNA はプロバイダ中立のランタイム統合を中心に設計されています。目的は、
 各ネイティブエージェントを最小公分母の背後に隠すことではありません。
-各ランタイムが提供する有用な意味を保ち、コンシューマアプリが依存すべき
-部分だけを正規化することです。
+各ランタイムが持つ意味は保ち、アプリが依存すべき境界だけを正規化します。
 
-このセクションでは、特定の API ルートや SDK パッケージを超える設計原則を
+このセクションでは、特定の API ルートや SDK パッケージを越える設計判断を
 整理します。
 
 <Cards>
-  <Card title="出発点" href="/ja/docs/introduction/philosophy/origin" description="SNA を作るきっかけになった痛み: コーディングエージェントを行き来しても文脈を散らさないこと。" />
-  <Card title="Actor と kind" href="/ja/docs/introduction/philosophy/actor-kind" description="正規化メッセージをプロバイダ中立の actor と kind フィールドで表す理由。" />
-  <Card title="SNA と ACP" href="/ja/docs/introduction/philosophy/acp" description="SNA が Zed の Agent Client Protocol とどう違い、どう共存できるか。" />
+  <Card title="出発点" href="/ja/docs/introduction/philosophy/origin" description="コーディングエージェントを切り替えても文脈と制御を失わないための出発点。" />
+  <Card title="Actor と kind" href="/ja/docs/introduction/philosophy/actor-kind" description="正規化メッセージを actor と kind に分けて表す理由。" />
+  <Card title="SNA と ACP" href="/ja/docs/introduction/philosophy/acp" description="Zed の Agent Client Protocol との違いと、併用する方法。" />
 </Cards>

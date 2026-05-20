@@ -5,6 +5,7 @@ description: "Bundled UI component와 chat store export입니다."
 # React Components와 Store
 
 완성된 chat panel을 사용하거나 SNA primitive로 자체 panel을 조합하려면 이 표면을 사용합니다.
+
 | 표면 | 목적 |
 | --- | --- |
 | `SnaChatUI` | agent auto-start를 포함한 floating chat UI입니다. Props: `children`, `defaultOpen?`, `dangerouslySkipPermissions?`. |
@@ -13,7 +14,79 @@ description: "Bundled UI component와 chat store export입니다."
 | `MessageBubble` | message renderer입니다. |
 | `ChatInput` | input composer입니다. |
 | `ToolUseCard` | tool-use visualization입니다. |
+| `ThinkingCard` | thinking block renderer입니다. |
 | `TypingIndicator` | assistant progress indicator입니다. |
 | `ResizeHandle` | side-by-side panel resize handle입니다. |
 | `useChatStore` | chat UI 상태와 저장된 message hydration을 담당하는 Zustand store입니다. |
+
 `SnaChatUI`는 peer dependency로 `@radix-ui/react-tooltip`가 필요하며 `SnaProvider` 아래에서 렌더링해야 합니다.
+
+## Import paths
+
+```ts
+import { SnaChatUI } from "@sna-sdk/react/components/sna-chat-ui";
+import { ChatPanel, ChatInput, MessageBubble } from "@sna-sdk/react/components/chat";
+import { useChatStore } from "@sna-sdk/react/stores/chat-store";
+```
+
+## `SnaChatUI`
+
+`SnaChatUI`는 application content를 감싸고 built-in panel layout을 관리합니다.
+
+```tsx
+<SnaProvider snaUrl="http://localhost:3099">
+  <SnaChatUI defaultOpen={false}>
+    <App />
+  </SnaChatUI>
+</SnaProvider>
+```
+
+| Prop | Default | 설명 |
+| --- | --- | --- |
+| `children` | required | Main application content. Desktop side-by-side mode에서는 chat panel 옆에 배치됩니다. |
+| `defaultOpen` | `false` | `localStorage["sna-chat-panel"]`이 아직 없을 때 사용할 initial open state. |
+| `dangerouslySkipPermissions` | `false` | Agent를 `permissionMode: "bypassPermissions"`로 시작합니다. 신뢰할 수 있는 local flow에서만 사용하십시오. |
+
+Runtime behavior:
+
+| 항목 | 설명 |
+| --- | --- |
+| Agent startup | Mount 시 provider `claude-code`로 `POST /agent/start?session=<provider session>`을 호출합니다. |
+| Loading state | Startup request가 resolve 또는 fail될 때까지 full-screen connecting overlay를 보여줍니다. |
+| Open state | `useChatStore.isOpen`을 사용합니다. Panel이 닫혀 있으면 floating button이 나타납니다. |
+| Keyboard shortcut | `Cmd/Ctrl + .`로 panel을 toggle합니다. |
+| Layout | `useResponsiveChat`을 사용합니다. Desktop은 side-by-side, tablet은 overlay, mobile은 fullscreen입니다. |
+| Tooltip provider | Children을 `@radix-ui/react-tooltip` provider로 감쌉니다. |
+
+## Composable chat components
+
+Host가 자체 shell, routing, control을 원하면 lower-level component를 사용하십시오.
+
+| Component | 책임 |
+| --- | --- |
+| `ChatPanel` | Session용 full panel composition. |
+| `ChatHeader` | Session header와 panel control. |
+| `ChatInput` | Message 전송용 text input composer. |
+| `MessageBubble` | User, assistant, status, error, thinking, tool, tool result message를 render합니다. |
+| `ToolUseCard` | Tool input/output metadata를 표시합니다. |
+| `ThinkingCard` | Thinking block을 표시합니다. |
+| `ResizeHandle` | Side-by-side panel width를 조절합니다. |
+| `Tooltip` | Chat UI가 사용하는 tooltip primitive wrapper. |
+
+## `useChatStore`
+
+Chat store는 UI state와 session별 message cache를 소유합니다.
+
+| State/action | 설명 |
+| --- | --- |
+| `isOpen`, `setOpen`, `toggle` | Panel open state. |
+| `width`, `setWidth` | Desktop panel width. `320`에서 `520` 사이로 clamp됩니다. |
+| `activeSessionId`, `setActiveSession` | 현재 chat session. Session을 바꾸면 message를 lazy-load합니다. |
+| `sessions` | Session별 message와 processed event ID. |
+| `initSession`, `removeSession` | Local store state를 만들고 chat session create/delete를 server에 mirror합니다. `default` session은 제거할 수 없습니다. |
+| `addMessage`, `clearMessages` | Local message를 갱신합니다. Clear는 server-side message deletion도 요청합니다. |
+| `markEventProcessed` | Cursor 기준으로 streamed event를 dedupe하고, set이 커지면 오래된 값을 줄입니다. |
+| `hydrate` | `/chat/sessions`에서 chat session metadata를 가져옵니다. Message는 lazy-load됩니다. |
+| `fetchSessionMessages` | `/chat/sessions/<id>/messages`를 session당 한 번 가져옵니다. |
+
+`SnaProvider`는 store API URL을 설정하고 기본적으로 `hydrate()`를 호출합니다. Bundled chat store가 필요 없고 hook이나 custom UI만 쓴다면 `SnaProvider`에 `hydrate={false}`를 전달하십시오.

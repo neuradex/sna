@@ -1,10 +1,10 @@
 ---
 title: HTTP 라우트
-description: 모든 서버 엔드포인트를 표면별로 그룹화합니다.
+description: 모든 서버 엔드포인트를 표면별로 묶어 보여줍니다.
 icon: Network
 ---
 
-HTTP API는 표면별로 묶입니다. 아래 각 경로는 엔드포인트별 상세 명세 페이지로 연결됩니다.
+HTTP API는 표면별로 묶여 있습니다. 아래 각 경로는 엔드포인트별 상세 명세 페이지로 연결됩니다.
 
 ## 시스템
 
@@ -74,7 +74,7 @@ HTTP API는 표면별로 묶입니다. 아래 각 경로는 엔드포인트별 �
 
 ## 응답 모양
 
-대부분의 SDK-facing 응답은 `server/api-types.ts`의 envelope을 따르며, streaming 및 binary 엔드포인트는 wire-native 응답 본문을 사용합니다. 정확한 schema의 진실의 원천은 라이브 OpenAPI 문서입니다.
+대부분의 SDK-facing 응답은 `server/api-types.ts`의 envelope을 따릅니다. streaming 및 binary 엔드포인트는 wire-native 응답 본문을 사용합니다. 정확한 schema는 라이브 OpenAPI 문서에서 확인하세요.
 
 ```ts
 type ApiResponse<T> =

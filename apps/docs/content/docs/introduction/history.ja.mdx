@@ -1,11 +1,11 @@
 ---
 title: 正規化履歴
-description: すべてのプロバイダネイティブ形と round-trip する 1 つのフラットブロック形式です。
+description: すべてのプロバイダネイティブ形式へ戻せるフラットブロック形式。
 icon: Database
 ---
 
-SNA は会話履歴を SQLite 内の **正規化ブロック** のフラットシーケンス
-として保存します。各ブロックは 2 つの直交軸を持ちます:
+SNA は会話履歴を SQLite 内の **正規化ブロック** のシーケンスとして
+保存します。各ブロックは 2 つの軸を持ちます:
 
 - `actor`: `user` | `assistant` | `system`
 - `kind`: `text` | `thinking` | `tool_use` | `tool_result` | `status` | `error`
@@ -13,23 +13,22 @@ SNA は会話履歴を SQLite 内の **正規化ブロック** のフラット�
 バイナリコンテンツ (画像、ファイル) は id をキーにした別の `embeds`
 JSON に置かれ、ブロックの `content` テキストには `![](embed://<id>)`
 のインライン参照が入ります。プロバイダネイティブの形 (Anthropic content
-配列、Codex `ResponseItem`、OpenCode parts) は **要求時に派生** され
-るもので、真実の源ではありません。
+配列、Codex `ResponseItem`、OpenCode parts) は **要求時に派生** されます。
+保存上の基準は正規化ブロックです。
 
 ## なぜフラットブロックか
 
 ほとんどのプロバイダは text、tool_use、thinking を 1 つの "message"
-オブジェクトにまとめるネストしたメッセージ形式を提供します。単一プロ
-バイダでは問題になりにくい一方で、クロスプロバイダ replay では複雑に
-なります。プロバイダごとに順序、signature、optional フィールドの
-ルールが少しずつ異なるためです。
+オブジェクトにまとめるネストしたメッセージ形式を使います。単一プロバイダ
+では大きな問題になりませんが、クロスプロバイダ replay では複雑になります。
+プロバイダごとに順序、signature、optional フィールドのルールが異なるためです。
 
 フラットブロックリストは 3 つのランタイムすべてで round-trip 可能な
 最小の表現です。各プロバイダのアダプタがフラットリストを歩いて、
 そのプロバイダが期待するネストした形を再構築します。
 
-`actor` と `kind` の設計背景は **[Actor と kind](/ja/docs/introduction/philosophy/actor-kind)** を
-参照してください。
+`actor` と `kind` の設計背景は **[Actor と kind](/ja/docs/introduction/philosophy/actor-kind)** で
+扱います。
 
 ## Replay アダプタ
 
@@ -41,7 +40,7 @@ JSON に置かれ、ブロックの `content` テキストには `![](embed://<i
 
 `POST /agent/resume` は、新たに spawn したプロセスに履歴を replay
 する経路です。入力はセッション id と正規化ブロックだけで、アダプタが
-プロバイダ固有の罠 (signature フィールド、tool_use 順序、partial-text
+プロバイダ固有の注意点 (signature フィールド、tool_use 順序、partial-text
 の合体) をすべて処理します。
 
 ## 3 層アトリビューション
@@ -52,6 +51,6 @@ JSON に置かれ、ブロックの `content` テキストには `![](embed://<i
 - `modelProvider`: モデルを所有したベンダ (anthropic / openai / google)
 - `model`: 正確なスラッグ (`claude-sonnet-4-6`、`gpt-5.4` 等)
 
-これによって、ユーザがスレッド途中でプロバイダを切り替えても行ごとの
-真実を失わず、UI が「ここで Codex の gpt-5.4 に切り替えました」と
-表示できます。
+これにより、ユーザーがスレッド途中でプロバイダを切り替えても各ブロックの
+出どころを失いません。UI は「ここで Codex の gpt-5.4 に切り替えました」
+のような表示を正確に出せます。

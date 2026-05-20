@@ -1,13 +1,13 @@
 ---
-title: 핵심 개념
-description: SNA 런타임의 구조, 서버, session manager, providers, 히스토리를 설명합니다.
+title: 핵심 모델
+description: SNA 런타임의 서버, session manager, provider, 히스토리 구조를 정리합니다.
 icon: LayoutGrid
 ---
 
-SNA는 세션마다 장기 실행 프로세스를 소유하는 Hono HTTP/WebSocket
-서버입니다. 서버는 프로바이더에 종속되지 않습니다. Claude Code, Codex,
-OpenCode가 모두 공통의 `AgentProvider` 인터페이스를 구현하므로 하나의 세션이
-맥락을 잃지 않고 런타임을 전환할 수 있습니다.
+SNA는 세션마다 에이전트 프로세스를 관리하는 Hono HTTP/WebSocket 서버입니다.
+서버 자체는 특정 프로바이더에 묶이지 않습니다. Claude Code, Codex,
+OpenCode가 모두 같은 `AgentProvider` 인터페이스를 구현하므로, 하나의 세션에서
+대화 히스토리를 유지한 채 런타임을 바꿀 수 있습니다.
 
 ```
 SnaClient
@@ -27,12 +27,12 @@ Hono server  ──►  SessionManager
 ## 읽는 순서
 
 <Cards>
-  <Card title="철학" href="/ko/docs/introduction/philosophy" description="SNA의 프로바이더 중립 아키텍처를 이끄는 설계 원칙." />
-  <Card title="Sessions" href="/ko/docs/introduction/sessions" description="라이프사이클, RuntimeSession 체인, PATCH 의미론." />
-  <Card title="정규화 히스토리" href="/ko/docs/introduction/history" description="플랫 블록, 프로바이더 네이티브 재구성." />
-  <Card title="Providers" href="/ko/docs/introduction/providers" description="AgentProvider 인터페이스와 runtime pool." />
-  <Card title="권한" href="/ko/docs/introduction/permissions" description="프로바이더 전체에 걸친 통합 권한 흐름." />
+  <Card title="철학" href="/ko/docs/introduction/philosophy" description="프로바이더 중립 구조를 유지하는 설계 원칙." />
+  <Card title="세션" href="/ko/docs/introduction/sessions" description="라이프사이클, RuntimeSession 체인, PATCH 의미." />
+  <Card title="정규화 히스토리" href="/ko/docs/introduction/history" description="평탄한 블록과 프로바이더별 히스토리 재구성." />
+  <Card title="프로바이더" href="/ko/docs/introduction/providers" description="AgentProvider 인터페이스와 runtime pool." />
+  <Card title="권한" href="/ko/docs/introduction/permissions" description="프로바이더 차이를 숨기는 승인 흐름." />
 </Cards>
 
 와이어 프로토콜의 세부 사항(HTTP 라우트, WebSocket op, 이벤트 타입)은
-**[API Spec](/ko/docs/api)** 참고하세요.
+**[API Spec](/ko/docs/api)** 에서 다룹니다.

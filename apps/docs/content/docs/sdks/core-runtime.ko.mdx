@@ -5,6 +5,7 @@ description: "`@sna-sdk/core`에서 직접 export되는 런타임 헬퍼입니�
 # Core 런타임 헬퍼
 
 HTTP 서버를 거치지 않고 agent runtime을 호출하려면 이 API를 사용합니다. 같은 Node 프로세스 안에서 실행되는 로컬 orchestration, 테스트, 도구에 적합합니다.
+
 | 표면 | 목적 |
 | --- | --- |
 | `completion(input)` | completion 형태의 provider 호출을 한 번 실행합니다. |
@@ -13,18 +14,34 @@ HTTP 서버를 거치지 않고 agent runtime을 호출하려면 이 API를 사�
 | `RuntimePool` | 고급 생명주기 제어에 사용하는 runtime pool 클래스입니다. |
 | `toClaudeEffort(level)` | SNA reasoning level을 Claude 계열 effort 값으로 매핑합니다. |
 | `toCodexEffort(level)` | SNA reasoning level을 Codex 계열 effort 값으로 매핑합니다. |
+| `toGrokEffort(level)` | SNA reasoning level을 Grok-compatible effort value로 매핑합니다. |
+| `toCursorEffortSuffix(level)` / `applyCursorReasoning(...)` | Reasoning level을 Cursor CLI argument로 매핑합니다. |
 | `buildCanonicalFromDb(...)` | DB에 저장된 row에서 canonical history를 다시 구성합니다. |
+
 HTTP 대응 표면은 [agent completion](/ko/docs/api/endpoints/agent/completion/post), [run once](/ko/docs/api/endpoints/agent/run-once/post), [run once stream](/ko/docs/api/endpoints/agent/run-once/stream/post)에 정리되어 있습니다.
+
+## Helper 선택 기준
+
+| 필요한 것 | 사용 API |
+| --- | --- |
+| Tool이나 persistent session이 필요 없는 text generation | `completion` |
+| Tool을 사용하고 끝날 수 있는 self-contained agent task | `runOnce` |
+| 긴 interactive session | `createSnaApp` 또는 `SnaClient.agent.start/send` |
+| 여러 direct call 사이의 provider process reuse | `getRuntimePool()` |
 
 ## 함수 레퍼런스
 
 ### `completion(input)`
 
-설정된 provider를 통해 completion-style call을 한 번 실행합니다. 장기적인 coding session보다 text generation이나 summarization에 가까운 작업에 사용합니다. Provider 응답이 완료되면 반환됩니다.
+설정된 provider를 통해 completion-style call을 한 번 실행합니다. 장기적인 coding session보다 text generation, summarization, classification, lightweight transformation에 가까운 작업에 사용합니다. Provider 응답이 완료되면 반환됩니다.
+
+주요 option은 `prompt`, `model`, `systemPrompt`, `appendSystemPrompt`, `label`, `timeout`, `env`, `reasoningLevel`, `providerOptions`입니다.
 
 ### `runOnce(input)`
 
 runtime을 통해 하나의 agent task를 끝까지 실행하고 최종 결과를 반환합니다. Agent가 plan, tool call, finish를 한 번의 흐름에서 처리할 수 있는 automation에 사용하십시오.
+
+주요 option은 `message`, `provider`, `model`, `permissionMode`, `cwd`, `timeout`, `systemPrompt`, `appendSystemPrompt`, `reasoningLevel`, `providerOptions`입니다.
 
 ### `getRuntimePool()`
 
@@ -42,6 +59,31 @@ SNA reasoning level을 Claude 호환 effort 값으로 매핑합니다. Applicati
 
 SNA reasoning level을 Codex 호환 effort 값으로 매핑합니다. UI-level reasoning choice를 provider-neutral하게 유지합니다.
 
+### `toGrokEffort(level)`
+
+Grok provider adapter가 사용할 수 있도록 SNA reasoning level을 Grok-compatible effort value로 매핑합니다.
+
+### `toCursorEffortSuffix(level)` / `applyCursorReasoning(...)`
+
+Provider-neutral reasoning level에서 Cursor CLI reasoning argument를 만듭니다. Provider adapter 또는 Cursor를 직접 실행하는 host code에서만 사용하십시오.
+
+## Reasoning level
+
+SNA는 UI와 SDK caller가 provider-specific effort string을 알 필요 없도록 하나의 `reasoningLevel` scale을 제공합니다.
+
+| Level | 의미 | Claude mapping | Codex mapping |
+| --- | --- | --- | --- |
+| `0` | 최소 또는 disabled reasoning | `low` | `none` |
+| `1` | 매우 가벼운 reasoning | `low` | `minimal` |
+| `2` | 가벼운 reasoning | `medium` | `low` |
+| `3` | 균형 잡힌 reasoning | `high` | `medium` |
+| `4` | 강한 reasoning | `xhigh` | `high` |
+| `5` | 최대 reasoning | `max` | `xhigh` |
+
+Provider adapter는 지원하지 않는 level을 무시할 수 있습니다. Codex `minimal`은 일부 built-in tool과 맞지 않을 수 있으므로, production UI에서는 allowed tool set까지 통제할 때만 level `1`을 노출하는 편이 좋습니다.
+
 ### `buildCanonicalFromDb(...)`
 
 database row에서 canonical history를 재구성합니다. Server process가 저장된 history를 provider-neutral actor/kind 형태로 replay해야 할 때 사용합니다.
+
+Canonical history는 provider-specific message name 대신 `actor`와 `kind`를 사용합니다. 그래서 같은 stored session을 Claude Code, Codex, OpenCode 또는 다른 adapter로 replay할 때 database row를 다시 쓸 필요가 없습니다.

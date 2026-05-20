@@ -5,6 +5,7 @@ description: "Direct runtime helpers exported from `@sna-sdk/core`."
 # Core Runtime Helpers
 
 Use these APIs when you want to invoke the agent runtime without going through the HTTP server. They are useful for local orchestration, tests, and tools that already run in the same Node process.
+
 | Surface | Purpose |
 | --- | --- |
 | `completion(input)` | Runs a single completion-style provider call. |
@@ -13,18 +14,34 @@ Use these APIs when you want to invoke the agent runtime without going through t
 | `RuntimePool` | Runtime pool class for advanced lifecycle control. |
 | `toClaudeEffort(level)` | Maps SNA reasoning levels to Claude-oriented effort values. |
 | `toCodexEffort(level)` | Maps SNA reasoning levels to Codex-oriented effort values. |
+| `toGrokEffort(level)` | Maps SNA reasoning levels to Grok-compatible effort values. |
+| `toCursorEffortSuffix(level)` / `applyCursorReasoning(...)` | Maps reasoning levels into Cursor CLI arguments. |
 | `buildCanonicalFromDb(...)` | Rebuilds canonical history from persisted database rows. |
+
 The HTTP equivalents are documented under [agent completion](/docs/api/endpoints/agent/completion/post), [run once](/docs/api/endpoints/agent/run-once/post), and [run once stream](/docs/api/endpoints/agent/run-once/stream/post).
+
+## Choosing the right helper
+
+| Need | Use |
+| --- | --- |
+| Text generation without tools or a persistent session | `completion` |
+| A self-contained agent task that can use tools and then finish | `runOnce` |
+| Long-lived interactive sessions | `createSnaApp` or `SnaClient.agent.start/send` |
+| Provider process reuse across several direct calls | `getRuntimePool()` |
 
 ## Function reference
 
 ### `completion(input)`
 
-Runs a single completion-style call through the configured provider. Use it when the task is closer to text generation or summarization than to a long-lived coding session. It returns after the provider response is complete.
+Runs a single completion-style call through the configured provider. Use it when the task is closer to text generation, summarization, classification, or lightweight transformation than to a long-lived coding session. It returns after the provider response is complete.
+
+Common options include `prompt`, `model`, `systemPrompt`, `appendSystemPrompt`, `label`, `timeout`, `env`, `reasoningLevel`, and `providerOptions`.
 
 ### `runOnce(input)`
 
 Runs one complete agent task through the runtime and returns the final result. Use it for automation where the agent can plan, call tools, and finish without a follow-up conversation.
+
+Common options include `message`, `provider`, `model`, `permissionMode`, `cwd`, `timeout`, `systemPrompt`, `appendSystemPrompt`, `reasoningLevel`, and `providerOptions`.
 
 ### `getRuntimePool()`
 
@@ -42,6 +59,31 @@ Maps SNA reasoning levels into Claude-compatible effort values. Use it in provid
 
 Maps SNA reasoning levels into Codex-compatible effort values. It keeps UI-level reasoning choices provider-neutral.
 
+### `toGrokEffort(level)`
+
+Maps SNA reasoning levels into Grok-compatible effort values for the Grok provider adapter.
+
+### `toCursorEffortSuffix(level)` / `applyCursorReasoning(...)`
+
+Builds Cursor CLI reasoning arguments from the provider-neutral reasoning level. Use these helpers only in provider adapters or host code that launches Cursor directly.
+
+## Reasoning levels
+
+SNA exposes one `reasoningLevel` scale so UI and SDK callers do not need provider-specific effort strings.
+
+| Level | Meaning | Claude mapping | Codex mapping |
+| --- | --- | --- | --- |
+| `0` | Minimal or disabled reasoning | `low` | `none` |
+| `1` | Very light reasoning | `low` | `minimal` |
+| `2` | Light reasoning | `medium` | `low` |
+| `3` | Balanced reasoning | `high` | `medium` |
+| `4` | Heavy reasoning | `xhigh` | `high` |
+| `5` | Maximum reasoning | `max` | `xhigh` |
+
+Provider adapters may ignore unsupported levels. Codex `minimal` can be incompatible with some built-in tools, so production UIs should expose level `1` only when they also control the allowed tool set.
+
 ### `buildCanonicalFromDb(...)`
 
 Reconstructs canonical history from database rows. Use it when a server process needs to replay persisted history into a provider-neutral actor/kind shape.
+
+Canonical history uses `actor` and `kind` rather than provider-specific message names. That lets the same stored session replay into Claude Code, Codex, OpenCode, or another adapter without rewriting the database rows.

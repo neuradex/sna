@@ -5,26 +5,58 @@ description: "Configuration helpers and environment variables exposed by `@sna-s
 # Core Configuration
 
 `getConfig`, `setConfig`, and `resetConfig` let applications inspect or override runtime configuration. Environment variables remain the easiest way to configure hosted processes.
+
+Configuration is resolved in this order:
+
+| Priority | Source | Notes |
+| --- | --- | --- |
+| 1 | SDK defaults | Defined in `packages/core/src/config.ts`. |
+| 2 | `SNA_*` environment variables | Useful for standalone server processes and Electron launchers. |
+| 3 | `setConfig(partial)` | Applies to the current Node process. In-process launchers use this path. |
+| 4 | Per-call parameters | Route handlers and runtime calls can still override specific fields. |
+
 | Variable | Meaning |
 | --- | --- |
-| `SNA_PORT` | Preferred server port. |
-| `SNA_MODEL` | Default model name. |
-| `SNA_PERMISSION_MODE` | Default permission mode. |
-| `SNA_MAX_SESSIONS` | Maximum concurrent sessions. |
-| `SNA_DB_PATH` | Explicit database path. |
-| `SNA_DATA_DIR` | Directory for SNA data when no DB path is set. |
-| `SNA_PERMISSION_TIMEOUT_MS` | Permission prompt timeout. |
-| `SNA_OMLX_BASE_URL` | OMLX-compatible base URL. |
+| `SNA_PORT` | Preferred server port. Defaults to `3099`. |
+| `SNA_MODEL` | Default model name. Defaults to `claude-sonnet-4-6`. |
+| `SNA_PERMISSION_MODE` | Default permission mode. Supports `default`, `acceptEdits`, `bypassPermissions`, and `plan`. |
+| `SNA_MAX_SESSIONS` | Maximum concurrent sessions. Defaults to `5`. |
+| `SNA_DB_PATH` | Explicit SQLite database path. Defaults to `data/sna.db`. |
+| `SNA_DATA_DIR` | Directory for SNA data such as images. Defaults to `<cwd>/data`. |
+| `SNA_PERMISSION_TIMEOUT_MS` | Permission prompt timeout in milliseconds. `0` means the app is responsible for responding. |
+| `SNA_OMLX_BASE_URL` | oMLX-compatible base URL for local model inference. |
+
+## Default values
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `port` | `3099` | HTTP server port used by the standalone server and browser discovery. |
+| `model` | `claude-sonnet-4-6` | Default model passed to provider adapters when a call does not specify one. |
+| `defaultProvider` | `claude-code` | Provider used by routes and helpers unless overridden. |
+| `defaultPermissionMode` | `default` | Baseline permission policy for agent operations. |
+| `maxSessions` | `5` | Maximum number of concurrent server-side sessions. |
+| `maxEventBuffer` | `500` | In-memory event buffer size per session. |
+| `permissionTimeoutMs` | `0` | Permission prompts do not auto-deny unless the host opts in. |
+| `runOnceTimeoutMs` | `120000` | Default one-shot execution timeout. |
+| `pollIntervalMs` | `500` | SSE polling interval for agent events. |
+| `keepaliveIntervalMs` | `15000` | SSE keepalive interval. |
+| `skillPollMs` | `2000` | WebSocket skill event poll interval. |
+| `dbPath` | `data/sna.db` | SQLite database path when no environment override is set. |
+| `dataDir` | `<cwd>/data` | Base directory for non-row assets. |
 
 ## Function reference
 
 ### `getConfig()`
 
-Returns the effective SNA configuration after defaults, environment variables, and runtime overrides are applied. Use it for diagnostics and server startup logging.
+Returns the effective SNA configuration after defaults, environment variables, and runtime overrides are applied.
+
+Use it for diagnostics, server startup logging, and host settings screens that need to display the active value rather than only the saved preference.
 
 ### `setConfig(partial)`
 
-Applies runtime overrides for the current process. Use it in embedded hosts that receive settings from an application preferences screen.
+Applies runtime overrides for the current process. Use it in embedded hosts that receive settings from an application preferences screen, IPC message, or test fixture.
+
+`setConfig` merges the provided fields into the current config. It does not clear previous overrides; call `resetConfig()` first if the caller needs a clean baseline.
 
 ### `resetConfig()`
 
@@ -33,3 +65,5 @@ Clears runtime overrides and returns configuration resolution to defaults plus e
 ### `SnaConfig`
 
 The typed shape of SNA configuration. Prefer this type when building host-level settings UIs or validating configuration objects.
+
+`langfuse`, `apiProxyPort`, and `omlxBaseUrl` are optional. They are only active when the host explicitly configures tracing or local inference.

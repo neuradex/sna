@@ -1,10 +1,10 @@
 ---
 title: WebSocket プロトコル
-description: Request/response op、push チャネル、再接続意味論を説明します。
+description: Request/response op、push チャネル、再接続ルールを整理します。
 icon: Cable
 ---
 
-WebSocket がライブチャネルです。push イベント (assistant delta、ツール
+WebSocket はライブチャネルです。push イベント (assistant delta、ツール
 呼び出し、権限要求) と、HTTP API が露出するのと同じ制御 op を、
 呼び出しごとの HTTP オーバーヘッドなしで運びます。
 
@@ -32,12 +32,12 @@ ws://<host>:<port>/ws
 { "type": "agent.event", "data": { "session": "abc", "event": { "type": "assistant_delta", "delta": "Hello" } } }
 ```
 
-`id` フィールドはクライアントが選ぶ相関トークンで、request/response
-ペアに付き、push メッセージには付きません。
+`id` フィールドはクライアントが選ぶ相関トークンです。request/response
+ペアには付き、push メッセージには付きません。
 
 ## 制御 op
 
-すべての HTTP ルートは WS 等価を持ちます:
+すべての HTTP ルートには対応する WS op があります:
 
 | WS type | HTTP 等価 |
 |---------|----------|
@@ -61,12 +61,12 @@ ws://<host>:<port>/ws
 
 ## Push チャネル
 
-2 つのチャネルは push 専用:
+2 つのチャネルは push 専用です:
 
 - `agent.event`: 購読中の全セッションが出す全 `AgentEvent` ごとに
-  発火します。`agent.subscribe` で購読し、`agent.unsubscribe` で解除します。
+  発生します。`agent.subscribe` で購読し、`agent.unsubscribe` で解除します。
 - `permission.request`: どのセッションが `permission_needed` を emit
-  しても発火します。`permission.subscribe` で購読します。
+  しても発生します。`permission.subscribe` で購読します。
 
 ## 再接続
 
@@ -85,4 +85,4 @@ replay されます。
 TypeScript クライアントはすべてのミューテーションに HTTP、push
 チャネルに WS を使います。片方だけでも動きます (`http: true, ws: false` は
 短命スクリプト用; `ws: true, http: false` は HTTP が使えない
-クライアント用) が、両方使う構成が最もスムーズです。
+クライアント用) が、実際のアプリでは両方使う構成が最も自然です。

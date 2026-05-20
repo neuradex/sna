@@ -4,28 +4,127 @@ description: "SNA サーバーを起動するための Node および Electron �
 ---
 # Core ランチャー
 
-ランチャーは host application のライフサイクル内で SNA を一緒に起動する必要がある場合に使います。port 選択、process 処理、Electron packaging の詳細を隠蔽します。
+ランチャーはホストアプリケーションのライフサイクル内で SNA を一緒に起動する場合に使います。Port 選択、プロセス処理、Electron packaging の詳細を隠し、client や React integration が使う server URL を渡せるようにします。
+
 | import path | サーフェス | 目的 |
 | --- | --- | --- |
-| `@sna-sdk/core/node` | `startSnaServer(options?)` | Node host から SNA を起動します。 |
-| `@sna-sdk/core/electron` | `startSnaServer(options?)` | Electron host から SNA を起動します。 |
-| `@sna-sdk/core/electron` | `startSnaServerInProcess(options?)` | より密な統合のため現在の process 内で SNA を実行します。 |
-| `@sna-sdk/core/electron` | `resolveClaudeCli`, `validateClaudePath`, `cacheClaudePath` | Claude Code CLI のインストールを検出、検証します。 |
+| `@sna-sdk/core/node` | `startSnaServer(options)` | Node host から SNA を起動します。 |
+| `@sna-sdk/core/electron` | `startSnaServer(options)` | Electron host から SNA を forked child process として起動します。 |
+| `@sna-sdk/core/electron` | `startSnaServerInProcess(options)` | 現在の Electron main process 内で SNA を実行します。 |
+| `@sna-sdk/core/electron` | `resolveClaudeCli`, `validateClaudePath`, `cacheClaudePath` | Claude Code CLI installation を検出、検証します。 |
+
 Launcher handle は、サーバー停止と、検出された URL を `@sna-sdk/client` または `@sna-sdk/react` へ渡すために十分な情報を公開します。
+
+## Options
+
+`dbPath` は必須です。その他の field は optional です。
+
+```ts
+type SnaServerOptions = {
+  port?: number;
+  dbPath: string;
+  cwd?: string;
+  maxSessions?: number;
+  permissionMode?: "acceptEdits" | "bypassPermissions" | "default";
+  model?: string;
+  permissionTimeoutMs?: number;
+  nativeBinding?: string;
+  env?: Record<string, string>;
+  readyTimeout?: number;
+  onLog?: (line: string) => void;
+  dataDir?: string;
+  logLevel?: "info" | "warn" | "error" | "silent";
+  langfuse?: { publicKey: string; secretKey: string; baseUrl?: string };
+  omlxBaseUrl?: string;
+};
+```
+
+| Field | Default | 説明 |
+| --- | --- | --- |
+| `port` | `3099` | Server に渡す API port。 |
+| `dbPath` | required | Absolute SQLite path。`cwd` がない場合、launcher はこの path から `cwd` を計算します。 |
+| `cwd` | `dirname(dbPath)` | Server process と provider session の working directory。 |
+| `maxSessions` | `5` | 同時に保持できる agent session 数。 |
+| `permissionMode` | SDK default | 新しい agent session のデフォルト permission mode。 |
+| `model` | SDK default | Provider call のデフォルト model。 |
+| `permissionTimeoutMs` | `0` | `0` の場合、permission prompt response は host が管理します。正の値なら timeout 後に自動 deny します。 |
+| `nativeBinding` | auto-detected | 明示的な `better-sqlite3` native binding path。Custom Electron build で使います。 |
+| `env` | `{}` | 追加 environment variable。Launcher が生成した値を override します。 |
+| `readyTimeout` | `15000` | Standalone process が ready line を出すまで待つ時間(ms)。 |
+| `onLog` | none | Child process の stdout/stderr line、または in-process mode の SDK logger line を受け取ります。 |
+| `dataDir` | `dbPath` から計算 | Image と asset storage の base directory。 |
+| `logLevel` | `info` | In-process logger output を filter します。Forked server の file log は全 level を記録し続けます。 |
+| `langfuse` | none | Metadata で tracing を opt in した session で Langfuse tracing を有効にします。 |
+| `omlxBaseUrl` | none | Claude-compatible call を oMLX endpoint へ route します。 |
+
+## Forked vs in-process
+
+| Mode | 使う場面 | Tradeoff |
+| --- | --- | --- |
+| Forked `startSnaServer` | プロセス分離が必要で、standalone child server を持ちたい場合。 | Packaged Electron app は `@sna-sdk/core` を unpack する必要があります。Ready になるには child process が正常に起動する必要があります。 |
+| `startSnaServerInProcess` | asar path、environment propagation、orphaned child の問題で Electron `fork()` が不安定な場合。 | Caller の Node event loop を共有します。Host は shutdown 時に `stop()` を呼ぶ必要があります。 |
+
+In-process mode は default agent を自動 spawn しません。Host が HTTP、WebSocket、または返された `sessionManager` から session を開始します。
 
 ## 関数リファレンス
 
-### `@sna-sdk/core/node` の `startSnaServer(options?)`
+### `@sna-sdk/core/node` の `startSnaServer(options)`
 
-通常の Node host から SNA を開始し、connection information と shutdown behavior を持つ handle を返します。CLI、desktop host、local development process に使います。
+通常の Node host から SNA を開始し、接続情報と停止処理を持つ handle を返します。CLI、desktop host、local development process に使います。
 
-### `@sna-sdk/core/electron` の `startSnaServer(options?)`
+```ts
+const handle = await startSnaServer({
+  dbPath: "/Users/me/Library/Application Support/MyApp/sna.db",
+  port: 3099,
+});
+
+handle.stop();
+```
+
+Node launcher は Electron launcher と同じ standalone server implementation を使います。Host が HTTP app を直接 import せず、SNA を sibling process として置きたい場合に適しています。
+
+### `@sna-sdk/core/electron` の `startSnaServer(options)`
 
 Electron host から SNA を開始します。Packaged application の制約を考慮するため、Electron main process では Node launcher よりこちらを優先してください。
 
-### `startSnaServerInProcess(options?)`
+Forked mode で packaged app を作る場合、Node が実行する SDK file を asar の外へ出す必要があります。
 
-現在の Electron process 内で SNA を実行します。Process isolation より密な lifecycle integration が重要な場合のみ使ってください。
+```js
+// electron-builder example
+asarUnpack: ["node_modules/@sna-sdk/core/**"]
+```
+
+Launcher は `.asar` path を `.asar.unpacked` へ remap し、`NODE_PATH` を構成し、`better-sqlite3` を探し、log を forward したうえで server が `API server ready` を出すまで待ちます。
+
+Returns:
+
+```ts
+type SnaServerHandle = {
+  process: ChildProcess;
+  port: number;
+  stop(): void;
+};
+```
+
+### `startSnaServerInProcess(options)`
+
+現在の Electron process 内で SNA を実行します。プロセス分離よりも密なライフサイクル統合が重要な場合だけ使ってください。
+
+Returns:
+
+```ts
+type InProcessSnaServerHandle = {
+  process: null;
+  port: number;
+  sessionManager: SessionManager;
+  httpServer: http.Server;
+  initLangfuse(config: { publicKey: string; secretKey: string; baseUrl?: string }): Promise<void>;
+  setTracerUser(userId?: string, userEmail?: string): void;
+  stop(): Promise<void>;
+};
+```
+
+`stop()` は session を終了し、provider runtime を dispose し、tracing を flush し、logger callback を整理してから HTTP server を閉じます。Host shutdown path で呼んでください。
 
 ### `resolveClaudeCli(options?)`
 

@@ -4,16 +4,89 @@ description: "Bundled UI component と chat store export です。"
 ---
 # React Components と Store
 
-完成済み chat panel を使う場合、または SNA primitive から独自 panel を組み立てる場合にこのサーフェスを使います。
+完成済みの chat panel を使う場合、または SNA primitive から独自 panel を組み立てる場合に使うサーフェスです。
+
 | サーフェス | 目的 |
 | --- | --- |
-| `SnaChatUI` | agent auto-start を含む floating chat UI です。Props: `children`, `defaultOpen?`, `dangerouslySkipPermissions?`. |
+| `SnaChatUI` | agent auto-start を含む floating chat UI です。Props: `children`, `defaultOpen?`, `dangerouslySkipPermissions?`。 |
 | `ChatPanel` | main chat panel shell です。 |
 | `ChatHeader` | panel header です。 |
 | `MessageBubble` | message renderer です。 |
 | `ChatInput` | input composer です。 |
 | `ToolUseCard` | tool-use visualization です。 |
+| `ThinkingCard` | thinking block renderer です。 |
 | `TypingIndicator` | assistant progress indicator です。 |
 | `ResizeHandle` | side-by-side panel resize handle です。 |
-| `useChatStore` | chat UI 状態と保存済み message hydration を扱う Zustand store です。 |
-`SnaChatUI` は peer dependency として `@radix-ui/react-tooltip` が必要で、`SnaProvider` の下で render してください。
+| `useChatStore` | chat UI state と保存済み message hydration を扱う Zustand store です。 |
+
+`SnaChatUI` は peer dependency として `@radix-ui/react-tooltip` を必要とし、`SnaProvider` の下で render する必要があります。
+
+## Import paths
+
+```ts
+import { SnaChatUI } from "@sna-sdk/react/components/sna-chat-ui";
+import { ChatPanel, ChatInput, MessageBubble } from "@sna-sdk/react/components/chat";
+import { useChatStore } from "@sna-sdk/react/stores/chat-store";
+```
+
+## `SnaChatUI`
+
+`SnaChatUI` は application content を包み、built-in panel layout を管理します。
+
+```tsx
+<SnaProvider snaUrl="http://localhost:3099">
+  <SnaChatUI defaultOpen={false}>
+    <App />
+  </SnaChatUI>
+</SnaProvider>
+```
+
+| Prop | Default | 説明 |
+| --- | --- | --- |
+| `children` | required | Main application content。Desktop side-by-side mode では chat panel の横に配置されます。 |
+| `defaultOpen` | `false` | `localStorage["sna-chat-panel"]` がまだない場合の initial open state。 |
+| `dangerouslySkipPermissions` | `false` | Agent を `permissionMode: "bypassPermissions"` で開始します。信頼できる local flow だけで使ってください。 |
+
+Runtime behavior:
+
+| 項目 | 説明 |
+| --- | --- |
+| Agent startup | Mount 時に provider `claude-code` で `POST /agent/start?session=<provider session>` を呼びます。 |
+| Loading state | Startup request が resolve または fail するまで full-screen connecting overlay を表示します。 |
+| Open state | `useChatStore.isOpen` を使います。Panel が閉じている場合は floating button が出ます。 |
+| Keyboard shortcut | `Cmd/Ctrl + .` で panel を toggle します。 |
+| Layout | `useResponsiveChat` を使います。Desktop は side-by-side、tablet は overlay、mobile は fullscreen です。 |
+| Tooltip provider | Children を `@radix-ui/react-tooltip` provider で包みます。 |
+
+## Composable chat components
+
+Host が独自 shell、routing、control を持ちたい場合は lower-level component を使ってください。
+
+| Component | 責務 |
+| --- | --- |
+| `ChatPanel` | Session 用 full panel composition。 |
+| `ChatHeader` | Session header と panel control。 |
+| `ChatInput` | Message 送信用 text input composer。 |
+| `MessageBubble` | User、assistant、status、error、thinking、tool、tool result message を render します。 |
+| `ToolUseCard` | Tool input/output metadata を表示します。 |
+| `ThinkingCard` | Thinking block を表示します。 |
+| `ResizeHandle` | Side-by-side panel width を調整します。 |
+| `Tooltip` | Chat UI が使う tooltip primitive wrapper。 |
+
+## `useChatStore`
+
+Chat store は UI state と session ごとの message cache を所有します。
+
+| State/action | 説明 |
+| --- | --- |
+| `isOpen`, `setOpen`, `toggle` | Panel open state。 |
+| `width`, `setWidth` | Desktop panel width。`320` から `520` の範囲に clamp されます。 |
+| `activeSessionId`, `setActiveSession` | 現在の chat session。Session を切り替えると message を lazy-load します。 |
+| `sessions` | Session ごとの message と processed event ID。 |
+| `initSession`, `removeSession` | Local store state を作り、chat session create/delete を server に mirror します。`default` session は削除できません。 |
+| `addMessage`, `clearMessages` | Local message を更新します。Clear は server-side message deletion も要求します。 |
+| `markEventProcessed` | Cursor を基準に streamed event を dedupe し、set が大きくなると古い値を減らします。 |
+| `hydrate` | `/chat/sessions` から chat session metadata を取得します。Message は lazy-load されます。 |
+| `fetchSessionMessages` | `/chat/sessions/<id>/messages` を session ごとに 1 回取得します。 |
+
+`SnaProvider` は store API URL を設定し、デフォルトで `hydrate()` を呼びます。Bundled chat store が不要で hook や custom UI だけを使う場合は、`SnaProvider` に `hydrate={false}` を渡してください。

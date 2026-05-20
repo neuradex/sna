@@ -1,10 +1,10 @@
 ---
 title: HTTP ルート
-description: すべてのサーバエンドポイントを表面別にグループ化します。
+description: すべてのサーバエンドポイントを表面別にまとめます。
 icon: Network
 ---
 
-HTTP API は表面別にグループ化されています。以下の各パスはエンドポイント別の詳細仕様ページへリンクします。
+HTTP API は表面別にまとまっています。以下の各パスはエンドポイント別の詳細仕様ページへリンクします。
 
 ## システム
 
@@ -74,7 +74,7 @@ HTTP API は表面別にグループ化されています。以下の各パス�
 
 ## レスポンス形
 
-ほとんどの SDK-facing レスポンスは `server/api-types.ts` の envelope に従い、streaming と binary エンドポイントは wire-native なレスポンス本文を使います。正確な schema の真実の源はライブ OpenAPI ドキュメントです。
+ほとんどの SDK-facing レスポンスは `server/api-types.ts` の envelope に従います。streaming と binary エンドポイントは wire-native なレスポンス本文を使います。正確な schema はライブ OpenAPI ドキュメントで確認してください。
 
 ```ts
 type ApiResponse<T> =

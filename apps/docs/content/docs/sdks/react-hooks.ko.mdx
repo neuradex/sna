@@ -5,12 +5,14 @@ description: "useAgent, useSessionManager, useResponsiveChat의 입력과 반환
 
 # React hooks
 
+React hook은 SNA HTTP API를 직접 사용합니다. 기본적으로 `SnaProvider`의 `apiUrl`과 `sessionId`를 읽지만, custom routing이 필요한 host는 hook option으로 override할 수 있습니다.
+
 ## `useAgent(options?)`
 
 **Signature**
 
 ```ts
-const agent = useAgent(options?: {
+declare function useAgent(options?: {
   sessionId?: string;
   baseUrl?: string;
   provider?: string;
@@ -24,26 +26,8 @@ const agent = useAgent(options?: {
   onComplete?: (event: AgentEvent) => void;
   onError?: (event: AgentEvent) => void;
   onInit?: (event: AgentEvent) => void;
-});
+}): UseAgentResult;
 ```
-
-**Options**
-
-| Field | Default | Description |
-| --- | --- | --- |
-| `sessionId` | context `sessionId` | 연결할 agent session입니다. |
-| `baseUrl` | `${apiUrl}/agent` | agent HTTP API base URL입니다. |
-| `provider` | `claude-code` | start/completion에 사용할 provider입니다. |
-| `permissionMode` | provider default | tool permission mode입니다. |
-| `reasoningLevel` | provider default | provider-neutral reasoning effort입니다. |
-| `providerOptions` | none | provider-specific option입니다. Codex `serviceTier` 등이 들어갑니다. |
-| `onEvent` | none | 모든 event를 받습니다. |
-| `onThinking` | none | `thinking` event만 받습니다. |
-| `onAssistant` | none | `assistant` event만 받습니다. |
-| `onToolResult` | none | `tool_result` event만 받습니다. |
-| `onComplete` | none | `complete` event만 받습니다. |
-| `onError` | none | `error` event만 받습니다. |
-| `onInit` | none | `init` event만 받습니다. |
 
 **Returns**
 
@@ -64,41 +48,61 @@ const agent = useAgent(options?: {
 }
 ```
 
-**Example**
+### Options
 
-```tsx
-function AssistantBox() {
-  const agent = useAgent({
-    sessionId: "default",
-    onAssistant: (event) => appendMessage(event),
-    onComplete: () => setBusy(false),
-  });
+| Field | Default | 설명 |
+| --- | --- | --- |
+| `sessionId` | context `sessionId` | 연결할 agent session입니다. |
+| `baseUrl` | `${apiUrl}/agent` | agent HTTP API base URL입니다. |
+| `provider` | `claude-code` | start/completion에 사용할 provider입니다. |
+| `permissionMode` | provider default | tool permission mode입니다. |
+| `reasoningLevel` | provider default | provider-neutral reasoning effort입니다. |
+| `providerOptions` | none | provider-specific option입니다. Codex `serviceTier` 등이 들어갑니다. |
 
-  return <button onClick={() => agent.send("Review this file")}>Send</button>;
-}
-```
+### 동작
 
-**Notes**
+| 항목 | 설명 |
+| --- | --- |
+| Event transport | `/agent/events?session=<id>&since=<cursor>`에 `EventSource`를 엽니다. |
+| Cursor 처리 | 먼저 `/agent/status`를 읽고 현재 event count부터 시작하므로 initial mount에서 과거 event를 건너뜁니다. |
+| Reconnect | SSE error가 발생하면 stream을 닫고 `3000ms` 뒤 다시 연결합니다. |
+| Provider default | `provider` 기본값은 `claude-code`입니다. |
+| Session default | `sessionId`는 `SnaContext`에서 오며, `SnaProvider`의 기본값은 `default`입니다. |
+| `alive` | 초기화 중 `/agent/status`로 설정하고, `start` 또는 `send`가 local에서 성공하면 optimistic하게 `true`로 둡니다. |
 
-- mount 시 SSE event stream에 연결합니다.
-- `send`는 `/agent/send`를 호출합니다.
-- `start`는 `/agent/start`를 호출하고 성공하면 `alive`를 `true`로 둡니다.
+### Methods
+
+| Method | HTTP route | Notes |
+| --- | --- | --- |
+| `start(prompt?)` | `POST /agent/start?session=<id>` | `provider`, `prompt`, `permissionMode`, `reasoningLevel`, `providerOptions`를 보냅니다. |
+| `send(message)` | `POST /agent/send?session=<id>` | Plain text message를 보냅니다. 이 hook은 image attachment를 노출하지 않으므로 multimodal send는 `SnaClient.agent.send`를 사용하십시오. |
+| `kill()` | `POST /agent/kill?session=<id>` | Runtime을 중지하고 `alive`를 `false`로 설정합니다. |
+| `completion(opts)` | `POST /agent/completion` | Hook의 provider와 reasoning default를 사용해 stateless completion request를 보냅니다. |
+
+### Event callbacks
+
+`onEvent`는 parsed `AgentEvent`를 모두 받습니다. 더 좁은 callback은 event type별 convenience filter입니다.
+
+| Callback | Event type |
+| --- | --- |
+| `onInit` | `init` |
+| `onThinking` | `thinking` |
+| `onAssistant` | `assistant` |
+| `onToolResult` | `tool_result` |
+| `onComplete` | `complete` |
+| `onError` | `error` |
+
+이 hook은 `SnaClient`를 감싸지 않고 WebSocket subscription도 사용하지 않습니다. Permission push handling, `runOnceStream`, message history pagination, WebSocket reconnect resubscription이 필요하면 `@sna-sdk/client`를 사용하십시오.
 
 ## `useSessionManager(pollInterval?)`
 
 **Signature**
 
 ```ts
-const manager = useSessionManager(pollInterval?: number);
+declare function useSessionManager(pollInterval?: number): UseSessionManagerResult;
 ```
 
-**Input**
-
-| Parameter | Default | Description |
-| --- | --- | --- |
-| `pollInterval` | `3000` | session 목록 자동 refresh 주기입니다. `0`이면 polling하지 않습니다. |
-
-**Returns**
+Returns:
 
 ```ts
 {
@@ -111,23 +115,24 @@ const manager = useSessionManager(pollInterval?: number);
 }
 ```
 
-**Example**
+`pollInterval` 기본값은 `3000`이며 polling을 끄려면 `0`을 전달합니다.
 
-```tsx
-const { sessions, createSession, deleteSession } = useSessionManager(5000);
-const id = await createSession({ label: "New task", cwd: "/repo" });
-if (id) console.log("created", id);
-```
+| Method | Route | Notes |
+| --- | --- | --- |
+| `refresh()` | `GET /agent/sessions` | Serialized response가 바뀐 경우에만 local state를 교체합니다. |
+| `createSession(opts?)` | `POST /agent/sessions` | `{ label?, cwd? }`를 받고 새 session ID 또는 `null`을 반환합니다. |
+| `killSession(id)` | `POST /agent/kill?session=<id>` | Agent process를 중지하지만 session record는 유지합니다. |
+| `deleteSession(id)` | `DELETE /agent/sessions/<id>` | Server에 요청해 session record를 삭제합니다. |
+
+단순 React state가 필요하면 이 hook을 사용하십시오. WebSocket snapshot, metadata update, 더 엄격한 command acknowledgement가 필요하면 `SnaClient.sessions`를 사용하십시오.
 
 ## `useResponsiveChat()`
 
 **Signature**
 
 ```ts
-const { mode } = useResponsiveChat(): { mode: "side-by-side" | "overlay" | "fullscreen" }
+declare function useResponsiveChat(): { mode: "side-by-side" | "overlay" | "fullscreen" };
 ```
-
-**Behavior**
 
 | Width | Mode | Meaning |
 | --- | --- | --- |

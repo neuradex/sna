@@ -1,12 +1,12 @@
 ---
-title: "개요"
-description: "공개된 4개 패키지의 레퍼런스입니다."
+title: "SDK 개요"
+description: "공개된 4개 패키지의 역할과 레퍼런스입니다."
 icon: LayoutGrid
 ---
-SNA는 4개 패키지를 계층별로 배포합니다.
+SNA는 네 개 패키지를 계층별로 배포합니다.
 
 <Cards>
-  <Card title="@sna-sdk/core" href="/ko/docs/sdks/core" description="서버, session manager, providers, completion()." />
+  <Card title="@sna-sdk/core" href="/ko/docs/sdks/core" description="서버, session manager, provider, completion()." />
   <Card title="@sna-sdk/client" href="/ko/docs/sdks/client" description="TypeScript 클라이언트. HTTP + WebSocket 전송." />
   <Card title="@sna-sdk/react" href="/ko/docs/sdks/react" description="React 훅 + 드롭인 채팅 UI." />
   <Card title="@sna-sdk/testing" href="/ko/docs/sdks/testing" description="Mock Anthropic API + 격리된 Claude Code 테스트 환경." />
@@ -14,14 +14,15 @@ SNA는 4개 패키지를 계층별로 배포합니다.
 
 ## 버저닝
 
-4개 패키지는 같이 릴리즈됩니다. 버전은 SNA 프로토콜 버전이므로 컨슈머는
-네 패키지를 모두 같은 메이저 버전으로 고정해야 합니다. 릴리즈별 표면 변경은
-[CHANGELOG](https://github.com/neuradex/sna/blob/main/CHANGELOG.md) 참고하세요.
+네 패키지는 함께 릴리즈됩니다. 버전은 SNA 프로토콜 버전이므로, 앱에서는
+네 패키지를 모두 같은 메이저 버전으로 고정하는 것이 좋습니다. 릴리즈별 공개
+API 변경은 [CHANGELOG](https://github.com/neuradex/sna/blob/main/CHANGELOG.md)에
+정리됩니다.
 
 ## 라이브 OpenAPI 스펙
 
-구동 중인 서버는 자신의 OpenAPI 3.1 스펙을 자체 제공합니다. Swagger UI
-는 `http://localhost:3099/docs`, 원시 JSON은
+실행 중인 서버는 자신의 OpenAPI 3.1 스펙을 직접 제공합니다. Swagger UI는
+`http://localhost:3099/docs`, 원시 JSON은
 `http://localhost:3099/openapi.json`, 평문은
 `http://localhost:3099/spec`. 스펙은 라우트가 쓰는 같은 Zod 스키마
 에서 생성되므로 실제 핸들러와 드리프트할 수 없습니다.

@@ -1,17 +1,17 @@
 ---
 title: 기능 × 프로바이더 매트릭스
-description: 어떤 SNA 기능이 Claude Code, Codex, OpenCode, Grok Build, Cursor에서 동작하는지 — 각 행마다 단서 조건과 함께.
+description: SNA 기능이 Claude Code, Codex, OpenCode, Grok Build, Cursor에서 어떻게 동작하는지 비교합니다.
 icon: TableProperties
 ---
 
-모든 SNA 기능은 같은 `AgentProvider` 인터페이스를 거치지만, 각 런타임은
-자체 네이티브 표면이 다르기 때문에 5개 프로바이더의 능력이 완전히
-일치하지는 않습니다. 이 페이지는 어디서 무엇이 실제로 동작하는지,
-각 행의 단서 조건을 명시해서 나열합니다.
+모든 SNA 기능은 같은 `AgentProvider` 인터페이스를 거치지만, 각 런타임의
+네이티브 표면은 다릅니다. 그래서 5개 프로바이더의 능력이 완전히 일치하지는
+않습니다. 이 페이지는 어떤 기능이 어디서 실제로 동작하는지와 행별 주의점을
+함께 정리합니다.
 
-행이 **✗** 인 경우, SNA API 레벨에서 해당 필드를 받아주긴 하지만
-프로바이더가 그것을 무시하거나, respawn으로 fallback하거나, 대응되는
-네이티브 표면 자체가 없다는 뜻입니다.
+행이 **✗** 인 경우, SNA API 레벨에서는 해당 필드를 받을 수 있지만
+프로바이더가 무시하거나, respawn으로 fallback하거나, 대응되는 네이티브 표면이
+없다는 뜻입니다.
 
 > 마지막 검증 대상: Claude Code 1.x, Codex 0.x (`app-server`),
 > OpenCode 0.x (`serve`), Grok Build CLI 0.1.x, Cursor CLI 2026.05.
@@ -26,11 +26,11 @@ icon: TableProperties
 | 공개 표준 프로토콜 | ✗ 벤더 | ✗ 벤더 | ✗ 벤더 | ✓ [ACP](https://agentclientprotocol.com) | ✓ [ACP](https://agentclientprotocol.com) |
 | Cold-start 비용 | 호출당 약 1초 spawn | 데몬 약 2초 spawn, 재사용 | 데몬 약 3초 spawn, 재사용 | 세션당 약 2초 spawn | 세션당 약 2초 spawn |
 
-Claude Code, Grok Build, Cursor는 호출/세션 단위 무상태입니다 — spawn마다
-새 자식 프로세스. Codex와 OpenCode는 `RuntimePool`을 통해 데몬을
-공유합니다. Codex 데몬만 `cwd`-비종속이라서, 단일 풀 데몬 위에서
-서로 다른 작업 디렉토리의 세션을 호스팅할 수 있는 유일한 프로바이더
-입니다. 두 ACP-스피킹 프로바이더(Grok Build, Cursor)는
+Claude Code, Grok Build, Cursor는 호출 또는 세션 단위로 무상태입니다. spawn마다
+새 자식 프로세스가 뜹니다. Codex와 OpenCode는 `RuntimePool`을 통해 데몬을
+공유합니다. Codex 데몬만 `cwd`에 종속되지 않으므로, 단일 풀 데몬 위에서
+서로 다른 작업 디렉토리의 세션을 호스팅할 수 있는 유일한 프로바이더입니다.
+두 ACP-speaking 프로바이더(Grok Build, Cursor)는
 `core/providers/acp/base.ts`를 공유합니다.
 
 ## 세션 라이프사이클
@@ -46,11 +46,11 @@ Claude Code, Grok Build, Cursor는 호출/세션 단위 무상태입니다 — s
 | `listModels()` | ✓ static + oMLX API | ✓ static catalog | ✓ `opencode` CLI 프로브 | ✓ static (`grok-build` 단일 항목) | ✓ `agent models` 텍스트 파싱 + static fallback |
 
 OpenCode는 스트리밍에서 예외입니다. 현재 SDK 헬퍼가 single-shot이라
-`complete()`에 `onDelta`를 넘기면 성공하지만 콜백은 발화하지 않습니다.
+`complete()`에 `onDelta`를 넘기면 성공하지만 콜백은 호출되지 않습니다.
 
 ## 인플레이스 변경 (`applyPatch`)
 
-각 프로바이더는 어느 `SessionPatch` 필드를 respawn 없이 인플레이스로
+각 프로바이더는 어떤 `SessionPatch` 필드를 respawn 없이 인플레이스로
 적용할 수 있는지 선언합니다. "leftover"로 반환된 필드는 세션 매니저가
 kill 후 history replay와 함께 respawn해야 합니다.
 
@@ -60,7 +60,7 @@ kill 후 history replay와 함께 respawn해야 합니다.
 | `permissionMode` | ✓ control_request | ✓ next-turn sandbox 정책 | ✓ per-session override | ✗ leftover (respawn) | ✗ leftover (respawn) |
 | `cwd` | ✗ leftover | ✓ next-turn override (유일하게 가능한 프로바이더) | ✗ leftover | ✗ leftover | ✗ leftover |
 
-두 ACP-스피킹 프로바이더는 모든 필드를 leftover로 반환합니다. ACP에는
+두 ACP-speaking 프로바이더는 모든 필드를 leftover로 반환합니다. ACP에는
 런타임 변경 메서드가 없기 때문입니다. respawn-with-history-replay는
 변함없이 동작합니다.
 
@@ -73,9 +73,9 @@ kill 후 history replay와 함께 respawn해야 합니다.
 | 양방향 (프로바이더가 우리를 기다림) | ✗ hook 스크립트가 결정 | ✓ | ✓ | ✓ | ✓ |
 | `bypassPermissions` 자동 승인 | ✓ hook 스크립트가 항상 허용 | ✓ next-turn override | ✓ per-session override | ✓ ACP base가 자동으로 `allow_*` 응답 | ✓ ACP base가 자동으로 `allow_*` 응답 |
 
-Claude Code의 권한 모델은 out-of-band입니다 — SNA가 hook 스크립트를
-써놓으면 CLI가 그것을 호출하고, 스크립트가 (permissionMode 및 allow/deny
-룰을 기준으로) 스스로 판단하며, CLI는 SNA 프로세스를 기다리지 않습니다.
+Claude Code의 권한 모델은 out-of-band입니다. SNA가 hook 스크립트를
+써두면 CLI가 그것을 호출하고, 스크립트가 permissionMode와 allow/deny 룰을
+기준으로 판단합니다. CLI는 SNA 프로세스를 기다리지 않습니다.
 나머지 네 프로바이더는 양방향입니다.
 
 ## 설정 노브 (SpawnOptions)
@@ -108,15 +108,15 @@ Claude Code의 권한 모델은 out-of-band입니다 — SNA가 hook 스크립�
 | `agent` | — | — | ✓ build / plan / etc. | — | — |
 | `logLevel` | — | — | ✓ `opencode serve --log-level` | — | — |
 
-Cursor는 현재 SNA-specific `providerOptions` 키가 없습니다 — CLI가
-받는 모든 노브(model, reasoning, mode)는 타입화된 `SpawnOptions` 필드에
-매핑됩니다. 미래에 Cursor가 새 플래그를 추가하면 여기에 등장합니다.
+Cursor는 현재 SNA-specific `providerOptions` 키가 없습니다. CLI가 받는 모든
+노브(model, reasoning, mode)는 타입화된 `SpawnOptions` 필드에 매핑됩니다.
+미래에 Cursor가 새 플래그를 추가하면 여기에 등장합니다.
 
 ## 프로바이더 간 history replay
 
-모든 프로바이더가 새 세션에 이전 대화를 시드하는 자체 메커니즘을
-가지고 있습니다. SNA의 정규화 `CanonicalBlock[]` history가 어댑터
-계층에서 네이티브 형태로 번역됩니다.
+모든 프로바이더는 새 세션에 이전 대화를 넣는 자체 메커니즘을 갖고 있습니다.
+SNA의 정규화 `CanonicalBlock[]` history는 어댑터 계층에서 네이티브 형태로
+번역됩니다.
 
 | 프로바이더 | 메커니즘 | 어댑터 |
 |---|---|---|
@@ -125,27 +125,27 @@ Cursor는 현재 SNA-specific `providerOptions` 키가 없습니다 — CLI가
 | OpenCode | SDK 경유 experimental `thread/resume(history=...)` | `history/opencode.ts` |
 | Grok Build / Cursor | 첫 `session/prompt`에서 transcript를 단일 ACP `resource` content block으로 직렬화 | `core/providers/acp/base.ts` 공유 (`serializeHistoryForAcp` + `buildHistoryPromptBlock`) |
 
-ACP 경로는 네이티브 resume 경로들과 의도적으로 다릅니다: probing 결과
-ACP `session/load`는 UI 이벤트만 replay할 뿐 모델 컨텍스트를 복원하지
-않고, 그 아래 깔린 세션 저장소는 벤더 내부 포맷(Grok은 xAI 내부, Cursor는
-`~/.cursor/chats/` 아래 SQLite)이고 session load 시 재생성됩니다 — 저장
-계층을 아예 건드리지 않는 방향. 대신 첫 turn에 prior transcript를
-인라인으로 embed하고, 그 컨텍스트는 같은 세션의 후속 turn에서도
-유지되므로 재주입은 불필요합니다.
+ACP 경로는 네이티브 resume 경로와 의도적으로 다릅니다. probing 결과
+ACP `session/load`는 UI 이벤트만 replay하고 모델 컨텍스트는 복원하지
+않았습니다. 하위 세션 저장소는 벤더 내부 포맷(Grok은 xAI 내부, Cursor는
+`~/.cursor/chats/` 아래 SQLite)이며 session load 시 재생성됩니다. 그래서
+SNA는 저장 계층을 건드리지 않습니다. 대신 첫 turn에 prior transcript를
+인라인으로 embed하고, 그 컨텍스트는 같은 세션의 후속 turn에서도 유지되므로
+재주입은 필요 없습니다.
 
 ## 아직 매트릭스에 없는 것
 
 - **런타임 plan mode 토글** (Claude Code `--permission-mode plan`,
   Grok Build `--permission-mode plan`, Cursor `--mode plan`): CLI 플래그
   는 spawn 시점에 반영되지만, 인플레이스 토글은 ACP가 wire 메서드로
-  노출하지 않습니다 — ACP applyPatch는 모든 필드를 leftover로
+  노출하지 않습니다. ACP applyPatch는 모든 필드를 leftover로
   반환하고 세션 매니저가 respawn-with-history-replay로 처리합니다.
 - **ACP 프로바이더의 `allowedTools` / `disallowedTools` glob/패턴 매칭**:
   현재 auto-deny intercept는 도구 이름을 정확 문자열 동등성으로만
-  매치. 실제 워크로드에서 필요해지면 glob 패턴(예: `"shell.*"`)이
-  자연스러운 follow-up.
+  매치합니다. 실제 워크로드에서 필요해지면 glob 패턴(예: `"shell.*"`)을
+  추가하는 것이 자연스럽습니다.
 - **이미지 입력 최소 크기**: Grok Build는 8×8 미만, 총 512px 미만
   이미지 거부(정사각형은 23×23 이상 필요); Cursor는 16×16부터 허용.
-  둘 다 서버 측에서 검증하므로 SNA는 image block을 그대로 전달.
-  썸네일 같은 작은 이미지 다루는 컨슈머는 Grok 호환을 위해 32×32
-  이상으로 upscale 필요.
+  둘 다 서버 측에서 검증하므로 SNA는 image block을 그대로 전달합니다.
+  썸네일 같은 작은 이미지를 다루는 앱은 Grok 호환을 위해 32×32 이상으로
+  upscale해야 합니다.

@@ -1,13 +1,13 @@
 ---
-title: 核心概念
-description: SNA ランタイムの構造、サーバ、session manager、providers、履歴を説明します。
+title: 中心モデル
+description: SNA ランタイムのサーバ、session manager、provider、履歴構造を整理します。
 icon: LayoutGrid
 ---
 
-SNA はセッションごとに長期稼働プロセスを持つ Hono HTTP/WebSocket
-サーバです。サーバはプロバイダ非依存です。Claude Code、Codex、OpenCode は
-すべて共通の `AgentProvider` インタフェースを実装しているため、1 つの
-セッションが文脈を失わずにランタイムを切り替えられます。
+SNA は、セッションごとにエージェントプロセスを管理する Hono HTTP/WebSocket
+サーバです。サーバ自体は特定のプロバイダに依存しません。Claude Code、
+Codex、OpenCode はすべて同じ `AgentProvider` インタフェースを実装するため、
+1 つのセッションで会話履歴を保ったままランタイムを切り替えられます。
 
 ```
 SnaClient
@@ -27,12 +27,12 @@ Hono server  ──►  SessionManager
 ## 読む順序
 
 <Cards>
-  <Card title="哲学" href="/ja/docs/introduction/philosophy" description="SNA のプロバイダ中立アーキテクチャを導く設計原則。" />
-  <Card title="セッション" href="/ja/docs/introduction/sessions" description="ライフサイクル、RuntimeSession チェーン、PATCH 意味論。" />
-  <Card title="正規化履歴" href="/ja/docs/introduction/history" description="フラットブロック、プロバイダネイティブ再構築。" />
+  <Card title="哲学" href="/ja/docs/introduction/philosophy" description="プロバイダ中立の構造を保つための設計原則。" />
+  <Card title="セッション" href="/ja/docs/introduction/sessions" description="ライフサイクル、RuntimeSession チェーン、PATCH の意味。" />
+  <Card title="正規化履歴" href="/ja/docs/introduction/history" description="フラットなブロックとプロバイダ別履歴の再構築。" />
   <Card title="プロバイダ" href="/ja/docs/introduction/providers" description="AgentProvider インタフェースと runtime pool。" />
-  <Card title="権限" href="/ja/docs/introduction/permissions" description="プロバイダ横断の統一権限フロー。" />
+  <Card title="権限" href="/ja/docs/introduction/permissions" description="プロバイダ差分を隠す承認フロー。" />
 </Cards>
 
 ワイヤプロトコルの詳細 (HTTP ルート、WebSocket op、イベントタイプ)
-は **[API Spec](/ja/docs/api)** を参照してください。
+は **[API Spec](/ja/docs/api)** で扱います。

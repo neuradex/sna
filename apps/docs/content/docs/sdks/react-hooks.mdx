@@ -5,10 +5,12 @@ description: "Inputs and return values for useAgent, useSessionManager, and useR
 
 # React hooks
 
+The React hooks use the SNA HTTP API directly. They read `apiUrl` and `sessionId` from `SnaProvider`, but each hook also accepts overrides for hosts that need custom routing.
+
 ## `useAgent(options?)`
 
 ```ts
-const agent = useAgent(options?: {
+declare function useAgent(options?: {
   sessionId?: string;
   baseUrl?: string;
   provider?: string;
@@ -22,23 +24,69 @@ const agent = useAgent(options?: {
   onComplete?: (event: AgentEvent) => void;
   onError?: (event: AgentEvent) => void;
   onInit?: (event: AgentEvent) => void;
-});
+}): UseAgentResult;
 ```
 
 Returns `{ connected, alive, start, send, kill, completion }`. The hook connects to the SSE event stream on mount. `start` calls `/agent/start`; `send` calls `/agent/send`; `completion` calls `/agent/completion`.
 
+### Behavior
+
+| Concern | Detail |
+| --- | --- |
+| Event transport | Opens `EventSource` against `/agent/events?session=<id>&since=<cursor>`. |
+| Cursor handling | Reads `/agent/status` first and starts from the current event count, so old events are skipped on initial mount. |
+| Reconnect | If SSE errors, the hook closes the stream and retries after `3000ms`. |
+| Provider default | `provider` defaults to `claude-code`. |
+| Session default | `sessionId` comes from `SnaContext`; `SnaProvider` defaults it to `default`. |
+| `alive` | Set from `/agent/status` during initialization and set optimistically when `start` or `send` succeeds locally. |
+
+### Methods
+
+| Method | HTTP route | Notes |
+| --- | --- | --- |
+| `start(prompt?)` | `POST /agent/start?session=<id>` | Sends `provider`, `prompt`, `permissionMode`, `reasoningLevel`, and `providerOptions`. |
+| `send(message)` | `POST /agent/send?session=<id>` | Sends a plain text message. This hook does not expose image attachments; use `SnaClient.agent.send` for multimodal sends. |
+| `kill()` | `POST /agent/kill?session=<id>` | Stops the runtime and sets `alive` to `false`. |
+| `completion(opts)` | `POST /agent/completion` | Sends a stateless completion request using the hook provider and reasoning defaults. |
+
+### Event callbacks
+
+`onEvent` receives every parsed `AgentEvent`. The narrower callbacks are convenience filters:
+
+| Callback | Event type |
+| --- | --- |
+| `onInit` | `init` |
+| `onThinking` | `thinking` |
+| `onAssistant` | `assistant` |
+| `onToolResult` | `tool_result` |
+| `onComplete` | `complete` |
+| `onError` | `error` |
+
+The hook does not wrap `SnaClient` and does not use WebSocket subscriptions. Use `@sna-sdk/client` when you need permission push handling, `runOnceStream`, message history pagination, or WebSocket reconnect resubscription.
+
 ## `useSessionManager(pollInterval?)`
 
 ```ts
-const manager = useSessionManager(pollInterval?: number);
+declare function useSessionManager(pollInterval?: number): UseSessionManagerResult;
 ```
 
 Returns `{ sessions, loading, createSession, killSession, deleteSession, refresh }`. `pollInterval` defaults to `3000`; pass `0` to disable polling.
 
+### Behavior
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| `refresh()` | `GET /agent/sessions` | Replaces local state only when the serialized response changes. |
+| `createSession(opts?)` | `POST /agent/sessions` | Accepts `{ label?, cwd? }` and returns the new session ID or `null`. |
+| `killSession(id)` | `POST /agent/kill?session=<id>` | Stops the agent process but keeps the session record. |
+| `deleteSession(id)` | `DELETE /agent/sessions/<id>` | Deletes the session record after asking the server. |
+
+Use this hook for simple React state. Use `SnaClient.sessions` when the app needs WebSocket snapshots, metadata updates, or stricter command acknowledgements.
+
 ## `useResponsiveChat()`
 
 ```ts
-const { mode } = useResponsiveChat(): { mode: "side-by-side" | "overlay" | "fullscreen" }
+declare function useResponsiveChat(): { mode: "side-by-side" | "overlay" | "fullscreen" };
 ```
 
 | Width | Mode | Meaning |

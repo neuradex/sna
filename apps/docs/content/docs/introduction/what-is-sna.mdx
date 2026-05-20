@@ -55,6 +55,33 @@ The CLIs already do the hard parts (tool dispatch, sandboxing,
 permission gating, history). SNA wraps them so a single consumer-side
 codebase works across all three.
 
+## Why not build it directly with model APIs?
+
+Direct model APIs and provider SDKs are the right layer for stateless
+model calls. They are not the same thing as an agent runtime. If you
+build directly on those APIs, your product owns the API keys, tool
+orchestration loop, approval UX, file-edit handling, streaming event
+shape, retries, and history format.
+
+SNA takes a different route: it orchestrates the **agentic CLI harness**
+provided by each runtime. Those harnesses are already tuned by the
+companies building the models: how context is prepared, how tools are
+called, how permissions are requested, how sandbox boundaries are
+enforced, and how long-running work recovers. SNA keeps that harness in
+place and normalizes the app-facing API around it.
+
+| Direct API / SDK integration | SNA |
+| --- | --- |
+| Your app usually needs to collect, store, or proxy model API keys. | The host runs an authenticated CLI; SNA drives that local runtime. |
+| You build the agent loop yourself. | The provider's CLI harness owns the model-specific loop. |
+| Tool calls, approvals, file edits, and streaming events are per-provider work. | SNA exposes one normalized session, event, and permission protocol. |
+| Switching runtimes means rewriting integration code or losing history. | SNA rebuilds provider-native history from canonical session blocks. |
+
+SNA still needs the underlying CLI to be installed and authenticated on
+the machine where it runs. The difference is that your product does not
+need to recreate every model provider's agent harness from raw
+completion APIs.
+
 ## What you get
 
 - **One canonical conversation model.** Messages live as flat blocks

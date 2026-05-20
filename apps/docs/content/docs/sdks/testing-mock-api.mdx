@@ -5,26 +5,37 @@ description: "Usage for startMockAnthropicServer, runOneshot, and MockServer."
 
 # Testing Mock API
 
-## `startMockAnthropicServer(options?)`
+## `startMockAnthropicServer()`
 
 ```ts
-const server = await startMockAnthropicServer(options?: { port?: number }): Promise<MockServer>
+declare function startMockAnthropicServer(): Promise<MockServer>;
 ```
 
 ```ts
 type MockServer = {
-  url: string;
   port: number;
-  logs: MockLogEntry[];
-  close: () => Promise<void>;
+  server: http.Server;
+  close: () => void;
+  requests: Array<{ model: string; messages: unknown[]; stream: boolean; timestamp: string }>;
+  onLog: (handler: (line: string) => void) => void;
 };
 ```
 
 ```ts
 type MockLogEntry = {
-  request: unknown;
-  response: unknown;
-  timestamp: number;
+  ts: string;
+  type: "request" | "response" | "error" | "info";
+  method?: string;
+  url?: string;
+  model?: string;
+  stream?: boolean;
+  messageCount?: number;
+  userText?: string;
+  systemPromptLength?: number;
+  replyText?: string;
+  requestBody?: unknown;
+  error?: string;
+  message?: string;
 };
 ```
 
@@ -32,28 +43,48 @@ type MockLogEntry = {
 import { startMockAnthropicServer } from "@sna-sdk/testing";
 
 const mock = await startMockAnthropicServer();
-process.env.ANTHROPIC_BASE_URL = mock.url;
+process.env.ANTHROPIC_BASE_URL = `http://localhost:${mock.port}`;
+process.env.ANTHROPIC_API_KEY = "sk-test";
+
+mock.onLog((line) => {
+  process.stdout.write(`${line}\n`);
+});
 
 try {
   // Run code that expects an Anthropic-compatible API.
 } finally {
-  await mock.close();
+  mock.close();
 }
 ```
 
 Behavior:
 
-- Provides a `/v1/messages` endpoint.
-- Normal user text receives deterministic responses.
-- If tools are declared and the prompt contains `[tool:Name]`, the mock can emit a tool-use response.
+- Starts on an available port chosen by the OS. The current implementation does not accept a fixed port option.
+- Provides an Anthropic-compatible `POST /v1/messages` endpoint.
+- Supports CORS preflight requests.
+- Records parsed requests in `mock.requests`.
+- Emits JSONL log lines through `mock.onLog`.
+- For normal text, replies with the last user text reversed. This makes responses deterministic without looking realistic.
+- If tools are declared and the latest user text contains `[tool:Name]`, returns or streams a `tool_use` block for that tool.
+- Supports streaming SSE and non-streaming JSON responses.
 
-## `runOneshot(options)`
+## `runOneshot(cliArgs?)`
 
 ```ts
-await runOneshot(options: Record<string, unknown>): Promise<unknown>
+declare function runOneshot(cliArgs?: string[]): Promise<void>;
 ```
 
-Use this when a test should exercise the one-shot execution path without starting the full CLI harness.
+Use this when a test should exercise Claude against the mock Anthropic API without starting the full interactive CLI harness.
+
+`runOneshot` starts the mock server, points `ANTHROPIC_BASE_URL` at it, runs `claude` with the provided CLI arguments, captures stdout/stderr, and exits the process with Claude's exit code. It also uses `.sna/mock-claude-oneshot` as `CLAUDE_CONFIG_DIR`.
+
+Written files:
+
+| File | Contents |
+| --- | --- |
+| `.sna/mock-claude-stdout.log` | Captured Claude stdout. |
+| `.sna/mock-claude-stderr.log` | Captured Claude stderr. |
+| `.sna/mock-claude-oneshot/` | Temporary Claude config directory. |
 
 ## Instance helpers
 
