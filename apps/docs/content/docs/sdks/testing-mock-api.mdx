@@ -1,6 +1,6 @@
 ---
 title: "Testing Mock API"
-description: "Usage for startMockAnthropicServer, runOneshot, and MockServer."
+description: "Usage for Anthropic/OpenAI mock APIs, runOneshot, and mock server types."
 ---
 
 # Testing Mock API
@@ -67,6 +67,50 @@ Behavior:
 - For normal text, replies with the last user text reversed. This makes responses deterministic without looking realistic.
 - If tools are declared and the latest user text contains `[tool:Name]`, returns or streams a `tool_use` block for that tool.
 - Supports streaming SSE and non-streaming JSON responses.
+
+## `startMockOpenAIServer(options?)`
+
+```ts
+declare function startMockOpenAIServer(options?: MockOpenAIOptions): Promise<MockOpenAIServer>;
+```
+
+```ts
+type MockOpenAIOptions = {
+  models?: Array<{ id: string; owned_by?: string }>;
+  responseText?: string | ((ctx: MockOpenAIResponseContext) => string);
+  chunkSize?: number;
+};
+```
+
+```ts
+import { startMockOpenAIServer } from "@sna-sdk/testing";
+
+const mock = await startMockOpenAIServer({
+  models: [{ id: "gpt-5.4", owned_by: "openai" }],
+  responseText: ({ endpoint, userText }) => `${endpoint}: ${userText}`,
+});
+
+try {
+  const res = await fetch(`${mock.url}/v1/responses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer sk-test" },
+    body: JSON.stringify({ model: "gpt-5.4", input: "hello" }),
+  });
+  console.log(await res.json());
+  console.log(mock.requests[0]);
+} finally {
+  await mock.close();
+}
+```
+
+Behavior:
+
+- Starts on an available local port and exposes `mock.url`.
+- Provides `GET /v1/models`, `POST /v1/chat/completions`, and `POST /v1/responses`.
+- Records parsed requests, including authorization, model, stream flag, user text, system prompt length, and the raw request body.
+- Emits JSONL log lines through `mock.onLog`.
+- Supports non-streaming JSON and streaming SSE for chat completions and responses.
+- By default, replies with the last user text reversed. Use `responseText` for fixed or per-request output.
 
 ## `runOneshot(cliArgs?)`
 

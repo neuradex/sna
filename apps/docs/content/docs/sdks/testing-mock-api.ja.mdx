@@ -1,6 +1,6 @@
 ---
 title: "Testing Mock API"
-description: "startMockAnthropicServer、runOneshot、MockServer の使い方。"
+description: "Anthropic/OpenAI mock API、runOneshot、mock server type の使い方。"
 ---
 
 # Testing Mock API
@@ -67,6 +67,50 @@ try {
 - 通常 text には最後の user text を反転した文字列で応答します。Realistic な返答ではなく deterministic test fixture です。
 - Tool が宣言され、最新の user text に `[tool:Name]` が含まれる場合、その tool の `tool_use` block を返すか stream します。
 - Streaming SSE と non-streaming JSON response の両方をサポートします。
+
+## `startMockOpenAIServer(options?)`
+
+```ts
+declare function startMockOpenAIServer(options?: MockOpenAIOptions): Promise<MockOpenAIServer>;
+```
+
+```ts
+type MockOpenAIOptions = {
+  models?: Array<{ id: string; owned_by?: string }>;
+  responseText?: string | ((ctx: MockOpenAIResponseContext) => string);
+  chunkSize?: number;
+};
+```
+
+```ts
+import { startMockOpenAIServer } from "@sna-sdk/testing";
+
+const mock = await startMockOpenAIServer({
+  models: [{ id: "gpt-5.4", owned_by: "openai" }],
+  responseText: ({ endpoint, userText }) => `${endpoint}: ${userText}`,
+});
+
+try {
+  const res = await fetch(`${mock.url}/v1/responses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer sk-test" },
+    body: JSON.stringify({ model: "gpt-5.4", input: "hello" }),
+  });
+  console.log(await res.json());
+  console.log(mock.requests[0]);
+} finally {
+  await mock.close();
+}
+```
+
+動作:
+
+- 使用可能な local port で起動し、`mock.url` を公開します。
+- `GET /v1/models`、`POST /v1/chat/completions`、`POST /v1/responses` を提供します。
+- authorization、model、stream flag、user text、system prompt length、raw request body を含む parsed request を記録します。
+- `mock.onLog` から JSONL log line を emit します。
+- Chat completions と responses の両方で non-streaming JSON と streaming SSE をサポートします。
+- デフォルトでは最後の user text を反転した文字列で応答します。固定応答や request ごとの応答は `responseText` で指定してください。
 
 ## `runOneshot(cliArgs?)`
 

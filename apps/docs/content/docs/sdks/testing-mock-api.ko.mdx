@@ -1,6 +1,6 @@
 ---
 title: "Testing Mock API"
-description: "startMockAnthropicServer, runOneshot, MockServer의 사용법."
+description: "Anthropic/OpenAI mock API, runOneshot, mock server type의 사용법."
 ---
 
 # Testing Mock API
@@ -75,6 +75,56 @@ try {
 - 일반 text는 마지막 user text를 뒤집은 값으로 응답합니다. Realistic한 답변이 아니라 deterministic test fixture입니다.
 - Tool이 선언되어 있고 최신 user text에 `[tool:Name]`이 있으면 해당 tool의 `tool_use` block을 반환하거나 stream합니다.
 - Streaming SSE와 non-streaming JSON response를 모두 지원합니다.
+
+## `startMockOpenAIServer(options?)`
+
+**Signature**
+
+```ts
+declare function startMockOpenAIServer(options?: MockOpenAIOptions): Promise<MockOpenAIServer>;
+```
+
+**Options**
+
+```ts
+type MockOpenAIOptions = {
+  models?: Array<{ id: string; owned_by?: string }>;
+  responseText?: string | ((ctx: MockOpenAIResponseContext) => string);
+  chunkSize?: number;
+};
+```
+
+**Example**
+
+```ts
+import { startMockOpenAIServer } from "@sna-sdk/testing";
+
+const mock = await startMockOpenAIServer({
+  models: [{ id: "gpt-5.4", owned_by: "openai" }],
+  responseText: ({ endpoint, userText }) => `${endpoint}: ${userText}`,
+});
+
+try {
+  const res = await fetch(`${mock.url}/v1/responses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer sk-test" },
+    body: JSON.stringify({ model: "gpt-5.4", input: "hello" }),
+  });
+  console.log(await res.json());
+  console.log(mock.requests[0]);
+} finally {
+  await mock.close();
+}
+```
+
+**Behavior**
+
+- 사용 가능한 local port에서 시작하고 `mock.url`을 노출합니다.
+- `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/responses`를 제공합니다.
+- authorization, model, stream flag, user text, system prompt 길이, raw request body를 포함해 parsed request를 기록합니다.
+- `mock.onLog`로 JSONL log line을 emit합니다.
+- Chat completions와 responses 모두 non-streaming JSON 및 streaming SSE를 지원합니다.
+- 기본 응답은 마지막 user text를 뒤집은 값입니다. 고정 응답이나 요청별 응답은 `responseText`로 지정하십시오.
 
 ## `runOneshot(cliArgs?)`
 
