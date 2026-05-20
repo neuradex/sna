@@ -4,7 +4,7 @@ description: SNA の各機能が Claude Code、Codex、OpenCode、Grok Build、C
 icon: TableProperties
 ---
 
-SNA のすべての機能は同じ `AgentProvider` インタフェースを通りますが、
+SNA のすべての機能は同じ `AgentProvider` インターフェースを通りますが、
 各ランタイムのネイティブ表面は異なります。そのため、5 つのプロバイダの
 能力が完全に揃うわけではありません。このページでは、どの機能がどこで
 実際に動くかと、行ごとの注意点を整理します。
@@ -13,8 +13,11 @@ SNA のすべての機能は同じ `AgentProvider` インタフェースを通�
 プロバイダが無視するか、respawn にフォールバックするか、対応する
 ネイティブ表面を持たないことを意味します。
 
-> 最終検証対象: Claude Code 1.x, Codex 0.x (`app-server`),
-> OpenCode 0.x (`serve`), Grok Build CLI 0.1.x, Cursor CLI 2026.05.
+> コード監査基準: 2026-05-21。`packages/core/src/core/providers/*`、
+> `core/providers/acp/base.ts`、provider テストスイートを基準にしています。
+> ランタイムメモは Claude Code 1.x、Codex 0.x (`app-server`)、
+> OpenCode 0.x (`serve`)、Grok Build CLI 0.1.x、Cursor CLI 2026.05 を
+> 前提にしています。
 
 ## ランタイム特性
 
@@ -30,7 +33,7 @@ Claude Code、Grok Build、Cursor は呼び出しまたはセッション単位�
 です。spawn ごとに新しい子プロセスが立ち上がります。Codex と OpenCode は
 `RuntimePool` を通じてデーモンを共有します。Codex のデーモンだけが
 `cwd` に依存しないため、単一プールのデーモン上で異なる作業ディレクトリの
-セッションをホストできる唯一のプロバイダです。2 つの ACP-speaking プロバイダ
+セッションをホストできる唯一のプロバイダです。ACP を使う 2 つのプロバイダ
 (Grok Build, Cursor) は `core/providers/acp/base.ts` を共有します。
 
 ## セッションライフサイクル
@@ -43,7 +46,7 @@ Claude Code、Grok Build、Cursor は呼び出しまたはセッション単位�
 | `kill()` / `closeThread()` | ✓ | ✓ (プール refcount 認識) | ✓ (プール refcount 認識) | ✓ | ✓ |
 | `complete(opts)` one-shot | ✓ | ✓ | ✓ | ✓ (`grok -p`) | ✓ (`agent -p`) |
 | `complete()` `onDelta` ストリーミング | ✓ stream-json | ✓ `item/agentMessage/delta` | ✗ 現状の SDK 呼び出しは single-shot | ✓ streaming-json text イベント | ✓ stream-json `assistant` チャンク (`model_call_id` なし) |
-| `listModels()` | ✓ static + oMLX API | ✓ static catalog | ✓ `opencode` CLI プローブ | ✓ static (単一: `grok-build`) | ✓ `agent models` テキストパース + static fallback |
+| `listModels()` | ✓ static + oMLX API | ✓ `codex debug models` プローブ + static fallback | ✓ `opencode` CLI プローブ | ✓ static (単一: `grok-build`) | ✓ `agent models` テキストパース + static fallback |
 
 OpenCode はストリーミングで例外です。現在の SDK ヘルパが single-shot
 のため、`complete()` に `onDelta` を渡しても成功はしますがコール
@@ -58,11 +61,11 @@ OpenCode はストリーミングで例外です。現在の SDK ヘルパが si
 
 | フィールド | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
-| `model` | ✓ control_request `set_model` | ✓ 次 turn override | ✓ per-session override | ✗ leftover (respawn) | ✗ leftover (respawn) |
-| `permissionMode` | ✓ control_request | ✓ 次 turn sandbox policy | ✓ per-session override | ✗ leftover (respawn) | ✗ leftover (respawn) |
+| `model` | ✓ control_request `set_model` | ✓ 次 turn override | ✓ 次 prompt override | ✗ leftover (respawn) | ✗ leftover (respawn) |
+| `permissionMode` | ✓ control_request | ✓ 次 turn sandbox policy | ✓ 次 prompt の agent override | ✗ leftover (respawn) | ✗ leftover (respawn) |
 | `cwd` | ✗ leftover | ✓ 次 turn override (唯一可能なプロバイダ) | ✗ leftover | ✗ leftover | ✗ leftover |
 
-2 つの ACP-speaking プロバイダはすべてのフィールドを leftover と
+ACP を使う 2 つのプロバイダはすべてのフィールドを leftover と
 して返します。ACP にランタイム変更メソッドがないためです。
 respawn-with-history-replay は変わらず動きます。
 
@@ -70,10 +73,10 @@ respawn-with-history-replay は変わらず動きます。
 
 | 能力 | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
-| `permission_needed` AgentEvent emit | ✓ hook ブリッジ経由 | ✓ JSON-RPC server-request 経由 | ✓ HTTP webhook 経由 | ✓ ACP `session/request_permission` 経由 | ✓ ACP `session/request_permission` 経由 |
+| `permission_needed` AgentEvent emit | ✓ hook ブリッジ経由 | ✓ JSON-RPC server-request 経由 | ✓ SSE `permission.updated` 経由 | ✓ ACP `session/request_permission` 経由 | ✓ ACP `session/request_permission` 経由 |
 | `respondToPermission(id, approved)` | ✗ 外部 hook スクリプトが承認処理 | ✓ JSON-RPC response | ✓ POST `/permissions/:id` | ✓ ACP `{outcome:{outcome:"selected",optionId}}` | ✓ ACP `{outcome:{outcome:"selected",optionId}}` |
 | 双方向 (プロバイダがこちらを待つ) | ✗ hook スクリプトが決定 | ✓ | ✓ | ✓ | ✓ |
-| `bypassPermissions` 自動承認 | ✓ hook スクリプトが常に許可 | ✓ 次 turn override | ✓ per-session override | ✓ ACP base が自動で `allow_*` を返す | ✓ ACP base が自動で `allow_*` を返す |
+| `bypassPermissions` 自動承認 | ✓ hook スクリプトが常に許可 | ✓ server-request に自動応答 | ✓ HTTP permission API で自動応答 | ✓ ACP base が自動で `allow_*` を返す | ✓ ACP base が自動で `allow_*` を返す |
 
 Claude Code の権限モデルは out-of-band です。SNA が hook スクリプトを
 書いておくと CLI がそれを呼び、スクリプトが permissionMode と allow/deny
@@ -86,29 +89,34 @@ Claude Code の権限モデルは out-of-band です。SNA が hook スクリプ
 |---|---|---|---|---|---|
 | `systemPrompt` | ✓ `--system-prompt` | ✓ `thread/start` の `baseInstructions` | ✓ `appendSystemPrompt` と結合 | ✓ ACP base 最初の turn の `resource` block (ヘッドレス `complete()` 経路は `--system-prompt-override` もサポート) | ✓ ACP base 最初の turn の `resource` block (CLI フラグ自体が無い。fold が共有 base に乗る) |
 | `appendSystemPrompt` | ✓ `--append-system-prompt` | ✓ `thread/start` の `developerInstructions` | ✓ `systemPrompt` と結合 | ✓ 同じ最初の turn の block で `systemPrompt` と結合 (complete 経路は `--rules` もサポート) | ✓ 同じ最初の turn の block で `systemPrompt` と結合 |
-| `allowedTools` | ✓ ネイティブ `--allowedTools` | ✓ PreToolUse hook (他を deny) | ⚠ best-effort (既知のツールのみトグル) | ✓ ACP base が `session/request_permission` 境界で非リストツールを自動 deny | ✓ ACP base が `session/request_permission` 境界で非リストツールを自動 deny |
+| `permissionMode: "plan"` | ✓ ネイティブ `--permission-mode plan` | ✗ plan 表面なし。read-only sandbox にマップ | ✓ OpenCode agent `plan` にマップ | ✗ 現在の adapter にマップなし | ✗ 現在の adapter にマップなし |
+| `allowedTools` | ✓ ネイティブ `--allowedTools` | ✓ PreToolUse hook (他を deny) | ⚠ 厳密な allowlist ではない。列挙ツールは有効化するが、それ以外は OpenCode の既定値のまま | ✓ ACP base が `session/request_permission` 境界で非リストツールを自動 deny | ✓ ACP base が `session/request_permission` 境界で非リストツールを自動 deny |
 | `disallowedTools` | ✓ ネイティブ `--disallowedTools` | ✓ PreToolUse hook | ✓ 列挙されたツールを無効化 | ✓ ACP base が permission 境界で列挙されたツールを自動 deny | ✓ ACP base が permission 境界で列挙されたツールを自動 deny |
-| `mcpServers` | ✓ `--mcp-config` JSON | ✓ `config.toml` `[mcp_servers.*]` に書き出し | ✓ SDK 経由 | ✓ stdio→HTTP bridge + `<cwd>/.grok/config.toml` | ✓ stdio→HTTP bridge + `<cwd>/.cursor/mcp.json` (既存 user entries とマージ、exit で復元) |
+| `mcpServers` | ✓ `--mcp-config` JSON | ✓ `config.toml` `[mcp_servers.*]` に書き出し | ✓ SDK 経由で daemon config に注入 | ✓ stdio→HTTP bridge + `<cwd>/.grok/config.toml` | ✓ stdio→HTTP bridge + `<cwd>/.cursor/mcp.json` (既存 user entries とマージ、exit で復元) |
 | `reasoningLevel` (0..5) | ✓ `toClaudeEffort` → `--effort` | ✓ `toCodexEffort` → `model_reasoning_effort` | ✗ 無視 | ✓ `toGrokEffort` → `--effort` | ✓ `applyCursorReasoning` → モデル ID サフィックス (`gpt-5.3-codex` → `gpt-5.3-codex-high`) |
 | `configDir` | ✓ `CLAUDE_CONFIG_DIR` | ✓ `CODEX_HOME` | ✗ 対応なし | ✗ 対応なし (Grok Build は `~/.grok` 固定) | ✗ 対応なし (Cursor は `~/.cursor` 固定; `CURSOR_CONFIG_DIR` は `cli-config.json` だけリルート、hook はリルートしない) |
-| `resumeSessionId` | ✓ JSONL replay ファイル経由 | ✓ `thread/resume` API | ✓ session id | ⚠ Grok Build chat id で resume は動くが、クロスプロバイダ history は下記 `resource` block 経路 | ⚠ Cursor `chatId` で resume 動作 (`--resume <id>` / `session/load`)、クロスプロバイダ history は同じ経路 |
+| `resumeSessionId` | ✓ ネイティブ `--resume <sessionId>` | ✓ `thread/resume` API | ✓ 既存 OpenCode session id | ✗ adapter に未接続 | ✗ adapter に未接続 |
 
 ### `providerOptions` (プロバイダごとの escape hatch)
 
 | キー | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
-| `settings` | ✓ `--settings` JSON にマージ | ✓ 同じ hook shape | — | — | — |
+| `settings` | ✓ `--settings` JSON にマージ | ✓ `hooks.PreToolUse` のみ反映 | — | — | — |
 | `settingSources` | ✓ `--setting-sources` | — | — | — | — |
 | `strictMcpConfig` | ✓ `--strict-mcp-config` | — | — | — | — |
 | `maxTurns` | ✓ `--max-turns` | — | — | — | — |
+| `disableSlashCommands` | ✓ `--disable-slash-commands` | — | — | — | — |
 | `omlxBaseUrl` | ✓ `ANTHROPIC_BASE_URL` をルーティング | — | — | — | — |
 | `serviceTier` | ✗ 誤課金 (`/fast` はモデルであって tier ではない) | ✓ `priority` / `flex` / `batch` | — | — | — |
-| `profile` | — | ✓ `config.toml` プロファイル | — | — | — |
-| `config` (`-c key=value`) | — | ✓ `codex exec` オーバーライド | — | — | — |
+| `profile` | — | ⚠ pool key の分離のみ。adapter は profile を有効化しない | — | — | — |
+| `config` (`-c key=value`) | — | ✗ 現在の adapter には未接続 | — | — | — |
+| `hooksHash` / `configHash` | — | ✓ runtime pool 分離 key | — | — | — |
 | `serverUrl` | — | — | ✓ spawn を飛ばして既存デーモンに attach | — | — |
 | `modelProviderId` | — | — | ✓ `{providerID, modelID}` の provider 半分 | — | — |
 | `agent` | — | — | ✓ build / plan / etc. | — | — |
-| `logLevel` | — | — | ✓ `opencode serve --log-level` | — | — |
+| `opencodeSessionId` | — | — | ✓ 新規作成前に既存 session を resume | — | — |
+| `logLevel` | — | — | ✓ SDK daemon config の `logLevel` | — | — |
+| `opencodeConfigHash` | — | — | ✓ runtime pool 分離 key | — | — |
 
 Cursor には現状 SNA-specific の `providerOptions` キーはありません。
 CLI が受け付けるすべての設定 (model、reasoning、mode) は型付きの
@@ -125,7 +133,7 @@ CLI が受け付けるすべての設定 (model、reasoning、mode) は型付き
 |---|---|---|
 | Claude Code | Anthropic フォーマットの JSONL を書き出し、パスを `--resume <filepath>` に渡す | `history/claude-code.ts` |
 | Codex | `thread/resume(history=ResponseItems)` JSON-RPC | `history/codex.ts` |
-| OpenCode | SDK 経由の experimental `thread/resume(history=...)` | `history/opencode.ts` |
+| OpenCode | 最初の prompt に history prelude `TextPartInput` と embed 用 file part を prepend | `history/opencode.ts` |
 | Grok Build / Cursor | 最初の `session/prompt` で transcript を 1 個の ACP `resource` content block にシリアライズ | `core/providers/acp/base.ts` 共有 (`serializeHistoryForAcp` + `buildHistoryPromptBlock`) |
 
 ACP 経路はネイティブ resume 経路と意図的に異なります。ACP の
@@ -136,14 +144,14 @@ xAI 内部、Cursor は `~/.cursor/chats/` 下の SQLite) で、session load 時
 turn で過去の transcript をインラインで埋め込み、そのコンテキストは同じ
 セッションの後続 turn でも保持されるため、再注入は不要です。
 
-## まだマトリクスに無いもの
+## 既知の隙間と検証限界
 
-- **plan mode のランタイム切り替え** (Claude Code
-  `--permission-mode plan`、Grok Build `--permission-mode plan`、
-  Cursor `--mode plan`): CLI フラグは spawn 時に反映されますが、
-  インプレース切り替えは ACP がワイヤメソッドとして公開しません。
-  ACP applyPatch はすべてのフィールドを leftover として返し、セッション
-  マネージャが respawn-with-history-replay で処理します。
+- **Plan mode はプロバイダごとに違います**: Claude Code はネイティブの
+  plan mode をサポートし、OpenCode は `plan` agent にマップします。
+  Codex は `plan` を既定の read-only sandbox と同じように扱い、
+  Grok Build / Cursor アダプタはまだ plan-mode flag を接続していません。
+  ACP プロバイダはランタイム中の `permissionMode` 変更も
+  respawn-with-history が必要です。
 - **ACP プロバイダの `allowedTools` / `disallowedTools` glob/パターン
   マッチ**: 現在の auto-deny intercept はツール名を文字列完全一致のみ
   比較します。実ワークロードで必要になれば glob パターン (例: `"shell.*"`)

@@ -10,11 +10,13 @@ icon: TableProperties
 함께 정리합니다.
 
 행이 **✗** 인 경우, SNA API 레벨에서는 해당 필드를 받을 수 있지만
-프로바이더가 무시하거나, respawn으로 fallback하거나, 대응되는 네이티브 표면이
+프로바이더가 무시하거나, respawn으로 폴백하거나, 대응되는 네이티브 표면이
 없다는 뜻입니다.
 
-> 마지막 검증 대상: Claude Code 1.x, Codex 0.x (`app-server`),
-> OpenCode 0.x (`serve`), Grok Build CLI 0.1.x, Cursor CLI 2026.05.
+> 코드 감사 기준: 2026-05-21, `packages/core/src/core/providers/*`,
+> `core/providers/acp/base.ts`, provider 테스트 스위트 기준. 런타임 메모는
+> Claude Code 1.x, Codex 0.x (`app-server`), OpenCode 0.x (`serve`),
+> Grok Build CLI 0.1.x, Cursor CLI 2026.05를 기준으로 둡니다.
 
 ## 런타임 특성
 
@@ -26,11 +28,11 @@ icon: TableProperties
 | 공개 표준 프로토콜 | ✗ 벤더 | ✗ 벤더 | ✗ 벤더 | ✓ [ACP](https://agentclientprotocol.com) | ✓ [ACP](https://agentclientprotocol.com) |
 | Cold-start 비용 | 호출당 약 1초 spawn | 데몬 약 2초 spawn, 재사용 | 데몬 약 3초 spawn, 재사용 | 세션당 약 2초 spawn | 세션당 약 2초 spawn |
 
-Claude Code, Grok Build, Cursor는 호출 또는 세션 단위로 무상태입니다. spawn마다
+Claude Code, Grok Build, Cursor는 호출 또는 세션 단위로 무상태입니다. `spawn`마다
 새 자식 프로세스가 뜹니다. Codex와 OpenCode는 `RuntimePool`을 통해 데몬을
 공유합니다. Codex 데몬만 `cwd`에 종속되지 않으므로, 단일 풀 데몬 위에서
 서로 다른 작업 디렉토리의 세션을 호스팅할 수 있는 유일한 프로바이더입니다.
-두 ACP-speaking 프로바이더(Grok Build, Cursor)는
+ACP를 사용하는 두 프로바이더(Grok Build, Cursor)는
 `core/providers/acp/base.ts`를 공유합니다.
 
 ## 세션 라이프사이클
@@ -43,7 +45,7 @@ Claude Code, Grok Build, Cursor는 호출 또는 세션 단위로 무상태입�
 | `kill()` / `closeThread()` | ✓ | ✓ (풀 refcount 인식) | ✓ (풀 refcount 인식) | ✓ | ✓ |
 | `complete(opts)` one-shot | ✓ | ✓ | ✓ | ✓ (`grok -p`) | ✓ (`agent -p`) |
 | `complete()` `onDelta` 스트리밍 | ✓ stream-json | ✓ `item/agentMessage/delta` | ✗ 현재 SDK 호출이 single-shot | ✓ streaming-json text 이벤트 | ✓ stream-json `assistant` 청크 (`model_call_id` 없음) |
-| `listModels()` | ✓ static + oMLX API | ✓ static catalog | ✓ `opencode` CLI 프로브 | ✓ static (`grok-build` 단일 항목) | ✓ `agent models` 텍스트 파싱 + static fallback |
+| `listModels()` | ✓ static + oMLX API | ✓ `codex debug models` 프로브 + static fallback | ✓ `opencode` CLI 프로브 | ✓ static (`grok-build` 단일 항목) | ✓ `agent models` 텍스트 파싱 + static fallback |
 
 OpenCode는 스트리밍에서 예외입니다. 현재 SDK 헬퍼가 single-shot이라
 `complete()`에 `onDelta`를 넘기면 성공하지만 콜백은 호출되지 않습니다.
@@ -56,11 +58,11 @@ kill 후 history replay와 함께 respawn해야 합니다.
 
 | 필드 | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
-| `model` | ✓ control_request `set_model` | ✓ next-turn override | ✓ per-session override | ✗ leftover (respawn) | ✗ leftover (respawn) |
-| `permissionMode` | ✓ control_request | ✓ next-turn sandbox 정책 | ✓ per-session override | ✗ leftover (respawn) | ✗ leftover (respawn) |
+| `model` | ✓ control_request `set_model` | ✓ next-turn override | ✓ next-prompt override | ✗ leftover (respawn) | ✗ leftover (respawn) |
+| `permissionMode` | ✓ control_request | ✓ next-turn sandbox 정책 | ✓ next-prompt agent override | ✗ leftover (respawn) | ✗ leftover (respawn) |
 | `cwd` | ✗ leftover | ✓ next-turn override (유일하게 가능한 프로바이더) | ✗ leftover | ✗ leftover | ✗ leftover |
 
-두 ACP-speaking 프로바이더는 모든 필드를 leftover로 반환합니다. ACP에는
+ACP를 사용하는 두 프로바이더는 모든 필드를 leftover로 반환합니다. ACP에는
 런타임 변경 메서드가 없기 때문입니다. respawn-with-history-replay는
 변함없이 동작합니다.
 
@@ -68,10 +70,10 @@ kill 후 history replay와 함께 respawn해야 합니다.
 
 | 능력 | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
-| `permission_needed` AgentEvent emit | ✓ hook 브릿지 경유 | ✓ JSON-RPC server-request 경유 | ✓ HTTP webhook 경유 | ✓ ACP `session/request_permission` 경유 | ✓ ACP `session/request_permission` 경유 |
+| `permission_needed` AgentEvent emit | ✓ hook 브리지 경유 | ✓ JSON-RPC server-request 경유 | ✓ SSE `permission.updated` 경유 | ✓ ACP `session/request_permission` 경유 | ✓ ACP `session/request_permission` 경유 |
 | `respondToPermission(id, approved)` | ✗ 외부 hook 스크립트가 승인 처리 | ✓ JSON-RPC response | ✓ POST `/permissions/:id` | ✓ ACP `{outcome:{outcome:"selected",optionId}}` | ✓ ACP `{outcome:{outcome:"selected",optionId}}` |
 | 양방향 (프로바이더가 우리를 기다림) | ✗ hook 스크립트가 결정 | ✓ | ✓ | ✓ | ✓ |
-| `bypassPermissions` 자동 승인 | ✓ hook 스크립트가 항상 허용 | ✓ next-turn override | ✓ per-session override | ✓ ACP base가 자동으로 `allow_*` 응답 | ✓ ACP base가 자동으로 `allow_*` 응답 |
+| `bypassPermissions` 자동 승인 | ✓ hook 스크립트가 항상 허용 | ✓ server-request에 자동 응답 | ✓ HTTP permission API로 자동 응답 | ✓ ACP base가 자동으로 `allow_*` 응답 | ✓ ACP base가 자동으로 `allow_*` 응답 |
 
 Claude Code의 권한 모델은 out-of-band입니다. SNA가 hook 스크립트를
 써두면 CLI가 그것을 호출하고, 스크립트가 permissionMode와 allow/deny 룰을
@@ -84,29 +86,34 @@ Claude Code의 권한 모델은 out-of-band입니다. SNA가 hook 스크립트�
 |---|---|---|---|---|---|
 | `systemPrompt` | ✓ `--system-prompt` | ✓ `thread/start`의 `baseInstructions` | ✓ `appendSystemPrompt`와 결합 | ✓ ACP base 첫-turn `resource` block (헤드리스 `complete()` 경로는 `--system-prompt-override`도 지원) | ✓ ACP base 첫-turn `resource` block (CLI flag 자체가 없음. fold가 공유 base를 타고 들어감) |
 | `appendSystemPrompt` | ✓ `--append-system-prompt` | ✓ `thread/start`의 `developerInstructions` | ✓ `systemPrompt`와 결합 | ✓ 같은 첫-turn block에 `systemPrompt`와 결합 (complete 경로는 `--rules`도 지원) | ✓ 같은 첫-turn block에 `systemPrompt`와 결합 |
-| `allowedTools` | ✓ 네이티브 `--allowedTools` | ✓ PreToolUse hook (나머지 거부) | ⚠ best-effort (알려진 도구만 토글) | ✓ ACP base가 `session/request_permission` 경계에서 미허용 도구 자동 deny | ✓ ACP base가 `session/request_permission` 경계에서 미허용 도구 자동 deny |
+| `permissionMode: "plan"` | ✓ 네이티브 `--permission-mode plan` | ✗ plan 표면 없음; read-only sandbox로 매핑 | ✓ OpenCode agent `plan`으로 매핑 | ✗ 현재 adapter 매핑 없음 | ✗ 현재 adapter 매핑 없음 |
+| `allowedTools` | ✓ 네이티브 `--allowedTools` | ✓ PreToolUse hook (나머지 거부) | ⚠ 엄격한 allowlist가 아님. 나열된 도구는 켜지만 나머지는 OpenCode 기본값 유지 | ✓ ACP base가 `session/request_permission` 경계에서 미허용 도구 자동 deny | ✓ ACP base가 `session/request_permission` 경계에서 미허용 도구 자동 deny |
 | `disallowedTools` | ✓ 네이티브 `--disallowedTools` | ✓ PreToolUse hook | ✓ 나열된 도구 비활성 | ✓ ACP base가 permission 경계에서 나열된 도구 자동 deny | ✓ ACP base가 permission 경계에서 나열된 도구 자동 deny |
-| `mcpServers` | ✓ `--mcp-config` JSON | ✓ `config.toml` `[mcp_servers.*]` 기록 | ✓ SDK 경유 | ✓ stdio→HTTP bridge + `<cwd>/.grok/config.toml` | ✓ stdio→HTTP bridge + `<cwd>/.cursor/mcp.json` (기존 user entries와 머지, exit에 원복) |
+| `mcpServers` | ✓ `--mcp-config` JSON | ✓ `config.toml` `[mcp_servers.*]` 기록 | ✓ SDK를 통해 daemon config에 주입 | ✓ stdio→HTTP bridge + `<cwd>/.grok/config.toml` | ✓ stdio→HTTP bridge + `<cwd>/.cursor/mcp.json` (기존 user entries와 머지, exit에 원복) |
 | `reasoningLevel` (0..5) | ✓ `toClaudeEffort` → `--effort` | ✓ `toCodexEffort` → `model_reasoning_effort` | ✗ 무시 | ✓ `toGrokEffort` → `--effort` | ✓ `applyCursorReasoning` → 모델 ID 접미사 (`gpt-5.3-codex` → `gpt-5.3-codex-high`) |
 | `configDir` | ✓ `CLAUDE_CONFIG_DIR` | ✓ `CODEX_HOME` | ✗ 대응 없음 | ✗ 대응 없음 (Grok Build은 `~/.grok` 고정) | ✗ 대응 없음 (Cursor는 `~/.cursor` 고정; `CURSOR_CONFIG_DIR`는 `cli-config.json`만 redirect, hook은 안 옮김) |
-| `resumeSessionId` | ✓ JSONL replay 파일 경유 | ✓ `thread/resume` API | ✓ 세션 id | ⚠ Grok Build chat id로 resume은 동작하지만, 크로스 프로바이더 history는 아래 `resource` block 경로 사용 | ⚠ Cursor `chatId`로 resume 동작 (`--resume <id>` / `session/load`), 크로스 프로바이더 history는 동일 경로 |
+| `resumeSessionId` | ✓ 네이티브 `--resume <sessionId>` | ✓ `thread/resume` API | ✓ 기존 OpenCode session id | ✗ 어댑터에 연결되지 않음 | ✗ 어댑터에 연결되지 않음 |
 
 ### `providerOptions` (프로바이더별 escape hatch)
 
 | 키 | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
-| `settings` | ✓ `--settings` JSON에 병합 | ✓ 같은 hook shape | — | — | — |
+| `settings` | ✓ `--settings` JSON에 병합 | ✓ `hooks.PreToolUse`만 반영 | — | — | — |
 | `settingSources` | ✓ `--setting-sources` | — | — | — | — |
 | `strictMcpConfig` | ✓ `--strict-mcp-config` | — | — | — | — |
 | `maxTurns` | ✓ `--max-turns` | — | — | — | — |
+| `disableSlashCommands` | ✓ `--disable-slash-commands` | — | — | — | — |
 | `omlxBaseUrl` | ✓ `ANTHROPIC_BASE_URL` 라우팅 | — | — | — | — |
 | `serviceTier` | ✗ 잘못 과금됨 (`/fast`는 모델, tier가 아님) | ✓ `priority` / `flex` / `batch` | — | — | — |
-| `profile` | — | ✓ `config.toml` 프로파일 | — | — | — |
-| `config` (`-c key=value`) | — | ✓ `codex exec` 오버라이드 | — | — | — |
+| `profile` | — | ⚠ pool key 분리 전용. 어댑터가 profile을 활성화하지는 않음 | — | — | — |
+| `config` (`-c key=value`) | — | ✗ 현재 어댑터에 연결되지 않음 | — | — | — |
+| `hooksHash` / `configHash` | — | ✓ runtime pool 분리 key | — | — | — |
 | `serverUrl` | — | — | ✓ spawn 생략, 기존 데몬에 attach | — | — |
 | `modelProviderId` | — | — | ✓ `{providerID, modelID}`의 provider 절반 | — | — |
 | `agent` | — | — | ✓ build / plan / etc. | — | — |
-| `logLevel` | — | — | ✓ `opencode serve --log-level` | — | — |
+| `opencodeSessionId` | — | — | ✓ 새 세션 생성 전 기존 세션 resume | — | — |
+| `logLevel` | — | — | ✓ SDK daemon config의 `logLevel` | — | — |
+| `opencodeConfigHash` | — | — | ✓ runtime pool 분리 key | — | — |
 
 Cursor는 현재 SNA-specific `providerOptions` 키가 없습니다. CLI가 받는 모든
 노브(model, reasoning, mode)는 타입화된 `SpawnOptions` 필드에 매핑됩니다.
@@ -122,7 +129,7 @@ SNA의 정규화 `CanonicalBlock[]` history는 어댑터 계층에서 네이티�
 |---|---|---|
 | Claude Code | Anthropic 포맷 JSONL 작성 → `--resume <filepath>`로 경로 전달 | `history/claude-code.ts` |
 | Codex | `thread/resume(history=ResponseItems)` JSON-RPC | `history/codex.ts` |
-| OpenCode | SDK 경유 experimental `thread/resume(history=...)` | `history/opencode.ts` |
+| OpenCode | 첫 prompt에 history prelude `TextPartInput`과 embed용 file part를 prepend | `history/opencode.ts` |
 | Grok Build / Cursor | 첫 `session/prompt`에서 transcript를 단일 ACP `resource` content block으로 직렬화 | `core/providers/acp/base.ts` 공유 (`serializeHistoryForAcp` + `buildHistoryPromptBlock`) |
 
 ACP 경로는 네이티브 resume 경로와 의도적으로 다릅니다. probing 결과
@@ -133,13 +140,13 @@ SNA는 저장 계층을 건드리지 않습니다. 대신 첫 turn에 prior tran
 인라인으로 embed하고, 그 컨텍스트는 같은 세션의 후속 turn에서도 유지되므로
 재주입은 필요 없습니다.
 
-## 아직 매트릭스에 없는 것
+## 알려진 빈틈과 검증 한계
 
-- **런타임 plan mode 토글** (Claude Code `--permission-mode plan`,
-  Grok Build `--permission-mode plan`, Cursor `--mode plan`): CLI 플래그
-  는 spawn 시점에 반영되지만, 인플레이스 토글은 ACP가 wire 메서드로
-  노출하지 않습니다. ACP applyPatch는 모든 필드를 leftover로
-  반환하고 세션 매니저가 respawn-with-history-replay로 처리합니다.
+- **Plan mode는 프로바이더별로 다릅니다**: Claude Code는 네이티브 plan
+  mode를 지원하고, OpenCode는 `plan` agent로 매핑합니다. Codex는
+  `plan`을 기본 read-only sandbox처럼 처리하며, Grok Build / Cursor
+  어댑터는 아직 plan-mode flag를 연결하지 않습니다. ACP 프로바이더는
+  런타임 `permissionMode` 변경도 respawn-with-history가 필요합니다.
 - **ACP 프로바이더의 `allowedTools` / `disallowedTools` glob/패턴 매칭**:
   현재 auto-deny intercept는 도구 이름을 정확 문자열 동등성으로만
   매치합니다. 실제 워크로드에서 필요해지면 glob 패턴(예: `"shell.*"`)을
