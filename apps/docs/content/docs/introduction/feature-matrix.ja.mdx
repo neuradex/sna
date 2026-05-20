@@ -84,11 +84,11 @@ allow/deny ルールに基づいて) 自分で判断し、CLI は SNA プロセ�
 
 | フィールド | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
-| `systemPrompt` | ✓ `--system-prompt` | ✓ `thread/start` の `baseInstructions` | ✓ `appendSystemPrompt` と結合 | ✓ `--system-prompt-override` | ⚠ CLI フラグ無し。ユーザの `AGENTS.md` か最初のプロンプトに fold (SNA からはまだ配線していない) |
-| `appendSystemPrompt` | ✓ `--append-system-prompt` | ✓ `thread/start` の `developerInstructions` | ✓ `systemPrompt` と結合 | ✓ `--rules` | ⚠ `systemPrompt` と同様 |
+| `systemPrompt` | ✓ `--system-prompt` | ✓ `thread/start` の `baseInstructions` | ✓ `appendSystemPrompt` と結合 | ✓ ACP base 最初の turn の `resource` block (ヘッドレス `complete()` 経路は `--system-prompt-override` もサポート) | ✓ ACP base 最初の turn の `resource` block (CLI フラグ自体が無い。fold が共有 base に乗る) |
+| `appendSystemPrompt` | ✓ `--append-system-prompt` | ✓ `thread/start` の `developerInstructions` | ✓ `systemPrompt` と結合 | ✓ 同じ最初の turn の block で `systemPrompt` と結合 (complete 経路は `--rules` もサポート) | ✓ 同じ最初の turn の block で `systemPrompt` と結合 |
 | `allowedTools` | ✓ ネイティブ `--allowedTools` | ✓ PreToolUse hook (他を deny) | ⚠ best-effort (既知のツールのみトグル) | ✓ `--tools` 許可リスト | ⚠ `~/.cursor/cli-config.json` の `permissions.allow` 経由 (user-global、SNA は管理しない) |
 | `disallowedTools` | ✓ ネイティブ `--disallowedTools` | ✓ PreToolUse hook | ✓ 列挙されたツールを無効化 | ✓ `--disallowed-tools` | ⚠ `allowedTools` と同様 (または `--mode plan` でセッション全体 read-only) |
-| `mcpServers` | ✓ `--mcp-config` JSON | ✓ `config.toml` `[mcp_servers.*]` に書き出し | ✓ SDK 経由 | ✓ stdio→HTTP bridge + `<cwd>/.grok/config.toml` | ⚠ ユーザの `~/.cursor/mcp.json` に依存; per-session stdio MCP 注入は後続タスク |
+| `mcpServers` | ✓ `--mcp-config` JSON | ✓ `config.toml` `[mcp_servers.*]` に書き出し | ✓ SDK 経由 | ✓ stdio→HTTP bridge + `<cwd>/.grok/config.toml` | ✓ stdio→HTTP bridge + `<cwd>/.cursor/mcp.json` (既存 user entries とマージ、exit で復元) |
 | `reasoningLevel` (0..5) | ✓ `toClaudeEffort` → `--effort` | ✓ `toCodexEffort` → `model_reasoning_effort` | ✗ 無視 | ✓ `toGrokEffort` → `--effort` | ✓ `applyCursorReasoning` → モデル ID サフィックス (`gpt-5.3-codex` → `gpt-5.3-codex-high`) |
 | `configDir` | ✓ `CLAUDE_CONFIG_DIR` | ✓ `CODEX_HOME` | ✗ 対応なし | ✗ 対応なし (Grok Build は `~/.grok` 固定) | ✗ 対応なし (Cursor は `~/.cursor` 固定; `CURSOR_CONFIG_DIR` は `cli-config.json` だけリルート、hook はリルートしない) |
 | `resumeSessionId` | ✓ JSONL replay ファイル経由 | ✓ `thread/resume` API | ✓ session id | ⚠ Grok Build chat id で resume は動くが、クロスプロバイダ history は下記 `resource` block 経路 | ⚠ Cursor `chatId` で resume 動作 (`--resume <id>` / `session/load`)、クロスプロバイダ history は同じ経路 |
@@ -143,13 +143,9 @@ xAI 内部、Cursor は `~/.cursor/chats/` 下の SQLite) で session load 時
   Cursor `--mode plan`): CLI フラグは spawn 時に反映されますが、
   インプレース切り替えには `permissionMode` patch サポートが必要で、
   ACP-スピーキングプロバイダはまだ持っていません。
-- **Cursor の MCP 配線**: Cursor の ACP は起動時にユーザの
-  `~/.cursor/mcp.json` を読みます。Per-session stdio MCP 注入 (Grok が
-  `.grok/config.toml` + stdio→HTTP bridge で扱う方式) は後続タスク。
-- **Cursor の `systemPrompt` / `appendSystemPrompt`**: Cursor には
-  エージェントのシステムプロンプトを CLI で override する手段が
-  ありません。`AGENTS.md` (プロジェクト単位、侵襲的) や最初の turn
-  への fold は可能ですが、まだ配線していません。
+- **Cursor の `allowedTools` / `disallowedTools`**: Cursor の per-tool
+  権限は user-global な `~/.cursor/cli-config.json` にあり、per-session
+  での shaping は後続タスク。
 - **プロンプトへの画像入力**: 5 つのプロバイダはすべて何らかの形で
   画像 block を受け付けますが、プロバイダごとの添付エンコーディング
   はまだ揃っていません — 現状は

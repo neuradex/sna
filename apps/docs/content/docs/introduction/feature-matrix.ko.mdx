@@ -82,11 +82,11 @@ Claude Code의 권한 모델은 out-of-band입니다 — SNA가 hook 스크립�
 
 | 필드 | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
-| `systemPrompt` | ✓ `--system-prompt` | ✓ `thread/start`의 `baseInstructions` | ✓ `appendSystemPrompt`와 결합 | ✓ `--system-prompt-override` | ⚠ CLI 플래그 없음. 사용자의 `AGENTS.md` 또는 첫 prompt에 fold (SNA에서 아직 와이어링 안 됨) |
-| `appendSystemPrompt` | ✓ `--append-system-prompt` | ✓ `thread/start`의 `developerInstructions` | ✓ `systemPrompt`와 결합 | ✓ `--rules` | ⚠ `systemPrompt`와 동일 |
+| `systemPrompt` | ✓ `--system-prompt` | ✓ `thread/start`의 `baseInstructions` | ✓ `appendSystemPrompt`와 결합 | ✓ ACP base 첫-turn `resource` block (헤드리스 `complete()` 경로는 `--system-prompt-override`도 지원) | ✓ ACP base 첫-turn `resource` block (CLI flag 자체가 없음. fold가 공유 base를 타고 들어감) |
+| `appendSystemPrompt` | ✓ `--append-system-prompt` | ✓ `thread/start`의 `developerInstructions` | ✓ `systemPrompt`와 결합 | ✓ 같은 첫-turn block에 `systemPrompt`와 결합 (complete 경로는 `--rules`도 지원) | ✓ 같은 첫-turn block에 `systemPrompt`와 결합 |
 | `allowedTools` | ✓ 네이티브 `--allowedTools` | ✓ PreToolUse hook (나머지 거부) | ⚠ best-effort (알려진 도구만 토글) | ✓ `--tools` 허용 목록 | ⚠ `~/.cursor/cli-config.json`의 `permissions.allow` 경유 (user-global, SNA 관리 안 함) |
 | `disallowedTools` | ✓ 네이티브 `--disallowedTools` | ✓ PreToolUse hook | ✓ 나열된 도구 비활성 | ✓ `--disallowed-tools` | ⚠ `allowedTools`와 동일 (또는 `--mode plan`으로 세션 전체 read-only) |
-| `mcpServers` | ✓ `--mcp-config` JSON | ✓ `config.toml` `[mcp_servers.*]` 기록 | ✓ SDK 경유 | ✓ stdio→HTTP bridge + `<cwd>/.grok/config.toml` | ⚠ 사용자의 `~/.cursor/mcp.json`에 의존; per-session stdio MCP 주입은 follow-up |
+| `mcpServers` | ✓ `--mcp-config` JSON | ✓ `config.toml` `[mcp_servers.*]` 기록 | ✓ SDK 경유 | ✓ stdio→HTTP bridge + `<cwd>/.grok/config.toml` | ✓ stdio→HTTP bridge + `<cwd>/.cursor/mcp.json` (기존 user entries와 머지, exit에 원복) |
 | `reasoningLevel` (0..5) | ✓ `toClaudeEffort` → `--effort` | ✓ `toCodexEffort` → `model_reasoning_effort` | ✗ 무시 | ✓ `toGrokEffort` → `--effort` | ✓ `applyCursorReasoning` → 모델 ID 접미사 (`gpt-5.3-codex` → `gpt-5.3-codex-high`) |
 | `configDir` | ✓ `CLAUDE_CONFIG_DIR` | ✓ `CODEX_HOME` | ✗ 대응 없음 | ✗ 대응 없음 (Grok Build은 `~/.grok` 고정) | ✗ 대응 없음 (Cursor는 `~/.cursor` 고정; `CURSOR_CONFIG_DIR`는 `cli-config.json`만 redirect, hook은 안 옮김) |
 | `resumeSessionId` | ✓ JSONL replay 파일 경유 | ✓ `thread/resume` API | ✓ 세션 id | ⚠ Grok Build chat id로 resume은 동작하지만, 크로스 프로바이더 history는 아래 `resource` block 경로 사용 | ⚠ Cursor `chatId`로 resume 동작 (`--resume <id>` / `session/load`), 크로스 프로바이더 history는 동일 경로 |
@@ -139,13 +139,9 @@ ACP `session/load`는 UI 이벤트만 replay할 뿐 모델 컨텍스트를 복�
   Grok Build `--permission-mode plan`, Cursor `--mode plan`): CLI 플래그
   는 spawn 시점에 반영되지만, 인플레이스 토글은 `permissionMode` patch
   지원이 필요한데 ACP-스피킹 프로바이더들은 아직 지원하지 않습니다.
-- **Cursor MCP 와이어링**: Cursor의 ACP는 사용자의 `~/.cursor/mcp.json`을
-  startup에 읽습니다. Per-session stdio MCP 주입(Grok이 `.grok/config.toml`
-  + stdio→HTTP bridge로 처리하는 방식)은 후속 과제입니다.
-- **Cursor의 `systemPrompt` / `appendSystemPrompt`**: Cursor는 에이전트
-  시스템 프롬프트를 CLI로 override하는 방법이 없습니다. `AGENTS.md`
-  (프로젝트 단위, 침습적) 또는 첫 turn fold가 가능하지만 아직 와이어링
-  안 됨.
+- **Cursor `allowedTools` / `disallowedTools`**: Cursor의 per-tool
+  권한은 user-global `~/.cursor/cli-config.json`에 있어서, per-session
+  shape이 아직 follow-up.
 - **프롬프트 이미지 입력**: 5개 프로바이더 모두 어떤 형태로든 이미지
   block을 받지만, 프로바이더별 첨부 인코딩이 아직 일관되지 않습니다 —
   현재 상태는 [세션 › 첨부](/ko/docs/introduction/sessions) 참조.

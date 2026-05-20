@@ -177,6 +177,22 @@ export function serializeHistoryForAcp(history: CanonicalBlock[]): string {
   return lines.join("\n");
 }
 
+/**
+ * Compose a single system-prompt string from the two SpawnOptions fields.
+ * `systemPrompt` and `appendSystemPrompt` are treated as concatenation
+ * candidates — the override and the append are joined by a blank line.
+ * Returns `null` when neither was supplied.
+ */
+export function buildSystemPromptText(
+  systemPrompt: string | undefined,
+  appendSystemPrompt: string | undefined,
+): string | null {
+  const parts: string[] = [];
+  if (systemPrompt && systemPrompt.trim().length > 0) parts.push(systemPrompt);
+  if (appendSystemPrompt && appendSystemPrompt.trim().length > 0) parts.push(appendSystemPrompt);
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}
+
 // ── Spawn descriptor returned by subclasses ─────────────────────────────────
 
 export interface AcpSpawnDescriptor {
@@ -213,6 +229,20 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
 
   /** Cached history transcript for first-turn injection. */
   protected readonly historyTranscript: string | null;
+  /**
+   * Cached system-prompt text for first-turn injection. ACP doesn't have a
+   * server-side `--system-prompt` flag for either Grok Build's
+   * `agent stdio` or Cursor's `agent acp`, so we fold the instruction
+   * into the first `session/prompt` as a high-priority resource block
+   * (placed before the optional history block and the user's actual
+   * message). Subsequent turns inherit it via the agent's own session
+   * state — same persistence model as `historyTranscript`.
+   *
+   * Combines `SpawnOptions.systemPrompt` (replaces) and
+   * `appendSystemPrompt` (additive) into one string. `null` when neither
+   * was supplied.
+   */
+  protected readonly systemPromptText: string | null;
   protected firstPromptSent = false;
   /**
    * Per-turn accumulator for `agent_message_chunk` text. See design
@@ -333,6 +363,32 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
   }
 
   /**
+   * Override the resource block prepended to the first `session/prompt`
+   * for `systemPrompt` / `appendSystemPrompt`. Placed BEFORE the history
+   * block so the model reads it as the highest-priority instruction.
+   *
+   * Both Grok and Cursor accept ACP `resource` blocks in the prompt
+   * (verified live during the option-B probe), even when their
+   * `promptCapabilities.embeddedContext` flag advertises `false`. The
+   * model treats the text as additional context layered on top of the
+   * agent's own system prompt — it can shape behavior strongly but
+   * cannot literally REPLACE the vendor's base instructions. Authors
+   * that need an authoritative override should phrase it that way
+   * ("You are NOT X. You are Y. …") rather than relying on
+   * cooperative-tone phrasing.
+   */
+  protected buildSystemPromptBlock(text: string): unknown {
+    return {
+      type: "resource",
+      resource: {
+        uri: "sna://system-prompt.txt",
+        mimeType: "text/plain",
+        text,
+      },
+    };
+  }
+
+  /**
    * `clientCapabilities` advertised in the initialize request. Subclasses
    * can override — Grok declares fs/terminal=false; Cursor matches that.
    */
@@ -365,6 +421,10 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
       options.history && options.history.length > 0
         ? this.serializeHistory(options.history)
         : null;
+    this.systemPromptText = buildSystemPromptText(
+      options.systemPrompt,
+      options.appendSystemPrompt,
+    );
 
     this.ready = this.initialize(options);
     this.ready.catch((err) => {
@@ -701,10 +761,23 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
 
     const promptBlocks: unknown[] = [];
 
-    // First turn: prepend the history transcript so the model reads it as
-    // prior context. Subsequent turns rely on the agent's own session state.
-    if (!this.firstPromptSent && this.historyTranscript) {
-      promptBlocks.push(this.buildHistoryPromptBlock(this.historyTranscript));
+    // First-turn injection. Order matters — the model reads top-down,
+    // so authority decreases as we go:
+    //
+    //   1. System prompt    (highest authority — sets identity/policy)
+    //   2. History transcript (prior context for cross-provider resume)
+    //   3. User text        (the current question)
+    //
+    // Subsequent turns rely on the agent's own session state — both
+    // blocks land in the agent's internal history after turn 1, so
+    // re-injection is wasted tokens.
+    if (!this.firstPromptSent) {
+      if (this.systemPromptText) {
+        promptBlocks.push(this.buildSystemPromptBlock(this.systemPromptText));
+      }
+      if (this.historyTranscript) {
+        promptBlocks.push(this.buildHistoryPromptBlock(this.historyTranscript));
+      }
     }
 
     if (typeof input === "string") {
