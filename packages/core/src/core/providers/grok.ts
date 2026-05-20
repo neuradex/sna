@@ -45,7 +45,10 @@
 
 import { spawn, execSync, type ChildProcess } from "child_process";
 import { EventEmitter } from "events";
+import fs from "node:fs";
+import path from "node:path";
 import readline from "readline";
+import { bridgeStdioMcpToHttp, type BridgeHandle } from "../mcp/stdio-http-bridge.js";
 import type {
   AgentProvider,
   AgentProcess,
@@ -126,6 +129,10 @@ interface AcpSessionUpdate {
   kind?: string;
   title?: string;
   rawInput?: unknown;
+  /** Present on tool_call_update result variant. */
+  rawOutput?: unknown;
+  /** File/path locations the tool touched — surfaces for tool_call_update. */
+  locations?: unknown;
   status?: string;
 }
 
@@ -159,6 +166,51 @@ interface AcpPermissionRequest {
  * structured tool_use blocks (grok would have no use for unfinished tool
  * state from a different provider's session).
  */
+/**
+ * Translate a `tool_call` or input-refresh `tool_call_update` notification
+ * into a normalized `tool_use` AgentEvent. Centralizes the `use_tool`
+ * unwrap so both code paths land on the same shape:
+ *
+ *   • `data.toolName` is the canonical tool name consumers match on
+ *     (`pinboard_patch`, `board_item_add`, vendor MCP names, etc.). Grok
+ *     wraps every external MCP call in its internal `use_tool` dispatch
+ *     with the real tool name nested in `rawInput.tool_name` — we surface
+ *     it directly so downstream `isToolName(...)` checks behave the same
+ *     way they do for claude / codex / opencode.
+ *   • `data.input` is what the *tool* sees: the unwrapped `tool_input`
+ *     for use_tool dispatches, or the raw input for grok's native tools
+ *     (`search_tool`, `run_terminal_command`, `write`, …).
+ *   • `data.grokTitle` preserves grok's human-readable dispatch title
+ *     ("Write `/tmp/big.html`", "Execute `wc -c /tmp/big.html`") for
+ *     debug overlays / tooltips without confusing the canonical name.
+ *   • `data.fromUpdate` flags refresh events so consumers can choose to
+ *     skip work that already ran on the initial tool_call. Optional —
+ *     idempotent-by-id consumers ignore it.
+ */
+function toolUseFromUpdate(
+  update: AcpSessionUpdate,
+  now: number,
+  opts: { fromUpdate?: boolean } = {},
+): AgentEvent {
+  const raw = update.rawInput as { tool_name?: string; tool_input?: unknown } | undefined;
+  const isUseTool = !!(raw && typeof raw.tool_name === "string");
+  const toolName = isUseTool ? raw!.tool_name! : (update.title ?? "tool");
+  const input = isUseTool ? raw!.tool_input : update.rawInput;
+  return {
+    type: "tool_use",
+    message: toolName,
+    data: {
+      id: update.toolCallId,
+      toolName,
+      kind: update.kind,
+      input,
+      grokTitle: update.title,
+      ...(opts.fromUpdate ? { fromUpdate: true } : {}),
+    },
+    timestamp: now,
+  };
+}
+
 export function serializeHistoryForGrok(history: CanonicalBlock[]): string {
   const lines: string[] = [];
   for (const block of history) {
@@ -191,10 +243,25 @@ export function serializeHistoryForGrok(history: CanonicalBlock[]): string {
 // ── Process ─────────────────────────────────────────────────────────────────
 
 export class GrokProcess extends EventEmitter implements AgentProcess {
-  private readonly proc: ChildProcess;
-  private readonly rl: readline.Interface;
+  // Definite-assignment: populated inside initialize() before the handshake
+  // resolves. Consumers always await this.ready before touching state.
+  private proc!: ChildProcess;
+  private rl!: readline.Interface;
   private _sessionId: string | null = null;
   private _alive = true;
+  /**
+   * stdio→HTTP MCP bridges spun up for this session. Each one owns its
+   * own child process + listener; dispose them on grok exit so we don't
+   * leak sockets between sessions.
+   */
+  private mcpBridges: BridgeHandle[] = [];
+  /**
+   * Path to the `.grok/config.toml` we wrote so cleanup can restore it.
+   * The snapshot is the file's contents *before* we touched it (null when
+   * we created it from scratch — cleanup then deletes it instead of
+   * restoring).
+   */
+  private grokConfigRestore: { path: string; original: string | null } | null = null;
 
   private rpcIdCounter = 0;
   /** Resolvers for outgoing requests, keyed by our own request id. */
@@ -212,16 +279,76 @@ export class GrokProcess extends EventEmitter implements AgentProcess {
   /** Cached history transcript for first-turn injection (option B). */
   private readonly historyTranscript: string | null;
   private firstPromptSent = false;
+  /**
+   * Per-turn accumulator for `agent_message_chunk` text. ACP has no terminal
+   * "final assistant message" notification — the turn ends implicitly when
+   * `session/prompt` resolves with a `stopReason`. SNA's persistence layer,
+   * however, only writes assistant rows for the `assistant` event (which
+   * carries the full message text), not for the streaming `assistant_delta`
+   * chunks. So we accumulate chunks here and flush them as a single
+   * `assistant` event right before `complete` — otherwise the assistant turn
+   * never lands in chat_messages and reload-the-chat wipes the reply.
+   */
+  private assistantTurnBuffer = "";
+  /**
+   * Captured permission mode for the duration of this session. Grok's CLI
+   * `--always-approve` flag covers built-in tool prompts but does NOT skip
+   * the ACP `session/request_permission` round-trip for MCP tool calls —
+   * grok always asks the client even in bypass mode. SNA's SessionManager
+   * doesn't auto-resolve permissions either (it expects the renderer to do
+   * that via a dialog). So a `bypassPermissions` session would hang on
+   * every MCP tool call. We handle the auto-approve here in the provider
+   * instead, replying `allow-once` to permission requests before they ever
+   * leave SNA.
+   */
+  private readonly permissionMode: string | undefined;
   /** Set true after initialize + session/new succeed. */
   private ready: Promise<void>;
 
   constructor(options: SpawnOptions) {
     super();
+    this.permissionMode = options.permissionMode;
     this.historyTranscript =
       options.history && options.history.length > 0
         ? serializeHistoryForGrok(options.history)
         : null;
 
+    // Bridge setup is async (needs a free port), so we cannot spawn grok
+    // synchronously in the constructor — config.toml must already be written
+    // before `grok agent stdio` starts reading it. Drive everything through
+    // an async initialize chain. Consumers always await this.ready first.
+    this.ready = this.initialize(options);
+    this.ready.catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      this.emitEvent({ type: "error", message, timestamp: Date.now() });
+    });
+  }
+
+  /**
+   * One-shot async setup chain:
+   *   1. Bridge any stdio MCP entries to HTTP and write their URLs into
+   *      `<cwd>/.grok/config.toml` so grok picks them up at startup. ACP's
+   *      `session/new.mcpServers` is rejected by grok 0.1.212 for any
+   *      non-empty shape, so config.toml is the only working channel today.
+   *   2. Spawn `grok agent stdio` and wire stdout/stderr/exit listeners.
+   *   3. Run the ACP handshake (initialize + session/new).
+   */
+  private async initialize(options: SpawnOptions): Promise<void> {
+    try {
+      await this.setupMcpBridges(options);
+      this.spawnGrok(options);
+      await this.runHandshake(options);
+    } catch (err) {
+      // Any failure between bridge setup and a live grok process leaves
+      // orphaned bridges + a config.toml we wrote. The proc.exit handler
+      // hasn't been registered yet (or won't fire if grok never spawned),
+      // so clean up here. Idempotent — fine to also run from exit later.
+      this.disposeMcpBridges();
+      throw err;
+    }
+  }
+
+  private spawnGrok(options: SpawnOptions): void {
     const grokPath = resolveGrokPath(options.cwd);
     // grok's top-level flags (`--model`, `--effort`, `--always-approve`) must
     // come BEFORE the `agent stdio` subcommand — the subcommand itself takes
@@ -259,9 +386,7 @@ export class GrokProcess extends EventEmitter implements AgentProcess {
       //   2. Clap arg-parse failures — `"error: unexpected argument '--foo'"`
       //      (lowercase) — fatal, immediate exit.
       // Surface both. Matching case-insensitively also catches "Error:" from
-      // panics or auth failures that the CLI prints at startup. Dropping the
-      // 400-char cap on the failure path would be nicer but the truncation
-      // is fine for log triage.
+      // panics or auth failures that the CLI prints at startup.
       if (/error/i.test(text)) {
         logger.log("agent", `grok stderr: ${text.trim().slice(0, 400)}`);
       }
@@ -274,6 +399,7 @@ export class GrokProcess extends EventEmitter implements AgentProcess {
         reject(new Error(`grok process exited (code=${code}) while waiting for ${method}`));
       }
       this.pendingRequests.clear();
+      this.disposeMcpBridges();
       this.emit("exit", code);
     });
 
@@ -281,15 +407,91 @@ export class GrokProcess extends EventEmitter implements AgentProcess {
       this._alive = false;
       this.emit("error", err);
     });
+  }
 
-    this.ready = this.runHandshake(options);
-    // Surface handshake failures as AgentEvent errors rather than unhandled
-    // promise rejections — the SessionManager only listens on the event/exit
-    // channels.
-    this.ready.catch((err) => {
-      const message = err instanceof Error ? err.message : String(err);
-      this.emitEvent({ type: "error", message, timestamp: Date.now() });
-    });
+  /**
+   * Spin up HTTP bridges for each stdio MCP entry and inject
+   * `[mcp_servers.<name>]` blocks into the project-scoped config at
+   * `<cwd>/.grok/config.toml`. We use the project-scoped file (not the
+   * global ~/.grok/config.toml) so concurrent sessions don't fight over
+   * the same file. The original contents (or "no such file") are
+   * remembered for restore on exit.
+   *
+   * Entries already declared as `{type:"http",url:...}` are passed through
+   * verbatim — no bridge needed. Other shapes are dropped with a log.
+   */
+  private async setupMcpBridges(options: SpawnOptions): Promise<void> {
+    if (!options.mcpServers) return;
+
+    type Entry = { name: string; url: string; headers?: Record<string, string> };
+    const entries: Entry[] = [];
+
+    for (const [name, cfg] of Object.entries(options.mcpServers)) {
+      if (!cfg || typeof cfg !== "object") continue;
+
+      if ("type" in cfg && cfg.type === "http") {
+        entries.push({ name, url: cfg.url, headers: cfg.headers });
+        continue;
+      }
+      if ("command" in cfg && cfg.command) {
+        const handle = await bridgeStdioMcpToHttp(name, {
+          command: cfg.command,
+          args: cfg.args,
+          env: cfg.env,
+          cwd: cfg.cwd ?? options.cwd,
+        });
+        this.mcpBridges.push(handle);
+        entries.push({ name, url: handle.url });
+        continue;
+      }
+      logger.log("agent", `grok: skipping mcp server '${name}' — unsupported shape`);
+    }
+
+    if (entries.length === 0) return;
+
+    const cfgDir = path.join(options.cwd, ".grok");
+    const cfgPath = path.join(cfgDir, "config.toml");
+    let original: string | null = null;
+    try { original = fs.readFileSync(cfgPath, "utf-8"); } catch { /* no file yet */ }
+    try { fs.mkdirSync(cfgDir, { recursive: true }); } catch {}
+
+    const block = entries.map((e) => {
+      const lines = [`[mcp_servers.${e.name}]`, `url = ${JSON.stringify(e.url)}`];
+      if (e.headers) {
+        lines.push(`[mcp_servers.${e.name}.headers]`);
+        for (const [k, v] of Object.entries(e.headers)) {
+          lines.push(`${k} = ${JSON.stringify(v)}`);
+        }
+      }
+      return lines.join("\n");
+    }).join("\n\n");
+
+    const marker = `# sna-grok-bridge:BEGIN\n${block}\n# sna-grok-bridge:END\n`;
+    const next = (original ?? "").replace(/\n*# sna-grok-bridge:BEGIN[\s\S]*?# sna-grok-bridge:END\n?/g, "");
+    fs.writeFileSync(cfgPath, (next ? next.replace(/\n*$/, "\n\n") : "") + marker);
+
+    this.grokConfigRestore = { path: cfgPath, original };
+    logger.log("agent", `grok: wrote ${entries.length} mcp_servers entries to ${cfgPath}`);
+  }
+
+  private disposeMcpBridges(): void {
+    for (const b of this.mcpBridges) {
+      try { b.dispose(); } catch {}
+    }
+    this.mcpBridges = [];
+
+    const restore = this.grokConfigRestore;
+    this.grokConfigRestore = null;
+    if (!restore) return;
+    try {
+      if (restore.original === null) {
+        fs.unlinkSync(restore.path);
+      } else {
+        fs.writeFileSync(restore.path, restore.original);
+      }
+    } catch (err) {
+      logger.log("agent", `grok: failed to restore ${restore.path}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   // ── JSON-RPC primitives ───────────────────────────────────────────────────
@@ -361,10 +563,31 @@ export class GrokProcess extends EventEmitter implements AgentProcess {
   private handleServerRequest(req: JsonRpcRequest): void {
     if (req.method === "session/request_permission") {
       const params = req.params as AcpPermissionRequest;
+      const requestId = params.toolCall.toolCallId;
+
+      // Bypass-mode shortcut: pick whichever option carries an "allow"
+      // intent (or fall back to the first option) and reply immediately,
+      // skipping the SessionManager round-trip + UI dialog entirely. This
+      // mirrors the contract of `permissionMode: "bypassPermissions"`,
+      // which other providers implement by never asking in the first place.
+      if (this.permissionMode === "bypassPermissions") {
+        const allowOpt =
+          params.options.find((o) => o.kind === "allow_always") ??
+          params.options.find((o) => o.kind === "allow_once") ??
+          params.options[0];
+        if (allowOpt) {
+          this.write({
+            jsonrpc: "2.0",
+            id: req.id,
+            result: { outcome: { outcome: "selected", optionId: allowOpt.optionId } },
+          });
+          return;
+        }
+      }
+
       // Externally we expose the toolCallId as the requestId — it's stable
       // across the tool's lifecycle and lets callers correlate with the
       // tool_use AgentEvent that triggered the prompt.
-      const requestId = params.toolCall.toolCallId;
       this.pendingPermissions.set(requestId, req.id);
       this.emitEvent({
         type: "permission_needed",
@@ -413,35 +636,52 @@ export class GrokProcess extends EventEmitter implements AgentProcess {
       case "agent_thought_chunk":
         return { type: "thinking_delta", delta: text, timestamp: now };
       case "agent_message_chunk":
+        // Accumulate so the final `assistant` event (flushed when
+        // session/prompt resolves) carries the full message text for the DB.
+        this.assistantTurnBuffer += text;
         return { type: "assistant_delta", delta: text, timestamp: now };
       case "user_message_chunk":
         // Emitted by grok when replaying loaded sessions or echoing our own
         // prompts back. SNA's user_message AgentEvent has the same shape.
         return { type: "user_message", message: text, timestamp: now };
       case "tool_call":
-        return {
-          type: "tool_use",
-          message: update.title,
-          data: {
-            id: update.toolCallId,
-            kind: update.kind,
-            input: update.rawInput,
-          },
-          timestamp: now,
-        };
-      case "tool_call_update":
-        // Status updates and final results both arrive here. Surface as
-        // tool_result; data.status lets the consumer distinguish "still
-        // running" from "completed" if it cares.
+        return toolUseFromUpdate(update, now);
+      case "tool_call_update": {
+        // `tool_call_update` is overloaded in ACP — grok uses the same
+        // notification for two distinct kinds of update:
+        //   (a) Input refresh — rawInput grows or finalizes between the
+        //       initial `tool_call` and execution. Carries rawInput + kind +
+        //       title + (textual) content, NO status. We emit `tool_use`
+        //       again with the same id; SNA's persistence + Loom's
+        //       message store merge by id so the existing bubble refreshes
+        //       in place. xAI's API itself doesn't expose token-level
+        //       streaming for tool arguments (it returns the call "in
+        //       whole in a single chunk" per their docs), so the
+        //       differences between (a) and the original tool_call are
+        //       small finalization patches — but we still pass them
+        //       through so future grok/ACP additions slot in cleanly.
+        //   (b) Result update — has status (in_progress/completed/failed)
+        //       and content/rawOutput. We emit `tool_result` with all
+        //       fields preserved so consumers see locations, raw output
+        //       (parsed), and the textual content side-by-side.
+        const hasResultSignal = !!update.status || update.rawOutput !== undefined;
+        if (!hasResultSignal && update.rawInput !== undefined) {
+          return toolUseFromUpdate(update, now, { fromUpdate: true });
+        }
         return {
           type: "tool_result",
           data: {
             id: update.toolCallId,
             status: update.status,
             content: update.content,
+            rawOutput: update.rawOutput,
+            locations: update.locations,
+            kind: update.kind,
+            title: update.title || undefined,
           },
           timestamp: now,
         };
+      }
       case "available_commands_update":
       case "plan":
         // Slash-command list refresh / plan-mode pane updates aren't part
@@ -471,9 +711,15 @@ export class GrokProcess extends EventEmitter implements AgentProcess {
       },
     });
 
+    // MCP server registration goes through `<cwd>/.grok/config.toml`, not
+    // session/new — setupMcpBridges() already wrote that file before this
+    // handshake runs. ACP's `session/new.mcpServers` field rejects any
+    // non-empty shape on grok 0.1.212 (`Invalid params`), even structurally
+    // valid http entries, so we keep it empty and let grok read tools off
+    // its own config-load path.
     const sessionResp = (await this.request("session/new", {
       cwd: options.cwd,
-      mcpServers: [], // SNA does not currently wire MCP through to grok.
+      mcpServers: [],
     })) as { sessionId?: string } | undefined;
 
     const sessionId = sessionResp?.sessionId ?? null;
@@ -556,15 +802,36 @@ export class GrokProcess extends EventEmitter implements AgentProcess {
         sessionId: this._sessionId,
         prompt: promptBlocks,
       })) as { stopReason?: string } | undefined;
+      this.flushAssistantTurn();
       this.emitEvent({
         type: "complete",
         data: { stopReason: result?.stopReason ?? null },
         timestamp: Date.now(),
       });
     } catch (err) {
+      // Flush whatever text streamed before the failure so a partial turn
+      // still lands in chat_messages and the user sees it after reload.
+      this.flushAssistantTurn();
       const message = err instanceof Error ? err.message : String(err);
       this.emitEvent({ type: "error", message, timestamp: Date.now() });
     }
+  }
+
+  /**
+   * Emit the accumulated `agent_message_chunk` text as a single terminal
+   * `assistant` event so SNA's persistence layer writes a row to
+   * chat_messages, then clear the buffer for the next turn. No-op when
+   * nothing streamed (tool-only turns, interruptions before any text).
+   */
+  private flushAssistantTurn(): void {
+    const text = this.assistantTurnBuffer;
+    this.assistantTurnBuffer = "";
+    if (!text) return;
+    this.emitEvent({
+      type: "assistant",
+      message: text,
+      timestamp: Date.now(),
+    });
   }
 
   interrupt(): void {
@@ -632,6 +899,13 @@ export class GrokProcess extends EventEmitter implements AgentProcess {
   kill(): void {
     if (!this._alive) return;
     this._alive = false;
+    // kill() may race with initialize() — proc isn't assigned until
+    // spawnGrok() runs. If we beat that, just dispose bridges and bail;
+    // initialize() will see _alive=false and unwind on its own.
+    if (!this.proc) {
+      this.disposeMcpBridges();
+      return;
+    }
     try {
       this.proc.kill("SIGTERM");
     } catch {
