@@ -52,6 +52,33 @@ OpenCode is the odd one out on streaming: its current SDK helper is
 single-shot, so passing `onDelta` to `complete()` succeeds but never
 fires the callback. The `complete()` return value is still correct.
 
+## Event richness
+
+Every provider emits the same `AgentEvent` union, but the native stream
+does not expose the same granularity. This is the part that matters most
+for rich UIs: live tool-call cards, streaming JSON arguments, command
+output panes, token/cost meters, and durable replay after reload.
+
+| Event surface | Claude Code | Codex | OpenCode | Grok Build | Cursor |
+|---|---|---|---|---|---|
+| Assistant text delta | ✓ `assistant_delta` from stream-json | ✓ `item/agentMessage/delta` | ✓ `message.part.delta` | ✓ ACP `agent_message_chunk` | ✓ ACP `agent_message_chunk` |
+| Final assistant event | ✓ `assistant` / `result` | ✓ `item/completed` agent message | ✓ finalized text part | ✓ synthesized from ACP chunks before `complete` | ✓ synthesized from ACP chunks before `complete` |
+| Thinking delta | ✓ `thinking_delta` | ✓ `item/reasoning/summaryTextDelta` | ✓ reasoning `message.part.delta` | ✓ ACP `agent_thought_chunk` | ✓ ACP `agent_thought_chunk` |
+| Final thinking event | ✓ signed thinking block | ✓ completed reasoning item | ✓ finalized reasoning part | ✗ delta only | ✗ delta only |
+| Tool call start | ✓ `tool_use` with `streaming: true` | ✓ typed item start (`shell`, `file_change`, MCP, hosted tools) | ✓ tool part running/pending | ✓ ACP `tool_call` | ✓ ACP `tool_call` |
+| Tool input delta | ✓ `tool_use_delta` from Anthropic `input_json_delta` | ✗ no native input delta | ✗ no native input delta | ⚠ ACP `tool_call_update` can refresh input, but not byte/token deltas | ⚠ ACP `tool_call_update` can refresh input, but not byte/token deltas |
+| Tool output streaming | ✗ final `tool_result` only | ✓ shell `outputDelta` as `tool_use` update; file patch delta is dropped | ✗ final part status only | ✗ final/update payload only | ✗ final/update payload only |
+| Tool result payload | ✓ `toolUseId`, `isError`, text/JSON content | ✓ rich per item: `exitCode`, `status`, `durationMs`, MCP error, `web_search`, `image_generation.savedPath`, `revisedPrompt`, unknown-tool `raw` | ✓ `title`, `isError`, output/error | ✓ ACP `rawOutput`, `locations`, `status`, `kind`, plus Grok tool-name unwrap | ✓ ACP `rawOutput`, `locations`, `status`, `kind`, plus Cursor tool-kind unwrap |
+| Session completion metadata | ✓ duration, API duration, cost, token usage, cache usage, model, context window | ✓ duration and token/cache usage; cost is not reported | ⚠ session stream only says provider; one-shot `complete()` returns usage/cost when OpenCode reports it | ✓ ACP `stopReason` only | ✓ ACP `stopReason` only |
+| Unknown/new tool visibility | ✓ native tool name still surfaces | ✓ fail-open generic `tool_use` / `tool_result` with `raw` payload | ✗ unhandled OpenCode event types are dropped | ✗ unknown ACP update types are dropped | ✗ unknown ACP update types are dropped |
+
+The most important asymmetry is `tool_use_delta`: only Claude Code
+currently exposes streaming partial JSON for tool inputs. Codex exposes
+richer item lifecycle metadata and live shell output, but not partial
+tool arguments. The ACP providers expose useful `tool_call_update`
+refreshes and final raw outputs, but SNA treats them as whole-event
+updates rather than fine-grained deltas.
+
 ## In-place mutation (`applyPatch`)
 
 Each provider declares which `SessionPatch` fields can be applied in

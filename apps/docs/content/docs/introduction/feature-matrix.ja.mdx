@@ -52,6 +52,34 @@ OpenCode はストリーミングで例外です。現在の SDK ヘルパが si
 のため、`complete()` に `onDelta` を渡しても成功はしますがコール
 バックは呼ばれません。
 
+## イベントの豊富さ
+
+すべてのプロバイダは同じ `AgentEvent` union に正規化されますが、
+ネイティブストリームが出せる粒度は同じではありません。リッチな UI では
+この差がそのまま効きます。tool-call カード、ストリーミング JSON 引数、
+コマンド出力ペイン、token/cost 表示、reload 後の会話復元品質がここで
+変わります。
+
+| イベント項目 | Claude Code | Codex | OpenCode | Grok Build | Cursor |
+|---|---|---|---|---|---|
+| Assistant text delta | ✓ stream-json の `assistant_delta` | ✓ `item/agentMessage/delta` | ✓ `message.part.delta` | ✓ ACP `agent_message_chunk` | ✓ ACP `agent_message_chunk` |
+| 最終 assistant イベント | ✓ `assistant` / `result` | ✓ `item/completed` agent message | ✓ finalized text part | ✓ ACP chunk を `complete` 直前に合成 | ✓ ACP chunk を `complete` 直前に合成 |
+| Thinking delta | ✓ `thinking_delta` | ✓ `item/reasoning/summaryTextDelta` | ✓ reasoning `message.part.delta` | ✓ ACP `agent_thought_chunk` | ✓ ACP `agent_thought_chunk` |
+| 最終 thinking イベント | ✓ signed thinking block | ✓ completed reasoning item | ✓ finalized reasoning part | ✗ delta のみ | ✗ delta のみ |
+| Tool call 開始 | ✓ `streaming: true` 付き `tool_use` | ✓ typed item start (`shell`, `file_change`, MCP, hosted tools) | ✓ running/pending tool part | ✓ ACP `tool_call` | ✓ ACP `tool_call` |
+| Tool input delta | ✓ Anthropic `input_json_delta` → `tool_use_delta` | ✗ ネイティブ input delta なし | ✗ ネイティブ input delta なし | ⚠ ACP `tool_call_update` で input 更新は可能だが byte/token 単位の delta ではない | ⚠ ACP `tool_call_update` で input 更新は可能だが byte/token 単位の delta ではない |
+| Tool output streaming | ✗ 最終 `tool_result` のみ | ✓ shell `outputDelta` を `tool_use` update として渡す。file patch delta は捨てる | ✗ 最終 part status のみ | ✗ 最終/update payload のみ | ✗ 最終/update payload のみ |
+| Tool result payload | ✓ `toolUseId`, `isError`, text/JSON content | ✓ item 別の詳細 payload: `exitCode`, `status`, `durationMs`, MCP error, `web_search`, `image_generation.savedPath`, `revisedPrompt`, unknown-tool `raw` | ✓ `title`, `isError`, output/error | ✓ ACP `rawOutput`, `locations`, `status`, `kind`, Grok tool-name unwrap | ✓ ACP `rawOutput`, `locations`, `status`, `kind`, Cursor tool-kind unwrap |
+| セッション完了メタデータ | ✓ duration, API duration, cost, token/cache usage, model, context window | ✓ duration と token/cache usage。cost は報告しない | ⚠ session stream は provider のみ。one-shot `complete()` は OpenCode が返す usage/cost を返す | ✓ ACP `stopReason` のみ | ✓ ACP `stopReason` のみ |
+| 未知の新 tool の可視性 | ✓ native tool name はそのまま出る | ✓ generic `tool_use` / `tool_result` + `raw` payload で fail-open | ✗ 未処理の OpenCode event type は捨てる | ✗ 未知の ACP update type は捨てる | ✗ 未知の ACP update type は捨てる |
+
+一番大きい非対称は `tool_use_delta` です。tool input の partial JSON を
+ストリーミングできるプロバイダは、現時点では Claude Code だけです。
+Codex は item lifecycle metadata と live shell output は豊富ですが、
+partial tool argument は出ません。ACP プロバイダは `tool_call_update` と
+最終 raw output を出せますが、SNA では fine-grained delta ではなく
+イベント単位の update として扱います。
+
 ## インプレース変更 (`applyPatch`)
 
 各プロバイダは、どの `SessionPatch` フィールドを respawn なしで
