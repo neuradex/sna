@@ -86,11 +86,11 @@ agent's turn suspends until SNA sends a permission response.
 
 | Field | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
-| `systemPrompt` | ✓ `--system-prompt` | ✓ `baseInstructions` on `thread/start` | ✓ joined with `appendSystemPrompt` | ✓ `--system-prompt-override` | ⚠ no CLI flag; use the user's `AGENTS.md` or fold into the first prompt (not yet wired by SNA) |
-| `appendSystemPrompt` | ✓ `--append-system-prompt` | ✓ `developerInstructions` on `thread/start` | ✓ joined with `systemPrompt` | ✓ `--rules` | ⚠ same as `systemPrompt` |
-| `allowedTools` | ✓ native `--allowedTools` | ✓ via PreToolUse hook (deny-others) | ⚠ best-effort (toggles known tools) | ✓ `--tools` allow-list | ⚠ via `~/.cursor/cli-config.json` `permissions.allow` (user-global, not yet managed by SNA) |
-| `disallowedTools` | ✓ native `--disallowedTools` | ✓ via PreToolUse hook | ✓ disables listed tools | ✓ `--disallowed-tools` | ⚠ same as `allowedTools` (or `--mode plan` to make the whole session read-only) |
-| `mcpServers` | ✓ `--mcp-config` JSON | ✓ written to `config.toml` `[mcp_servers.*]` | ✓ via SDK | ✓ stdio→HTTP bridge + `<cwd>/.grok/config.toml` | ⚠ relies on the user's `~/.cursor/mcp.json`; per-session injection of stdio MCP is a follow-up |
+| `systemPrompt` | ✓ `--system-prompt` | ✓ `baseInstructions` on `thread/start` | ✓ joined with `appendSystemPrompt` | ✓ ACP base first-turn `resource` block (the headless `complete()` path also supports `--system-prompt-override`) | ✓ ACP base first-turn `resource` block (no CLI flag exists; the fold rides on the shared base) |
+| `appendSystemPrompt` | ✓ `--append-system-prompt` | ✓ `developerInstructions` on `thread/start` | ✓ joined with `systemPrompt` | ✓ joined with `systemPrompt` in the same first-turn block (complete-path also supports `--rules`) | ✓ joined with `systemPrompt` in the same first-turn block |
+| `allowedTools` | ✓ native `--allowedTools` | ✓ via PreToolUse hook (deny-others) | ⚠ best-effort (toggles known tools) | ✓ ACP base auto-denies non-listed tools at the `session/request_permission` boundary | ✓ ACP base auto-denies non-listed tools at the `session/request_permission` boundary |
+| `disallowedTools` | ✓ native `--disallowedTools` | ✓ via PreToolUse hook | ✓ disables listed tools | ✓ ACP base auto-denies listed tools at the permission boundary | ✓ ACP base auto-denies listed tools at the permission boundary |
+| `mcpServers` | ✓ `--mcp-config` JSON | ✓ written to `config.toml` `[mcp_servers.*]` | ✓ via SDK | ✓ stdio→HTTP bridge + `<cwd>/.grok/config.toml` | ✓ stdio→HTTP bridge + `<cwd>/.cursor/mcp.json` (merges with existing user entries, restores on exit) |
 | `reasoningLevel` (0..5) | ✓ `toClaudeEffort` → `--effort` | ✓ `toCodexEffort` → `model_reasoning_effort` | ✗ ignored | ✓ `toGrokEffort` → `--effort` | ✓ `applyCursorReasoning` → model-id suffix (`gpt-5.3-codex` → `gpt-5.3-codex-high`) |
 | `configDir` | ✓ `CLAUDE_CONFIG_DIR` | ✓ `CODEX_HOME` | ✗ no equivalent | ✗ no equivalent (Grok Build uses `~/.grok`) | ✗ no equivalent (Cursor uses `~/.cursor`; `CURSOR_CONFIG_DIR` only reroutes `cli-config.json`, not hooks) |
 | `resumeSessionId` | ✓ via JSONL replay file | ✓ `thread/resume` API | ✓ session id | ⚠ Grok Build chat id works, but cross-provider history goes via the `resource` block path below | ⚠ Cursor `chatId` works (`--resume <id>` / `session/load`), but cross-provider history goes via the same `resource` block path |
@@ -144,16 +144,16 @@ so re-injection is not required.
 - **Plan mode toggling at runtime** (Claude Code `--permission-mode plan`,
   Grok Build `--permission-mode plan`, Cursor `--mode plan`): the CLI
   flag is honored at spawn but in-place toggling needs `permissionMode`
-  patch support, which the ACP-speaking providers do not yet have.
-- **MCP wiring through Cursor**: Cursor's ACP reads from the user's
-  `~/.cursor/mcp.json` at startup. Per-session injection of stdio MCP
-  (the way Grok handles it via `.grok/config.toml` + the stdio→HTTP
-  bridge) is a follow-up.
-- **`systemPrompt` / `appendSystemPrompt` for Cursor**: Cursor has no
-  CLI override for the agent system prompt. Routes via `AGENTS.md`
-  (project-scoped, intrusive) or first-turn folding are possible but
-  not yet wired.
-- **Image input in prompts**: all five providers accept image blocks
-  in some form, but the per-provider attachment encoding is still
-  inconsistent — see [Sessions › Attachments](/docs/introduction/sessions)
-  for the current state.
+  patch support, which ACP does not expose as a wire method — every
+  field on the ACP `applyPatch` surface is returned as leftover, and
+  the session manager handles the change via respawn-with-history-replay.
+- **Glob/pattern matching in `allowedTools` / `disallowedTools`** for
+  the ACP providers — today the auto-deny intercept matches tool names
+  by exact string equality. Glob patterns (e.g. `"shell.*"`) are a
+  natural follow-up if real workloads need them.
+- **Image input minimum dimensions** — Grok Build rejects images
+  smaller than 8×8 pixels and below 512 total pixels (1024 effective
+  minimum for square images); Cursor accepts as small as 16×16. Both
+  validate server-side, so SNA passes the image block through
+  unchanged. Consumers feeding tiny thumbnails should upscale to at
+  least 32×32 to satisfy Grok.

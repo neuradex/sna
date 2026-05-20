@@ -36,14 +36,21 @@
  *     `result` is preserved under `data.toolCallResult` so consumers
  *     wanting the structured success/rejected shape have it.
  *
- *   • MCP wiring is left to the user's existing `~/.cursor/mcp.json` for
- *     now. Cursor's ACP server reads it at startup. Per-session injection
- *     of stdio MCP servers (the way Grok handles it via `.grok/config.toml`
- *     + the stdio→HTTP bridge) is a follow-up — Cursor's ACP currently
- *     accepts only what's already declared in the user-level mcp.json.
+ *   • MCP injection mirrors the Grok pattern but writes to
+ *     `<cwd>/.cursor/mcp.json` (JSON) instead of
+ *     `<cwd>/.grok/config.toml` (TOML). Cursor's ACP reads project-scoped
+ *     `mcp.json` at startup, so the on-disk channel works the same way.
+ *     Stdio MCP entries are bridged to HTTP through
+ *     `core/mcp/stdio-http-bridge.ts` (shared with Grok) — Cursor's ACP
+ *     advertises only `{http,sse}` in `initialize.mcpCapabilities`, same
+ *     as Grok, so the bridge is mandatory for stdio. We merge with any
+ *     pre-existing user `mcp.json` and restore it on exit.
  */
 
 import { spawn, execSync } from "child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { bridgeStdioMcpToHttp, type BridgeHandle } from "../mcp/stdio-http-bridge.js";
 import type {
   AgentProvider,
   AgentProcess,
@@ -115,6 +122,21 @@ function unwrapCursorVariant(rawInput: unknown): { variant: string; args: unknow
 // ── Process ─────────────────────────────────────────────────────────────────
 
 export class CursorProcess extends AcpStdioProcess {
+  /**
+   * stdio→HTTP MCP bridges spun up for this session. Each one owns its
+   * own child process + listener; disposed on cursor exit so we don't
+   * leak sockets between sessions.
+   */
+  private mcpBridges: BridgeHandle[] = [];
+  /**
+   * Path to the `<cwd>/.cursor/mcp.json` we touched so cleanup can
+   * restore it. `original` is the file's pre-write contents (`null` if
+   * we created it from scratch — cleanup then deletes it instead of
+   * restoring). `cwd` is recorded so we know whether to remove the
+   * `.cursor` directory too (only if we created it).
+   */
+  private cursorMcpRestore: { path: string; original: string | null; createdDir: boolean } | null = null;
+
   protected get name(): string { return "cursor"; }
 
   /**
@@ -133,6 +155,18 @@ export class CursorProcess extends AcpStdioProcess {
     // through ACP `session/request_permission` regardless of CLI flags.
     const args = ["acp"];
     return { command: resolveCursorPath(options.cwd), args };
+  }
+
+  protected async preHandshake(options: SpawnOptions): Promise<void> {
+    await this.setupMcpBridges(options);
+  }
+
+  protected onExit(_code: number | null): void {
+    this.disposeMcpBridges();
+  }
+
+  protected onPreSpawnCleanup(): void {
+    this.disposeMcpBridges();
   }
 
   /**
@@ -209,6 +243,117 @@ export class CursorProcess extends AcpStdioProcess {
       input: update.rawInput,
       extra: update.title && update.title !== toolName ? { cursorTitle: update.title } : undefined,
     };
+  }
+
+  /**
+   * Spin up HTTP bridges for each stdio MCP entry and merge them into
+   * `<cwd>/.cursor/mcp.json`. We write the project-scoped file (not
+   * `~/.cursor/mcp.json`) so concurrent SNA sessions in different cwds
+   * never fight over the same file, and so we don't touch user-global
+   * state. Pre-existing user entries are preserved across the SNA write
+   * and restored on exit.
+   *
+   * Entries already declared as `{type:"http",url:...}` are passed
+   * through verbatim — no bridge needed. Other unsupported shapes
+   * are dropped with a log.
+   */
+  private async setupMcpBridges(options: SpawnOptions): Promise<void> {
+    if (!options.mcpServers) return;
+
+    // Cursor's mcp.json schema for an HTTP server:
+    //   { "mcpServers": { "<name>": { "url": "...", "headers": {...} } } }
+    type HttpEntry = { url: string; headers?: Record<string, string> };
+    const entries: Record<string, HttpEntry> = {};
+
+    for (const [name, cfg] of Object.entries(options.mcpServers)) {
+      if (!cfg || typeof cfg !== "object") continue;
+      if ("type" in cfg && cfg.type === "http") {
+        const entry: HttpEntry = { url: cfg.url };
+        if (cfg.headers) entry.headers = cfg.headers;
+        entries[name] = entry;
+        continue;
+      }
+      if ("command" in cfg && cfg.command) {
+        const handle = await bridgeStdioMcpToHttp(name, {
+          command: cfg.command,
+          args: cfg.args,
+          env: cfg.env,
+          cwd: cfg.cwd ?? options.cwd,
+        });
+        this.mcpBridges.push(handle);
+        entries[name] = { url: handle.url };
+        continue;
+      }
+      logger.log("agent", `cursor: skipping mcp server '${name}' — unsupported shape`);
+    }
+
+    if (Object.keys(entries).length === 0) return;
+
+    const cfgDir = path.join(options.cwd, ".cursor");
+    const cfgPath = path.join(cfgDir, "mcp.json");
+    let original: string | null = null;
+    let createdDir = false;
+    try {
+      original = fs.readFileSync(cfgPath, "utf-8");
+    } catch {
+      // No mcp.json yet — also remember whether `.cursor/` itself exists,
+      // so cleanup can remove it if we created it. (Prefer not to leave
+      // a stray directory in the user's project root.)
+      try { fs.accessSync(cfgDir); } catch { createdDir = true; }
+    }
+    try { fs.mkdirSync(cfgDir, { recursive: true }); } catch {}
+
+    // Merge: existing user entries first, then SNA entries (SNA wins on
+    // name collision, which matches the intent — if the consumer asked
+    // SNA to expose an MCP named `foo`, that's the one the agent should
+    // see for this session). Unknown top-level keys in the user file are
+    // preserved as-is.
+    let merged: Record<string, unknown>;
+    try {
+      const parsed = original ? JSON.parse(original) : {};
+      merged = (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+        ? { ...parsed as Record<string, unknown> }
+        : {};
+    } catch {
+      // Malformed user file — log and start fresh so we don't lose the
+      // SNA wiring. Original is preserved in `cursorMcpRestore`, so
+      // exit restoration will put the broken file back exactly as it was.
+      logger.log("agent", `cursor: existing ${cfgPath} is not valid JSON; not merging`);
+      merged = {};
+    }
+    const existingServers = (merged.mcpServers && typeof merged.mcpServers === "object")
+      ? merged.mcpServers as Record<string, unknown>
+      : {};
+    merged.mcpServers = { ...existingServers, ...entries };
+
+    fs.writeFileSync(cfgPath, JSON.stringify(merged, null, 2) + "\n");
+    this.cursorMcpRestore = { path: cfgPath, original, createdDir };
+    logger.log("agent", `cursor: wrote ${Object.keys(entries).length} mcpServers entries to ${cfgPath}`);
+  }
+
+  private disposeMcpBridges(): void {
+    for (const b of this.mcpBridges) {
+      try { b.dispose(); } catch {}
+    }
+    this.mcpBridges = [];
+
+    const restore = this.cursorMcpRestore;
+    this.cursorMcpRestore = null;
+    if (!restore) return;
+    try {
+      if (restore.original === null) {
+        fs.unlinkSync(restore.path);
+        if (restore.createdDir) {
+          // Best-effort: only remove the directory if it's empty (the
+          // user might have added other files there in the meantime).
+          try { fs.rmdirSync(path.dirname(restore.path)); } catch { /* not empty */ }
+        }
+      } else {
+        fs.writeFileSync(restore.path, restore.original);
+      }
+    } catch (err) {
+      logger.log("agent", `cursor: failed to restore ${restore.path}: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 }
 
