@@ -6,7 +6,7 @@ icon: Boxes
 
 Each runtime is implemented as a class behind a common
 `AgentProvider` interface. Adapters live in
-`core/providers/{claude-code,codex,opencode}.ts`.
+`core/providers/{claude-code,codex,opencode,grok}.ts`.
 
 ## AgentProvider
 
@@ -42,11 +42,25 @@ apply in-place vs which require a respawn-with-history-replay.
 | **claude-code** | `claude -p` (one-shot) plus `claude --resume` (replay) | stateless per call | no |
 | **codex** | `codex app-server` daemon, JSON-RPC over stdio | persistent daemon, multi-thread | yes |
 | **opencode** | `opencode serve` daemon plus SDK HTTP | persistent daemon, single-cwd | yes |
+| **grok** | `grok agent stdio` (Agent Client Protocol over stdio — Grok Build CLI) | stateless per session | no |
 
 The Codex and OpenCode providers share daemons through `RuntimePool`.
 When a session opens, the pool is queried by `(provider, cwd, config)`
 and an existing daemon is reused if compatible, sparing the cold-start
 cost (≈2s for Codex, ≈3s for OpenCode).
+
+Grok Build is the first SNA provider whose wire protocol is a public
+standard ([ACP](https://agentclientprotocol.com)), so the adapter is
+mostly a thin translator between ACP `session/update` notifications and
+SNA's normalized `AgentEvent` stream. The bulk of `core/providers/grok.ts`
+is ACP-standard; the Grok Build-specific pieces (CLI discovery,
+`--effort` flag mapping, `_x.ai/*` extension filtering) are kept
+separable so a second ACP-speaking agent could share the same foundation
+with modest effort. Resume across providers is handled by serialising the
+canonical history into a single ACP `resource` content block on the first
+`session/prompt` of a Grok Build session — see
+[Cross-provider history replay](/docs/introduction/feature-matrix#cross-provider-history-replay)
+on the feature matrix page.
 
 ## RuntimePool
 
@@ -67,9 +81,14 @@ as the only provider layer, see **[SNA and ACP](/docs/introduction/philosophy/ac
 Two latency knobs flow through every provider:
 
 - **`reasoningLevel: 0..5`**: provider-agnostic, lightest to heaviest.
-  Translates to Claude's `--effort` and Codex's
-  `model_reasoning_effort` via [reasoning-level.ts](https://github.com/neuradex/sna/blob/main/packages/core/src/core/providers/reasoning-level.ts).
+  Translates to Claude Code's `--effort`, Codex's `model_reasoning_effort`,
+  and Grok Build's `--reasoning-effort` via
+  [reasoning-level.ts](https://github.com/neuradex/sna/blob/main/packages/core/src/core/providers/reasoning-level.ts).
+  OpenCode currently ignores this field.
 - **`providerOptions.serviceTier`**: Codex-only. Mirrors Codex's
   `/fast` slash command (values: `"priority"`, `"flex"`, `"batch"`).
-  Intentionally not auto-mapped to Claude because Claude's `/fast` is a
-  different MODEL variant with separate billing.
+  Intentionally not auto-mapped to Claude Code because Claude Code's
+  `/fast` is a different MODEL variant with separate billing.
+
+For a per-feature compatibility view across all four runtimes, see
+**[Feature × provider matrix](/docs/introduction/feature-matrix)**.

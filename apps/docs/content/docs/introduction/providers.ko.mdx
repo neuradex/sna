@@ -5,7 +5,7 @@ icon: Boxes
 ---
 
 각 런타임은 공통 `AgentProvider` 인터페이스 뒤에 클래스로 구현됩니다.
-어댑터는 `core/providers/{claude-code,codex,opencode}.ts`.
+어댑터는 `core/providers/{claude-code,codex,opencode,grok}.ts`.
 
 ## AgentProvider
 
@@ -41,11 +41,26 @@ respawn-with-history-replay가 필요한지 결정합니다.
 | **claude-code** | `claude -p` (one-shot) + `claude --resume` (replay) | 호출 단위 무상태 | 아니오 |
 | **codex** | `codex app-server` 데몬, stdio 위 JSON-RPC | 영구 데몬, 멀티 스레드 | 예 |
 | **opencode** | `opencode serve` 데몬 + SDK HTTP | 영구 데몬, single-cwd | 예 |
+| **grok** | `grok agent stdio` (stdio 위 Agent Client Protocol — Grok Build CLI) | 세션 단위 무상태 | 아니오 |
 
 Codex와 OpenCode 프로바이더는 `RuntimePool`을 통해 데몬을 공유합니다.
 세션이 열릴 때 `(provider, cwd, config)` 키로 풀이 조회되고, 호환되는
 기존 데몬이 있으면 재사용해서 cold-start 비용을 줄입니다(Codex 약 2초,
 OpenCode 약 3초).
+
+Grok Build은 SNA에서 처음으로 공개 표준 ([ACP](https://agentclientprotocol.com))을
+와이어 프로토콜로 쓰는 프로바이더입니다. 그래서 어댑터 대부분은 ACP
+`session/update` 알림을 SNA의 정규화된 `AgentEvent` 스트림으로 옮기는
+얇은 변환기 수준입니다. `core/providers/grok.ts`의 Grok Build 고유 부분(CLI
+경로 탐색, `--effort` 플래그 매핑, `_x.ai/*` 확장 알림 필터링)은 따로
+분리해 두었고, 두 번째 ACP-스피킹 에이전트가 등장하면 base를 추출해
+공유하기 쉬운 모양으로 유지하고 있습니다.
+
+프로바이더 간 history replay는 Grok Build 세션의 첫 `session/prompt`에
+정규화된 대화 이력을 단일 ACP `resource` content block으로 담아 보내는
+식으로 처리합니다 — 기능 매트릭스 페이지의
+[프로바이더 간 history replay](/ko/docs/introduction/feature-matrix#cross-provider-history-replay)
+항목 참고.
 
 ## RuntimePool
 
@@ -66,9 +81,15 @@ SNA가 ACP만을 프로바이더 계층으로 삼지 않고 고충실도 네이�
 모든 프로바이더를 관통하는 두 가지 레이턴시 노브:
 
 - **`reasoningLevel: 0..5`**: 프로바이더 비종속, 가장 가벼움부터 가장
-  무거움까지. Claude의 `--effort`와 Codex의 `model_reasoning_effort`로
+  무거움까지. Claude Code의 `--effort`, Codex의 `model_reasoning_effort`,
+  Grok Build의 `--reasoning-effort`를
   [reasoning-level.ts](https://github.com/neuradex/sna/blob/main/packages/core/src/core/providers/reasoning-level.ts)가 번역합니다.
+  OpenCode는 이 필드를 무시합니다.
 - **`providerOptions.serviceTier`**: Codex 전용. Codex의 `/fast`
   슬래시 명령을 모방함 (값: `"priority"`, `"flex"`, `"batch"`).
-  Claude로는 의도적으로 자동 매핑하지 않습니다. Claude의 `/fast`는 별도
-  과금 풀을 가진 다른 MODEL variant이기 때문입니다.
+  Claude Code로는 의도적으로 자동 매핑하지 않습니다. Claude Code의 `/fast`는
+  별도 과금 풀을 가진 다른 MODEL variant이기 때문입니다.
+
+모든 런타임에 대한 기능별 호환성은
+**[기능 × 프로바이더 매트릭스](/ko/docs/introduction/feature-matrix)**
+페이지를 참고하세요.
