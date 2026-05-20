@@ -10,12 +10,16 @@ import path from "path";
 
 const TEST_DB_DIR = path.join(import.meta.dirname, "../.test-data-routes");
 
+function removeTestDir() {
+  fs.rmSync(TEST_DB_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+}
+
 function setup() {
-  if (fs.existsSync(TEST_DB_DIR)) fs.rmSync(TEST_DB_DIR, { recursive: true });
+  removeTestDir();
   fs.mkdirSync(TEST_DB_DIR, { recursive: true });
   const origCwd = process.cwd;
   process.cwd = () => TEST_DB_DIR;
-  return () => { process.cwd = origCwd; fs.rmSync(TEST_DB_DIR, { recursive: true, force: true }); };
+  return () => { process.cwd = origCwd; removeTestDir(); };
 }
 
 describe("HTTP API Routes", () => {
@@ -31,7 +35,11 @@ describe("HTTP API Routes", () => {
     app = await createSnaApp({ sessionManager: sm });
   });
 
-  afterEach(() => { cleanup?.(); });
+  afterEach(async () => {
+    sm?.killAll?.();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    cleanup?.();
+  });
 
   // Helper
   async function req(method: string, path: string, body?: any) {
