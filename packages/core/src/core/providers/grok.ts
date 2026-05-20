@@ -1,14 +1,19 @@
 /**
- * Grok (xAI) provider — ACP-over-stdio adapter.
+ * Grok Build (xAI) provider — ACP-over-stdio adapter.
  *
- * Backed by the `grok` CLI's `agent stdio` subcommand, which implements the
- * Agent Client Protocol (ACP, https://agentclientprotocol.com) as a
- * JSON-RPC 2.0 stream over stdin/stdout. This is the only provider in SNA
- * whose wire protocol is a public standard rather than a vendor-specific
+ * Backed by the Grok Build CLI's `grok agent stdio` subcommand, which
+ * implements the Agent Client Protocol (ACP, https://agentclientprotocol.com)
+ * as a JSON-RPC 2.0 stream over stdin/stdout. This is the only provider in
+ * SNA whose wire protocol is a public standard rather than a vendor-specific
  * schema — which means the adapter is mostly a thin translator between ACP
  * `session/update` notifications and SNA's normalized `AgentEvent`.
  *
- * Design decisions (validated against grok 0.1.212):
+ * Note on product naming: throughout this file, `grok` (lowercase) refers
+ * to the CLI binary / registry key only. The xAI product itself is "Grok
+ * Build" — that's what user-facing documentation should call it, just as
+ * "Claude Code" is the product name behind the `claude` binary.
+ *
+ * Design decisions (validated against Grok Build CLI 0.1.212):
  *
  * 1. NO daemon pooling. `grok agent stdio` is spawned fresh per session,
  *    mirroring Claude Code's stateless model. xAI's storage layer
