@@ -1,10 +1,10 @@
 ---
-title: Agentic app hosting
-description: Product integration patterns from Loom for embedding SNA inside a real app.
+title: Embedding SNA in an app
+description: Product integration patterns for embedding SNA inside a real app.
 icon: AppWindow
 ---
 
-Loom embeds SNA as a local and cloud-capable agent runtime rather than treating it as a throwaway chat endpoint. These patterns are useful when a product owns projects, tabs, documents, permissions, and background workflows around an agent.
+SNA can be embedded as a local and cloud-capable agent runtime rather than treated as a throwaway chat endpoint. These patterns are useful when a product owns projects, tabs, documents, permissions, and background workflows around an agent.
 
 ## 1. Keep app sessions separate from SNA sessions
 
@@ -97,7 +97,7 @@ The important part is that UI components subscribe to the app-level aggregator, 
 
 ## 3. Route commands through the host, events through SNA
 
-Loom uses a split path:
+A common product architecture uses a split path:
 
 | Path | Route | Why |
 | --- | --- | --- |
