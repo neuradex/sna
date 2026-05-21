@@ -68,6 +68,8 @@ The general rule: if a knob has a 1:1 semantic counterpart across providers, it'
 
 Conversation history is the SDK's source of truth. Provider-native session ids (Claude's CC session id, Codex's thread id) are kept on `Session.ccSessionId` so `--resume` works, but they are *one of two* resume strategies — the other is rebuilding from canonical blocks via `agent.resume`. Switching providers mid-conversation works because the canonical store doesn't depend on either runtime's native shape.
 
+The normal continuation path is simpler than either resume strategy: keep the same SNA session and call `agent.send`. While a process is alive, SNA keeps the runtime-native conversation/thread attached. Only restarts, process recovery, or runtime switches need native resume or canonical replay. That means consumer apps do not implement cache-key setup, history compaction, or prompt replay just to keep a conversation going; the runtime can keep using its own vendor-side cache behavior where it supports one.
+
 ### Launcher API, not "is the app"
 
 The earlier shape of this project tried to own the entire app environment — `sna up` would install dependencies, manage `pnpm dev`, set up `.claude/settings.json`. That coupling fights the "library you embed" framing. The current recommendation is `startSnaServer({ port, dbPath, runtimePaths, ... })`: forks the standalone server, resolves native bindings, registers runtime CLI paths, waits for ready. The consumer app's web framework, lifecycle, setup UI, and process supervision stay in the consumer app.

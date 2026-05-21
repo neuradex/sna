@@ -79,6 +79,7 @@ place and normalizes the app-facing API around it.
 | --- | --- |
 | Your app usually needs to collect, store, or proxy model API keys. | The host runs an authenticated CLI; SNA drives that local runtime. |
 | You build the agent loop yourself. | The runtime's CLI harness owns the model-specific loop. |
+| You load history, replay prompts, and configure cache behavior yourself. | Continue the same SNA session; SNA keeps the runtime-native conversation/thread attached and resumes from canonical history only when needed. |
 | Tool calls, approvals, file edits, and streaming events are per-runtime work. | SNA exposes one normalized session, event, and permission protocol. |
 | Switching runtimes means rewriting integration code or losing history. | SNA rebuilds runtime-native history from canonical session blocks. |
 
@@ -95,6 +96,12 @@ completion APIs.
   Runtime-native shapes are derived from this on demand. See
   **[Actor and kind](/docs/introduction/philosophy/actor-kind)** for the
   design rationale.
+- **Session continuity without cache plumbing.** The normal path is to
+  keep the same SNA session and call `agent.send` for the next turn.
+  SNA keeps the active runtime-native conversation/thread attached. If
+  a process has to restart, it rebuilds from canonical history. Your app
+  does not reload history, replay prompts, or configure cache keys just
+  to continue a conversation.
 - **3-layer attribution.** Every block records `provider` (runtime),
   `modelProvider` (vendor), and `model` (slug). Swap any of them
   mid-session and the per-row truth stays honest.

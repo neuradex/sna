@@ -34,6 +34,13 @@ Every running agent is a `Session` owned by `SessionManager`. Each session has:
 
 Every config mutation — `saveStartConfig`, `restartSession`, `setSessionModel`, `setSessionPermissionMode`, `applySessionPatch` — appends a new `RuntimeSession` row to the `runtime_sessions` table and retires the previous one. `Session.config` mirrors the current `RuntimeSession.config` for backward compat with in-process callers. The full chain is available via `getRuntimeChain(sessionId)` and exposed on the HTTP surface as `SessionInfo.runtimeChain` (opt-in via `?include=chain`).
 
+The common path does not rebuild history per turn. As long as the session
+has an alive `AgentProcess`, `agent.send` writes to that same runtime-native
+conversation/thread. Native resume ids and canonical history adapters are
+only used when SNA needs to recreate a process, recover a stopped session,
+or cross a runtime boundary. This preserves the runtime's own cache-friendly
+conversation continuity instead of making the host app replay history.
+
 `applySessionPatch(id, patch, respawnFn)` is the unified PATCH mutator: it asks the live `AgentProcess.applyPatch(patch)` first (codex queues per-turn overrides; claude-code emits `set_model` / `set_permission_mode` control_requests) and inspects the leftover. Empty leftover → in-place transition; non-empty → kill + respawn with history replay. Either path appends exactly one chain node and emits `configChanged`.
 
 Listeners cover lifecycle (`started` / `resumed` / `killed` / `exited` / `crashed` / `restarted`), config changes, state changes, agent events, permission requests, and skill events. `SessionManagerOptions.maxSessions` caps the number of concurrently alive subprocesses.
