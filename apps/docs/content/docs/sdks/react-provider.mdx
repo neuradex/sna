@@ -8,7 +8,7 @@ description: "Props and return values for SnaProvider, SnaSession, and useSnaCon
 ## `<SnaProvider>`
 
 ```tsx
-<SnaProvider snaUrl?: string authToken?: string sessionId?: string hydrate?: boolean>
+<SnaProvider connection?: SnaConnection snaUrl?: string authToken?: string sessionId?: string hydrate?: boolean>
   {children}
 </SnaProvider>
 ```
@@ -16,8 +16,9 @@ description: "Props and return values for SnaProvider, SnaSession, and useSnaCon
 | Prop | Type | Default | Description |
 | --- | --- | --- | --- |
 | `children` | `React.ReactNode` | required | Subtree that receives SNA context. |
+| `connection` | `{ baseUrl: string; authToken?: string }` | none | Connection object returned by SDK launchers. Prefer this for embedded SNA. |
 | `snaUrl` | `string` | auto-discovery | SNA internal API server URL. If omitted, it first reads `/api/sna-port`, then falls back to `http://localhost:3099`. |
-| `authToken` | `string` | none | Bearer token returned by the SNA launcher. Required for protected servers. |
+| `authToken` | `string` | none | Token override for custom deployments. SDK apps usually use `connection`. |
 | `sessionId` | `string` | `default` | Default session ID for descendants. |
 | `hydrate` | `boolean` | `true` | Controls whether the chat store fetches persisted sessions and messages on mount. Set to `false` when the app does not use the chat store. |
 

@@ -93,22 +93,17 @@ const sna = await startSnaServer({
 ```
 
 SNA サーバは管理された子プロセスとして fork されます。`sna.port` には
-実際のバインドポートが入ります。`sna.baseUrl` と `sna.authToken` は
-クライアントへそのまま渡します。`sna.appId` はこのサーバが作る
-session の owner metadata として付きます。`port` に `0` を指定した場合は
-自動割り当てになり、`sna.stop()` を呼ぶと SIGTERM でサーバを終了します。
+実際のバインドポートが入ります。SDK client には `sna.connection` を
+渡します。`sna.appId` はこのサーバが作る session の owner metadata として
+付きます。`port` に `0` を指定した場合は自動割り当てになり、
+`sna.stop()` を呼ぶと SIGTERM でサーバを終了します。
 
 ## 3. クライアント接続
 
 ```ts
 import { SnaClient } from "@sna-sdk/client";
 
-const client = new SnaClient({
-  baseUrl: sna.baseUrl,
-  authToken: sna.authToken,
-  http: true,   // POST /agent/* など
-  ws: true,     // ライブイベントストリーム
-});
+const client = new SnaClient(sna.connection);
 client.connect();
 ```
 

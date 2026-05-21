@@ -65,6 +65,7 @@ function resetStore() {
     activeSessionId: "default",
     sessions: { default: emptySession() },
     _apiUrl: "",
+    _authToken: undefined,
     _hydratedSessions: new Set<string>(),
   });
 }
@@ -245,6 +246,32 @@ describe("React documented surfaces", () => {
     assert.equal(sessionContext?.apiUrl, "http://localhost:4242");
     assert.equal(sessionContext?.sessionId, "review-panel");
     assert.equal(useChatStore.getState()._apiUrl, "http://localhost:4242");
+  });
+
+  it("SnaProvider accepts a launcher connection object", async () => {
+    installWindow();
+    const requests = installFetch([]);
+    let providerContext: ReturnType<typeof useSnaContext> | undefined;
+
+    function Capture() {
+      providerContext = useSnaContext();
+      return null;
+    }
+
+    await render(React.createElement(
+      SnaProvider,
+      {
+        connection: { baseUrl: "http://localhost:4242", authToken: "secret-token" },
+        hydrate: false,
+      },
+      React.createElement(Capture),
+    ));
+
+    assert.equal(requests.length, 0);
+    assert.equal(providerContext?.apiUrl, "http://localhost:4242");
+    assert.equal(providerContext?.authToken, "secret-token");
+    assert.equal(useChatStore.getState()._apiUrl, "http://localhost:4242");
+    assert.equal(useChatStore.getState()._authToken, "secret-token");
   });
 
   it("SnaProvider hydrates the chat store by default and can skip hydration", async () => {

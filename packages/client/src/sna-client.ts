@@ -5,8 +5,8 @@
  *
  * ## Transport model
  *
- * Configure both transports explicitly via `ws` and `http` boolean flags.
- * Both URLs are derived from a single `baseUrl` — no need to specify them separately.
+ * Configure both transports with optional `ws` and `http` boolean flags.
+ * Both default to `true`, and both URLs are derived from a single `baseUrl`.
  *
  * | Transport | Used for | Enabled by |
  * |-----------|----------|------------|
@@ -52,12 +52,8 @@
  * ```ts
  * import { SnaClient } from "@sna-sdk/client";
  *
- * const sna = new SnaClient({
- *   baseUrl: "localhost:3099",
- *   authToken: process.env.SNA_AUTH_TOKEN,
- *   ws: true,
- *   http: true,
- * });
+ * const handle = await startSnaServer({ ... });
+ * const sna = new SnaClient(handle.connection);
  *
  * sna.sessions.onSnapshot((sessions) => setSessions(sessions));
  * sna.connect();
@@ -108,7 +104,7 @@ export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 /**
  * Options for creating an {@link SnaClient} instance.
  */
-export interface SnaClientOptions {
+export interface SnaClientConnection {
   /**
    * Base URL of the SNA server.
    *
@@ -130,6 +126,12 @@ export interface SnaClientOptions {
    * WebSocket clients cannot set arbitrary headers.
    */
   authToken?: string;
+}
+
+/**
+ * Options for creating an {@link SnaClient} instance.
+ */
+export interface SnaClientOptions extends SnaClientConnection {
 
   /**
    * Enable WebSocket transport.
@@ -141,7 +143,7 @@ export interface SnaClientOptions {
    * When `false`, all WS-dependent operations will reject with an error.
    * Use `false` only when building an HTTP-only integration.
    */
-  ws: boolean;
+  ws?: boolean;
 
   /**
    * Enable REST (HTTP) transport.
@@ -154,7 +156,7 @@ export interface SnaClientOptions {
    * When `false`, all operations fall back to WebSocket (the server ACKs
    * immediately without waiting for async work to complete).
    */
-  http: boolean;
+  http?: boolean;
 
   /**
    * Whether to automatically reconnect when the WebSocket connection drops.
@@ -220,13 +222,15 @@ function resolveTransports(options: SnaClientOptions): ResolvedTransports {
   if (!/^https?:\/\//i.test(base)) {
     base = "http://" + base;
   }
-  const baseWsUrl = options.ws
+  const wsEnabled = options.ws ?? true;
+  const httpEnabled = options.http ?? true;
+  const baseWsUrl = wsEnabled
     ? base.replace(/^https:\/\//i, "wss://").replace(/^http:\/\//i, "ws://") + "/ws"
     : null;
   const wsUrl = baseWsUrl && authToken
     ? withQueryParam(baseWsUrl, "token", authToken)
     : baseWsUrl;
-  const httpBase = options.http ? base : null;
+  const httpBase = httpEnabled ? base : null;
 
   if (!wsUrl && !httpBase) {
     console.warn("[SnaClient] Both ws and http are false — no transport is available.");
@@ -246,15 +250,15 @@ function withQueryParam(url: string, key: string, value: string): string {
 /**
  * Dual-transport client for the SNA API server.
  *
- * Provide a single `baseUrl` and explicit `ws`/`http` flags.
- * The client derives the WS and HTTP endpoints automatically.
+ * Provide a launcher connection object, or a single `baseUrl` plus optional
+ * `ws`/`http` flags. The client derives the WS and HTTP endpoints automatically.
  *
  * @example
  * ```ts
  * const sna = new SnaClient({
  *   baseUrl: "localhost:3099",
- *   ws: true,   // real-time push, event streaming
- *   http: true, // ordering-guaranteed state changes
+ *   ws: true,   // optional, defaults true
+ *   http: true, // optional, defaults true
  * });
  * sna.connect();
  *

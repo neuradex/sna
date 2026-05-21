@@ -8,7 +8,7 @@ description: "SnaProvider、SnaSession、useSnaContext の props と返り値。
 ## `<SnaProvider>`
 
 ```tsx
-<SnaProvider snaUrl?: string authToken?: string sessionId?: string hydrate?: boolean>
+<SnaProvider connection?: SnaConnection snaUrl?: string authToken?: string sessionId?: string hydrate?: boolean>
   {children}
 </SnaProvider>
 ```
@@ -16,8 +16,9 @@ description: "SnaProvider、SnaSession、useSnaContext の props と返り値。
 | Prop | Type | Default | Description |
 | --- | --- | --- | --- |
 | `children` | `React.ReactNode` | required | SNA context を受け取る subtree です。 |
+| `connection` | `{ baseUrl: string; authToken?: string }` | none | SDK launcher が返す connection object です。Embedded SNA ではこれを優先します。 |
 | `snaUrl` | `string` | auto-discovery | SNA internal API server URL です。省略すると `/api/sna-port` を先に読み、失敗した場合は `http://localhost:3099` を使います。 |
-| `authToken` | `string` | none | SNA launcher が返す bearer token です。Protected server では必要です。 |
+| `authToken` | `string` | none | Custom deployment 用の token override です。SDK app では通常 `connection` を使います。 |
 | `sessionId` | `string` | `default` | descendants の default session ID です。 |
 | `hydrate` | `boolean` | `true` | mount 時に chat store が保存済み sessions と messages を取得するかを制御します。chat store を使わない app では `false` にできます。 |
 

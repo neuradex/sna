@@ -1,13 +1,23 @@
 import * as react_jsx_runtime from 'react/jsx-runtime';
 
+interface SnaConnection {
+    baseUrl: string;
+    authToken?: string;
+}
 interface SnaProviderProps {
     children: React.ReactNode;
+    /**
+     * Connection object returned by startSnaServer/startSnaServerInProcess.
+     * Prefer this in SDK-managed apps so the auth token stays paired with
+     * the server handle.
+     */
+    connection?: SnaConnection;
     /**
      * Override the SNA internal API server URL.
      * Defaults to auto-discovery via /api/sna-port, then http://localhost:3099.
      */
     snaUrl?: string;
-    /** Bearer token returned by startSnaServer/startSnaServerInProcess. */
+    /** Bearer token override for custom deployments. Prefer `connection`. */
     authToken?: string;
     /**
      * Session ID for this provider scope.
@@ -29,7 +39,7 @@ interface SnaProviderProps {
  *
  * @example
  * // Minimal — context only
- * <SnaProvider snaUrl="http://localhost:52341">
+ * <SnaProvider connection={sna.connection}>
  *   {children}
  * </SnaProvider>
  *
@@ -47,6 +57,6 @@ interface SnaProviderProps {
  *   <SnaSession id={projectSessionId}><ChatArea /></SnaSession>
  * </SnaProvider>
  */
-declare function SnaProvider({ children, snaUrl, authToken, sessionId, hydrate: shouldHydrate, }: SnaProviderProps): react_jsx_runtime.JSX.Element;
+declare function SnaProvider({ children, connection, snaUrl, authToken, sessionId, hydrate: shouldHydrate, }: SnaProviderProps): react_jsx_runtime.JSX.Element;
 
-export { SnaProvider };
+export { type SnaConnection, SnaProvider, type SnaProviderProps };

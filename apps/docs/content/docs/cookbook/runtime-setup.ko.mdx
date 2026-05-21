@@ -130,9 +130,9 @@ const sna = await startSnaServerInProcess({
 });
 ```
 
-`sna.baseUrl`과 `sna.authToken`은 `SnaClient`나 `SnaProvider`에 그대로
-넘깁니다. Token은 이 server process를 위해 생성된 값이므로 긴 수명의
-사용자 설정으로 저장하지 마십시오.
+`sna.connection`을 `SnaClient`나 `SnaProvider`에 넘깁니다. Token은 이
+server process를 위해 생성되고 connection object와 함께 묶여 있으므로
+긴 수명의 사용자 설정으로 저장하지 마십시오.
 
 Forked standalone SNA server에서는 path change를 launch 전에 반영하거나 SNA를 재시작하는 구성이 보통 다루기 쉽습니다. In-process SNA에서는 runtime adapter가 같은 process 안에서 path를 resolve하므로, host가 `process.env.SNA_*_COMMAND`를 갱신하면 이후 spawn에 반영될 수 있습니다.
 

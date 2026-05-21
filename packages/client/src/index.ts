@@ -1,5 +1,6 @@
 export { SnaClient } from "./sna-client.js";
 export type {
+  SnaClientConnection,
   SnaClientOptions,
   ConnectionStatus,
   SessionInfo,

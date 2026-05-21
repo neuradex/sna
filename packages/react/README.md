@@ -19,17 +19,18 @@ npm install @sna-sdk/react @sna-sdk/core
 ```tsx
 import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
 
-<SnaProvider snaUrl={sna.baseUrl} authToken={sna.authToken}>
+<SnaProvider connection={sna.connection}>
   <YourApp />
 </SnaProvider>
 ```
 
-`SnaProvider` is a pure context provider — no UI, no peer deps beyond React. It auto-discovers the server URL via `/api/sna-port` if `snaUrl` is omitted; otherwise falls back to `http://localhost:3099`.
+`SnaProvider` is a pure context provider — no UI, no peer deps beyond React. In SDK-managed apps, pass `connection={sna.connection}` so the token stays paired with the server handle. It auto-discovers the server URL via `/api/sna-port` if no connection or `snaUrl` is provided; otherwise falls back to `http://localhost:3099`.
 
 | Prop | |
 |------|---|
+| `connection?` | Connection object returned by `startSnaServer` |
 | `snaUrl?` | Override the server URL |
-| `authToken?` | Bearer token returned by `startSnaServer` |
+| `authToken?` | Token override for custom deployments |
 | `sessionId?` | Default session id (default `"default"`) |
 | `hydrate?` | Hydrate chat-store on mount (default `true`) |
 
@@ -38,7 +39,7 @@ import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
 ```tsx
 import { SnaChatUI } from "@sna-sdk/react/components/sna-chat-ui";
 
-<SnaProvider snaUrl={sna.baseUrl} authToken={sna.authToken}>
+<SnaProvider connection={sna.connection}>
   <SnaChatUI dangerouslySkipPermissions>
     <YourApp />
   </SnaChatUI>
@@ -57,7 +58,7 @@ import { SnaChatUI } from "@sna-sdk/react/components/sna-chat-ui";
 ```tsx
 import { SnaSession } from "@sna-sdk/react/components/sna-session";
 
-<SnaProvider snaUrl={sna.baseUrl} authToken={sna.authToken}>
+<SnaProvider connection={sna.connection}>
   <SnaSession id="default"><HelperAgent /></SnaSession>
   <SnaSession id={activeProjectSessionId}><ChatArea /></SnaSession>
 </SnaProvider>

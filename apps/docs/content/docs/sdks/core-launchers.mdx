@@ -109,12 +109,7 @@ const handle = await startSnaServer({
   },
 });
 
-const client = new SnaClient({
-  baseUrl: handle.baseUrl,
-  authToken: handle.authToken,
-  http: true,
-  ws: true,
-});
+const client = new SnaClient(handle.connection);
 
 handle.stop();
 ```
@@ -144,6 +139,7 @@ type SnaServerHandle = {
   appId: string;
   baseUrl: string;
   authToken: string;
+  connection: { baseUrl: string; authToken: string };
   stop(): void;
 };
 ```
@@ -162,6 +158,7 @@ type InProcessSnaServerHandle = {
   appId: string;
   baseUrl: string;
   authToken: string;
+  connection: { baseUrl: string; authToken: string };
   sessionManager: SessionManager;
   httpServer: http.Server;
   initLangfuse(config: { publicKey: string; secretKey: string; baseUrl?: string }): Promise<void>;

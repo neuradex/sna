@@ -81,12 +81,7 @@ export function snaFor(instanceId: string, connection: SnaConnection): SnaClient
   const existing = clients.get(instanceId);
   if (existing) return existing;
 
-  const client = new SnaClient({
-    baseUrl: connection.baseUrl,
-    authToken: connection.authToken,
-    ws: true,
-    http: true,
-  });
+  const client = new SnaClient(connection);
   clients.set(instanceId, client);
   installAggregator(client);
 
@@ -112,7 +107,7 @@ A common product architecture uses a split path:
 | Path | Route | Why |
 | --- | --- | --- |
 | Lifecycle commands | renderer → app host HTTP → SNA HTTP | The host can build config from app DB, wake cloud instances, reconcile model selection, and inject product context. |
-| Event stream | renderer → SNA WebSocket | The UI receives low-latency runtime events without proxying every token through the app server. Pass the SNA auth token through a trusted host channel. |
+| Event stream | renderer → SNA WebSocket | The UI receives low-latency runtime events without proxying every token through the app server. Pass the SDK launcher `connection` through a trusted host channel. |
 
 In the renderer, expose a domain wrapper rather than raw SNA calls:
 

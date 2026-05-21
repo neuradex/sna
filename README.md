@@ -70,12 +70,7 @@ const sna = await startSnaServer({
   },
 });
 
-const client = new SnaClient({
-  baseUrl: sna.baseUrl,
-  authToken: sna.authToken,
-  ws: true,
-  http: true,
-});
+const client = new SnaClient(sna.connection);
 client.connect();
 
 const { sessionId } = await client.sessions.create({ label: "research" });
@@ -105,7 +100,7 @@ client.disconnect();
 sna.stop();
 ```
 
-> Launchers bind to `127.0.0.1` by default, generate an auth token, and tag sessions with `appId`. Pass `sna.authToken` to `SnaClient` or `SnaProvider`. Direct standalone server usage is intended for development/debugging and must set `SNA_AUTH_TOKEN` explicitly.
+> Launchers bind to `127.0.0.1` by default, generate an auth token, and tag sessions with `appId`. SDK clients should pass the returned `sna.connection` object instead of handling the token separately. Direct standalone server usage is intended for development/debugging and must set `SNA_AUTH_TOKEN` explicitly.
 
 ### As a React app
 
@@ -113,7 +108,7 @@ sna.stop();
 import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
 import { SnaChatUI } from "@sna-sdk/react/components/sna-chat-ui";
 
-<SnaProvider snaUrl={sna.baseUrl} authToken={sna.authToken}>
+<SnaProvider connection={sna.connection}>
   <SnaChatUI dangerouslySkipPermissions>
     <YourApp />
   </SnaChatUI>

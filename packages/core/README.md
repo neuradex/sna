@@ -46,11 +46,11 @@ const sna = await startSnaServer({
 ```
 
 Launchers bind to `127.0.0.1` by default, generate a per-server
-`authToken`, and tag sessions with `appId`. Pass `sna.baseUrl` and
-`sna.authToken` to `SnaClient` or `SnaProvider`. Browser renderer origins
-are rejected unless they are listed in `allowedOrigins`. Direct standalone
-server launches are for development/debugging and must provide
-`SNA_AUTH_TOKEN` explicitly.
+`authToken`, and tag sessions with `appId`. Use the returned
+`sna.connection` object with `SnaClient` or `SnaProvider` so consumers do not
+handle the token separately. Browser renderer origins are rejected unless they
+are listed in `allowedOrigins`. Direct standalone server launches are for
+development/debugging and must provide `SNA_AUTH_TOKEN` explicitly.
 
 For Electron, use `@sna-sdk/core/electron` and add `asarUnpack: ["node_modules/@sna-sdk/core/**"]`.
 

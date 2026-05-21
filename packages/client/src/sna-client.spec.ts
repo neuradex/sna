@@ -82,6 +82,18 @@ describe("connection lifecycle", () => {
     assert.equal(url.searchParams.get("token"), "secret-token");
   });
 
+  it("accepts launcher connection objects with default transports", async () => {
+    const connection = { baseUrl: mock.host, authToken: "secret-token" };
+    sna = new SnaClient({ ...connection, reconnect: false });
+
+    assert.equal(sna._httpUrl, `http://${mock.host}`);
+    sna.connect();
+    await waitFor(() => sna.connected);
+
+    const url = new URL(mock.wsRequests[0], "ws://localhost");
+    assert.equal(url.searchParams.get("token"), "secret-token");
+  });
+
   it("disconnect fires status callback and closes socket", async () => {
     const statuses: string[] = [];
     sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });

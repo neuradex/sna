@@ -132,9 +132,9 @@ const sna = await startSnaServerInProcess({
 });
 ```
 
-Pass `sna.baseUrl` and `sna.authToken` to `SnaClient` or `SnaProvider`.
-The token is generated for this server process; do not store it as a
-long-lived user setting.
+Pass `sna.connection` to `SnaClient` or `SnaProvider`. The token is generated
+for this server process and stays paired with that connection object; do not
+store it as a long-lived user setting.
 
 For a forked standalone SNA server, path changes should usually be applied before launch or by restarting SNA. For in-process SNA, updating `process.env.SNA_*_COMMAND` in the host can affect later spawns because the runtime adapters resolve paths inside the same process.
 

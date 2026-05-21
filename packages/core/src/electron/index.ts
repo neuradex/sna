@@ -205,7 +205,15 @@ export interface RuntimePaths {
   cursor?: string;
 }
 
-export interface SnaServerHandle {
+export interface SnaServerConnection {
+  /** Base HTTP URL for this server. */
+  baseUrl: string;
+
+  /** Bearer token required for protected routes. */
+  authToken: string;
+}
+
+export interface SnaServerHandle extends SnaServerConnection {
   /** The forked child process. */
   process: ChildProcess;
 
@@ -218,11 +226,8 @@ export interface SnaServerHandle {
   /** Application owner ID associated with this server process. */
   appId: string;
 
-  /** Base HTTP URL for this server. */
-  baseUrl: string;
-
-  /** Bearer token required for protected routes. */
-  authToken: string;
+  /** Portable client connection object for SnaClient/SnaProvider. */
+  connection: SnaServerConnection;
 
   /** Send SIGTERM to the server process for graceful shutdown. */
   stop(): void;
@@ -408,13 +413,16 @@ export async function startSnaServer(options: SnaServerOptions): Promise<SnaServ
     });
   });
 
+  const connection = { baseUrl: `http://${host}:${port}`, authToken };
+
   return {
     process: proc,
     port,
     host,
     appId,
-    baseUrl: `http://${host}:${port}`,
+    baseUrl: connection.baseUrl,
     authToken,
+    connection,
     stop() {
       proc.kill("SIGTERM");
     },
@@ -423,7 +431,7 @@ export async function startSnaServer(options: SnaServerOptions): Promise<SnaServ
 
 // ── In-process mode ──────────────────────────────────────────────────────────
 
-export interface InProcessSnaServerHandle {
+export interface InProcessSnaServerHandle extends SnaServerConnection {
   /** No child process — the server runs in the calling process. */
   process: null;
 
@@ -436,11 +444,8 @@ export interface InProcessSnaServerHandle {
   /** Application owner ID associated with this server instance. */
   appId: string;
 
-  /** Base HTTP URL for this server. */
-  baseUrl: string;
-
-  /** Bearer token required for protected routes. */
-  authToken: string;
+  /** Portable client connection object for SnaClient/SnaProvider. */
+  connection: SnaServerConnection;
 
   /** The session manager instance. */
   sessionManager: SessionManager;
@@ -602,13 +607,16 @@ export async function startSnaServerInProcess(
     }
   }
 
+  const connection = { baseUrl: `http://${host}:${port}`, authToken };
+
   return {
     process: null,
     port,
     host,
     appId,
-    baseUrl: `http://${host}:${port}`,
+    baseUrl: connection.baseUrl,
     authToken,
+    connection,
     sessionManager,
     httpServer,
     async initLangfuse(config) {

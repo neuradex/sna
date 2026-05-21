@@ -33,15 +33,13 @@ const sna = await startSnaServer({
 // sna.process : the spawned ChildProcess
 // sna.port    : actual port (after auto-pick)
 // sna.appId   : owner ID tagged onto sessions created by this server
-// sna.baseUrl : HTTP URL to pass to clients
-// sna.authToken : bearer token to pass to clients
+// sna.connection : connection object to pass to SDK clients
 // sna.stop()  : graceful SIGTERM
 ```
 
 In forked mode, the child server also shuts down when the parent process
-disconnects. The token belongs to that server process; pass the returned
-`sna.authToken` through your trusted app channel instead of putting a
-long-lived token in user-managed config.
+disconnects. The token belongs to that server process; keep it paired with
+`sna.connection` instead of putting a long-lived token in user-managed config.
 
 ## Electron checklist
 
@@ -66,15 +64,10 @@ HTTP/WS host:
 ```ts
 import { SnaClient } from "@sna-sdk/client";
 
-const client = new SnaClient({
-  baseUrl: sna.baseUrl,
-  authToken: sna.authToken,
-  http: true,
-  ws: true,
-});
+const client = new SnaClient(sna.connection);
 ```
 
 A helper endpoint `GET /api/sna-port` is wired by `<SnaProvider>` for
-React apps so the renderer can auto-discover the port without IPC. The
-auth token is not discovered through that endpoint; pass it from the
-host process to the renderer through your app's trusted channel.
+React apps so the renderer can auto-discover the port without IPC. If your
+host exposes `{ baseUrl, authToken }` from that same trusted app endpoint,
+`SnaProvider` uses it as the connection automatically.

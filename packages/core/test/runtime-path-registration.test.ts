@@ -115,6 +115,10 @@ describe("runtime path registration", () => {
     try {
       assert.equal(handle.appId, "test-host");
       assert.equal(handle.authToken, "launcher-token");
+      assert.deepEqual(handle.connection, {
+        baseUrl: handle.baseUrl,
+        authToken: "launcher-token",
+      });
       assert.equal(process.env.SNA_APP_ID, "test-host");
       assert.equal(process.env.SNA_AUTH_TOKEN, "launcher-token");
       assert.equal(process.env.SNA_ALLOWED_ORIGINS, "http://localhost:5173");
