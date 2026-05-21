@@ -7,6 +7,8 @@ interface SnaProviderProps {
      * Defaults to auto-discovery via /api/sna-port, then http://localhost:3099.
      */
     snaUrl?: string;
+    /** Bearer token returned by startSnaServer/startSnaServerInProcess. */
+    authToken?: string;
     /**
      * Session ID for this provider scope.
      * @default "default"
@@ -45,6 +47,6 @@ interface SnaProviderProps {
  *   <SnaSession id={projectSessionId}><ChatArea /></SnaSession>
  * </SnaProvider>
  */
-declare function SnaProvider({ children, snaUrl, sessionId, hydrate: shouldHydrate, }: SnaProviderProps): react_jsx_runtime.JSX.Element;
+declare function SnaProvider({ children, snaUrl, authToken, sessionId, hydrate: shouldHydrate, }: SnaProviderProps): react_jsx_runtime.JSX.Element;
 
 export { SnaProvider };

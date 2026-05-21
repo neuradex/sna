@@ -14,6 +14,7 @@ import { useChatStore, type ChatMessage } from "../src/stores/chat-store.js";
 type FetchRequest = {
   url: string;
   method: string;
+  headers: Record<string, string>;
   body?: unknown;
 };
 
@@ -112,6 +113,7 @@ function installFetch(responses: MockResponse[] | ((request: FetchRequest) => un
     const request = {
       url: String(input),
       method: init?.method ?? "GET",
+      headers: Object.fromEntries(new Headers(init?.headers).entries()),
       body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
     };
     requests.push(request);
@@ -119,8 +121,10 @@ function installFetch(responses: MockResponse[] | ((request: FetchRequest) => un
     const body = Array.isArray(responses)
       ? typeof responses[0] === "function"
         ? await (responses.shift() as (request: FetchRequest) => unknown | Promise<unknown>)(request)
-        : responses.shift() ?? {}
+      : responses.shift() ?? {}
       : await responses(request);
+
+    if (body instanceof Response) return body;
 
     return new Response(JSON.stringify(body ?? {}), {
       status: 200,
@@ -157,10 +161,31 @@ async function flush() {
   });
 }
 
-function contextProvider(children: React.ReactNode, sessionId = "default") {
+function createSseStream() {
+  const encoder = new TextEncoder();
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const stream = new ReadableStream<Uint8Array>({
+    start(c) { controller = c; },
+  });
+
+  return {
+    response: new Response(stream, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    }),
+    send(event: Record<string, unknown>, id?: string) {
+      controller.enqueue(encoder.encode(`${id ? `id: ${id}\n` : ""}data: ${JSON.stringify(event)}\n\n`));
+    },
+    close() {
+      controller.close();
+    },
+  };
+}
+
+function contextProvider(children: React.ReactNode, sessionId = "default", authToken?: string) {
   return React.createElement(
     SnaContext.Provider,
-    { value: { apiUrl: "http://localhost:3099", sessionId } },
+    { value: { apiUrl: "http://localhost:3099", authToken, sessionId } },
     children,
   );
 }
@@ -324,10 +349,11 @@ describe("React documented surfaces", () => {
 
   it("useAgent opens the SSE stream, dispatches filtered callbacks, and posts documented commands", async () => {
     installWindow();
-    const sources = installEventSource();
+    const sse = createSseStream();
     const seen: string[] = [];
     const requests = installFetch((request) => {
       if (request.url.includes("/agent/status")) return { eventCount: 7, alive: true };
+      if (request.url.includes("/agent/events")) return sse.response;
       if (request.url.includes("/agent/start")) return { status: "started" };
       if (request.url.includes("/agent/send")) return { status: "sent" };
       if (request.url.includes("/agent/completion")) return { content: "done" };
@@ -352,23 +378,19 @@ describe("React documented surfaces", () => {
       return null;
     }
 
-    await render(contextProvider(React.createElement(Capture), "agent one"));
+    await render(contextProvider(React.createElement(Capture), "agent one", "test-token"));
 
     assert.equal(requests[0].url, "http://localhost:3099/agent/status?session=agent%20one");
-    assert.equal(sources[0].url, "http://localhost:3099/agent/events?session=agent%20one&since=7");
+    assert.equal(requests[0].headers.authorization, "Bearer test-token");
+    assert.equal(requests[1].url, "http://localhost:3099/agent/events?session=agent%20one&since=7");
+    assert.equal(requests[1].headers.authorization, "Bearer test-token");
     assert.equal(agent?.alive, true);
-
-    await act(async () => {
-      sources[0].onopen?.({} as Event);
-    });
     assert.equal(agent?.connected, true);
 
     for (const type of ["init", "thinking", "assistant", "tool_result", "complete", "error"] as const) {
       await act(async () => {
-        sources[0].onmessage?.({
-          data: JSON.stringify({ type, message: type }),
-          lastEventId: "8",
-        } as MessageEvent);
+        sse.send({ type, message: type }, "8");
+        await Promise.resolve();
       });
     }
 
@@ -392,34 +414,37 @@ describe("React documented surfaces", () => {
       await agent!.kill();
     });
 
-    assert.equal(requests[1].url, "http://localhost:3099/agent/start?session=agent%20one");
-    assert.deepEqual(requests[1].body, {
+    assert.equal(requests[2].url, "http://localhost:3099/agent/start?session=agent%20one");
+    assert.deepEqual(requests[2].body, {
       provider: "codex",
       prompt: "boot",
       permissionMode: "acceptEdits",
       reasoningLevel: 2,
       providerOptions: { serviceTier: "priority" },
     });
-    assert.equal(requests[2].url, "http://localhost:3099/agent/send?session=agent%20one");
-    assert.deepEqual(requests[2].body, { message: "hello" });
-    assert.equal(requests[3].url, "http://localhost:3099/agent/completion");
-    assert.deepEqual(requests[3].body, {
+    assert.equal(requests[2].headers.authorization, "Bearer test-token");
+    assert.equal(requests[3].url, "http://localhost:3099/agent/send?session=agent%20one");
+    assert.deepEqual(requests[3].body, { message: "hello" });
+    assert.equal(requests[4].url, "http://localhost:3099/agent/completion");
+    assert.deepEqual(requests[4].body, {
       provider: "codex",
       reasoningLevel: 3,
       prompt: "summarize",
       providerOptions: { serviceTier: "batch" },
     });
-    assert.equal(requests[4].url, "http://localhost:3099/agent/kill?session=agent%20one");
-    assert.equal(requests[4].method, "POST");
+    assert.equal(requests[5].url, "http://localhost:3099/agent/kill?session=agent%20one");
+    assert.equal(requests[5].method, "POST");
     assert.equal(agent?.alive, false);
   });
 
   it("useAgent closes the stream and schedules the documented reconnect delay on SSE error", async () => {
     installWindow();
-    const sources = installEventSource();
-    installFetch((request) => request.url.includes("/agent/status")
-      ? { eventCount: 0, alive: false }
-      : { status: "ok" });
+    const sse = createSseStream();
+    installFetch((request) => {
+      if (request.url.includes("/agent/status")) return { eventCount: 0, alive: false };
+      if (request.url.includes("/agent/events")) return sse.response;
+      return { status: "ok" };
+    });
     let agent: ReturnType<typeof useAgent> | undefined;
 
     function Capture() {
@@ -428,9 +453,6 @@ describe("React documented surfaces", () => {
     }
 
     await render(contextProvider(React.createElement(Capture)));
-    await act(async () => {
-      sources[0].onopen?.({} as Event);
-    });
     assert.equal(agent?.connected, true);
 
     const originalSetTimeout = globalThis.setTimeout;
@@ -441,13 +463,13 @@ describe("React documented surfaces", () => {
     }) as typeof setTimeout;
     try {
       await act(async () => {
-        sources[0].onerror?.({} as Event);
+        sse.close();
+        await Promise.resolve();
       });
     } finally {
       globalThis.setTimeout = originalSetTimeout;
     }
 
-    assert.equal(sources[0].closed, true);
     assert.equal(agent?.connected, false);
     assert.deepEqual(scheduled, [{ delay: 3000 }]);
   });

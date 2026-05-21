@@ -61,6 +61,7 @@ If a binary lives somewhere non-standard, register it when starting SNA:
 
 ```ts
 await startSnaServer({
+  appId: "my-app",
   dbPath: "./data/sna.db",
   runtimePaths: {
     claudeCode: "/opt/homebrew/bin/claude",

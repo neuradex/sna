@@ -11,6 +11,8 @@ interface SnaProviderProps {
    * Defaults to auto-discovery via /api/sna-port, then http://localhost:3099.
    */
   snaUrl?: string;
+  /** Bearer token returned by startSnaServer/startSnaServerInProcess. */
+  authToken?: string;
   /**
    * Session ID for this provider scope.
    * @default "default"
@@ -53,6 +55,7 @@ interface SnaProviderProps {
 export function SnaProvider({
   children,
   snaUrl,
+  authToken,
   sessionId = "default",
   hydrate: shouldHydrate = true,
 }: SnaProviderProps) {
@@ -82,14 +85,15 @@ export function SnaProvider({
 
     discover().then((url) => {
       useChatStore.getState()._setApiUrl(url);
+      useChatStore.getState()._setAuthToken(authToken);
       if (shouldHydrate) {
         useChatStore.getState().hydrate();
       }
     });
-  }, [snaUrl, shouldHydrate]);
+  }, [snaUrl, authToken, shouldHydrate]);
 
   return (
-    <SnaContext.Provider value={{ apiUrl: resolvedUrl, sessionId }}>
+    <SnaContext.Provider value={{ apiUrl: resolvedUrl, authToken, sessionId }}>
       {children}
     </SnaContext.Provider>
   );

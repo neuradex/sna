@@ -42,7 +42,7 @@ async function startServerOnly(): Promise<ServerOnlyContext> {
   const { serve } = await import("@hono/node-server");
 
   const sm = new SessionManager();
-  const app = createSnaApp({
+  const app = await createSnaApp({
     sessionManager: sm,
     authToken: TEST_TOKEN,
     allowedOrigins: [ALLOWED_ORIGIN],

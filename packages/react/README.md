@@ -19,7 +19,7 @@ npm install @sna-sdk/react @sna-sdk/core
 ```tsx
 import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
 
-<SnaProvider snaUrl="http://localhost:3099">
+<SnaProvider snaUrl={sna.baseUrl} authToken={sna.authToken}>
   <YourApp />
 </SnaProvider>
 ```
@@ -29,6 +29,7 @@ import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
 | Prop | |
 |------|---|
 | `snaUrl?` | Override the server URL |
+| `authToken?` | Bearer token returned by `startSnaServer` |
 | `sessionId?` | Default session id (default `"default"`) |
 | `hydrate?` | Hydrate chat-store on mount (default `true`) |
 
@@ -37,7 +38,7 @@ import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
 ```tsx
 import { SnaChatUI } from "@sna-sdk/react/components/sna-chat-ui";
 
-<SnaProvider snaUrl={apiUrl}>
+<SnaProvider snaUrl={sna.baseUrl} authToken={sna.authToken}>
   <SnaChatUI dangerouslySkipPermissions>
     <YourApp />
   </SnaChatUI>
@@ -56,7 +57,7 @@ import { SnaChatUI } from "@sna-sdk/react/components/sna-chat-ui";
 ```tsx
 import { SnaSession } from "@sna-sdk/react/components/sna-session";
 
-<SnaProvider snaUrl={apiUrl}>
+<SnaProvider snaUrl={sna.baseUrl} authToken={sna.authToken}>
   <SnaSession id="default"><HelperAgent /></SnaSession>
   <SnaSession id={activeProjectSessionId}><ChatArea /></SnaSession>
 </SnaProvider>

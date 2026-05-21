@@ -14,6 +14,7 @@ description: "SnaClient 생성자, 연결 lifecycle, low-level request/push API.
 ```ts
 const client = new SnaClient({
   baseUrl: string;
+  authToken?: string;
   ws: boolean;
   http: boolean;
   reconnect?: boolean;
@@ -27,6 +28,7 @@ const client = new SnaClient({
 | Field | Required | Default | Description |
 | --- | --- | --- | --- |
 | `baseUrl` | yes | none | SNA server 주소입니다. `localhost:3099`, `http://localhost:3099`, `https://example.com` 형태를 지원합니다. |
+| `authToken` | protected server에서 필요 | none | SNA server가 발급한 bearer token입니다. HTTP는 `Authorization` header를 쓰고, WebSocket은 browser 호환성을 위해 `/ws?token=...`을 씁니다. |
 | `ws` | yes | none | WebSocket transport를 켭니다. `agent.subscribe`, `onEvent`, permission push에 필요합니다. |
 | `http` | yes | none | HTTP transport를 켭니다. session CRUD와 agent lifecycle 명령의 ordering guarantee를 제공합니다. |
 | `reconnect` | no | `true` | WebSocket이 끊겼을 때 자동 reconnect를 시도합니다. |
@@ -46,7 +48,8 @@ const client = new SnaClient({
 import { SnaClient } from "@sna-sdk/client";
 
 const client = new SnaClient({
-  baseUrl: "localhost:3099",
+  baseUrl: handle.baseUrl,
+  authToken: handle.authToken,
   http: true,
   ws: true,
 });

@@ -7,14 +7,13 @@
  */
 
 import { serve } from "@hono/node-server";
-import { cors } from "hono/cors";
 import fs from "fs";
 import path from "path";
 import { SessionManager } from "./session-manager.js";
 import { attachWebSocket } from "./ws.js";
 import { getProvider } from "../core/providers/index.js";
 import { logger } from "../lib/logger.js";
-import { getConfig } from "../config.js";
+import { configuredAppMeta, getConfig } from "../config.js";
 import { createSnaApp } from "./index.js";
 
 // Pre-flight: verify native modules are compatible before starting
@@ -34,11 +33,21 @@ try {
 }
 
 // All env parsing is done by config.ts — just read the resolved values
-const { port, defaultPermissionMode: permissionMode, model: defaultModel, maxSessions } = getConfig();
+const { appId, port, host, authToken, allowedOrigins, defaultPermissionMode: permissionMode, model: defaultModel, maxSessions } = getConfig();
+if (!authToken) {
+  console.error("SNA_AUTH_TOKEN is required for standalone server mode.");
+  process.exit(1);
+}
+
+let shutdownFromParentDisconnect: (() => void) | undefined;
+process.on("disconnect", () => {
+  if (shutdownFromParentDisconnect) shutdownFromParentDisconnect();
+  else process.exit(0);
+});
 
 // 1. Create session manager and main session
 const sessionManager = new SessionManager({ maxSessions });
-sessionManager.getOrCreateSession("default", { cwd: process.cwd() });
+sessionManager.getOrCreateSession("default", { cwd: process.cwd(), meta: configuredAppMeta() });
 
 // 2. Spawn agent into main session
 const provider = getProvider("claude-code");
@@ -48,14 +57,12 @@ sessionManager.setProcess("default", agentProcess);
 
 async function start() {
   // Create OpenAPI app with Swagger UI at /docs
-  const snaApp = await createSnaApp({ sessionManager });
+  const snaApp = await createSnaApp({ sessionManager, authToken, allowedOrigins });
 
   // Root wrapper with CORS, error handling, and request logging
   import("hono").then((honoModule) => {
     const Hono = honoModule.Hono;
     const root = new Hono();
-    root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] }));
-
     root.onError((err, c) => {
       logger.err("err", `${c.req.method} ${new URL(c.req.url).pathname} → ${err.message}`);
       return c.json({ status: "error", message: err.message, stack: err.stack }, 500);
@@ -105,6 +112,7 @@ async function start() {
 
     process.on("SIGTERM", () => shutdown("SIGTERM"));
     process.on("SIGINT", () => shutdown("SIGINT"));
+    shutdownFromParentDisconnect = () => shutdown("parent process disconnected");
     process.on("uncaughtException", (err) => {
       if (shuttingDown) process.exit(0);
       console.error(err);
@@ -112,7 +120,7 @@ async function start() {
     });
 
     // Start listening — agent receives messages when ready
-    server = serve({ fetch: root.fetch, port }, () => {
+    server = serve({ fetch: root.fetch, port, hostname: host }, () => {
       // Write port file so /api/sna-port works consistently (Electron + standalone)
       const portDir = path.join(process.cwd(), ".sna");
       const portFile = path.join(portDir, "sna-api.port");
@@ -122,14 +130,15 @@ async function start() {
       } catch { /* non-fatal */ }
 
       console.log("");
-      logger.log("sna", `API server ready → http://localhost:${port}`);
-      logger.log("sna", `WebSocket endpoint → ws://localhost:${port}/ws`);
-      logger.log("sna", `OpenAPI docs → http://localhost:${port}/docs`);
+      logger.log("sna", `API server ready → http://${host}:${port}`);
+      if (appId) logger.log("sna", `App owner → ${appId}`);
+      logger.log("sna", `WebSocket endpoint → ws://${host}:${port}/ws`);
+      logger.log("sna", `OpenAPI docs → http://${host}:${port}/docs`);
       console.log("");
     });
 
     // Attach WebSocket on the same HTTP server
-    attachWebSocket(server as unknown as import("http").Server, sessionManager);
+    attachWebSocket(server as unknown as import("http").Server, sessionManager, { authToken, allowedOrigins });
 
     agentProcess.on("event", (e) => {
       if (e.type === "init") {

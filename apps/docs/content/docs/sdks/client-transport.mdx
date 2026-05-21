@@ -14,6 +14,7 @@ description: "SnaClient constructor, connection lifecycle, and low-level request
 ```ts
 const client = new SnaClient({
   baseUrl: string;
+  authToken?: string;
   ws: boolean;
   http: boolean;
   reconnect?: boolean;
@@ -27,6 +28,7 @@ const client = new SnaClient({
 | Field | Required | Default | Description |
 | --- | --- | --- | --- |
 | `baseUrl` | yes | none | SNA server address. Supports `localhost:3099`, `http://localhost:3099`, and `https://example.com`. |
+| `authToken` | for protected servers | none | Bearer token issued by the SNA server. HTTP uses `Authorization`; WebSocket uses `/ws?token=...` for browser compatibility. |
 | `ws` | yes | none | Enables WebSocket transport. Required for `agent.subscribe`, `onEvent`, and permission pushes. |
 | `http` | yes | none | Enables HTTP transport. Provides ordering guarantees for session CRUD and agent lifecycle commands. |
 | `reconnect` | no | `true` | Automatically tries to reconnect when the WebSocket connection drops. |
@@ -46,7 +48,8 @@ const client = new SnaClient({
 import { SnaClient } from "@sna-sdk/client";
 
 const client = new SnaClient({
-  baseUrl: "localhost:3099",
+  baseUrl: handle.baseUrl,
+  authToken: handle.authToken,
   http: true,
   ws: true,
 });

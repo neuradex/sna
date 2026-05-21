@@ -14,6 +14,7 @@ description: "SnaClient constructor、connection lifecycle、low-level request/p
 ```ts
 const client = new SnaClient({
   baseUrl: string;
+  authToken?: string;
   ws: boolean;
   http: boolean;
   reconnect?: boolean;
@@ -27,6 +28,7 @@ const client = new SnaClient({
 | Field | Required | Default | Description |
 | --- | --- | --- | --- |
 | `baseUrl` | yes | none | SNA server のアドレスです。`localhost:3099`、`http://localhost:3099`、`https://example.com` を指定できます。 |
+| `authToken` | protected server で必要 | none | SNA server が発行した bearer token です。HTTP は `Authorization` header、WebSocket は browser 互換性のため `/ws?token=...` を使います。 |
 | `ws` | yes | none | WebSocket transport を有効にします。`agent.subscribe`、`onEvent`、permission push に必要です。 |
 | `http` | yes | none | HTTP transport を有効にします。session CRUD と agent lifecycle command に ordering guarantee を提供します。 |
 | `reconnect` | no | `true` | WebSocket 接続が切れたときに自動 reconnect を試みます。 |

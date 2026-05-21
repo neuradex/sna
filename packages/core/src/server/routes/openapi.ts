@@ -25,11 +25,12 @@ import { saveEmbeds } from "../image-store.js";
 import { insertChatMessage } from "../../db/chat-messages.js";
 import { formatEmbedRef } from "../../history/embed-refs.js";
 import type { EmbedRecord } from "../../history/types.js";
-import { getConfig } from "../../config.js";
+import { configuredAppMeta, getConfig, withConfiguredAppId } from "../../config.js";
 import { completion, type CompletionOptions } from "../../core/completion.js";
 import type { ContentBlock } from "../../core/providers/types.js";
 import { resolveImagePath } from "../image-store.js";
 import { runOnce, type RunOnceOptions } from "../run-once.js";
+import { createHttpSecurityMiddleware, type SnaSecurityOptions } from "../security.js";
 
 // Resolve our own version from package.json so the OpenAPI document
 // reports whatever ships in @sna-sdk/core, not a hard-coded string that
@@ -1080,8 +1081,9 @@ function getSessionId(c: { req: { query: (k: string) => string | undefined } }):
   return c.req.query("session") ?? "default";
 }
 
-export async function createOpenApiApp(options?: { sessionManager?: SessionManager }) {
+export async function createOpenApiApp(options?: { sessionManager?: SessionManager } & SnaSecurityOptions) {
   const app = new OpenAPIHono();
+  app.use("*", createHttpSecurityMiddleware(options ?? {}));
 
   const openApiInfo = {
     openapi: "3.1.0" as const,
@@ -1135,7 +1137,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
         id: body.id,
         label: body.label,
         cwd: body.cwd,
-        meta: body.meta,
+        meta: withConfiguredAppId(body.meta, { includeWhenMissing: true }),
       });
       logger.log("route", `POST /sessions → created "${session.id}"`);
       return c.json({ status: "created", sessionId: session.id, label: session.label, meta: session.meta }, 200);
@@ -1172,7 +1174,11 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     const { id } = c.req.valid("param");
     const body = c.req.valid("json");
     try {
-      sessionManager.updateSession(id, { label: body.label, meta: body.meta, cwd: body.cwd });
+      sessionManager.updateSession(id, {
+        label: body.label,
+        meta: body.meta !== undefined ? withConfiguredAppId(body.meta) as Record<string, unknown> : undefined,
+        cwd: body.cwd,
+      });
       logger.log("route", `PATCH /sessions/${id} → updated`);
       return c.json({ status: "updated", session: id }, 200);
     } catch (e: any) {
@@ -1188,7 +1194,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     const sessionId = getSessionId(c);
     const body = c.req.valid("json");
 
-    const session = sessionManager.getOrCreateSession(sessionId, { cwd: body.cwd });
+    const session = sessionManager.getOrCreateSession(sessionId, { cwd: body.cwd, meta: configuredAppMeta() });
 
     if (session.process?.alive && !body.force) {
       logger.log("route", `POST /start?session=${sessionId} → already_running`);
@@ -1858,10 +1864,11 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     const sessionType = body.type ?? body.chatType ?? "background";
     try {
       const db = getDb();
+      const meta = withConfiguredAppId(body.meta, { includeWhenMissing: true });
       db.prepare(
         `INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, ?, ?)`
-      ).run(id, body.label ?? id, sessionType, body.meta ? JSON.stringify(body.meta) : null);
-      return c.json({ status: "created", id, meta: body.meta ?? null }, 200);
+      ).run(id, body.label ?? id, sessionType, meta ? JSON.stringify(meta) : null);
+      return c.json({ status: "created", id, meta: meta ?? null }, 200);
     } catch (e: any) {
       return c.json({ status: "error", message: e.message }, 500);
     }

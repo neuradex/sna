@@ -19,6 +19,7 @@ Electron 런타임에 맞게 리빌드한 `better-sqlite3` 바이너리를 찾�
 
 ```ts
 const sna = await startSnaServer({
+  appId: "my-electron-app",
   port: 3099,
   dbPath: path.join(app.getPath("userData"), "sna.db"),
   maxSessions: 20,
@@ -31,8 +32,16 @@ const sna = await startSnaServer({
 
 // sna.process : spawn된 ChildProcess
 // sna.port    : 실제 포트 (자동 선택 후)
+// sna.appId   : 이 서버가 만든 session에 붙는 owner ID
+// sna.baseUrl : client에 넘길 HTTP URL
+// sna.authToken : client에 넘길 bearer token
 // sna.stop()  : graceful SIGTERM
 ```
+
+Forked mode에서는 부모 프로세스와의 IPC 연결이 끊기면 child server도
+종료됩니다. Token은 이 server process의 수명에 묶입니다. 긴 수명의
+사용자 설정 파일에 넣지 말고, 반환된 `sna.authToken`을 앱 내부의 신뢰할
+수 있는 채널로 renderer/client에 전달하십시오.
 
 ## Electron 체크리스트
 
@@ -57,12 +66,14 @@ Renderer 프로세스는 임베드된 서버를 일반 HTTP/WS 호스트처럼 �
 import { SnaClient } from "@sna-sdk/client";
 
 const client = new SnaClient({
-  baseUrl: `localhost:${snaPort}`,
+  baseUrl: sna.baseUrl,
+  authToken: sna.authToken,
   http: true,
   ws: true,
 });
 ```
 
 `<SnaProvider>`는 `GET /api/sna-port` 헬퍼를 자동으로 사용합니다.
-따라서 React 앱에서는 IPC 없이도 renderer가 포트를 찾을 수
-있습니다.
+따라서 React 앱에서는 IPC 없이도 renderer가 포트를 찾을 수 있습니다.
+단, auth token은 이 endpoint로 자동 발견하지 않습니다. Host process가
+신뢰할 수 있는 app 내부 채널로 renderer에 전달해야 합니다.

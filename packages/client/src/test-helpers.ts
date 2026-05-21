@@ -13,6 +13,7 @@ if (!globalThis.WebSocket) {
 export interface HttpRequest {
   method: string;
   url: string;
+  headers: http.IncomingHttpHeaders;
   body: Record<string, unknown>;
 }
 
@@ -28,6 +29,8 @@ export interface MockServer {
   clients: Set<WsType>;
   /** Last connected client (convenience) */
   lastClient: () => WsType;
+  /** URLs used by accepted WebSocket upgrades */
+  wsRequests: string[];
   /** Send a JSON message to all connected clients */
   broadcast: (data: Record<string, unknown>) => void;
   /** Send a JSON message to the last connected client */
@@ -51,6 +54,7 @@ export interface MockServer {
 export function startMockWsServer(): Promise<MockServer> {
   return new Promise((resolve) => {
     const httpRequests: HttpRequest[] = [];
+    const wsRequests: string[] = [];
     const httpResponseQueue: Array<{ status: number; body: Record<string, unknown> }> = [];
 
     const server = http.createServer((req, res) => {
@@ -67,6 +71,7 @@ export function startMockWsServer(): Promise<MockServer> {
         httpRequests.push({
           method: req.method ?? "GET",
           url: req.url ?? "/",
+          headers: req.headers,
           body,
         });
 
@@ -83,7 +88,8 @@ export function startMockWsServer(): Promise<MockServer> {
     const clients = new Set<WsType>();
     const messageHandlers: Array<(ws: WsType, msg: Record<string, unknown>) => void> = [];
 
-    wss.on("connection", (ws) => {
+    wss.on("connection", (ws, req) => {
+      wsRequests.push(req.url ?? "");
       clients.add(ws);
       ws.on("close", () => clients.delete(ws));
       ws.on("message", (raw) => {
@@ -103,6 +109,7 @@ export function startMockWsServer(): Promise<MockServer> {
         wss,
         server,
         clients,
+        wsRequests,
         httpRequests,
         queueHttpResponse: (status, body) => { httpResponseQueue.push({ status, body }); },
         clearHttpRequests: () => { httpRequests.length = 0; },

@@ -15,8 +15,20 @@ import path from "path";
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface SnaConfig {
+  /** Application owner ID for this SNA server instance. env: SNA_APP_ID */
+  appId?: string;
+
   /** SNA API server port. env: SNA_PORT */
   port: number;
+
+  /** SNA API bind host. env: SNA_HOST */
+  host: string;
+
+  /** Bearer token required for protected HTTP and WebSocket routes. env: SNA_AUTH_TOKEN */
+  authToken?: string;
+
+  /** Browser origins allowed to call the SNA API. env: SNA_ALLOWED_ORIGINS */
+  allowedOrigins: string[];
 
   /** Default LLM model. env: SNA_MODEL */
   model: string;
@@ -80,6 +92,8 @@ export interface SnaConfig {
 
 const defaults: SnaConfig = {
   port: 3099,
+  host: "127.0.0.1",
+  allowedOrigins: [],
   model: "claude-sonnet-4-6",
   defaultProvider: "claude-code",
   defaultPermissionMode: "default",
@@ -98,7 +112,13 @@ const defaults: SnaConfig = {
 
 function fromEnv(): Partial<SnaConfig> {
   const env: Partial<SnaConfig> = {};
+  if (process.env.SNA_APP_ID) env.appId = process.env.SNA_APP_ID;
   if (process.env.SNA_PORT) env.port = parseInt(process.env.SNA_PORT, 10);
+  if (process.env.SNA_HOST) env.host = process.env.SNA_HOST;
+  if (process.env.SNA_AUTH_TOKEN) env.authToken = process.env.SNA_AUTH_TOKEN;
+  if (process.env.SNA_ALLOWED_ORIGINS) {
+    env.allowedOrigins = process.env.SNA_ALLOWED_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean);
+  }
   if (process.env.SNA_MODEL) env.model = process.env.SNA_MODEL;
   if (process.env.SNA_PERMISSION_MODE) env.defaultPermissionMode = process.env.SNA_PERMISSION_MODE as SnaConfig["defaultPermissionMode"];
   if (process.env.SNA_MAX_SESSIONS) env.maxSessions = parseInt(process.env.SNA_MAX_SESSIONS, 10);
@@ -127,4 +147,22 @@ export function setConfig(overrides: Partial<SnaConfig>): void {
 /** Reset to defaults + env. Useful for testing. */
 export function resetConfig(): void {
   current = { ...defaults, ...fromEnv() };
+}
+
+/** Return metadata tagged with the configured app owner, when one exists. */
+export function withConfiguredAppId(
+  meta: Record<string, unknown> | null | undefined,
+  options: { includeWhenMissing?: boolean } = {},
+): Record<string, unknown> | null | undefined {
+  const appId = current.appId?.trim();
+  if (!appId) return meta;
+  if (meta === undefined && !options.includeWhenMissing) return undefined;
+
+  const base = meta && typeof meta === "object" && !Array.isArray(meta) ? meta : {};
+  return { ...base, appId };
+}
+
+/** Metadata for newly created sessions owned by the configured app. */
+export function configuredAppMeta(): Record<string, unknown> | undefined {
+  return withConfiguredAppId(undefined, { includeWhenMissing: true }) as Record<string, unknown> | undefined;
 }

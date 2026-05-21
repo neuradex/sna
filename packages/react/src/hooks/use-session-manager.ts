@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import type { SessionInfo } from "@sna-sdk/core";
-import { useSnaContext } from "../context.js";
+import { authHeaders, useSnaContext } from "../context.js";
 
 export type { SessionInfo };
 
@@ -18,7 +18,7 @@ export type { SessionInfo };
  * @param pollInterval - Auto-refresh interval in ms. 0 = no polling. Default 3000.
  */
 export function useSessionManager(pollInterval = 3000) {
-  const { apiUrl } = useSnaContext();
+  const { apiUrl, authToken } = useSnaContext();
   const baseUrl = `${apiUrl}/agent`;
 
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -27,7 +27,9 @@ export function useSessionManager(pollInterval = 3000) {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch(`${baseUrl}/sessions`);
+      const res = await fetch(`${baseUrl}/sessions`, {
+        headers: authHeaders(authToken),
+      });
       const data = await res.json();
       const next = data.sessions ?? [];
       const json = JSON.stringify(next);
@@ -38,14 +40,14 @@ export function useSessionManager(pollInterval = 3000) {
     } catch {
       // Server not ready
     }
-  }, [baseUrl]);
+  }, [baseUrl, authToken]);
 
   const createSession = useCallback(async (opts?: { label?: string; cwd?: string }): Promise<string | null> => {
     setLoading(true);
     try {
       const res = await fetch(`${baseUrl}/sessions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(authToken, { "Content-Type": "application/json" }),
         body: JSON.stringify(opts ?? {}),
       });
       const data = await res.json();
@@ -61,25 +63,31 @@ export function useSessionManager(pollInterval = 3000) {
     } finally {
       setLoading(false);
     }
-  }, [baseUrl, refresh]);
+  }, [baseUrl, authToken, refresh]);
 
   const killSession = useCallback(async (id: string) => {
     try {
-      await fetch(`${baseUrl}/kill?session=${encodeURIComponent(id)}`, { method: "POST" });
+      await fetch(`${baseUrl}/kill?session=${encodeURIComponent(id)}`, {
+        method: "POST",
+        headers: authHeaders(authToken),
+      });
       await refresh();
     } catch (err) {
       console.error("[useSessionManager:kill]", err);
     }
-  }, [baseUrl, refresh]);
+  }, [baseUrl, authToken, refresh]);
 
   const deleteSession = useCallback(async (id: string) => {
     try {
-      await fetch(`${baseUrl}/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+      await fetch(`${baseUrl}/sessions/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: authHeaders(authToken),
+      });
       await refresh();
     } catch (err) {
       console.error("[useSessionManager:delete]", err);
     }
-  }, [baseUrl, refresh]);
+  }, [baseUrl, authToken, refresh]);
 
   // Initial fetch + polling
   useEffect(() => {

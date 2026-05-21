@@ -62,6 +62,7 @@ if (claude.source === "fallback") {
 }
 
 const sna = await startSnaServer({
+  appId: "my-app",
   port: 3099,
   dbPath: "./data/sna.db",
   runtimePaths: {
@@ -69,7 +70,12 @@ const sna = await startSnaServer({
   },
 });
 
-const client = new SnaClient({ baseUrl: "localhost:3099", ws: true, http: true });
+const client = new SnaClient({
+  baseUrl: sna.baseUrl,
+  authToken: sna.authToken,
+  ws: true,
+  http: true,
+});
 client.connect();
 
 const { sessionId } = await client.sessions.create({ label: "research" });
@@ -99,7 +105,7 @@ client.disconnect();
 sna.stop();
 ```
 
-> The running server publishes its own live OpenAPI 3.1 spec — open `http://localhost:3099/docs` for Swagger UI, `http://localhost:3099/openapi.json` for the raw JSON, or `http://localhost:3099/spec` for a plain-text view.
+> Launchers bind to `127.0.0.1` by default, generate an auth token, and tag sessions with `appId`. Pass `sna.authToken` to `SnaClient` or `SnaProvider`. Direct standalone server usage is intended for development/debugging and must set `SNA_AUTH_TOKEN` explicitly.
 
 ### As a React app
 
@@ -107,7 +113,7 @@ sna.stop();
 import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
 import { SnaChatUI } from "@sna-sdk/react/components/sna-chat-ui";
 
-<SnaProvider snaUrl="http://localhost:3099">
+<SnaProvider snaUrl={sna.baseUrl} authToken={sna.authToken}>
   <SnaChatUI dangerouslySkipPermissions>
     <YourApp />
   </SnaChatUI>

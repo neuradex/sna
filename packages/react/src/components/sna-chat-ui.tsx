@@ -4,7 +4,7 @@ import { memo, useEffect, useState } from "react";
 import { ChatPanel } from "./chat/chat-panel.js";
 import { useChatStore } from "../stores/chat-store.js";
 import { useResponsiveChat } from "../hooks/use-responsive-chat.js";
-import { useSnaContext } from "../context.js";
+import { authHeaders, useSnaContext } from "../context.js";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 
 const StableChatPanel = memo(function StableChatPanel({
@@ -104,7 +104,7 @@ export function SnaChatUI({
   defaultOpen = false,
   dangerouslySkipPermissions = false,
 }: SnaChatUIProps) {
-  const { apiUrl, sessionId } = useSnaContext();
+  const { apiUrl, authToken, sessionId } = useSnaContext();
   const [agentReady, setAgentReady] = useState(false);
   const chatOpen = useChatStore((s) => s.isOpen);
   const setChatOpen = useChatStore((s) => s.setOpen);
@@ -117,13 +117,13 @@ export function SnaChatUI({
     const permissionMode = dangerouslySkipPermissions ? "bypassPermissions" : undefined;
     fetch(`${apiUrl}/agent/start?session=${encodeURIComponent(sessionId)}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders(authToken, { "Content-Type": "application/json" }),
       body: JSON.stringify({ provider: "claude-code", permissionMode }),
     })
       .then((res) => res.json())
       .then(() => setAgentReady(true))
       .catch(() => setAgentReady(true));
-  }, [apiUrl, dangerouslySkipPermissions, sessionId]);
+  }, [apiUrl, authToken, dangerouslySkipPermissions, sessionId]);
 
   // Auto-open chat on first mount
   useEffect(() => {

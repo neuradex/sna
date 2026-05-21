@@ -35,6 +35,7 @@ Peer dependencies: `better-sqlite3` (required), `langfuse` (optional, for tracin
 import { startSnaServer } from "@sna-sdk/core/node";
 
 const sna = await startSnaServer({
+  appId: "my-app",
   port: 3099,
   dbPath: "./data/sna.db",
   maxSessions: 20,
@@ -44,18 +45,26 @@ const sna = await startSnaServer({
 });
 ```
 
+Launchers bind to `127.0.0.1` by default, generate a per-server
+`authToken`, and tag sessions with `appId`. Pass `sna.baseUrl` and
+`sna.authToken` to `SnaClient` or `SnaProvider`. Browser renderer origins
+are rejected unless they are listed in `allowedOrigins`. Direct standalone
+server launches are for development/debugging and must provide
+`SNA_AUTH_TOKEN` explicitly.
+
 For Electron, use `@sna-sdk/core/electron` and add `asarUnpack: ["node_modules/@sna-sdk/core/**"]`.
 
 ### Mount the routes manually
 
 ```ts
-import { createSnaApp, attachWebSocket, SessionManager } from "@sna-sdk/core/server";
+import { createSnaApp, attachWebSocket, generateSnaAuthToken, SessionManager } from "@sna-sdk/core/server";
 import { serve } from "@hono/node-server";
 
 const sessionManager = new SessionManager({ maxSessions: 10 });
-const app = createSnaApp({ sessionManager });
-const server = serve({ fetch: app.fetch, port: 3099 });
-attachWebSocket(server, sessionManager);
+const authToken = generateSnaAuthToken();
+const app = await createSnaApp({ sessionManager, authToken });
+const server = serve({ fetch: app.fetch, port: 3099, hostname: "127.0.0.1" });
+attachWebSocket(server, sessionManager, { authToken });
 ```
 
 ### One-shot completion
@@ -161,7 +170,7 @@ const db = getDb();
 | Import path | Contents |
 |-------------|----------|
 | `@sna-sdk/core` | Default port/url, types (`AgentEvent`, `Session`, `SessionInfo`, `ChatSession`, `ChatMessage`, `CanonicalBlock`, `EmbedRecord`, …), `completion`, config helpers |
-| `@sna-sdk/core/server` | `createSnaApp`, `attachWebSocket`, `SessionManager`, `snaPortRoute`, `buildCanonicalFromDb`, `completion`, `runOnce`, related types |
+| `@sna-sdk/core/server` | `createSnaApp`, `attachWebSocket`, `generateSnaAuthToken`, `SessionManager`, `snaPortRoute`, `buildCanonicalFromDb`, `completion`, `runOnce`, related types |
 | `@sna-sdk/core/db/schema` | `getDb`, `resetDb`, schema types (`ChatSession`, `ChatMessage`, `ChatActor`, `ChatKind`) |
 | `@sna-sdk/core/providers` | `getProvider`, `registerProvider`, `getRuntimePool`, `ClaudeCodeProvider`, `CodexProvider`, `OpenCodeProvider`, `RuntimePool`, schemas (`SpawnOptionsSchema`, `RuntimeConfigSchema`, `RuntimeHandleSchema`) |
 | `@sna-sdk/core/electron` | `startSnaServer` (Electron-aware launcher) |

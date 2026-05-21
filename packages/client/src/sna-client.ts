@@ -54,6 +54,7 @@
  *
  * const sna = new SnaClient({
  *   baseUrl: "localhost:3099",
+ *   authToken: process.env.SNA_AUTH_TOKEN,
  *   ws: true,
  *   http: true,
  * });
@@ -120,6 +121,15 @@ export interface SnaClientOptions {
    * @example "https://my-server.com"
    */
   baseUrl: string;
+
+  /**
+   * Shared token issued by the local SNA server.
+   *
+   * HTTP requests send it as `Authorization: Bearer <token>`. WebSocket
+   * connections include it in the `/ws?token=...` URL because browser
+   * WebSocket clients cannot set arbitrary headers.
+   */
+  authToken?: string;
 
   /**
    * Enable WebSocket transport.
@@ -206,12 +216,16 @@ interface ResolvedTransports {
  */
 function resolveTransports(options: SnaClientOptions): ResolvedTransports {
   let base = options.baseUrl.trim().replace(/\/$/, "");
+  const authToken = options.authToken?.trim();
   if (!/^https?:\/\//i.test(base)) {
     base = "http://" + base;
   }
-  const wsUrl = options.ws
+  const baseWsUrl = options.ws
     ? base.replace(/^https:\/\//i, "wss://").replace(/^http:\/\//i, "ws://") + "/ws"
     : null;
+  const wsUrl = baseWsUrl && authToken
+    ? withQueryParam(baseWsUrl, "token", authToken)
+    : baseWsUrl;
   const httpBase = options.http ? base : null;
 
   if (!wsUrl && !httpBase) {
@@ -219,6 +233,12 @@ function resolveTransports(options: SnaClientOptions): ResolvedTransports {
   }
 
   return { wsUrl, httpBase };
+}
+
+function withQueryParam(url: string, key: string, value: string): string {
+  const parsed = new URL(url);
+  parsed.searchParams.set(key, value);
+  return parsed.toString();
 }
 
 // ── Client ────────────────────────────────────────────────────────
@@ -254,6 +274,7 @@ export class SnaClient {
   private disposed = false;
 
   private readonly wsUrl: string | null;
+  private readonly authToken: string | undefined;
   private readonly _reconnect: boolean;
   private readonly reconnectDelay: number;
   private readonly maxReconnectAttempts: number;
@@ -295,6 +316,7 @@ export class SnaClient {
     const { wsUrl, httpBase } = resolveTransports(options);
     this.wsUrl = wsUrl;
     this._httpUrl = httpBase ?? undefined;
+    this.authToken = options.authToken?.trim() || undefined;
     this._reconnect = options.reconnect ?? true;
     this.reconnectDelay = options.reconnectDelay ?? 2000;
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? 0;
@@ -497,12 +519,21 @@ export class SnaClient {
     const hasBody = body !== undefined && method !== "GET" && method !== "DELETE";
     const res = await fetch(base + path, {
       method,
-      headers: hasBody ? { "Content-Type": "application/json" } : undefined,
+      headers: this._authHeaders(hasBody ? { "Content-Type": "application/json" } : {}),
       body: hasBody ? JSON.stringify(body) : undefined,
     });
     const data = await res.json() as Record<string, unknown>;
     if (!res.ok) throw new Error((data.message as string) ?? `HTTP ${res.status}`);
     return data as T;
+  }
+
+  /** @internal */
+  _authHeaders(headers: Record<string, string> = {}): Record<string, string> | undefined {
+    const next = { ...headers };
+    if (this.authToken) {
+      next.Authorization = `Bearer ${this.authToken}`;
+    }
+    return Object.keys(next).length > 0 ? next : undefined;
   }
 
   /**
@@ -1507,7 +1538,7 @@ class AgentApi {
     const base = this.client._httpUrl.replace(/\/$/, "");
     const res = await fetch(`${base}/agent/run-once/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      headers: this.client._authHeaders({ "Content-Type": "application/json", Accept: "text/event-stream" }),
       body: JSON.stringify(opts),
     });
     if (!res.ok) {
@@ -1569,7 +1600,9 @@ class AgentApi {
     const base = this.client._httpUrl.replace(/\/$/, "");
     const params = new URLSearchParams({ session });
     if (since !== undefined) params.set("since", String(since));
-    const res = await fetch(`${base}/agent/events?${params}`);
+    const res = await fetch(`${base}/agent/events?${params}`, {
+      headers: this.client._authHeaders(),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     yield* SnaClient._parseSse(res);
   }

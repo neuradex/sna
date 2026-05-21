@@ -1,15 +1,17 @@
 "use client";
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useSnaContext } from "../context.js";
+import { authHeaders, useSnaContext } from "../context.js";
 function useSessionManager(pollInterval = 3e3) {
-  const { apiUrl } = useSnaContext();
+  const { apiUrl, authToken } = useSnaContext();
   const baseUrl = `${apiUrl}/agent`;
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(false);
   const prevJsonRef = useRef("");
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch(`${baseUrl}/sessions`);
+      const res = await fetch(`${baseUrl}/sessions`, {
+        headers: authHeaders(authToken)
+      });
       const data = await res.json();
       const next = data.sessions ?? [];
       const json = JSON.stringify(next);
@@ -19,13 +21,13 @@ function useSessionManager(pollInterval = 3e3) {
       }
     } catch {
     }
-  }, [baseUrl]);
+  }, [baseUrl, authToken]);
   const createSession = useCallback(async (opts) => {
     setLoading(true);
     try {
       const res = await fetch(`${baseUrl}/sessions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(authToken, { "Content-Type": "application/json" }),
         body: JSON.stringify(opts ?? {})
       });
       const data = await res.json();
@@ -41,23 +43,29 @@ function useSessionManager(pollInterval = 3e3) {
     } finally {
       setLoading(false);
     }
-  }, [baseUrl, refresh]);
+  }, [baseUrl, authToken, refresh]);
   const killSession = useCallback(async (id) => {
     try {
-      await fetch(`${baseUrl}/kill?session=${encodeURIComponent(id)}`, { method: "POST" });
+      await fetch(`${baseUrl}/kill?session=${encodeURIComponent(id)}`, {
+        method: "POST",
+        headers: authHeaders(authToken)
+      });
       await refresh();
     } catch (err) {
       console.error("[useSessionManager:kill]", err);
     }
-  }, [baseUrl, refresh]);
+  }, [baseUrl, authToken, refresh]);
   const deleteSession = useCallback(async (id) => {
     try {
-      await fetch(`${baseUrl}/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+      await fetch(`${baseUrl}/sessions/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: authHeaders(authToken)
+      });
       await refresh();
     } catch (err) {
       console.error("[useSessionManager:delete]", err);
     }
-  }, [baseUrl, refresh]);
+  }, [baseUrl, authToken, refresh]);
   useEffect(() => {
     refresh();
     if (!pollInterval) return;

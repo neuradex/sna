@@ -83,6 +83,7 @@ import { resolveClaudeCli, startSnaServer } from "@sna-sdk/core/node";
 const claude = resolveClaudeCli();
 
 const sna = await startSnaServer({
+  appId: "my-app",
   port: 3099,
   dbPath: "./data/sna.db",
   runtimePaths: {
@@ -92,7 +93,9 @@ const sna = await startSnaServer({
 ```
 
 SNA サーバは管理された子プロセスとして fork されます。`sna.port` には
-実際のバインドポートが入ります。`port` に `0` を指定した場合は
+実際のバインドポートが入ります。`sna.baseUrl` と `sna.authToken` は
+クライアントへそのまま渡します。`sna.appId` はこのサーバが作る
+session の owner metadata として付きます。`port` に `0` を指定した場合は
 自動割り当てになり、`sna.stop()` を呼ぶと SIGTERM でサーバを終了します。
 
 ## 3. クライアント接続
@@ -101,7 +104,8 @@ SNA サーバは管理された子プロセスとして fork されます。`sna
 import { SnaClient } from "@sna-sdk/client";
 
 const client = new SnaClient({
-  baseUrl: `localhost:${sna.port}`,
+  baseUrl: sna.baseUrl,
+  authToken: sna.authToken,
   http: true,   // POST /agent/* など
   ws: true,     // ライブイベントストリーム
 });

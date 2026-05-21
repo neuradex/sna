@@ -18,7 +18,9 @@ interface ChatState {
     activeSessionId: string;
     sessions: Record<string, SessionChatState>;
     _apiUrl: string;
+    _authToken?: string;
     _setApiUrl: (url: string) => void;
+    _setAuthToken: (token: string | undefined) => void;
     /** Tracks which sessions have had their messages fetched */
     _hydratedSessions: Set<string>;
     setOpen: (open: boolean) => void;

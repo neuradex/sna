@@ -6,6 +6,7 @@ import { SnaContext, DEFAULT_SNA_URL } from "../context.js";
 function SnaProvider({
   children,
   snaUrl,
+  authToken,
   sessionId = "default",
   hydrate: shouldHydrate = true
 }) {
@@ -33,12 +34,13 @@ function SnaProvider({
     }
     discover().then((url) => {
       useChatStore.getState()._setApiUrl(url);
+      useChatStore.getState()._setAuthToken(authToken);
       if (shouldHydrate) {
         useChatStore.getState().hydrate();
       }
     });
-  }, [snaUrl, shouldHydrate]);
-  return /* @__PURE__ */ jsx(SnaContext.Provider, { value: { apiUrl: resolvedUrl, sessionId }, children });
+  }, [snaUrl, authToken, shouldHydrate]);
+  return /* @__PURE__ */ jsx(SnaContext.Provider, { value: { apiUrl: resolvedUrl, authToken, sessionId }, children });
 }
 export {
   SnaProvider

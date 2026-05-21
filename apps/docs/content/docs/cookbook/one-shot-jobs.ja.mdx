@@ -11,7 +11,7 @@ icon: Zap
 | Job shape | API | 理由 |
 | --- | --- | --- |
 | Text transform, classification, JSON extraction | `agent.completion()` | 最速 path。temporary session lifecycle がありません。 |
-| Agent が tool を使う、または provider 固有の agent behavior が必要 | `agent.runOnce()` | temporary session を作成し、完了を待ってから cleanup します。 |
+| Agent が tool を使う、または runtime 固有の behavior が必要 | `agent.runOnce()` | temporary session を作成し、完了を待ってから cleanup します。 |
 | Browser/Electron UI が one-shot の進捗を live 表示する | `agent.runOnceStream()` | HTTP SSE stream。長期 chat session は作りません。 |
 
 One-shot prompt は狭く保つと扱いやすいです。これは product plumbing であり、open-ended conversation ではありません。
@@ -164,4 +164,4 @@ export async function previewPlan(client: SnaClient, request: string, append: (t
 - Timeout と明示的な fallback を用意しておくと運用しやすいです。
 - Prompt が tool を使わない作業のときだけ `permissionMode: "bypassPermissions"` を使うと安全です。
 - User が明示的に求めた output でない限り、one-shot result を user conversation に入れない方が扱いやすいです。
-- 繰り返し実行される background work は provider を hardcode せず、runtime/model registry から model を選ぶ構成が便利です。
+- 繰り返し実行される background work は runtime を hardcode せず、runtime/model registry から model を選ぶ構成が便利です。

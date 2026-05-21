@@ -15,8 +15,9 @@
  */
 
 import { SessionManager } from "./session-manager.js";
+import type { SnaSecurityOptions } from "./security.js";
 
-export interface SnaAppOptions {
+export interface SnaAppOptions extends SnaSecurityOptions {
   /** Session manager for multi-session support. Auto-created if omitted. */
   sessionManager?: SessionManager;
 }
@@ -41,6 +42,8 @@ export type {
   AgentStatus,
 } from "./session-manager.js";
 export { attachWebSocket } from "./ws.js";
+export { generateSnaAuthToken } from "./security.js";
+export type { SnaSecurityOptions } from "./security.js";
 export { buildCanonicalFromDb } from "../history/canonical.js";
 export { completion } from "../core/completion.js";
 export type { CompletionOptions, CompletionResult } from "../core/completion.js";

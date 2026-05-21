@@ -20,6 +20,7 @@ Electron 用エントリポイントは asar-unpacked パスを解決し、
 
 ```ts
 const sna = await startSnaServer({
+  appId: "my-electron-app",
   port: 3099,
   dbPath: path.join(app.getPath("userData"), "sna.db"),
   maxSessions: 20,
@@ -32,8 +33,16 @@ const sna = await startSnaServer({
 
 // sna.process : spawn された ChildProcess
 // sna.port    : 実際のポート (自動選択後)
+// sna.appId   : このサーバが作る session に付く owner ID
+// sna.baseUrl : client に渡す HTTP URL
+// sna.authToken : client に渡す bearer token
 // sna.stop()  : graceful SIGTERM
 ```
+
+Forked mode では、親プロセスとの IPC 接続が切れると child server も
+終了します。Token はその server process の寿命に紐づくものです。
+長期間残るユーザー設定に保存せず、返された `sna.authToken` を app 内の
+信頼できるチャネルで renderer/client に渡してください。
 
 ## Electron チェックリスト
 
@@ -58,7 +67,8 @@ const sna = await startSnaServer({
 import { SnaClient } from "@sna-sdk/client";
 
 const client = new SnaClient({
-  baseUrl: `localhost:${snaPort}`,
+  baseUrl: sna.baseUrl,
+  authToken: sna.authToken,
   http: true,
   ws: true,
 });
@@ -66,4 +76,6 @@ const client = new SnaClient({
 
 `<SnaProvider>` はヘルパーエンドポイント `GET /api/sna-port` を
 自動的に使います。そのため、React アプリでは IPC なしでレンダラが
-ポートを検出できます。
+ポートを検出できます。ただし auth token はこの endpoint では自動検出
+しません。Host process から信頼できる app 内部チャネルで renderer に
+渡してください。

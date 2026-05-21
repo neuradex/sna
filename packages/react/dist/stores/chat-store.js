@@ -1,5 +1,6 @@
 "use client";
 import { create } from "zustand";
+import { authHeaders } from "../context.js";
 let messageCounter = 0;
 function emptySession() {
   return { messages: [], processedEventIds: /* @__PURE__ */ new Set() };
@@ -15,23 +16,29 @@ function actorKindToRole(actor, kind) {
   if (kind === "error") return "error";
   return "status";
 }
-function syncCreateSession(apiUrl, id, label, type) {
+function syncCreateSession(apiUrl, authToken, id, label, type) {
   if (!apiUrl) return;
   fetch(`${apiUrl}/chat/sessions`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(authToken, { "Content-Type": "application/json" }),
     body: JSON.stringify({ id, label: label ?? id, type: type ?? "background" })
   }).catch(() => {
   });
 }
-function syncDeleteSession(apiUrl, id) {
+function syncDeleteSession(apiUrl, authToken, id) {
   if (!apiUrl) return;
-  fetch(`${apiUrl}/chat/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {
+  fetch(`${apiUrl}/chat/sessions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: authHeaders(authToken)
+  }).catch(() => {
   });
 }
-function syncClearMessages(apiUrl, sessionId) {
+function syncClearMessages(apiUrl, authToken, sessionId) {
   if (!apiUrl) return;
-  fetch(`${apiUrl}/chat/sessions/${encodeURIComponent(sessionId)}/messages`, { method: "DELETE" }).catch(() => {
+  fetch(`${apiUrl}/chat/sessions/${encodeURIComponent(sessionId)}/messages`, {
+    method: "DELETE",
+    headers: authHeaders(authToken)
+  }).catch(() => {
   });
 }
 const useChatStore = create()(
@@ -41,7 +48,9 @@ const useChatStore = create()(
     activeSessionId: "default",
     sessions: { default: emptySession() },
     _apiUrl: "",
+    _authToken: void 0,
     _setApiUrl: (url) => set({ _apiUrl: url }),
+    _setAuthToken: (token) => set({ _authToken: token }),
     _hydratedSessions: /* @__PURE__ */ new Set(),
     setOpen: (open) => set({ isOpen: open }),
     toggle: () => set((s) => ({ isOpen: !s.isOpen })),
@@ -59,7 +68,7 @@ const useChatStore = create()(
       const s = get().sessions;
       if (!s[id]) {
         set({ sessions: { ...s, [id]: emptySession() } });
-        syncCreateSession(get()._apiUrl, id);
+        syncCreateSession(get()._apiUrl, get()._authToken, id);
       }
     },
     removeSession: (id) => {
@@ -68,7 +77,7 @@ const useChatStore = create()(
       delete s[id];
       const activeSessionId = get().activeSessionId === id ? "default" : get().activeSessionId;
       set({ sessions: s, activeSessionId });
-      syncDeleteSession(get()._apiUrl, id);
+      syncDeleteSession(get()._apiUrl, get()._authToken, id);
     },
     addMessage: (msg, sessionId) => {
       const id = sessionId ?? get().activeSessionId;
@@ -94,7 +103,7 @@ const useChatStore = create()(
           [id]: emptySession()
         }
       }));
-      syncClearMessages(get()._apiUrl, id);
+      syncClearMessages(get()._apiUrl, get()._authToken, id);
     },
     markEventProcessed: (eventId, sessionId) => {
       const id = sessionId ?? get().activeSessionId;
@@ -121,7 +130,9 @@ const useChatStore = create()(
       const apiUrl = get()._apiUrl;
       if (!apiUrl) return;
       try {
-        const sessRes = await fetch(`${apiUrl}/chat/sessions`);
+        const sessRes = await fetch(`${apiUrl}/chat/sessions`, {
+          headers: authHeaders(get()._authToken)
+        });
         const sessData = await sessRes.json();
         const dbSessions = sessData.sessions;
         const sessions = {};
@@ -147,7 +158,8 @@ const useChatStore = create()(
       set({ _hydratedSessions: next });
       try {
         const msgRes = await fetch(
-          `${apiUrl}/chat/sessions/${encodeURIComponent(sessionId)}/messages`
+          `${apiUrl}/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
+          { headers: authHeaders(get()._authToken) }
         );
         const msgData = await msgRes.json();
         const messages = msgData.messages.map((m) => ({

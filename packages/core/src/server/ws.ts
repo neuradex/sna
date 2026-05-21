@@ -63,10 +63,18 @@ import { saveEmbeds } from "./image-store.js";
 import { insertChatMessage } from "../db/chat-messages.js";
 import { formatEmbedRef } from "../history/embed-refs.js";
 import type { EmbedRecord } from "../history/types.js";
-import { getConfig } from "../config.js";
+import { configuredAppMeta, getConfig, withConfiguredAppId } from "../config.js";
 import type { SessionManager } from "./session-manager.js";
 import { spawnWithPool } from "../core/providers/index.js";
 import type { RuntimeHandle } from "../core/providers/runtime.js";
+import {
+  extractWsToken,
+  isAuthorizedToken,
+  isOriginAllowed,
+  rejectUpgrade,
+  resolveSnaSecurityOptions,
+  type SnaSecurityOptions,
+} from "./security.js";
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -110,12 +118,24 @@ function replyError(ws: WebSocket, msg: WsRequest, message: string): void {
 export function attachWebSocket(
   server: HttpServer,
   sessionManager: SessionManager,
+  options: SnaSecurityOptions = {},
 ): WebSocketServer {
   const wss = new WebSocketServer({ noServer: true });
+  const security = resolveSnaSecurityOptions(options);
 
   server.on("upgrade", (req, socket, head) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     if (url.pathname === "/ws") {
+      const origin = req.headers.origin;
+      if (!security.unsafeDisableAuth && !isOriginAllowed(origin, security.allowedOrigins)) {
+        rejectUpgrade(socket, 403, "Origin not allowed");
+        return;
+      }
+      const token = extractWsToken(req.headers as { authorization?: string; "x-sna-token"?: string }, url);
+      if (!security.unsafeDisableAuth && !isAuthorizedToken(token, security.authToken)) {
+        rejectUpgrade(socket, 401, "Unauthorized");
+        return;
+      }
       wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit("connection", ws, req);
       });
@@ -291,7 +311,7 @@ function handleSessionsCreate(ws: WebSocket, msg: WsRequest, sm: SessionManager)
       id: msg.id as string | undefined,
       label: msg.label as string | undefined,
       cwd: msg.cwd as string | undefined,
-      meta: msg.meta as Record<string, unknown> | undefined,
+      meta: withConfiguredAppId(msg.meta as Record<string, unknown> | undefined, { includeWhenMissing: true }),
     });
     wsReply(ws, msg, { status: "created", sessionId: session.id, label: session.label, meta: session.meta });
   } catch (e: any) {
@@ -305,7 +325,7 @@ function handleSessionsUpdate(ws: WebSocket, msg: WsRequest, sm: SessionManager)
   try {
     sm.updateSession(id, {
       label: msg.label as string | undefined,
-      meta: msg.meta as Record<string, unknown> | undefined,
+      meta: msg.meta !== undefined ? withConfiguredAppId(msg.meta as Record<string, unknown> | undefined) as Record<string, unknown> : undefined,
       cwd: msg.cwd as string | undefined,
     });
     wsReply(ws, msg, { status: "updated", session: id });
@@ -329,6 +349,7 @@ async function handleAgentStart(ws: WebSocket, msg: WsRequest, sm: SessionManage
   const sessionId = (msg.session as string) ?? "default";
   const session = sm.getOrCreateSession(sessionId, {
     cwd: msg.cwd as string | undefined,
+    meta: configuredAppMeta(),
   });
 
   if (session.process?.alive && !msg.force) {
@@ -988,9 +1009,10 @@ function handleChatSessionsCreate(ws: WebSocket, msg: WsRequest): void {
   const id = (msg.id as string) ?? crypto.randomUUID().slice(0, 8);
   try {
     const db = getDb();
+    const meta = withConfiguredAppId(msg.meta as Record<string, unknown> | undefined, { includeWhenMissing: true });
     db.prepare(`INSERT OR IGNORE INTO chat_sessions (id, label, type, meta) VALUES (?, ?, ?, ?)`)
-      .run(id, (msg.label as string) ?? id, (msg.chatType as string) ?? "background", msg.meta ? JSON.stringify(msg.meta) : null);
-    wsReply(ws, msg, { status: "created", id, meta: (msg.meta as Record<string, unknown>) ?? null });
+      .run(id, (msg.label as string) ?? id, (msg.chatType as string) ?? "background", meta ? JSON.stringify(meta) : null);
+    wsReply(ws, msg, { status: "created", id, meta: meta ?? null });
   } catch (e: any) {
     replyError(ws, msg, e.message);
   }

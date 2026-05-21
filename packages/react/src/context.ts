@@ -14,6 +14,8 @@ export interface SnaConfig {
    * Override via <SnaProvider snaUrl="..."> for custom deployments.
    */
   apiUrl: string;
+  /** Bearer token issued by the SNA server. */
+  authToken?: string;
   /**
    * Active session ID for this scope.
    * Set by <SnaSession id="...">. Defaults to "default".
@@ -25,6 +27,17 @@ export const SnaContext = createContext<SnaConfig>({ apiUrl: DEFAULT_SNA_URL, se
 
 export function useSnaContext(): SnaConfig {
   return useContext(SnaContext);
+}
+
+export function authHeaders(
+  authToken: string | undefined,
+  headers: Record<string, string> = {},
+): Record<string, string> | undefined {
+  const next = { ...headers };
+  if (authToken) {
+    next.Authorization = `Bearer ${authToken}`;
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
 }
 
 export { DEFAULT_SNA_URL };

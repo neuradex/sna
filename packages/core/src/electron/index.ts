@@ -52,11 +52,11 @@ import path from "path";
 
 // In-process mode imports
 import { Hono } from "hono";
-import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { createSnaApp } from "../server/index.js";
 import { SessionManager } from "../server/session-manager.js";
 import { attachWebSocket } from "../server/ws.js";
+import { generateSnaAuthToken } from "../server/security.js";
 import { setConfig, getConfig } from "../config.js";
 import { getDb } from "../db/schema.js";
 import { logger as snaLogger, type LogLevel } from "../lib/logger.js";
@@ -66,6 +66,27 @@ import { logger as snaLogger, type LogLevel } from "../lib/logger.js";
 export interface SnaServerOptions {
   /** Port for the SNA API server. Default: 3099 */
   port?: number;
+
+  /** Hostname to bind. Default: 127.0.0.1 */
+  host?: string;
+
+  /**
+   * Application owner ID for this SNA server instance.
+   * Defaults to "sna-sdk" when launched through the SDK.
+   */
+  appId?: string;
+
+  /**
+   * Bearer token required for protected HTTP and WebSocket routes.
+   * When omitted, launchers generate one and return it on the handle.
+   */
+  authToken?: string;
+
+  /**
+   * Browser origins allowed to call SNA. Native clients that do not send
+   * Origin are allowed, but browser requests must match this list.
+   */
+  allowedOrigins?: string[];
 
   /** Absolute path to the SQLite database file. Required. */
   dbPath: string;
@@ -191,6 +212,18 @@ export interface SnaServerHandle {
   /** The port the server is listening on. */
   port: number;
 
+  /** The host the server is bound to. */
+  host: string;
+
+  /** Application owner ID associated with this server process. */
+  appId: string;
+
+  /** Base HTTP URL for this server. */
+  baseUrl: string;
+
+  /** Bearer token required for protected routes. */
+  authToken: string;
+
   /** Send SIGTERM to the server process for graceful shutdown. */
   stop(): void;
 }
@@ -275,6 +308,10 @@ function applyProcessEnv(env: Record<string, string>): void {
  */
 export async function startSnaServer(options: SnaServerOptions): Promise<SnaServerHandle> {
   const port = options.port ?? 3099;
+  const host = options.host ?? "127.0.0.1";
+  const appId = options.appId ?? "sna-sdk";
+  const authToken = options.authToken ?? generateSnaAuthToken();
+  const allowedOrigins = options.allowedOrigins ?? [];
   const cwd = options.cwd ?? path.dirname(options.dbPath);
   const readyTimeout = options.readyTimeout ?? 15_000;
   const { onLog } = options;
@@ -293,7 +330,16 @@ export async function startSnaServer(options: SnaServerOptions): Promise<SnaServ
   const runtimeEnv = runtimePathsToEnv(options.runtimePaths);
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
+    ...runtimeEnv,
+    // Consumer env remains the escape hatch for runtime CLI variables and
+    // provider-specific settings. Launcher-owned security and process identity
+    // values are written below so the returned handle always matches the child.
+    ...(options.env ?? {}),
     SNA_PORT: String(port),
+    SNA_HOST: host,
+    SNA_APP_ID: appId,
+    SNA_AUTH_TOKEN: authToken,
+    SNA_ALLOWED_ORIGINS: allowedOrigins.join(","),
     SNA_DB_PATH: options.dbPath,
     ...(options.maxSessions != null ? { SNA_MAX_SESSIONS: String(options.maxSessions) } : {}),
     ...(options.permissionMode ? { SNA_PERMISSION_MODE: options.permissionMode } : {}),
@@ -303,9 +349,6 @@ export async function startSnaServer(options: SnaServerOptions): Promise<SnaServ
     ...(options.nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: options.nativeBinding } : {}),
     ...(consumerModules ? { SNA_MODULES_PATH: consumerModules } : {}),
     ...(nodePath ? { NODE_PATH: nodePath } : {}),
-    ...runtimeEnv,
-    // Consumer overrides last so they can always win
-    ...(options.env ?? {}),
   };
 
   const proc = fork(standaloneScript, [], {
@@ -368,6 +411,10 @@ export async function startSnaServer(options: SnaServerOptions): Promise<SnaServ
   return {
     process: proc,
     port,
+    host,
+    appId,
+    baseUrl: `http://${host}:${port}`,
+    authToken,
     stop() {
       proc.kill("SIGTERM");
     },
@@ -382,6 +429,18 @@ export interface InProcessSnaServerHandle {
 
   /** The port the server is listening on. */
   port: number;
+
+  /** The host the server is bound to. */
+  host: string;
+
+  /** Application owner ID associated with this server instance. */
+  appId: string;
+
+  /** Base HTTP URL for this server. */
+  baseUrl: string;
+
+  /** Bearer token required for protected routes. */
+  authToken: string;
 
   /** The session manager instance. */
   sessionManager: SessionManager;
@@ -418,6 +477,10 @@ export async function startSnaServerInProcess(
   options: SnaServerOptions,
 ): Promise<InProcessSnaServerHandle> {
   const port = options.port ?? 3099;
+  const host = options.host ?? "127.0.0.1";
+  const appId = options.appId ?? "sna-sdk";
+  const authToken = options.authToken ?? generateSnaAuthToken();
+  const allowedOrigins = options.allowedOrigins ?? [];
   const cwd = options.cwd ?? path.dirname(options.dbPath);
 
   // Route ALL SNA SDK logger output through the consumer's onLog callback.
@@ -438,7 +501,11 @@ export async function startSnaServerInProcess(
 
   // Configure SNA SDK before any module reads config
   setConfig({
+    appId,
     port,
+    host,
+    authToken,
+    allowedOrigins,
     dbPath: options.dbPath,
     ...(options.dataDir ? { dataDir: options.dataDir } : {}),
     ...(options.maxSessions != null ? { maxSessions: options.maxSessions } : {}),
@@ -449,6 +516,10 @@ export async function startSnaServerInProcess(
 
   // Also set env vars so any module reading process.env directly works
   process.env.SNA_PORT = String(port);
+  process.env.SNA_HOST = host;
+  process.env.SNA_APP_ID = appId;
+  process.env.SNA_AUTH_TOKEN = authToken;
+  process.env.SNA_ALLOWED_ORIGINS = allowedOrigins.join(",");
   process.env.SNA_DB_PATH = options.dbPath;
   if (options.maxSessions != null) process.env.SNA_MAX_SESSIONS = String(options.maxSessions);
   if (options.permissionMode) process.env.SNA_PERMISSION_MODE = options.permissionMode;
@@ -490,8 +561,6 @@ export async function startSnaServerInProcess(
   const config = getConfig();
 
   const root = new Hono();
-  root.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] }));
-
   // Global error handler
   root.onError((err, c) => {
     const pathname = new URL(c.req.url).pathname;
@@ -510,17 +579,17 @@ export async function startSnaServerInProcess(
   // Create session manager (no default agent spawn)
   const sessionManager = new SessionManager({ maxSessions: config.maxSessions });
 
-  const snaApp = await createSnaApp({ sessionManager });
+  const snaApp = await createSnaApp({ sessionManager, authToken, allowedOrigins });
   root.route("/", snaApp);
 
   // Start HTTP server
-  const httpServer = serve({ fetch: root.fetch, port }, () => {
-    snaLogger.log("sna", `API server ready → http://localhost:${port}`);
-    snaLogger.log("sna", `WebSocket endpoint → ws://localhost:${port}/ws`);
+  const httpServer = serve({ fetch: root.fetch, port, hostname: host }, () => {
+    snaLogger.log("sna", `API server ready → http://${host}:${port}`);
+    snaLogger.log("sna", `WebSocket endpoint → ws://${host}:${port}/ws`);
   }) as unknown as http.Server;
 
   // Attach WebSocket on the same HTTP server
-  attachWebSocket(httpServer, sessionManager);
+  attachWebSocket(httpServer, sessionManager, { authToken, allowedOrigins });
 
   // Initialize Langfuse tracer if configured
   if (options.langfuse) {
@@ -536,6 +605,10 @@ export async function startSnaServerInProcess(
   return {
     process: null,
     port,
+    host,
+    appId,
+    baseUrl: `http://${host}:${port}`,
+    authToken,
     sessionManager,
     httpServer,
     async initLangfuse(config) {

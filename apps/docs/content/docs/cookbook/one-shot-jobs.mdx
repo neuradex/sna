@@ -11,7 +11,7 @@ Use one-shot calls for work that should not become part of a user's long-lived c
 | Job shape | API | Why |
 | --- | --- | --- |
 | Text transform, classification, JSON extraction | `agent.completion()` | Fastest path; no temporary session lifecycle. |
-| Agent can use tools or needs provider-specific agent behavior | `agent.runOnce()` | Creates a temporary session, waits for completion, then cleans up. |
+| Agent can use tools or needs runtime-specific behavior | `agent.runOnce()` | Creates a temporary session, waits for completion, then cleans up. |
 | Browser/Electron UI needs live progress for a one-shot | `agent.runOnceStream()` | HTTP SSE stream; no long-lived chat session. |
 
 Keep one-shot prompts narrow. They are product plumbing, not open-ended conversations.
@@ -164,4 +164,4 @@ export async function previewPlan(client: SnaClient, request: string, append: (t
 - Set a timeout and write an explicit fallback.
 - Use `permissionMode: "bypassPermissions"` only when the prompt is not allowed to use tools.
 - Keep one-shot results out of the user conversation unless the user explicitly asked for that output.
-- For repeated background work, route model choice through your runtime/model registry instead of hardcoding one provider.
+- For repeated background work, route model choice through your runtime/model registry instead of hardcoding one runtime.

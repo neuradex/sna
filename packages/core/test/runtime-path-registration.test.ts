@@ -16,7 +16,11 @@ const ENV_KEYS = [
   "SNA_OPENCODE_COMMAND",
   "SNA_GROK_COMMAND",
   "SNA_CURSOR_COMMAND",
+  "SNA_APP_ID",
   "SNA_PORT",
+  "SNA_HOST",
+  "SNA_AUTH_TOKEN",
+  "SNA_ALLOWED_ORIGINS",
   "SNA_DB_PATH",
   "SNA_DATA_DIR",
   "SNA_PERMISSION_MODE",
@@ -85,6 +89,35 @@ describe("runtime path registration", () => {
       assert.equal(process.env.SNA_OPENCODE_COMMAND, "/runtime/opencode");
       assert.equal(process.env.SNA_GROK_COMMAND, "/runtime/grok");
       assert.equal(process.env.SNA_CURSOR_COMMAND, "/runtime/cursor-agent");
+    } finally {
+      await handle.stop();
+    }
+  });
+
+  it("keeps launcher-owned identity and auth values authoritative", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sna-launcher-identity-"));
+    tempDirs.push(dir);
+
+    const handle = await startSnaServerInProcess({
+      port: 0,
+      dbPath: path.join(dir, "sna.db"),
+      appId: "test-host",
+      authToken: "launcher-token",
+      allowedOrigins: ["http://localhost:5173"],
+      logLevel: "silent",
+      env: {
+        SNA_APP_ID: "wrong-app",
+        SNA_AUTH_TOKEN: "wrong-token",
+        SNA_ALLOWED_ORIGINS: "https://wrong.example",
+      },
+    });
+
+    try {
+      assert.equal(handle.appId, "test-host");
+      assert.equal(handle.authToken, "launcher-token");
+      assert.equal(process.env.SNA_APP_ID, "test-host");
+      assert.equal(process.env.SNA_AUTH_TOKEN, "launcher-token");
+      assert.equal(process.env.SNA_ALLOWED_ORIGINS, "http://localhost:5173");
     } finally {
       await handle.stop();
     }

@@ -177,6 +177,22 @@ describe("HTTP API Routes", () => {
       assert.deepEqual(json.meta, { app: "test" });
     });
 
+    it("POST /agent/sessions tags sessions with the configured appId", async () => {
+      const { resetConfig, setConfig } = await import("../src/config.js");
+      setConfig({ appId: "test-host" });
+      try {
+        const res = await req("POST", "/agent/sessions", {
+          label: "Owned",
+          meta: { appId: "spoofed", feature: "chat-panel" },
+        });
+        const json = await res.json();
+        assert.equal(json.status, "created");
+        assert.deepEqual(json.meta, { appId: "test-host", feature: "chat-panel" });
+      } finally {
+        resetConfig();
+      }
+    });
+
     it("GET /agent/sessions lists sessions", async () => {
       await req("POST", "/agent/sessions", { label: "S1" });
       const res = await req("GET", "/agent/sessions");
@@ -467,7 +483,11 @@ describe("HTTP API Routes", () => {
       try {
         const res = await app.request("/agent/run-once/stream", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+            Authorization: `Bearer ${TEST_TOKEN}`,
+          },
           body: JSON.stringify({ message: "hi", provider: "claude-code", timeout: 200 }),
           signal: ctrl.signal,
         });
@@ -513,6 +533,19 @@ describe("HTTP API Routes", () => {
       assert.equal(json.status, "created");
       assert.ok(json.id);
       assert.deepEqual(json.meta, { x: 1 });
+    });
+
+    it("POST /chat/sessions tags chat sessions with the configured appId", async () => {
+      const { resetConfig, setConfig } = await import("../src/config.js");
+      setConfig({ appId: "test-host" });
+      try {
+        const res = await req("POST", "/chat/sessions", { label: "OwnedChat" });
+        const json = await res.json();
+        assert.equal(json.status, "created");
+        assert.deepEqual(json.meta, { appId: "test-host" });
+      } finally {
+        resetConfig();
+      }
     });
 
     it("DELETE /chat/sessions/default is blocked", async () => {

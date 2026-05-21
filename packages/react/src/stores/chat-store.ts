@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { authHeaders } from "../context.js";
 
 export interface ChatMessage {
   id: string;
@@ -27,7 +28,9 @@ interface ChatState {
 
   // API URL for DB sync (set by SnaProvider)
   _apiUrl: string;
+  _authToken?: string;
   _setApiUrl: (url: string) => void;
+  _setAuthToken: (token: string | undefined) => void;
   /** Tracks which sessions have had their messages fetched */
   _hydratedSessions: Set<string>;
 
@@ -74,24 +77,30 @@ function actorKindToRole(actor: string, kind: string): ChatMessage["role"] {
   return "status";
 }
 
-function syncCreateSession(apiUrl: string, id: string, label?: string, type?: string) {
+function syncCreateSession(apiUrl: string, authToken: string | undefined, id: string, label?: string, type?: string) {
   if (!apiUrl) return;
   fetch(`${apiUrl}/chat/sessions`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(authToken, { "Content-Type": "application/json" }),
     body: JSON.stringify({ id, label: label ?? id, type: type ?? "background" }),
   }).catch(() => { /* non-fatal */ });
 }
 
-function syncDeleteSession(apiUrl: string, id: string) {
+function syncDeleteSession(apiUrl: string, authToken: string | undefined, id: string) {
   if (!apiUrl) return;
-  fetch(`${apiUrl}/chat/sessions/${encodeURIComponent(id)}`, { method: "DELETE" })
+  fetch(`${apiUrl}/chat/sessions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: authHeaders(authToken),
+  })
     .catch(() => { /* non-fatal */ });
 }
 
-function syncClearMessages(apiUrl: string, sessionId: string) {
+function syncClearMessages(apiUrl: string, authToken: string | undefined, sessionId: string) {
   if (!apiUrl) return;
-  fetch(`${apiUrl}/chat/sessions/${encodeURIComponent(sessionId)}/messages`, { method: "DELETE" })
+  fetch(`${apiUrl}/chat/sessions/${encodeURIComponent(sessionId)}/messages`, {
+    method: "DELETE",
+    headers: authHeaders(authToken),
+  })
     .catch(() => { /* non-fatal */ });
 }
 
@@ -102,7 +111,9 @@ export const useChatStore = create<ChatState>()(
     activeSessionId: "default",
     sessions: { default: emptySession() },
     _apiUrl: "",
+    _authToken: undefined,
     _setApiUrl: (url) => set({ _apiUrl: url }),
+    _setAuthToken: (token) => set({ _authToken: token }),
     _hydratedSessions: new Set<string>(),
 
     setOpen: (open) => set({ isOpen: open }),
@@ -124,7 +135,7 @@ export const useChatStore = create<ChatState>()(
       const s = get().sessions;
       if (!s[id]) {
         set({ sessions: { ...s, [id]: emptySession() } });
-        syncCreateSession(get()._apiUrl, id);
+        syncCreateSession(get()._apiUrl, get()._authToken, id);
       }
     },
 
@@ -134,7 +145,7 @@ export const useChatStore = create<ChatState>()(
       delete s[id];
       const activeSessionId = get().activeSessionId === id ? "default" : get().activeSessionId;
       set({ sessions: s, activeSessionId });
-      syncDeleteSession(get()._apiUrl, id);
+      syncDeleteSession(get()._apiUrl, get()._authToken, id);
     },
 
     addMessage: (msg, sessionId?) => {
@@ -164,7 +175,7 @@ export const useChatStore = create<ChatState>()(
           [id]: emptySession(),
         },
       }));
-      syncClearMessages(get()._apiUrl, id);
+      syncClearMessages(get()._apiUrl, get()._authToken, id);
     },
 
     markEventProcessed: (eventId, sessionId?) => {
@@ -195,7 +206,9 @@ export const useChatStore = create<ChatState>()(
 
       try {
         // Fetch session metadata only — no messages
-        const sessRes = await fetch(`${apiUrl}/chat/sessions`);
+        const sessRes = await fetch(`${apiUrl}/chat/sessions`, {
+          headers: authHeaders(get()._authToken),
+        });
         const sessData = await sessRes.json();
         const dbSessions = sessData.sessions as Array<{ id: string; label: string; type: string }>;
 
@@ -232,7 +245,8 @@ export const useChatStore = create<ChatState>()(
 
       try {
         const msgRes = await fetch(
-          `${apiUrl}/chat/sessions/${encodeURIComponent(sessionId)}/messages`
+          `${apiUrl}/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
+          { headers: authHeaders(get()._authToken) },
         );
         const msgData = await msgRes.json();
         const messages = (msgData.messages as Array<{

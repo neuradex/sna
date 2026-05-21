@@ -54,6 +54,12 @@ import { SnaClient } from "@sna-sdk/client";
 // Instance id ごとに client を 1 つだけ作り、WebSocket の重複接続を避けます。
 const clients = new Map<string, SnaClient>();
 
+type SnaConnection = {
+  // Local embedded SNA では startSnaServer() が返した値を使います。
+  baseUrl: string;
+  authToken: string;
+};
+
 // UI は特定 client ではなく app-level listener set に subscribe します。
 const eventListeners = new Set<(event: unknown) => void>();
 const permissionListeners = new Set<(event: unknown) => void>();
@@ -70,13 +76,17 @@ function installAggregator(client: SnaClient) {
   });
 }
 
-export function snaFor(instanceId: string, baseUrl?: string): SnaClient {
+export function snaFor(instanceId: string, connection: SnaConnection): SnaClient {
   // すでに接続済みの instance なら同じ client を再利用します。
   const existing = clients.get(instanceId);
   if (existing) return existing;
-  if (!baseUrl) throw new Error(`baseUrl required for ${instanceId}`);
 
-  const client = new SnaClient({ baseUrl, ws: true, http: true });
+  const client = new SnaClient({
+    baseUrl: connection.baseUrl,
+    authToken: connection.authToken,
+    ws: true,
+    http: true,
+  });
   clients.set(instanceId, client);
   installAggregator(client);
 
@@ -102,7 +112,7 @@ Product app では、path を次のように分けると扱いやすいです。
 | Path | Route | 理由 |
 | --- | --- | --- |
 | Lifecycle command | renderer → app host HTTP → SNA HTTP | Host が app DB から config を作り、cloud instance を起こし、model selection を reconcile し、product context を注入できます。 |
-| Event stream | renderer → SNA WebSocket | すべての token を app server 経由にせず、UI が低 latency で runtime event を受け取れます。 |
+| Event stream | renderer → SNA WebSocket | すべての token を app server 経由にせず、UI が低 latency で runtime event を受け取れます。SNA auth token は host の信頼できるチャネルで渡します。 |
 
 Renderer には raw SNA call ではなく domain wrapper を公開します。
 
@@ -145,6 +155,7 @@ Start-vs-resume の判断は host が持つと責任範囲が明確になりま�
 ```ts
 async function ensureAgent({ appSessionId, requestedSnaId, isNewSession }) {
   // Product session を基準に local/cloud SNA instance を選びます。
+  // `instance` は SnaClient connection を包む host-owned wrapper です。
   const instance = snaForAppSession(appSessionId);
   await wakeIfCloudInstance(instance);
 

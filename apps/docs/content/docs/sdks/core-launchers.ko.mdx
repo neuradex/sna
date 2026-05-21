@@ -22,6 +22,10 @@ Launcher handle은 서버를 중지하고 발견된 URL을 `@sna-sdk/client` 또
 ```ts
 type SnaServerOptions = {
   port?: number;
+  host?: string;
+  appId?: string;
+  authToken?: string;
+  allowedOrigins?: string[];
   dbPath: string;
   cwd?: string;
   maxSessions?: number;
@@ -50,6 +54,10 @@ type RuntimePaths = {
 | Field | Default | 설명 |
 | --- | --- | --- |
 | `port` | `3099` | Server에 전달할 API port. |
+| `host` | `127.0.0.1` | Bind host. Host app에 더 강한 transport boundary가 없다면 loopback을 유지하십시오. |
+| `appId` | `sna-sdk` | 이 server instance의 owner ID입니다. 이 서버가 만든 session metadata에 붙습니다. |
+| `authToken` | generated | Protected HTTP route와 WebSocket upgrade에 필요한 bearer token. |
+| `allowedOrigins` | `[]` | Browser `Origin` 요청 중 허용할 값. `Origin`을 보내지 않는 native client는 허용됩니다. |
 | `dbPath` | required | Absolute SQLite path. `cwd`가 없으면 launcher가 이 path에서 `cwd`를 계산합니다. |
 | `cwd` | `dirname(dbPath)` | Server process와 runtime session의 working directory. |
 | `maxSessions` | `5` | 동시에 유지할 수 있는 agent session 수. |
@@ -57,7 +65,7 @@ type RuntimePaths = {
 | `model` | SDK default | Runtime call의 기본 model. |
 | `permissionTimeoutMs` | `0` | `0`이면 permission prompt 응답을 host가 직접 관리합니다. 양수면 timeout 뒤 자동 deny됩니다. |
 | `nativeBinding` | auto-detected | 명시적인 `better-sqlite3` native binding path. Custom Electron build에서 사용합니다. |
-| `env` | `{}` | 추가 환경 변수. 여기에 둔 런타임 명령 환경 변수는 `runtimePaths`에서 생성된 값을 덮어씁니다. |
+| `env` | `{}` | 추가 환경 변수. 여기에 둔 runtime command 환경 변수는 `runtimePaths`에서 생성된 값을 덮어씁니다. 단 `SNA_APP_ID`, `SNA_AUTH_TOKEN`, `SNA_HOST`, `SNA_ALLOWED_ORIGINS` 같은 launcher 소유 값은 typed option이 최종값입니다. |
 | `readyTimeout` | `15000` | Standalone process가 ready line을 출력할 때까지 기다리는 시간(ms). |
 | `onLog` | none | Child process의 stdout/stderr line, 또는 in-process mode의 SDK logger line을 받습니다. |
 | `dataDir` | `dbPath`에서 계산 | Image와 asset storage의 base directory. |
@@ -67,7 +75,8 @@ type RuntimePaths = {
 
 호스트 앱에 설정 화면이 있거나 사용자가 선택한 CLI 위치를 저장한다면
 `runtimePaths`를 사용하십시오. `env`는 여전히 마지막 우회 수단으로 남아
-있으며, `runtimePaths`에서 생성된 값을 덮어씁니다.
+있으며, `runtimePaths`에서 생성된 값을 덮어씁니다. Server identity, auth,
+bind host, origin policy는 typed launcher field로 지정하십시오.
 
 ## Forked vs in-process
 
@@ -78,6 +87,11 @@ type RuntimePaths = {
 
 In-process mode는 default agent를 자동으로 spawn하지 않습니다. Host가 HTTP, WebSocket 또는 반환된 `sessionManager`로 session을 시작합니다.
 
+Standalone server를 직접 실행하는 방식은 개발/디버깅용 경로입니다. Product
+integration에서는 `startSnaServer()` 또는 `startSnaServerInProcess()`를
+우선 사용하십시오. 그래야 token, owner identity, bind host, shutdown lifecycle을
+host app이 직접 소유할 수 있습니다.
+
 ## 함수 레퍼런스
 
 ### `@sna-sdk/core/node`의 `startSnaServer(options)`
@@ -86,11 +100,20 @@ In-process mode는 default agent를 자동으로 spawn하지 않습니다. Host�
 
 ```ts
 const handle = await startSnaServer({
+  appId: "my-app",
   dbPath: "/Users/me/Library/Application Support/MyApp/sna.db",
   port: 3099,
+  allowedOrigins: ["http://localhost:5173"],
   runtimePaths: {
     claudeCode: "/opt/homebrew/bin/claude",
   },
+});
+
+const client = new SnaClient({
+  baseUrl: handle.baseUrl,
+  authToken: handle.authToken,
+  http: true,
+  ws: true,
 });
 
 handle.stop();
@@ -117,6 +140,10 @@ Returns:
 type SnaServerHandle = {
   process: ChildProcess;
   port: number;
+  host: string;
+  appId: string;
+  baseUrl: string;
+  authToken: string;
   stop(): void;
 };
 ```
@@ -131,6 +158,10 @@ Returns:
 type InProcessSnaServerHandle = {
   process: null;
   port: number;
+  host: string;
+  appId: string;
+  baseUrl: string;
+  authToken: string;
   sessionManager: SessionManager;
   httpServer: http.Server;
   initLangfuse(config: { publicKey: string; secretKey: string; baseUrl?: string }): Promise<void>;
