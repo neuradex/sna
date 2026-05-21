@@ -21,6 +21,9 @@ interface MockServer {
         messages: any[];
         stream: boolean;
         timestamp: string;
+        userText?: string;
+        systemPromptLength?: number;
+        requestBody?: any;
     }>;
     /** Set a JSONL log writer. Each call receives one JSON line string (no trailing newline). */
     onLog: (handler: (line: string) => void) => void;
@@ -105,6 +108,71 @@ interface MockOpenAIServer {
 }
 declare function startMockOpenAIServer(options?: MockOpenAIOptions): Promise<MockOpenAIServer>;
 
+interface ClaudeMockEnvOptions {
+    /** Project cwd that Claude should trust. Defaults to process.cwd(). */
+    cwd?: string;
+    /** Anthropic-compatible mock URL, for example http://127.0.0.1:12345. */
+    anthropicBaseUrl: string;
+    /** Fake API key approved in the isolated Claude config. */
+    apiKey?: string;
+    /** Claude config directory. Defaults to <cwd>/.sna/mock-claude. */
+    configDir?: string;
+    /** Base env. Defaults to process.env. */
+    env?: Record<string, string | undefined>;
+    /** Extra env appended after mock-specific values. */
+    extraEnv?: Record<string, string | undefined>;
+    /** When false, only a small shell env allowlist is inherited. */
+    inheritEnv?: boolean;
+    /** Extra project paths to mark trusted in .claude.json. */
+    trustedProjectPaths?: string[];
+    /** Rewrite .claude.json even if it already exists. */
+    overwrite?: boolean;
+}
+interface ClaudeMockEnv {
+    env: Record<string, string>;
+    cwd: string;
+    configDir: string;
+    configFile: string;
+    apiKey: string;
+    anthropicBaseUrl: string;
+}
+declare function createClaudeMockEnv(options: ClaudeMockEnvOptions): ClaudeMockEnv;
+
+interface MockCliInvocation {
+    argv: string[];
+    cwd: string;
+    env: Record<string, string | undefined>;
+    timestamp: string;
+}
+interface MockRuntimeCli {
+    command: string;
+    dir: string;
+    invocationsFile: string;
+    readInvocations(): MockCliInvocation[];
+    close(): void;
+}
+interface MockCodexExecCliOptions {
+    apiKey?: string;
+}
+interface MockClaudeCliOptions {
+    apiKey?: string;
+    defaultModel?: string;
+}
+declare function createMockCodexExecCli(input: string | MockOpenAIServer, options?: MockCodexExecCliOptions): MockRuntimeCli;
+declare function createMockClaudeCli(input: string | MockServer, options?: MockClaudeCliOptions): MockRuntimeCli;
+
+interface WaitForRequestOptions {
+    timeoutMs?: number;
+    intervalMs?: number;
+}
+declare function readSseData(res: Response): Promise<string[]>;
+declare function waitForRequest<TRequest>(source: {
+    requests: TRequest[];
+}, predicate?: (request: TRequest) => boolean, options?: WaitForRequestOptions): Promise<TRequest>;
+declare function withMockAnthropicServer<T>(fn: (mock: MockServer) => Promise<T> | T): Promise<T>;
+declare function withMockOpenAIServer<T>(options: MockOpenAIOptions, fn: (mock: MockOpenAIServer) => Promise<T> | T): Promise<T>;
+declare function withMockOpenAIServer<T>(fn: (mock: MockOpenAIServer) => Promise<T> | T): Promise<T>;
+
 /**
  * sna tu claude:oneshot — auto mock API + run claude + dump all logs.
  *
@@ -141,4 +209,4 @@ declare function readInstanceMeta(name: string): InstanceMeta | null;
 declare function listInstances(): InstanceMeta[];
 declare function removeInstance(name: string): boolean;
 
-export { type InstanceMeta, type MockLogEntry, type MockOpenAIEndpoint, type MockOpenAILogEntry, type MockOpenAIModel, type MockOpenAIOptions, type MockOpenAIRequest, type MockOpenAIResponseContext, type MockOpenAIServer, type MockServer, generateInstanceName, getInstanceDir, getInstancesDir, listInstances, readInstanceMeta, removeInstance, runOneshot, startMockAnthropicServer, startMockOpenAIServer, writeInstanceMeta };
+export { type ClaudeMockEnv, type ClaudeMockEnvOptions, type InstanceMeta, type MockClaudeCliOptions, type MockCliInvocation, type MockCodexExecCliOptions, type MockLogEntry, type MockOpenAIEndpoint, type MockOpenAILogEntry, type MockOpenAIModel, type MockOpenAIOptions, type MockOpenAIRequest, type MockOpenAIResponseContext, type MockOpenAIServer, type MockRuntimeCli, type MockServer, type WaitForRequestOptions, createClaudeMockEnv, createMockClaudeCli, createMockCodexExecCli, generateInstanceName, getInstanceDir, getInstancesDir, listInstances, readInstanceMeta, readSseData, removeInstance, runOneshot, startMockAnthropicServer, startMockOpenAIServer, waitForRequest, withMockAnthropicServer, withMockOpenAIServer, writeInstanceMeta };

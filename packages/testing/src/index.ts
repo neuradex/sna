@@ -9,6 +9,26 @@ export {
   type MockOpenAIResponseContext,
   type MockOpenAIServer,
 } from "./mock-openai.js";
+export {
+  createClaudeMockEnv,
+  type ClaudeMockEnv,
+  type ClaudeMockEnvOptions,
+} from "./claude-env.js";
+export {
+  createMockClaudeCli,
+  createMockCodexExecCli,
+  type MockClaudeCliOptions,
+  type MockCliInvocation,
+  type MockCodexExecCliOptions,
+  type MockRuntimeCli,
+} from "./mock-cli.js";
+export {
+  readSseData,
+  waitForRequest,
+  withMockAnthropicServer,
+  withMockOpenAIServer,
+  type WaitForRequestOptions,
+} from "./harness.js";
 export { runOneshot } from "./oneshot.js";
 export {
   generateInstanceName,

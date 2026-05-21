@@ -18,7 +18,15 @@ export interface MockServer {
   port: number;
   server: http.Server;
   close: () => void;
-  requests: Array<{ model: string; messages: any[]; stream: boolean; timestamp: string }>;
+  requests: Array<{
+    model: string;
+    messages: any[];
+    stream: boolean;
+    timestamp: string;
+    userText?: string;
+    systemPromptLength?: number;
+    requestBody?: any;
+  }>;
   /** Set a JSONL log writer. Each call receives one JSON line string (no trailing newline). */
   onLog: (handler: (line: string) => void) => void;
 }
@@ -75,9 +83,6 @@ export async function startMockAnthropicServer(): Promise<MockServer> {
         return;
       }
 
-      const entry = { model: body.model, messages: body.messages, stream: body.stream, timestamp: now() };
-      requests.push(entry);
-
       // Extract user text for log summary
       const lastUser = body.messages?.filter((m: any) => m.role === "user").pop();
       let userText = "(no text)";
@@ -92,6 +97,16 @@ export async function startMockAnthropicServer(): Promise<MockServer> {
       }
 
       const sysText = typeof body.system === "string" ? body.system : (body.system ? JSON.stringify(body.system) : "");
+      const entry = {
+        model: body.model,
+        messages: body.messages,
+        stream: body.stream,
+        timestamp: now(),
+        userText,
+        systemPromptLength: sysText.length || undefined,
+        requestBody: body,
+      };
+      requests.push(entry);
 
       log({
         ts: now(),

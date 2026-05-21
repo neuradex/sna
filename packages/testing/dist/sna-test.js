@@ -2,8 +2,8 @@
 
 // src/cli.ts
 import { execSync, spawn } from "child_process";
-import fs2 from "fs";
-import path2 from "path";
+import fs3 from "fs";
+import path3 from "path";
 import chalk from "chalk";
 
 // src/instance.ts
@@ -154,8 +154,6 @@ async function startMockAnthropicServer() {
         res.end(JSON.stringify({ error: "invalid JSON" }));
         return;
       }
-      const entry = { model: body.model, messages: body.messages, stream: body.stream, timestamp: now() };
-      requests.push(entry);
       const lastUser = body.messages?.filter((m) => m.role === "user").pop();
       let userText = "(no text)";
       if (typeof lastUser?.content === "string") {
@@ -166,6 +164,16 @@ async function startMockAnthropicServer() {
         userText = realText ?? textBlocks[textBlocks.length - 1] ?? "(no text)";
       }
       const sysText = typeof body.system === "string" ? body.system : body.system ? JSON.stringify(body.system) : "";
+      const entry = {
+        model: body.model,
+        messages: body.messages,
+        stream: body.stream,
+        timestamp: now(),
+        userText,
+        systemPromptLength: sysText.length || void 0,
+        requestBody: body
+      };
+      requests.push(entry);
       log({
         ts: now(),
         type: "request",
@@ -301,13 +309,69 @@ data: ${JSON.stringify(data)}
   });
 }
 
+// src/claude-env.ts
+import fs2 from "fs";
+import path2 from "path";
+var SAFE_ENV_KEYS = ["PATH", "HOME", "SHELL", "TERM", "LANG", "TMPDIR"];
+function compactEnv(input) {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== void 0)
+  );
+}
+function baseEnv(options) {
+  const source = options.env ?? process.env;
+  if (options.inheritEnv !== false) {
+    return compactEnv(source);
+  }
+  const clean = {};
+  for (const key of SAFE_ENV_KEYS) clean[key] = source[key];
+  return compactEnv(clean);
+}
+function createClaudeMockEnv(options) {
+  const cwd = options.cwd ?? process.cwd();
+  const apiKey = options.apiKey ?? "sk-test-mock-sna";
+  const configDir = options.configDir ?? path2.join(cwd, ".sna", "mock-claude");
+  const configFile = path2.join(configDir, ".claude.json");
+  fs2.mkdirSync(configDir, { recursive: true });
+  if (options.overwrite || !fs2.existsSync(configFile)) {
+    const projects = {};
+    for (const projectPath of [cwd, ...options.trustedProjectPaths ?? []]) {
+      projects[projectPath] = { hasTrustDialogAccepted: true };
+    }
+    fs2.writeFileSync(configFile, JSON.stringify({
+      theme: "dark",
+      hasCompletedOnboarding: true,
+      customApiKeyResponses: {
+        approved: [apiKey.slice(-20)],
+        rejected: []
+      },
+      projects
+    }, null, 2));
+  }
+  const env = {
+    ...baseEnv(options),
+    ANTHROPIC_BASE_URL: options.anthropicBaseUrl,
+    ANTHROPIC_API_KEY: apiKey,
+    CLAUDE_CONFIG_DIR: configDir,
+    ...compactEnv(options.extraEnv ?? {})
+  };
+  return {
+    env,
+    cwd,
+    configDir,
+    configFile,
+    apiKey,
+    anthropicBaseUrl: options.anthropicBaseUrl
+  };
+}
+
 // src/cli.ts
 var SHELL = process.env.SHELL || "/bin/zsh";
 function resolveClaudePath() {
-  const stateDir = path2.join(process.cwd(), ".sna");
-  const cached = path2.join(stateDir, "claude-path");
-  if (fs2.existsSync(cached)) {
-    const p = fs2.readFileSync(cached, "utf8").trim();
+  const stateDir = path3.join(process.cwd(), ".sna");
+  const cached = path3.join(stateDir, "claude-path");
+  if (fs3.existsSync(cached)) {
+    const p = fs3.readFileSync(cached, "utf8").trim();
     if (p) {
       try {
         execSync(`test -x "${p}"`, { stdio: "pipe" });
@@ -340,36 +404,9 @@ function printInstanceInfo(name) {
   console.log(`  ${chalk.dim("cleanup:")}    sna-test rm ${name}`);
   console.log();
 }
-function buildClaudeEnv(mockPort, instanceDir) {
-  const configDir = path2.join(instanceDir, "claude-config");
-  fs2.mkdirSync(configDir, { recursive: true });
-  const apiKey = "sk-test-mock-sna";
-  const keyTruncated = apiKey.slice(-20);
-  const configFile = path2.join(configDir, ".claude.json");
-  if (!fs2.existsSync(configFile)) {
-    const cwd = process.cwd();
-    fs2.writeFileSync(configFile, JSON.stringify({
-      theme: "dark",
-      hasCompletedOnboarding: true,
-      customApiKeyResponses: {
-        approved: [keyTruncated],
-        rejected: []
-      },
-      projects: {
-        [cwd]: { hasTrustDialogAccepted: true }
-      }
-    }, null, 2));
-  }
-  return {
-    ...process.env,
-    ANTHROPIC_BASE_URL: `http://localhost:${mockPort}`,
-    ANTHROPIC_API_KEY: apiKey,
-    CLAUDE_CONFIG_DIR: configDir
-  };
-}
 function wireApiLog(mock, dir) {
-  const logPath = path2.join(dir, "api.jsonl");
-  const stream = fs2.createWriteStream(logPath, { flags: "a" });
+  const logPath = path3.join(dir, "api.jsonl");
+  const stream = fs3.createWriteStream(logPath, { flags: "a" });
   mock.onLog((line) => {
     stream.write(line + "\n");
   });
@@ -396,7 +433,7 @@ ${" ".repeat(14)}${chalk.dim("reply:")} ${entry.replyText ?? ""}`;
 async function cmdClaude(args2) {
   const name = generateInstanceName();
   const dir = getInstanceDir(name);
-  fs2.mkdirSync(dir, { recursive: true });
+  fs3.mkdirSync(dir, { recursive: true });
   const meta = {
     name,
     mode: args2.includes("-p") || args2.includes("--print") ? "oneshot" : "interactive",
@@ -414,7 +451,12 @@ async function cmdClaude(args2) {
   console.log(`  Mock API ready on :${mock.port}`);
   console.log();
   const claudePath = resolveClaudePath();
-  const env = buildClaudeEnv(mock.port, dir);
+  const { env } = createClaudeMockEnv({
+    cwd: process.cwd(),
+    configDir: path3.join(dir, "claude-config"),
+    anthropicBaseUrl: `http://localhost:${mock.port}`,
+    apiKey: "sk-test-mock-sna"
+  });
   const proc = spawn(claudePath, args2, {
     env,
     cwd: process.cwd(),
@@ -467,8 +509,8 @@ function cmdLogs(name, args2) {
   const follow = args2.includes("-f") || args2.includes("--follow");
   const apiOnly = args2.includes("--api");
   if (apiOnly) {
-    const logFile = path2.join(dir, "api.jsonl");
-    if (!fs2.existsSync(logFile)) {
+    const logFile = path3.join(dir, "api.jsonl");
+    if (!fs3.existsSync(logFile)) {
       console.log("  No API logs.");
       return;
     }
@@ -491,7 +533,7 @@ function cmdLogs(name, args2) {
       });
       return;
     }
-    const content = fs2.readFileSync(logFile, "utf8");
+    const content = fs3.readFileSync(logFile, "utf8");
     for (const line of content.split("\n")) {
       if (!line.trim()) continue;
       try {
@@ -503,8 +545,8 @@ function cmdLogs(name, args2) {
     }
     return;
   }
-  const apiFile = path2.join(dir, "api.jsonl");
-  if (fs2.existsSync(apiFile)) {
+  const apiFile = path3.join(dir, "api.jsonl");
+  if (fs3.existsSync(apiFile)) {
     if (follow) {
       const tail = spawn("tail", ["-f", apiFile], { stdio: ["ignore", "pipe", "inherit"] });
       tail.stdout.on("data", (d) => {
@@ -524,7 +566,7 @@ function cmdLogs(name, args2) {
       });
       return;
     }
-    const content = fs2.readFileSync(apiFile, "utf8");
+    const content = fs3.readFileSync(apiFile, "utf8");
     for (const line of content.split("\n")) {
       if (!line.trim()) continue;
       try {

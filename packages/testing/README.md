@@ -94,12 +94,71 @@ Supported routes:
 
 Both chat completions and responses support non-streaming JSON and streaming SSE. By default the mock replies with the last user text reversed.
 
+### Runtime CLI fakes
+
+Use the mock CLIs when you need to test SNA providers or consumer app launch
+configuration without depending on a real Claude Code or Codex installation.
+
+```ts
+import {
+  createClaudeMockEnv,
+  createMockClaudeCli,
+  createMockCodexExecCli,
+  startMockAnthropicServer,
+  startMockOpenAIServer,
+} from "@sna-sdk/testing";
+
+const anthropic = await startMockAnthropicServer();
+const claude = createMockClaudeCli(anthropic);
+const claudeEnv = createClaudeMockEnv({
+  anthropicBaseUrl: `http://127.0.0.1:${anthropic.port}`,
+  extraEnv: { LOOM_API_URL: "http://127.0.0.1:57787" },
+});
+
+process.env.SNA_CLAUDE_COMMAND = claude.command;
+// pass claudeEnv.env to the provider/process under test
+
+const openai = await startMockOpenAIServer();
+const codex = createMockCodexExecCli(openai);
+process.env.SNA_CODEX_COMMAND = codex.command;
+
+// ...run provider or app integration logic...
+
+claude.close();
+codex.close();
+anthropic.close();
+await openai.close();
+```
+
+### Harness helpers
+
+```ts
+import { waitForRequest, withMockOpenAIServer, readSseData } from "@sna-sdk/testing";
+
+await withMockOpenAIServer({ responseText: "ok" }, async (mock) => {
+  const pending = waitForRequest(mock, (req) => req.endpoint === "responses");
+  const res = await fetch(`${mock.url}/v1/responses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "gpt-5.4", stream: true, input: "hello" }),
+  });
+  const request = await pending;
+  const sseLines = await readSseData(res);
+});
+```
+
 ## Exports
 
 | Name | Role |
 |------|------|
 | `startMockAnthropicServer()` | Boot a mock Anthropic Messages API on a random port |
 | `startMockOpenAIServer()` | Boot a mock OpenAI-compatible API on a random port |
+| `createClaudeMockEnv()` | Create isolated Claude config and env for mock Anthropic routing |
+| `createMockClaudeCli()` | Create a fake `claude` executable backed by the Anthropic mock |
+| `createMockCodexExecCli()` | Create a fake `codex exec` executable backed by the OpenAI mock |
+| `withMockAnthropicServer()`, `withMockOpenAIServer()` | Start a mock for a callback and always close it |
+| `waitForRequest()` | Wait until a mock receives a matching request |
+| `readSseData()` | Parse SSE `data:` lines from a mock response |
 | `runOneshot(opts)` | Boot mock → run `claude -p` → capture → teardown |
 | `MockServer`, `MockLogEntry`, `MockOpenAIServer`, `MockOpenAIRequest`, `MockOpenAILogEntry` | Types |
 | `generateInstanceName`, `getInstanceDir`, `listInstances`, `readInstanceMeta`, `writeInstanceMeta`, `removeInstance` | Instance helpers used by the CLI |
