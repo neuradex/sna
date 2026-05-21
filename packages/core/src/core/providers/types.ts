@@ -37,11 +37,13 @@ export interface AgentEvent {
 /**
  * Mutable subset of SessionConfig that can be PATCH-applied to an alive agent.
  *
- * Each field has a per-provider dispatch strategy: codex applies model /
+ * Each field has a per-provider dispatch strategy: Codex applies model /
  * permissionMode / cwd via per-turn overrides on the next `turn/start`;
- * claude-code applies model / permissionMode via control_request but cannot
- * change cwd in-place — `applyPatch` returns those as leftover so the caller
- * can drive a respawn. opencode currently leaves all fields as leftover.
+ * Claude Code applies model / permissionMode via control_request but cannot
+ * change cwd in-place; OpenCode applies model / permissionMode on the next
+ * prompt; ACP applies SNA-side permission gate changes in-place. Fields that
+ * cannot be handled in-place are returned as leftover so the caller can drive
+ * a respawn.
  *
  * Defined here (and not anchored on `SessionConfig` directly) to keep the
  * providers layer independent of session-manager.
@@ -71,10 +73,11 @@ export interface AgentProcess {
    * caller is expected to merge those into the next spawn config (with
    * history replay) to complete the patch.
    *
-   * Implementations: codex applies all currently-defined fields in-place via
-   * the next turn/start override mechanism. claude-code applies model /
-   * permissionMode via control_request but returns `cwd` (and any other
-   * unsupported field) as leftover. opencode leaves all fields as leftover.
+   * Implementations: Codex applies all currently-defined fields in-place via
+   * next turn/start overrides. Claude Code applies model / permissionMode via
+   * control_request but returns `cwd`. OpenCode applies model /
+   * permissionMode as next-prompt overrides and returns `cwd`. ACP runtimes
+   * apply SNA-side permissionMode gates in-place and return model / cwd.
    */
   applyPatch(patch: SessionPatch): SessionPatch;
   /**

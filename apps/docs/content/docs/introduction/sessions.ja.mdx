@@ -40,11 +40,11 @@ DELETE /agent/sessions/:id → セッション + 履歴を削除
 このフックがインプレース適用と respawn-with-history-replay のどちら
 を取るかを決めます。
 
-| フィールド | claude-code | codex | opencode |
-|------------|-------------|-------|----------|
-| `model` | インプレース | per-turn 上書き | インプレース |
-| `permissionMode` | インプレース | per-turn 上書き | インプレース |
-| `cwd` | respawn + replay | インプレース (per-thread cwd) | respawn |
+| フィールド | claude-code | codex | opencode | grok / cursor |
+|------------|-------------|-------|----------|---------------|
+| `model` | インプレース | per-turn 上書き | インプレース | respawn + replay |
+| `permissionMode` | インプレース | per-turn 上書き | インプレース | インプレース (SNA gate) |
+| `cwd` | respawn + replay | インプレース (per-thread cwd) | respawn | respawn + replay |
 
 レスポンスの `applied` フィールドでどの経路を通ったか分かるため、
 クライアントは必要な時だけ "reloading…" のような表示を出せます。

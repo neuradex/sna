@@ -93,12 +93,15 @@ partial tool argument は出ません。ACP ランタイムは `tool_call_update
 | フィールド | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
 | `model` | ✓ control_request `set_model` | ✓ 次 turn override | ✓ 次 prompt override | ✗ leftover (respawn) | ✗ leftover (respawn) |
-| `permissionMode` | ✓ control_request | ✓ 次 turn sandbox policy | ✓ 次 prompt の agent override | ✗ leftover (respawn) | ✗ leftover (respawn) |
+| `permissionMode` | ✓ control_request | ✓ 次 turn sandbox policy | ✓ 次 prompt の agent override | ✓ SNA permission gate 更新 | ✓ SNA permission gate 更新 |
 | `cwd` | ✗ leftover | ✓ 次 turn override (唯一可能なランタイム) | ✗ leftover | ✗ leftover | ✗ leftover |
 
-ACP を使う 2 つのランタイムはすべてのフィールドを leftover と
-して返します。ACP にランタイム変更メソッドがないためです。
-respawn-with-history-replay は変わらず動きます。
+ACP を使うランタイムは、引き続き `model` と `cwd` を leftover として
+返します。Grok Build / Cursor が使っている ACP バージョンには、この 2 つを
+同じセッション内で変更する mutator がありません。`permissionMode` は
+別です。ACP の permission gate は SNA アダプタが持っているため、
+`bypassPermissions` への切り替えや解除は、ネイティブプロセスを
+再起動せずにインプレース適用できます。
 
 ## 権限フロー
 
@@ -181,8 +184,8 @@ turn で過去の transcript をインラインで埋め込み、そのコンテ
   plan mode をサポートし、OpenCode は `plan` agent にマップします。
   Codex は `plan` を既定の read-only sandbox と同じように扱い、
   Grok Build / Cursor アダプタはまだ plan-mode flag を接続していません。
-  ACP ランタイムはランタイム中の `permissionMode` 変更も
-  respawn-with-history が必要です。
+  ACP ランタイムは SNA 側の permission gate 動作をインプレースで
+  変えられますが、それはネイティブの plan mode とは別物です。
 - **ACP ランタイムの `allowedTools` / `disallowedTools` glob/パターン
   マッチ**: 現在の auto-deny intercept はツール名を文字列完全一致のみ
   比較します。実ワークロードで必要になれば glob パターン (例: `"shell.*"`)

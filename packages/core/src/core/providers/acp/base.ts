@@ -250,8 +250,8 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
   protected assistantTurnBuffer = "";
   /** Per-turn accumulator for `agent_thought_chunk` text. */
   protected thinkingTurnBuffer = "";
-  /** Captured permission mode — see design decision (3). */
-  protected readonly permissionMode: string | undefined;
+  /** Current permission mode — see design decision (3). */
+  protected permissionMode: string | undefined;
   /**
    * Optional allow-list of tool names. When set, any tool whose unwrapped
    * `toolName` (see {@link unwrapToolCall}) is NOT in this list gets
@@ -1030,16 +1030,23 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
     // (returned as leftover from applyPatch).
   }
 
-  setPermissionMode(_mode: string): void {
-    // ACP permissionMode is fixed at process startup. Runtime change
-    // requires respawn — returned as leftover from applyPatch.
+  setPermissionMode(mode: string): void {
+    // ACP permission prompts are handled by this adapter, not by a native
+    // per-session flag. That means SNA-side gate modes such as
+    // bypassPermissions can change without respawning the agent process.
+    this.permissionMode = mode;
+    logger.log("agent", `${this.name}: permission mode override → ${mode}`);
   }
 
   applyPatch(patch: SessionPatch): SessionPatch {
-    // No in-place patching supported in the base implementation — every
-    // mutable field requires a respawn. Return the patch unchanged so
-    // session-manager handles it.
-    return { ...patch };
+    const leftover: SessionPatch = { ...patch };
+    if (patch.permissionMode !== undefined) {
+      this.setPermissionMode(patch.permissionMode);
+      delete leftover.permissionMode;
+    }
+    // Model and cwd still have no ACP wire surface in the current Grok /
+    // Cursor adapters, so leave them for respawn-with-history.
+    return leftover;
   }
 
   respondToPermission(requestId: string, approved: boolean): void {

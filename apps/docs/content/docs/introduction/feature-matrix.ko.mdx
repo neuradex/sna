@@ -88,12 +88,14 @@ kill 후 history replay와 함께 respawn해야 합니다.
 | 필드 | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
 | `model` | ✓ control_request `set_model` | ✓ next-turn override | ✓ next-prompt override | ✗ leftover (respawn) | ✗ leftover (respawn) |
-| `permissionMode` | ✓ control_request | ✓ next-turn sandbox 정책 | ✓ next-prompt agent override | ✗ leftover (respawn) | ✗ leftover (respawn) |
+| `permissionMode` | ✓ control_request | ✓ next-turn sandbox 정책 | ✓ next-prompt agent override | ✓ SNA permission gate 갱신 | ✓ SNA permission gate 갱신 |
 | `cwd` | ✗ leftover | ✓ next-turn override (유일하게 가능한 런타임) | ✗ leftover | ✗ leftover | ✗ leftover |
 
-ACP를 사용하는 두 런타임은 모든 필드를 leftover로 반환합니다. ACP에는
-런타임 변경 메서드가 없기 때문입니다. respawn-with-history-replay는
-변함없이 동작합니다.
+ACP를 사용하는 런타임은 여전히 `model`과 `cwd`를 leftover로 반환합니다.
+Grok Build / Cursor가 사용하는 ACP 버전에는 해당 세션 안에서 이 둘을
+바꾸는 mutator가 없습니다. `permissionMode`는 다릅니다. ACP 권한 게이트는
+SNA 어댑터가 소유하므로, `bypassPermissions`로 전환하거나 되돌리는 작업은
+네이티브 프로세스를 재시작하지 않고 인플레이스로 적용할 수 있습니다.
 
 ## 권한 흐름
 
@@ -175,7 +177,8 @@ SNA는 저장 계층을 건드리지 않습니다. 대신 첫 turn에 prior tran
   mode를 지원하고, OpenCode는 `plan` agent로 매핑합니다. Codex는
   `plan`을 기본 read-only sandbox처럼 처리하며, Grok Build / Cursor
   어댑터는 아직 plan-mode flag를 연결하지 않습니다. ACP 런타임은
-  런타임 `permissionMode` 변경도 respawn-with-history가 필요합니다.
+  SNA 쪽 권한 게이트 동작은 인플레이스로 바꿀 수 있지만, 이것이
+  네이티브 plan mode와 같지는 않습니다.
 - **ACP 런타임의 `allowedTools` / `disallowedTools` glob/패턴 매칭**:
   현재 auto-deny intercept는 도구 이름을 정확 문자열 동등성으로만
   매치합니다. 실제 워크로드에서 필요해지면 glob 패턴(예: `"shell.*"`)을

@@ -37,11 +37,11 @@ DELETE /agent/sessions/:id → 세션 + 히스토리 삭제
 `applyPatch()` 훅을 통해 필드별로 적용하고, 그 훅이 인플레이스 적용과
 respawn-with-history-replay 중 하나를 결정합니다.
 
-| 필드 | claude-code | codex | opencode |
-|------|-------------|-------|----------|
-| `model` | 인플레이스 | per-turn 오버라이드 | 인플레이스 |
-| `permissionMode` | 인플레이스 | per-turn 오버라이드 | 인플레이스 |
-| `cwd` | respawn + replay | 인플레이스 (per-thread cwd) | respawn |
+| 필드 | claude-code | codex | opencode | grok / cursor |
+|------|-------------|-------|----------|---------------|
+| `model` | 인플레이스 | per-turn 오버라이드 | 인플레이스 | respawn + replay |
+| `permissionMode` | 인플레이스 | per-turn 오버라이드 | 인플레이스 | 인플레이스 (SNA gate) |
+| `cwd` | respawn + replay | 인플레이스 (per-thread cwd) | respawn | respawn + replay |
 
 응답의 `applied` 필드가 어느 경로를 탔는지 알려주므로, 클라이언트는
 "reloading…" 표시를 필요할 때만 보여줄 수 있습니다.

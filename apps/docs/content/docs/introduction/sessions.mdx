@@ -38,11 +38,11 @@ DELETE /agent/sessions/:id → drop session + history
 field through the active runtime adapter's `applyPatch()` hook, which decides
 in-place vs respawn-with-history-replay:
 
-| Field | claude-code | codex | opencode |
-|-------|-------------|-------|----------|
-| `model` | in-place | per-turn override | in-place |
-| `permissionMode` | in-place | per-turn override | in-place |
-| `cwd` | respawn + replay | in-place (per-thread cwd) | respawn |
+| Field | claude-code | codex | opencode | grok / cursor |
+|-------|-------------|-------|----------|---------------|
+| `model` | in-place | per-turn override | in-place | respawn + replay |
+| `permissionMode` | in-place | per-turn override | in-place | in-place (SNA gate) |
+| `cwd` | respawn + replay | in-place (per-thread cwd) | respawn | respawn + replay |
 
 The response's `applied` field tells you which path was taken so
 clients can show a "reloading…" affordance only when needed.

@@ -90,12 +90,14 @@ session manager to kill and re-spawn with history replay.
 | Field | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
 | `model` | ✓ control_request `set_model` | ✓ next-turn override | ✓ next-prompt override | ✗ leftover (respawn) | ✗ leftover (respawn) |
-| `permissionMode` | ✓ control_request | ✓ next-turn sandbox policy | ✓ next-prompt agent override | ✗ leftover (respawn) | ✗ leftover (respawn) |
+| `permissionMode` | ✓ control_request | ✓ next-turn sandbox policy | ✓ next-prompt agent override | ✓ SNA permission gate update | ✓ SNA permission gate update |
 | `cwd` | ✗ leftover | ✓ next-turn override (the only runtime that can) | ✗ leftover | ✗ leftover | ✗ leftover |
 
-Both ACP-speaking runtimes return every field as leftover because ACP
-does not expose runtime mutation methods. Respawn-with-history-replay
-keeps working as expected for the session manager.
+ACP-speaking runtimes still return `model` and `cwd` as leftover because
+ACP does not expose those in-session mutators in the version used by
+Grok Build / Cursor. `permissionMode` is different: SNA owns the ACP
+permission gate, so switching to or from `bypassPermissions` can be
+applied in-place without restarting the native process.
 
 ## Permission flow
 
@@ -180,8 +182,8 @@ so re-injection is not required.
 - **Plan mode is not uniform**: Claude Code supports native plan mode,
   and OpenCode maps it to the `plan` agent. Codex treats `plan` like the
   default read-only sandbox, and the Grok Build / Cursor adapters do not
-  wire a plan-mode flag today. ACP runtimes still need respawn-with-history
-  for any runtime `permissionMode` change.
+  wire a plan-mode flag today. ACP runtimes can change SNA-side permission
+  gate behavior in-place, but that is not the same as a native plan mode.
 - **Glob/pattern matching in `allowedTools` / `disallowedTools`** for
   the ACP runtimes — today the auto-deny intercept matches tool names
   by exact string equality. Glob patterns (e.g. `"shell.*"`) are a
