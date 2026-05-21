@@ -25,8 +25,8 @@ app, pin exact package versions in `package.json` instead of relying on a
 floating range.
 
 ```bash
-pnpm add @sna-sdk/core@0.16.0 @sna-sdk/client@0.16.0
-pnpm add @sna-sdk/react@0.16.0
+pnpm add @sna-sdk/core@0.17.2 @sna-sdk/client@0.17.2
+pnpm add @sna-sdk/react@0.17.2
 ```
 
 If you find a bug or have a feature request, please open an issue:

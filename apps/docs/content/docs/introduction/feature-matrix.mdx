@@ -73,6 +73,7 @@ output panes, token/cost meters, and durable replay after reload.
 | Final assistant event | ✓ `assistant` / `result` | ✓ `item/completed` agent message | ✓ finalized text part | ✓ synthesized from ACP chunks before `complete` | ✓ synthesized from ACP chunks before `complete` |
 | Thinking delta | ✓ `thinking_delta` | ✓ `item/reasoning/summaryTextDelta` | ✓ reasoning `message.part.delta` | ✓ ACP `agent_thought_chunk` | ✓ ACP `agent_thought_chunk` |
 | Final thinking event | ✓ signed thinking block | ✓ completed reasoning item | ✓ finalized reasoning part | ✓ synthesized from ACP thought chunks | ✓ synthesized from ACP thought chunks |
+| Content lifecycle starts | ✓ ignored unless the block is a tool | ✓ `agentMessage` / `reasoning` starts are ignored | ✓ text/reasoning part starts are tracked, not emitted as tools | ✓ message/thought chunks are content, not tools | ✓ message/thought chunks are content, not tools |
 | Tool call start | ✓ `tool_use` with `streaming: true` | ✓ typed item start (`shell`, `file_change`, MCP, hosted tools) | ✓ tool part running/pending | ✓ ACP `tool_call` | ✓ ACP `tool_call` |
 | Tool input delta | ✓ `tool_use_delta` from Anthropic `input_json_delta` | ✗ no native input delta | ✗ no native input delta | ⚠ ACP `tool_call_update` can refresh input, but not byte/token deltas | ⚠ ACP `tool_call_update` can refresh input, but not byte/token deltas |
 | Tool output streaming | ✗ final `tool_result` only | ✓ shell `outputDelta` as `tool_use` update; file patch delta is dropped | ✗ final part status only | ✗ final/update payload only | ✗ final/update payload only |
@@ -86,6 +87,11 @@ richer item lifecycle metadata and live shell output, but not partial
 tool arguments. The ACP runtimes expose useful `tool_call_update`
 refreshes and final raw outputs, but SNA treats them as whole-event
 updates rather than fine-grained deltas.
+
+Assistant text and reasoning lifecycle starts are never surfaced as
+`tool_use`. A runtime may notify SNA when a content block starts, but
+only real tool invocations enter the `tool_use` / `tool_result`
+contract.
 
 ## In-place mutation (`applyPatch`)
 

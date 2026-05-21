@@ -74,6 +74,7 @@ chunk と最終 usage の両方を受け取れます。
 | 最終 assistant イベント | ✓ `assistant` / `result` | ✓ `item/completed` agent message | ✓ finalized text part | ✓ ACP chunk を `complete` 直前に合成 | ✓ ACP chunk を `complete` 直前に合成 |
 | Thinking delta | ✓ `thinking_delta` | ✓ `item/reasoning/summaryTextDelta` | ✓ reasoning `message.part.delta` | ✓ ACP `agent_thought_chunk` | ✓ ACP `agent_thought_chunk` |
 | 最終 thinking イベント | ✓ signed thinking block | ✓ completed reasoning item | ✓ finalized reasoning part | ✓ ACP thought chunk から合成 | ✓ ACP thought chunk から合成 |
+| Content lifecycle start | ✓ block が tool のときだけイベント化 | ✓ `agentMessage` / `reasoning` start は無視 | ✓ text/reasoning part start は追跡のみで tool として出さない | ✓ message/thought chunk は content であり tool ではない | ✓ message/thought chunk は content であり tool ではない |
 | Tool call 開始 | ✓ `streaming: true` 付き `tool_use` | ✓ typed item start (`shell`, `file_change`, MCP, hosted tools) | ✓ running/pending tool part | ✓ ACP `tool_call` | ✓ ACP `tool_call` |
 | Tool input delta | ✓ Anthropic `input_json_delta` → `tool_use_delta` | ✗ ネイティブ input delta なし | ✗ ネイティブ input delta なし | ⚠ ACP `tool_call_update` で input 更新は可能だが byte/token 単位の delta ではない | ⚠ ACP `tool_call_update` で input 更新は可能だが byte/token 単位の delta ではない |
 | Tool output streaming | ✗ 最終 `tool_result` のみ | ✓ shell `outputDelta` を `tool_use` update として渡す。file patch delta は捨てる | ✗ 最終 part status のみ | ✗ 最終/update payload のみ | ✗ 最終/update payload のみ |
@@ -87,6 +88,10 @@ Codex は item lifecycle metadata と live shell output は豊富ですが、
 partial tool argument は出ません。ACP ランタイムは `tool_call_update` と
 最終 raw output を出せますが、SNA では fine-grained delta ではなく
 イベント単位の update として扱います。
+
+Assistant text と reasoning の lifecycle start は `tool_use` として
+出しません。ランタイムが content block の開始を通知しても、実際の
+tool 呼び出しだけが `tool_use` / `tool_result` の契約に入ります。
 
 ## インプレース変更 (`applyPatch`)
 

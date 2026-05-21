@@ -558,11 +558,15 @@ const unsubscribe = client.agent.onEvent((event: {
 | Type | Meaning |
 | --- | --- |
 | `thinking` | agent 内部の reasoning block。 |
+| `thinking_delta` | reasoning のストリーミング断片。 |
 | `assistant` | assistant に見える response block。 |
 | `assistant_delta` | streaming text fragment。 |
 | `tool_use` | agent が tool を呼び出しています。 |
+| `tool_use_delta` | runtime が対応する場合の tool input のストリーミング断片。 |
 | `tool_result` | tool 実行結果。 |
+| `permission_needed` | runtime が承認判断を待っている状態。 |
 | `complete` | turn が完了しました。 |
+| `interrupted` | turn が正常完了前に中断されました。 |
 | `error` | runtime error。 |
 | `user_message` | multi-client sync のために echo された user message。 |
 
