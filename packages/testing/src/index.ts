@@ -25,6 +25,11 @@ export {
   type OpenCodeMockConfigOptions,
 } from "./opencode-config.js";
 export {
+  createGrokMockEnv,
+  type GrokMockEnv,
+  type GrokMockEnvOptions,
+} from "./grok-env.js";
+export {
   createMockClaudeCli,
   createMockCodexExecCli,
   type MockClaudeCliOptions,

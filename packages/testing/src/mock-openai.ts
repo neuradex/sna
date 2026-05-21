@@ -393,25 +393,38 @@ export async function startMockOpenAIServer(options: MockOpenAIOptions = {}): Pr
         });
         const responseId = `resp_mock_${Date.now()}`;
         const itemId = `msg_mock_${Date.now()}`;
+        const createdAt = Math.floor(Date.now() / 1000);
+        let sequenceNumber = 0;
         writeSse(res, "response.created", {
           type: "response.created",
-          response: { id: responseId, object: "response", status: "in_progress", model },
+          sequence_number: sequenceNumber++,
+          response: {
+            id: responseId,
+            object: "response",
+            created_at: createdAt,
+            status: "in_progress",
+            model,
+            output: [],
+          },
         });
         writeSse(res, "response.output_item.added", {
           type: "response.output_item.added",
+          sequence_number: sequenceNumber++,
           output_index: 0,
-          item: { id: itemId, type: "message", role: "assistant", content: [] },
+          item: { id: itemId, type: "message", status: "in_progress", role: "assistant", content: [] },
         });
         writeSse(res, "response.content_part.added", {
           type: "response.content_part.added",
+          sequence_number: sequenceNumber++,
           item_id: itemId,
           output_index: 0,
           content_index: 0,
-          part: { type: "output_text", text: "" },
+          part: { type: "output_text", text: "", annotations: [] },
         });
         for (const chunk of chunksFor(replyText, chunkSize)) {
           writeSse(res, "response.output_text.delta", {
             type: "response.output_text.delta",
+            sequence_number: sequenceNumber++,
             item_id: itemId,
             output_index: 0,
             content_index: 0,
@@ -420,6 +433,7 @@ export async function startMockOpenAIServer(options: MockOpenAIOptions = {}): Pr
         }
         writeSse(res, "response.output_text.done", {
           type: "response.output_text.done",
+          sequence_number: sequenceNumber++,
           item_id: itemId,
           output_index: 0,
           content_index: 0,
@@ -427,21 +441,32 @@ export async function startMockOpenAIServer(options: MockOpenAIOptions = {}): Pr
         });
         writeSse(res, "response.output_item.done", {
           type: "response.output_item.done",
+          sequence_number: sequenceNumber++,
           output_index: 0,
           item: {
             id: itemId,
             type: "message",
+            status: "completed",
             role: "assistant",
-            content: [{ type: "output_text", text: replyText }],
+            content: [{ type: "output_text", text: replyText, annotations: [] }],
           },
         });
         writeSse(res, "response.completed", {
           type: "response.completed",
+          sequence_number: sequenceNumber++,
           response: {
             id: responseId,
             object: "response",
+            created_at: createdAt,
             status: "completed",
             model,
+            output: [{
+              id: itemId,
+              type: "message",
+              status: "completed",
+              role: "assistant",
+              content: [{ type: "output_text", text: replyText, annotations: [] }],
+            }],
             output_text: replyText,
             usage,
           },

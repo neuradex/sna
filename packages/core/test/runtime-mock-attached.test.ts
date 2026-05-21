@@ -4,10 +4,11 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ClaudeCodeProvider, CodexProvider, OpenCodeProvider } from "../src/core/providers/index.js";
+import { ClaudeCodeProvider, CodexProvider, GrokProvider, OpenCodeProvider } from "../src/core/providers/index.js";
 import {
   createClaudeMockEnv,
   createCodexMockEnv,
+  createGrokMockEnv,
   createOpenCodeMockConfig,
   startMockAnthropicServer,
   startMockOpenAIServer,
@@ -32,6 +33,15 @@ function runtimeCliSkip(command: string, envVar: string): string | undefined {
   return commandAvailable(command) ? undefined : `${command} CLI is not installed; set ${envVar}=<path> to run this test`;
 }
 
+async function waitUntil(predicate: () => boolean, label: string, timeoutMs = 5_000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for ${label}`);
+}
+
 function systemText(system: unknown): string {
   if (typeof system === "string") return system;
   if (Array.isArray(system)) {
@@ -48,9 +58,11 @@ describe("real runtime CLIs with mock-attached LLM APIs", () => {
   let openai: MockOpenAIServer | null = null;
   let opencodeProcess: AgentProcess | null = null;
   let opencodeRuntime: RuntimeHandle | null = null;
+  let grokProcess: AgentProcess | null = null;
   const originalClaudeCommand = process.env.SNA_CLAUDE_COMMAND;
   const originalCodexCommand = process.env.SNA_CODEX_COMMAND;
   const originalOpenCodeCommand = process.env.SNA_OPENCODE_COMMAND;
+  const originalGrokCommand = process.env.SNA_GROK_COMMAND;
 
   afterEach(async () => {
     if (originalClaudeCommand === undefined) delete process.env.SNA_CLAUDE_COMMAND;
@@ -59,8 +71,12 @@ describe("real runtime CLIs with mock-attached LLM APIs", () => {
     else process.env.SNA_CODEX_COMMAND = originalCodexCommand;
     if (originalOpenCodeCommand === undefined) delete process.env.SNA_OPENCODE_COMMAND;
     else process.env.SNA_OPENCODE_COMMAND = originalOpenCodeCommand;
+    if (originalGrokCommand === undefined) delete process.env.SNA_GROK_COMMAND;
+    else process.env.SNA_GROK_COMMAND = originalGrokCommand;
     anthropic?.close();
     anthropic = null;
+    grokProcess?.kill();
+    grokProcess = null;
     opencodeProcess?.kill();
     opencodeProcess = null;
     opencodeRuntime?.dispose();
@@ -211,5 +227,63 @@ describe("real runtime CLIs with mock-attached LLM APIs", () => {
       Array.isArray(request.requestBody?.messages),
       "OpenCode should send OpenAI-compatible chat messages",
     );
+  });
+
+  it("runs real Grok Build against the mock OpenAI Responses API and captures streaming request shape", {
+    skip: runtimeCliSkip("grok", "SNA_GROK_COMMAND"),
+    timeout: 60_000,
+  }, async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "sna-real-grok-mock-"));
+    const events: any[] = [];
+    openai = await startMockOpenAIServer({
+      models: [{ id: "grok-build", object: "model", created: 0, owned_by: "xai" }],
+      responseText: (ctx) => ctx.userText.includes("mock attached grok") ? "OK" : "Mock Grok title",
+      chunkSize: 1000,
+    });
+    const mockEnv = createGrokMockEnv({
+      cwd,
+      openAIBaseUrl: openai.url,
+      apiKey: "sk-grok-mock-attached",
+      model: "grok-build",
+    });
+
+    try {
+      grokProcess = new GrokProvider().spawn({
+        cwd,
+        prompt: "Reply with exactly OK for mock attached grok and do not use tools.",
+        model: mockEnv.model,
+        permissionMode: "bypassPermissions",
+        systemPrompt: "SNA mock-attached Grok system prompt",
+        env: mockEnv.env,
+        providerOptions: mockEnv.providerOptions,
+      });
+      grokProcess.on("event", (event) => events.push(event));
+
+      const request = await waitForRequest(openai, (entry) =>
+        entry.endpoint === "responses"
+        && entry.userText.includes("mock attached grok")
+        && JSON.stringify(entry.requestBody).includes("SNA mock-attached Grok system prompt"),
+      { timeoutMs: 20_000 });
+
+      assert.equal(request.url, "/v1/responses");
+      assert.equal(request.authorization, "Bearer sk-grok-mock-attached");
+      assert.equal(request.model, "grok-build");
+      assert.equal(request.stream, true);
+      assert.equal(request.userText.includes("mock attached grok"), true);
+      assert.equal(JSON.stringify(request.requestBody).includes("SNA mock-attached Grok system prompt"), true);
+      assert.ok(
+        Array.isArray(request.requestBody?.input),
+        "Grok Build should send OpenAI-compatible Responses input",
+      );
+      await waitUntil(
+        () => events.some((event) => event.type === "assistant_delta" && String(event.delta ?? "").includes("OK")),
+        "Grok Build assistant stream delta",
+        10_000,
+      );
+    } finally {
+      grokProcess?.kill();
+      grokProcess = null;
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
   });
 });

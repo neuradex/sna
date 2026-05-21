@@ -221,6 +221,11 @@ export interface SpawnOptions {
    *   opencodeConfig?: object        — raw OpenCode config passed to `OPENCODE_CONFIG_CONTENT`
    *   opencodeConfigHash?: string    — hash of opencode config overrides; different hashes get different daemons
    *   logLevel?: string              — passed through to `opencode serve --log-level`
+   * Grok Build:
+   *   xaiApiBaseUrl?: string         — passed to `grok agent --xai-api-base-url`; use `<mock>/v1`
+   *                                     for OpenAI Responses-compatible mockAttached tests
+   *   cliChatProxyBaseUrl?: string   — passed to `grok agent --cli-chat-proxy-base-url`
+   *   noLeader?: boolean             — passed as `--no-leader` to avoid sharing a user leader process
    */
   providerOptions?: Record<string, unknown>;
 

@@ -104,6 +104,7 @@ actual CLI contract while keeping CI deterministic and offline from paid LLMs.
 import {
   createClaudeMockEnv,
   createCodexMockEnv,
+  createGrokMockEnv,
   createOpenCodeMockConfig,
   startMockAnthropicServer,
   startMockOpenAIServer,
@@ -121,6 +122,11 @@ const codexEnv = createCodexMockEnv({
 });
 // Run real `codex` with codexEnv.env.
 
+const grokEnv = createGrokMockEnv({
+  openAIBaseUrl: openai.url,
+});
+// Pass grokEnv.env and grokEnv.providerOptions to SNA's Grok provider.
+
 const opencodeConfig = createOpenCodeMockConfig({
   openAIBaseUrl: openai.url,
 });
@@ -133,6 +139,7 @@ provider uses in production before running the mock-attached tests:
 ```bash
 SNA_CLAUDE_COMMAND=/absolute/path/to/claude \
 SNA_CODEX_COMMAND=/absolute/path/to/codex \
+SNA_GROK_COMMAND=/absolute/path/to/grok \
 SNA_OPENCODE_COMMAND=/absolute/path/to/opencode \
 pnpm --filter @sna-sdk/core exec tsx --test test/runtime-mock-attached.test.ts
 ```
@@ -198,6 +205,7 @@ await withMockOpenAIServer({ responseText: "ok" }, async (mock) => {
 | `startMockOpenAIServer()` | Boot a mock OpenAI-compatible API on a random port |
 | `createClaudeMockEnv()` | Create isolated Claude config and env for mock Anthropic routing |
 | `createCodexMockEnv()` | Create isolated Codex config and env for mock OpenAI routing |
+| `createGrokMockEnv()` | Create isolated Grok env/providerOptions for mock OpenAI Responses routing |
 | `createOpenCodeMockConfig()` | Create OpenCode config/providerOptions for mock OpenAI routing |
 | `createMockClaudeCli()` | Create a fake `claude` executable backed by the Anthropic mock |
 | `createMockCodexExecCli()` | Create a fake `codex exec` executable backed by the OpenAI mock |
