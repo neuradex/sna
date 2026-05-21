@@ -52,6 +52,63 @@ function makeMockProc(): { proc: ChildProcess; pushLine: (line: string) => void;
 const SPAWN_OPTIONS: SpawnOptions = { cwd: "/tmp/test-cc-fixture" };
 
 describe("ClaudeCodeProcess — tool_use_delta forwarding", () => {
+  it("assistant-only stream-json transcript emits no tool lifecycle events", async () => {
+    const { proc, pushLine, close } = makeMockProc();
+    const cc = new ClaudeCodeProcess(proc, SPAWN_OPTIONS);
+
+    const events: AgentEvent[] = [];
+    cc.on("event", (e) => events.push(e));
+
+    pushLine(JSON.stringify({
+      type: "system",
+      subtype: "init",
+      session_id: "cc-assistant-only",
+      model: "claude-sonnet-4-6",
+    }));
+    pushLine(JSON.stringify({
+      type: "stream_event",
+      event: { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+    }));
+    pushLine(JSON.stringify({
+      type: "stream_event",
+      event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello" } },
+    }));
+    pushLine(JSON.stringify({
+      type: "stream_event",
+      event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: " world" } },
+    }));
+    pushLine(JSON.stringify({
+      type: "stream_event",
+      event: { type: "content_block_stop", index: 0 },
+    }));
+    pushLine(JSON.stringify({
+      type: "result",
+      subtype: "success",
+      result: "Hello world",
+      duration_ms: 42,
+      total_cost_usd: 0,
+      usage: { input_tokens: 3, output_tokens: 2 },
+    }));
+
+    await new Promise<void>((resolve) => {
+      cc.on("exit", () => resolve());
+      close();
+    });
+    await new Promise((r) => setTimeout(r, 250));
+
+    assert.deepEqual(
+      events.filter((e) => e.type === "assistant_delta").map((e) => e.delta),
+      ["Hello", " world"],
+    );
+    assert.ok(events.some((e) => e.type === "assistant" && e.message === "Hello world"));
+    assert.ok(events.some((e) => e.type === "complete"));
+    assert.deepEqual(
+      events.filter((e) => e.type === "tool_use" || e.type === "tool_use_delta" || e.type === "tool_result"),
+      [],
+      "assistant-only Claude Code turns must not surface fake tool events",
+    );
+  });
+
   it("emits tool_use_delta for each input_json_delta in the captured fixture", async () => {
     const { proc, pushLine, close } = makeMockProc();
     const cc = new ClaudeCodeProcess(proc, SPAWN_OPTIONS);

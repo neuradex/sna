@@ -56,6 +56,11 @@ describe("OpenCodeProvider end-to-end via mock server", () => {
     assert.ok(types.includes("assistant_delta"), "assistant_delta should fire");
     assert.ok(types.includes("assistant"), "final assistant should fire");
     assert.ok(types.includes("complete"), "complete should fire");
+    assert.deepEqual(
+      events.filter((e) => e.type === "tool_use" || e.type === "tool_use_delta" || e.type === "tool_result"),
+      [],
+      "assistant-only OpenCode turns must not surface fake tool events",
+    );
 
     // Init carries the OpenCode session id.
     const init = events.find((e) => e.type === "init")!;
