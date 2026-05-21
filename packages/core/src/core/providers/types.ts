@@ -401,8 +401,8 @@ export interface CompleteOptions {
    *   - claude-code: streamed via `--include-partial-messages` + JSONL parse
    *   - codex (pool): forwarded from `item/agentMessage/delta` notifications
    *   - codex (ephemeral): parsed from `codex exec --json` stdout stream
-   *   - opencode: not yet wired (the SDK call is single-shot today);
-   *               the callback is silently a no-op there.
+   *   - opencode: streamed through `session.promptAsync` + SSE events when
+   *               the callback is present; otherwise uses the sync SDK call
    *
    * Callbacks fire from the same Node.js microtask as the underlying
    * stream — keep them cheap. Throwing inside the callback aborts the

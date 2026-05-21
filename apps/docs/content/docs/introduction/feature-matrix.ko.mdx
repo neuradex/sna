@@ -44,11 +44,14 @@ ACP를 사용하는 두 런타임(Grok Build, Cursor)은
 | turn 중간 `interrupt()` | ✓ | ✓ | ✓ | ✓ (ACP `session/cancel`) | ✓ (ACP `session/cancel`) |
 | `kill()` / `closeThread()` | ✓ | ✓ (풀 refcount 인식) | ✓ (풀 refcount 인식) | ✓ | ✓ |
 | `complete(opts)` one-shot | ✓ | ✓ | ✓ | ✓ (`grok -p`) | ✓ (`agent -p`) |
-| `complete()` `onDelta` 스트리밍 | ✓ stream-json | ✓ `item/agentMessage/delta` | ✗ 현재 SDK 호출이 single-shot | ✓ streaming-json text 이벤트 | ✓ stream-json `assistant` 청크 (`model_call_id` 없음) |
+| `complete()` `onDelta` 스트리밍 | ✓ stream-json | ✓ `item/agentMessage/delta` | ✓ `prompt_async` SSE 텍스트 델타 | ✓ streaming-json text 이벤트 | ✓ stream-json `assistant` 청크 (`model_call_id` 없음) |
 | `listModels()` | ✓ static + oMLX API | ✓ `codex debug models` 프로브 + static fallback | ✓ `opencode` CLI 프로브 | ✓ static (`grok-build` 단일 항목) | ✓ `agent models` 텍스트 파싱 + static fallback |
 
-OpenCode는 스트리밍에서 예외입니다. 현재 SDK 헬퍼가 single-shot이라
-`complete()`에 `onDelta`를 넘기면 성공하지만 콜백은 호출되지 않습니다.
+OpenCode의 `complete()`는 두 경로를 씁니다. 콜백이 없으면 낮은 오버헤드의
+동기 SDK 호출을 유지하고, `onDelta`가 있으면 `prompt_async`와 이벤트
+스트림으로 전환합니다. 스트리밍 경로도 최종 텍스트 파트와 assistant
+메시지 메타데이터에서 resolve하므로, 호출자는 실시간 텍스트 청크와
+최종 usage를 모두 받을 수 있습니다.
 
 ## 이벤트 풍부도
 

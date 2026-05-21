@@ -27,9 +27,9 @@ await completion({
 Promise は最終テキストと使用量で resolve します。`onDelta` は side channel であり、
 最終結果の置き換えではありません。
 
-`claude-code` と `codex` (プールと ephemeral の両方) で配線済みです。
-OpenCode の SDK 呼び出しは現状 single-shot なので、コールバックは
-そこでは文書化されている no-op です。
+`claude-code`, `codex`, `opencode`, `grok-build`, `cursor` で配線済みです。
+OpenCode は `onDelta` がある場合に `prompt_async` とイベントストリーム
+へ切り替え、ない場合はオーバーヘッドの小さい同期 SDK 経路を維持します。
 
 ## 2. インプロセス、フルイベントストリーム: `runOnce({ onEvent })`
 

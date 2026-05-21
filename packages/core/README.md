@@ -97,9 +97,10 @@ await completion({
 });
 ```
 
-`onDelta` is wired for the `claude-code` and `codex` providers
-(both pool and ephemeral paths). On OpenCode the SDK call is single-shot,
-so the callback is a documented no-op there for now.
+`onDelta` is wired for `claude-code`, `codex`, `opencode`,
+`grok-build`, and `cursor`. OpenCode switches to `prompt_async` plus
+the event stream when the callback is present; without it, `complete()`
+keeps the lower-overhead sync SDK path.
 
 `runOnce()` accepts the same `onDelta` plus an `onEvent` callback for
 the full agent event stream (tool_use, thinking, complete, ...). For

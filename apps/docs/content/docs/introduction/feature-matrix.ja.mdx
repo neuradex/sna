@@ -45,12 +45,15 @@ Claude Code、Grok Build、Cursor は呼び出しまたはセッション単位�
 | turn 中の `interrupt()` | ✓ | ✓ | ✓ | ✓ (ACP `session/cancel`) | ✓ (ACP `session/cancel`) |
 | `kill()` / `closeThread()` | ✓ | ✓ (プール refcount 認識) | ✓ (プール refcount 認識) | ✓ | ✓ |
 | `complete(opts)` one-shot | ✓ | ✓ | ✓ | ✓ (`grok -p`) | ✓ (`agent -p`) |
-| `complete()` `onDelta` ストリーミング | ✓ stream-json | ✓ `item/agentMessage/delta` | ✗ 現状の SDK 呼び出しは single-shot | ✓ streaming-json text イベント | ✓ stream-json `assistant` チャンク (`model_call_id` なし) |
+| `complete()` `onDelta` ストリーミング | ✓ stream-json | ✓ `item/agentMessage/delta` | ✓ `prompt_async` SSE テキスト delta | ✓ streaming-json text イベント | ✓ stream-json `assistant` チャンク (`model_call_id` なし) |
 | `listModels()` | ✓ static + oMLX API | ✓ `codex debug models` プローブ + static fallback | ✓ `opencode` CLI プローブ | ✓ static (単一: `grok-build`) | ✓ `agent models` テキストパース + static fallback |
 
-OpenCode はストリーミングで例外です。現在の SDK ヘルパが single-shot
-のため、`complete()` に `onDelta` を渡しても成功はしますがコール
-バックは呼ばれません。
+OpenCode の `complete()` には 2 つの経路があります。コールバックが
+ない場合はオーバーヘッドの小さい同期 SDK 呼び出しを使い、`onDelta`
+がある場合は `prompt_async` とイベントストリームに切り替えます。
+ストリーミング経路も最終テキスト part と assistant メッセージの
+メタデータから resolve するため、呼び出し側はリアルタイムのテキスト
+chunk と最終 usage の両方を受け取れます。
 
 ## イベントの豊富さ
 

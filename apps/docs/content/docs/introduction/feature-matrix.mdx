@@ -45,12 +45,14 @@ directories on a single pooled daemon. The two ACP-speaking runtimes
 | `interrupt()` mid-turn | ✓ | ✓ | ✓ | ✓ (ACP `session/cancel`) | ✓ (ACP `session/cancel`) |
 | `kill()` / `closeThread()` | ✓ | ✓ (pool refcount aware) | ✓ (pool refcount aware) | ✓ | ✓ |
 | `complete(opts)` one-shot | ✓ | ✓ | ✓ | ✓ (`grok -p`) | ✓ (`agent -p`) |
-| `complete()` `onDelta` streaming | ✓ stream-json | ✓ `item/agentMessage/delta` | ✗ SDK call is single-shot today | ✓ streaming-json text events | ✓ stream-json `assistant` chunks (no `model_call_id`) |
+| `complete()` `onDelta` streaming | ✓ stream-json | ✓ `item/agentMessage/delta` | ✓ `prompt_async` SSE text deltas | ✓ streaming-json text events | ✓ stream-json `assistant` chunks (no `model_call_id`) |
 | `listModels()` | ✓ static + oMLX API | ✓ probes `codex debug models` + static fallback | ✓ probes `opencode` CLI | ✓ static (single entry: `grok-build`) | ✓ parses `agent models` (plain text) + static fallback |
 
-OpenCode is the odd one out on streaming: its current SDK helper is
-single-shot, so passing `onDelta` to `complete()` succeeds but never
-fires the callback. The `complete()` return value is still correct.
+OpenCode uses two paths for `complete()`: the sync SDK call when no
+callback is present, and `prompt_async` plus the event stream when
+`onDelta` is present. The streaming path resolves from the final text
+part and the assistant message metadata, so callers get both live text
+chunks and the final usage payload.
 
 ## Event richness
 

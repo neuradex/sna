@@ -1033,6 +1033,194 @@ export class OpenCodeProvider implements AgentProvider {
     }
   }
 
+  private async completeViaStreamingSession(args: {
+    client: OpencodeClient;
+    sessionId: string;
+    cwd: string;
+    options: CompleteOptions;
+    model?: { providerID: string; modelID: string };
+    agent?: string;
+    system: string;
+    startTime: number;
+    timeout: number;
+  }): Promise<CompletionResult> {
+    const {
+      client,
+      sessionId,
+      cwd,
+      options,
+      model,
+      agent,
+      system,
+      startTime,
+      timeout,
+    } = args;
+
+    const eventCtrl = new AbortController();
+    const promptCtrl = new AbortController();
+    const partTypes = new Map<string, string>();
+    const finalTextParts = new Map<string, string>();
+    const streamedText: string[] = [];
+    let assistantInfo: any = null;
+    let promptSubmitted = false;
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const eventSessionId = (type: string, props: any): string | undefined => {
+      if (props.sessionID) return props.sessionID;
+      if (props.info?.sessionID) return props.info.sessionID;
+      if (props.info?.id && type.startsWith("session.")) return props.info.id;
+      if (props.part?.sessionID) return props.part.sessionID;
+      return undefined;
+    };
+
+    const finish = (
+      resolveOrReject: () => void,
+    ) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { eventCtrl.abort(); } catch { /* ignore */ }
+      try { promptCtrl.abort(); } catch { /* ignore */ }
+      void client.session.delete({
+        path: { id: sessionId },
+        query: { directory: cwd },
+      }).catch(() => { /* ignore */ });
+      resolveOrReject();
+    };
+
+    const toError = (err: unknown): Error =>
+      err instanceof Error ? err : new Error(String(err));
+
+    return new Promise<CompletionResult>((resolve, reject) => {
+      timer = setTimeout(() => {
+        finish(() => reject(new Error(`OpenCode complete timed out after ${timeout}ms`)));
+      }, timeout);
+
+      const emitDelta = (delta: string) => {
+        streamedText.push(delta);
+        try {
+          options.onDelta?.(delta);
+        } catch (err) {
+          finish(() => reject(toError(err)));
+        }
+      };
+
+      const resolveResult = () => {
+        const durationMs = Date.now() - startTime;
+        const tokens = assistantInfo?.tokens ?? {
+          input: 0,
+          output: 0,
+          cache: { read: 0, write: 0 },
+        };
+        const text = finalTextParts.size > 0
+          ? Array.from(finalTextParts.values()).join("")
+          : streamedText.join("");
+
+        finish(() =>
+          resolve({
+            text,
+            usage: {
+              inputTokens: tokens.input ?? 0,
+              outputTokens: tokens.output ?? 0,
+              cacheReadTokens: tokens.cache?.read ?? 0,
+              cacheCreationTokens: tokens.cache?.write ?? 0,
+            },
+            costUsd: assistantInfo?.cost ?? 0,
+            durationMs,
+            durationApiMs: durationMs,
+            model: assistantInfo?.modelID ?? options.model ?? "opencode",
+          }),
+        );
+      };
+
+      void (async () => {
+        try {
+          const subscription = await client.event.subscribe({ signal: eventCtrl.signal });
+
+          void (async () => {
+            try {
+              for await (const ev of subscription.stream as AsyncGenerator<{ type: string; properties?: any }>) {
+                if (settled || eventCtrl.signal.aborted) break;
+                const props = ev.properties ?? {};
+                const scopedSessionId = eventSessionId(ev.type, props);
+                if (scopedSessionId && scopedSessionId !== sessionId) continue;
+
+                if (ev.type === "message.part.updated") {
+                  const part = props.part;
+                  if (!part) continue;
+                  if (part.id && part.type) partTypes.set(part.id, part.type);
+                  if (part.type === "text" && part.time?.end != null) {
+                    finalTextParts.set(part.id, part.text ?? "");
+                  }
+                  if (part.type === "text" && typeof part.delta === "string" && part.delta.length > 0) {
+                    emitDelta(part.delta);
+                  }
+                  continue;
+                }
+
+                if (ev.type === "message.part.delta") {
+                  const delta = typeof props.delta === "string" ? props.delta : "";
+                  if (!delta) continue;
+                  const field = props.field ?? "text";
+                  const partType = (props.partID && partTypes.get(props.partID)) ?? field;
+                  if (partType === "text" && field === "text") {
+                    emitDelta(delta);
+                  }
+                  continue;
+                }
+
+                if (ev.type === "message.updated") {
+                  const info = props.info;
+                  if (info?.role === "assistant") assistantInfo = info;
+                  continue;
+                }
+
+                if (ev.type === "session.error") {
+                  const errInfo = props.error ?? {};
+                  finish(() =>
+                    reject(new Error(errInfo.data?.message ?? errInfo.name ?? "OpenCode session error")),
+                  );
+                  continue;
+                }
+
+                if (ev.type === "session.idle" && promptSubmitted) {
+                  resolveResult();
+                }
+              }
+            } catch (err) {
+              if (settled || eventCtrl.signal.aborted) return;
+              finish(() => reject(toError(err)));
+            }
+          })();
+
+          promptSubmitted = true;
+          const result = await client.session.promptAsync({
+            path: { id: sessionId },
+            query: { directory: cwd },
+            signal: promptCtrl.signal,
+            body: {
+              parts: [{ type: "text", text: options.prompt }],
+              ...(model ? { model } : {}),
+              ...(agent ? { agent } : {}),
+              ...(system ? { system } : {}),
+            },
+          });
+          if (result?.error) {
+            finish(() =>
+              reject(new Error(
+                `OpenCode session.promptAsync failed: ${JSON.stringify(result.error).slice(0, 300)}`,
+              )),
+            );
+          }
+        } catch (err) {
+          if (settled || eventCtrl.signal.aborted) return;
+          finish(() => reject(toError(err)));
+        }
+      })();
+    });
+  }
+
   async complete(options: CompleteOptions): Promise<CompletionResult> {
     const cwd = options.cwd ?? process.cwd();
     const externalUrl = options.providerOptions?.serverUrl as string | undefined;
@@ -1095,6 +1283,20 @@ export class OpenCodeProvider implements AgentProvider {
       const system = [options.systemPrompt, options.appendSystemPrompt]
         .filter((s): s is string => typeof s === "string" && s.length > 0)
         .join("\n\n");
+
+      if (typeof options.onDelta === "function") {
+        return await this.completeViaStreamingSession({
+          client,
+          sessionId,
+          cwd,
+          options,
+          model,
+          agent,
+          system,
+          startTime,
+          timeout: overallTimeout,
+        });
+      }
 
       // Wrap the prompt call in a manual timeout so we don't hang on a
       // network stall — the SDK propagates fetch's signal.
