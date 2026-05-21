@@ -46,7 +46,7 @@ Claude Code、Grok Build、Cursor は呼び出しまたはセッション単位�
 | `kill()` / `closeThread()` | ✓ | ✓ (プール refcount 認識) | ✓ (プール refcount 認識) | ✓ | ✓ |
 | `complete(opts)` one-shot | ✓ | ✓ | ✓ | ✓ (`grok -p`) | ✓ (`agent -p`) |
 | `complete()` `onDelta` ストリーミング | ✓ stream-json | ✓ `item/agentMessage/delta` | ✓ `prompt_async` SSE テキスト delta | ✓ streaming-json text イベント | ✓ stream-json `assistant` チャンク (`model_call_id` なし) |
-| `listModels()` | ✓ static + oMLX API | ✓ `codex debug models` プローブ + static fallback | ✓ `opencode` CLI プローブ | ✓ static (単一: `grok-build`) | ✓ `agent models` テキストパース + static fallback |
+| `listModels()` | ✓ static catalog | ✓ `codex debug models` プローブ + static fallback | ✓ `opencode` CLI プローブ | ✓ static (単一: `grok-build`) | ✓ `agent models` テキストパース + static fallback |
 
 OpenCode の `complete()` には 2 つの経路があります。コールバックが
 ない場合はオーバーヘッドの小さい同期 SDK 呼び出しを使い、`onDelta`
@@ -133,6 +133,14 @@ Claude Code の権限モデルは out-of-band です。SNA が hook スクリプ
 
 ### `providerOptions` (ランタイムごとの escape hatch)
 
+SNA は、すべてのランタイムが同じ意味で扱える値だけをランタイム中立
+フィールドへ昇格します。API endpoint override はその条件を満たしません。
+Codex は native の `-c model_providers.*` 設定で OpenAI-compatible gateway
+を指せますが、Claude Code は Anthropic 固有の環境変数を使い、OpenCode は
+独自の設定ファイルを使い、Cursor には現時点で SNA がサポートする base
+URL override がありません。擬似的な共通 `apiBaseUrl` ではなく、各ランタイムの
+native escape hatch を使ってください。
+
 | キー | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
 | `settings` | ✓ `--settings` JSON にマージ | ✓ `hooks.PreToolUse` のみ反映 | — | — | — |
@@ -140,10 +148,9 @@ Claude Code の権限モデルは out-of-band です。SNA が hook スクリプ
 | `strictMcpConfig` | ✓ `--strict-mcp-config` | — | — | — | — |
 | `maxTurns` | ✓ `--max-turns` | — | — | — | — |
 | `disableSlashCommands` | ✓ `--disable-slash-commands` | — | — | — | — |
-| `omlxBaseUrl` | ✓ `ANTHROPIC_BASE_URL` をルーティング | — | — | — | — |
 | `serviceTier` | ✗ 誤課金 (`/fast` はモデルであって tier ではない) | ✓ `priority` / `flex` / `batch` | — | — | — |
 | `profile` | — | ✓ `codex app-server` と `codex exec` に `--profile` として渡す。runtime pool も分離 | — | — | — |
-| `config` (`-c key=value`) | — | ✓ `codex app-server` と `codex exec` に渡す。`config` object は pool key にも含まれる | — | — | — |
+| `config` (`-c key=value`) | — | ✓ `codex app-server` と `codex exec` に渡す。OpenRouter やローカルモデルサーバーなどの OpenAI-compatible gateway はこの経路を使う | — | — | — |
 | `hooksHash` / `configHash` | — | ✓ 生成された hooks/config 用の手動 runtime pool 分離 key | — | — | — |
 | `serverUrl` | — | — | ✓ spawn を飛ばして既存デーモンに attach | — | — |
 | `modelProviderId` | — | — | ✓ `{providerID, modelID}` の provider 半分 | — | — |

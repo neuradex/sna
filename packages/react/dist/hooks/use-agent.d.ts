@@ -10,7 +10,18 @@ interface UseAgentOptions {
     provider?: string;
     /** Permission mode for the agent */
     permissionMode?: string;
-    /** Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`). */
+    /**
+     * Reasoning effort 0..5 (lightest → heaviest), passed to `start()` and
+     * `completion()` so the underlying provider sets `--effort` (Claude) or
+     * `model_reasoning_effort` (Codex) accordingly. Omit to inherit the
+     * provider's own default.
+     */
+    reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
+    /**
+     * Provider-specific options passed through to the selected runtime.
+     * Codex-only knobs include `serviceTier` ("priority" / "flex" / "batch" —
+     * the `/fast` slash-command equivalent).
+     */
     providerOptions?: Record<string, unknown>;
     onEvent?: (e: AgentEvent) => void;
     onThinking?: (e: AgentEvent) => void;
@@ -36,6 +47,9 @@ declare function useAgent(options?: UseAgentOptions): {
         prompt: string;
         model?: string;
         systemPrompt?: string;
+        /** Reasoning effort 0..5. Falls back to the hook-level reasoningLevel. */
+        reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
+        /** Provider-specific options. Codex: `serviceTier` for `/fast` lane. */
         providerOptions?: Record<string, unknown>;
     }) => Promise<any>;
 };

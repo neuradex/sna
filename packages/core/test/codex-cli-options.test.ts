@@ -1,6 +1,6 @@
 import { after, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { CodexProvider } from "../src/core/providers/codex.js";
+import { buildCodexGlobalArgs, CodexProvider } from "../src/core/providers/codex.js";
 import { getRuntimePool } from "../src/core/providers/runtime.js";
 import { startMockCodexAppServer, type MockCodexServer } from "./mock-codex-app-server.js";
 
@@ -38,6 +38,31 @@ describe("Codex CLI provider options", () => {
   beforeEach(() => {
     getRuntimePool().dispose();
     mock.reset();
+  });
+
+  it("passes OpenAI-compatible gateway config as Codex dotted overrides", () => {
+    const args = buildCodexGlobalArgs({
+      config: {
+        model_provider: "openrouter",
+        "model_providers.openrouter.name": "OpenRouter",
+        "model_providers.openrouter.base_url": "https://openrouter.ai/api/v1",
+        "model_providers.openrouter.env_key": "OPENROUTER_API_KEY",
+        "model_providers.openrouter.wire_api": "responses",
+      },
+    });
+
+    assert.deepEqual(args, [
+      "-c",
+      "model_provider=openrouter",
+      "-c",
+      "model_providers.openrouter.name=OpenRouter",
+      "-c",
+      "model_providers.openrouter.base_url=https://openrouter.ai/api/v1",
+      "-c",
+      "model_providers.openrouter.env_key=OPENROUTER_API_KEY",
+      "-c",
+      "model_providers.openrouter.wire_api=responses",
+    ]);
   });
 
   it("passes Codex profile and config overrides to app-server startup", async () => {

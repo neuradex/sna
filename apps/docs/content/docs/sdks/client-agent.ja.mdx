@@ -26,7 +26,7 @@ await client.agent.start(session: string, config?: AgentStartConfig): Promise<{
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `session` | `string` | yes | 対象の SNA session ID。存在しない場合は server が自動作成します。 |
-| `config.provider` | `string` | no | `claude-code`、`codex`、`opencode`、`omlx` などの runtime id。 |
+| `config.provider` | `string` | no | `claude-code`、`codex`、`opencode`、`grok`、`cursor` などの runtime id。 |
 | `config.modelProvider` | `string` | no | モデルベンダのアトリビューション metadata。assistant が書いた canonical row に保存されます。 |
 | `config.prompt` | `string` | no | 起動直後に送る初期 prompt。 |
 | `config.model` | `string` | no | ランタイムの model slug。 |
@@ -378,10 +378,8 @@ await client.agent.listModels(runtime: string, config?: ListModelsConfig): Promi
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `runtime` | `string` | 調べるランタイム。例: `claude-code`、`codex`、`opencode`、`omlx`。 |
+| `runtime` | `string` | 調べるランタイム。例: `claude-code`、`codex`、`opencode`、`grok`、`cursor`。 |
 | `config.cliPath` | `string` | ランタイム CLI path override。 |
-| `config.baseUrl` | `string` | OMLX-style ランタイムの API base URL。 |
-| `config.apiKey` | `string` | OMLX-style ランタイムの API key。 |
 | `config.refresh` | `boolean` | cache を使わず再取得します。 |
 
 **Returns**
@@ -406,10 +404,7 @@ type ListModelsResult = {
 **Example**
 
 ```ts
-const catalog = await client.agent.listModels("omlx", {
-  baseUrl: "http://localhost:11434",
-  refresh: true,
-});
+const catalog = await client.agent.listModels("opencode", { refresh: true });
 if (catalog.error) console.warn(catalog.error);
 ```
 

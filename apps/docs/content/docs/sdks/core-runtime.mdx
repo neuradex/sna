@@ -47,6 +47,42 @@ Common options include `message`, `provider`, `model`, `permissionMode`, `cwd`, 
 
 When `provider: "codex"` is selected, `providerOptions.profile` is passed to both `codex app-server` and `codex exec` as `--profile <name>`. `providerOptions.config` is a record of Codex `-c key=value` overrides; SNA passes those overrides to both runtime paths and includes the object in the runtime-pool key so sessions with different Codex config do not share the same daemon. `providerOptions.serviceTier` remains the request-priority lane (`"priority"`, `"flex"`, or `"batch"`).
 
+#### OpenRouter or local OpenAI-compatible endpoints
+
+Use the Codex runtime for OpenAI-compatible gateways. SNA does not expose a
+runtime-neutral `apiBaseUrl`, because the supported endpoint override surface
+differs by runtime. Codex already has a native model-provider configuration
+surface, so SNA forwards it through `providerOptions.config`.
+
+The endpoint must match the wire API supported by your installed Codex CLI.
+Codex `0.132.0` expects `wire_api = "responses"` for custom providers; a
+legacy chat-completions-only endpoint is not enough for this path.
+
+```ts
+process.env.OPENROUTER_API_KEY = "...";
+
+await completion({
+  provider: "codex",
+  model: "openrouter/model-id",
+  prompt: "Implement the requested change.",
+  providerOptions: {
+    config: {
+      model_provider: "openrouter",
+      "model_providers.openrouter.name": "OpenRouter",
+      "model_providers.openrouter.base_url": "https://openrouter.ai/api/v1",
+      "model_providers.openrouter.env_key": "OPENROUTER_API_KEY",
+      "model_providers.openrouter.wire_api": "responses",
+    },
+  },
+});
+```
+
+For a local model server, keep the same shape and replace the provider id,
+`base_url`, `env_key`, and `model` with values accepted by that server. Do
+not route OpenRouter or local OpenAI-compatible servers through Claude Code's
+Anthropic environment variables; that bypasses the Codex harness SNA is meant
+to preserve.
+
 ### `getRuntimePool()`
 
 Returns the shared runtime pool used by the process. Use this when multiple call sites should reuse the same runtime process management instead of creating independent pools.

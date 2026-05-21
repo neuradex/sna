@@ -2372,12 +2372,6 @@
                       "cliPath": {
                         "type": "string"
                       },
-                      "baseUrl": {
-                        "type": "string"
-                      },
-                      "apiKey": {
-                        "type": "string"
-                      },
                       "refresh": {
                         "type": "boolean"
                       }

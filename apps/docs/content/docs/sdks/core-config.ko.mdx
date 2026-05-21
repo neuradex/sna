@@ -24,7 +24,6 @@ Configuration은 다음 순서로 결정됩니다.
 | `SNA_DB_PATH` | 명시적인 SQLite database path. 기본값은 `data/sna.db`입니다. |
 | `SNA_DATA_DIR` | image 같은 SNA data를 저장할 directory. 기본값은 `<cwd>/data`입니다. |
 | `SNA_PERMISSION_TIMEOUT_MS` | Permission prompt timeout(ms). `0`이면 host app이 응답을 책임집니다. |
-| `SNA_OMLX_BASE_URL` | local model inference에 사용할 oMLX-compatible base URL. |
 
 ## 기본값
 
@@ -66,4 +65,4 @@ runtime override를 지우고 configuration resolution을 default plus environme
 
 SNA configuration의 typed shape입니다. Host-level settings UI를 만들거나 configuration object를 검증할 때 이 타입을 우선 사용하십시오.
 
-`langfuse`, `apiProxyPort`, `omlxBaseUrl`은 optional입니다. Host가 tracing 또는 local inference를 명시적으로 설정할 때만 활성화됩니다.
+`langfuse`와 `apiProxyPort`는 optional입니다. Host가 tracing 또는 debug proxy capture를 명시적으로 설정할 때만 활성화됩니다.

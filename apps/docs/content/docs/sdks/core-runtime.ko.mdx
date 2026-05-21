@@ -47,6 +47,42 @@ runtime을 통해 하나의 agent task를 끝까지 실행하고 최종 결과�
 
 `provider: "codex"`를 선택하면 `providerOptions.profile`은 `codex app-server`와 `codex exec` 양쪽에 `--profile <name>`으로 전달됩니다. `providerOptions.config`는 Codex의 `-c key=value` override 목록입니다. SNA는 이 override를 두 실행 경로에 모두 전달하고 runtime pool key에도 포함하므로, Codex 설정이 다른 세션이 같은 데몬을 공유하지 않습니다. `providerOptions.serviceTier`는 기존처럼 요청 우선순위 레인(`"priority"`, `"flex"`, `"batch"`)을 지정합니다.
 
+#### OpenRouter 또는 로컬 OpenAI-compatible endpoint
+
+OpenAI-compatible gateway는 Codex runtime으로 연결하십시오. SNA는 런타임
+중립 `apiBaseUrl`을 제공하지 않습니다. Endpoint override가 런타임마다
+지원되는 방식이 다르기 때문입니다. Codex에는 이미 네이티브 model-provider
+설정 표면이 있고, SNA는 그 값을 `providerOptions.config`를 통해 그대로
+전달합니다.
+
+Endpoint는 설치된 Codex CLI가 지원하는 wire API와 맞아야 합니다. Codex
+`0.132.0` 기준 custom provider는 `wire_api = "responses"`를 기대합니다.
+Legacy chat-completions-only endpoint만으로는 이 경로를 사용할 수 없습니다.
+
+```ts
+process.env.OPENROUTER_API_KEY = "...";
+
+await completion({
+  provider: "codex",
+  model: "openrouter/model-id",
+  prompt: "요청된 변경을 구현해줘.",
+  providerOptions: {
+    config: {
+      model_provider: "openrouter",
+      "model_providers.openrouter.name": "OpenRouter",
+      "model_providers.openrouter.base_url": "https://openrouter.ai/api/v1",
+      "model_providers.openrouter.env_key": "OPENROUTER_API_KEY",
+      "model_providers.openrouter.wire_api": "responses",
+    },
+  },
+});
+```
+
+로컬 모델 서버도 같은 형태를 사용하고, provider id, `base_url`, `env_key`,
+`model`만 해당 서버가 받는 값으로 바꾸면 됩니다. OpenRouter나 로컬
+OpenAI-compatible server를 Claude Code의 Anthropic 환경 변수로 우회하지
+마십시오. 그렇게 하면 SNA가 보존하려는 Codex harness를 쓰지 못합니다.
+
 ### `getRuntimePool()`
 
 현재 process가 사용하는 shared runtime pool을 반환합니다. 여러 call site가 독립 pool을 만들지 않고 같은 runtime process management를 재사용해야 할 때 사용합니다.

@@ -1,18 +1,18 @@
-# SNA — Claude Code, Codex & OpenCode as a Backend Runtime
+# SNA — Agentic CLI Runtimes as a Backend Runtime
 
-**An HTTP/WebSocket server that wraps Claude Code, Codex, and OpenCode as background processes, so consumer apps can use them as a backend runtime.**
+**An HTTP/WebSocket server that wraps Claude Code, Codex, OpenCode, Grok Build, and Cursor as background processes, so consumer apps can use them as a backend runtime.**
 
 ```
-Your app → @sna-sdk/client → SNA server → spawn(claude-code | codex | opencode) → events back over WS
+Your app → @sna-sdk/client → SNA server → spawn(agentic CLI runtime) → events back over WS
 ```
 
-The SDK normalizes all three runtimes into a single API surface: one canonical conversation model, one event protocol, one permission flow, one set of runtime controls. Consumer apps don't need to know which agent is running underneath, and a session can switch providers mid-conversation without losing context.
+The SDK normalizes those runtimes into a single API surface: one canonical conversation model, one event protocol, one permission flow, one set of runtime controls. Consumer apps don't need to know which agent is running underneath, and a session can switch runtimes mid-conversation without losing context.
 
 ## Packages
 
 | Package | npm name | Role |
 |---------|----------|------|
-| `packages/core` | `@sna-sdk/core` | HTTP/WS server, session manager, providers (Claude Code, Codex, OpenCode), canonical history, SQLite, launchers |
+| `packages/core` | `@sna-sdk/core` | HTTP/WS server, session manager, runtime adapters, canonical history, SQLite, launchers |
 | `packages/client` | `@sna-sdk/client` | TypeScript client. Dual transport (HTTP for ordering, WS for push). Framework-agnostic. |
 | `packages/react` | `@sna-sdk/react` | React bindings — hooks (`useAgent`, `useSessionManager`, `useResponsiveChat`) and a drop-in chat UI |
 | `packages/testing` | `@sna-sdk/testing` | Mock Anthropic Messages API + `sna-test` CLI for running Claude Code in an isolated test env |
@@ -34,7 +34,7 @@ https://github.com/neuradex/sna/issues
 
 ## What the SDK gives you
 
-- **Multi-session agents.** `POST /agent/sessions` creates a session record; `POST /agent/start?session=<id>` spawns the Claude Code, Codex, or OpenCode subprocess for it. Call them again with a new id and you get another. Each session has its own cwd, meta, event buffer, lifecycle, and a `runtimeChain` of `RuntimeSession` rows recording every config mutation.
+- **Multi-session agents.** `POST /agent/sessions` creates a session record; `POST /agent/start?session=<id>` spawns the selected runtime subprocess for it. Call them again with a new id and you get another. Each session has its own cwd, meta, event buffer, lifecycle, and a `runtimeChain` of `RuntimeSession` rows recording every config mutation.
 - **Canonical conversation model.** Messages are stored as flat blocks with two orthogonal axes: `actor` (`user`/`assistant`/`system`) and `kind` (`text`/`thinking`/`tool_use`/`tool_result`/`status`/`error`). Binaries live in an `embeds` JSON keyed by id; content text holds inline `![](embed://<id>)` refs. Provider-native formats (Anthropic content arrays, Codex ResponseItems) are derived on demand.
 - **3-layer attribution.** `provider` (runtime: claude-code / codex), `modelProvider` (vendor: anthropic / openai / google), `model` (slug). Lets you swap runtimes or models mid-session and keep accurate per-row attribution.
 - **Real-time events over WebSocket.** 15 normalized event types: `init`, `thinking` / `thinking_delta`, `text_delta`, `assistant` / `assistant_delta`, `tool_use` / `tool_use_delta`, `tool_result`, `permission_needed`, `milestone`, `user_message`, `interrupted`, `error`, `complete`. The `_delta` events stream tokens for ChatGPT-style UIs.
@@ -43,7 +43,7 @@ https://github.com/neuradex/sna/issues
 - **One-shot completion.** `completion()` skips session management for short single-prompt jobs (e.g. naming a chat). Returns `{ text, usage, costUsd, durationMs, model }`. Opportunistically reuses a pooled daemon if one is already alive for the cwd, so high-frequency autocomplete-style callers don't pay per-call cold-start. Pass `onDelta` for typewriter-style streaming.
 - **Streaming one-shot runs.** `runOnce()` exposes the full agent pipeline (tool calls, thinking, permissions) for a temp session. In-process callers can pass `onDelta` / `onEvent` callbacks; network callers can subscribe to `POST /agent/run-once/stream` (SSE), wrapped client-side as `client.agent.runOnceStream(opts)` returning `AsyncIterable<AgentEvent>`.
 - **Reasoning effort knob.** A provider-agnostic `reasoningLevel: 0..5` flows to Claude Code's `--effort` and Codex's `model_reasoning_effort` / `turn/start.effort`. Set 0 for autocomplete-grade latency, 5 for deep thinking.
-- **Codex runtime knobs.** `providerOptions.serviceTier` mirrors Codex's `/fast` slash command (values: `"priority"`, `"flex"`, `"batch"`), `providerOptions.profile` maps to `--profile`, and `providerOptions.config` maps to repeatable `-c key=value` overrides. Codex-only on purpose — Claude's `/fast` is a different MODEL variant with its own billing pool, so it's not auto-translated.
+- **Codex runtime knobs.** `providerOptions.serviceTier` mirrors Codex's `/fast` slash command (values: `"priority"`, `"flex"`, `"batch"`), `providerOptions.profile` maps to `--profile`, and `providerOptions.config` maps to repeatable `-c key=value` overrides. Use `providerOptions.config` for OpenAI-compatible gateways such as OpenRouter or local model servers by configuring Codex's native `model_providers.*` settings. Codex-only on purpose — Claude's `/fast` is a different MODEL variant with its own billing pool, so it's not auto-translated.
 - **Hooks / MCP / policy abstraction.** Define hooks, MCP servers, allowed/disallowed tools once; per-provider adapters apply them. Mid-session provider switches keep the same configuration.
 - **Embedded launcher.** `startSnaServer({ port, dbPath, ... })` from `@sna-sdk/core/electron` or `@sna-sdk/core/node` forks the standalone server, resolves native bindings (asar-aware), and waits for ready.
 
