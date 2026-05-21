@@ -65,6 +65,11 @@ rl.on("line", (line) => {
   }
 
   if (msg.method === "session/prompt") {
+    if (mode.includes("assistant-only")) {
+      notify({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hel" } });
+      notify({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "lo" } });
+    }
+
     if (mode.includes("updates")) {
       notify({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "plan" } });
       notify({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hel" } });
@@ -228,6 +233,27 @@ describe("ACP shared adapter base", () => {
     assert.ok(events.some((event) => event.type === "tool_use" && event.data?.toolName === "Read" && (event.data as any).fromUpdate === true));
     assert.ok(events.some((event) => event.type === "tool_result" && event.data?.status === "completed" && event.data?.rawOutput === "ok"));
     assert.ok(events.some((event) => event.type === "complete" && event.data?.stopReason === "end_turn"));
+  });
+
+  it("assistant-only ACP updates emit no tool lifecycle events", async () => {
+    const { proc } = await startProcess({ cwd: process.cwd() }, "assistant-only");
+    const events: AgentEvent[] = [];
+    proc.on("event", (event) => events.push(event));
+
+    proc.send("plain assistant reply");
+    await waitFor(() => events.some((event) => event.type === "complete"));
+
+    assert.deepEqual(
+      events.filter((event) => event.type === "assistant_delta").map((event) => event.delta),
+      ["Hel", "lo"],
+    );
+    assert.ok(events.some((event) => event.type === "assistant" && event.message === "Hello"));
+    assert.ok(events.some((event) => event.type === "complete"));
+    assert.deepEqual(
+      events.filter((event) => event.type === "tool_use" || event.type === "tool_use_delta" || event.type === "tool_result"),
+      [],
+      "assistant-only ACP turns must not surface fake tool events",
+    );
   });
 
   it("surfaces unknown ACP tool-like updates as generic tool events", async () => {
