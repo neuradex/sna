@@ -3,6 +3,7 @@
   "description": "OpenAPI からレンダリングした HTTP エンドポイントリファレンスです。",
   "icon": "Route",
   "pages": [
+    "index",
     "---システム---",
     "health/get",
     "api/sna-port/get",

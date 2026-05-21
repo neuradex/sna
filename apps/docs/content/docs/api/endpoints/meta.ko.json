@@ -3,6 +3,7 @@
   "description": "OpenAPI에서 렌더링한 HTTP 엔드포인트 레퍼런스입니다.",
   "icon": "Route",
   "pages": [
+    "index",
     "---시스템---",
     "health/get",
     "api/sna-port/get",

@@ -167,6 +167,42 @@ describe("HTTP API Routes", () => {
     });
   });
 
+  describe("OpenAPI auth contract", () => {
+    function getDocument(targetApp = app) {
+      return targetApp.getOpenAPIDocument({
+        openapi: "3.1.0",
+        info: { title: "SNA SDK API", version: "0.0.0" },
+      }) as any;
+    }
+
+    it("documents bearer auth while keeping health public", async () => {
+      const { createSnaApp } = await import("../src/server/index.js");
+      const documentedApp = await createSnaApp({ authToken: TEST_TOKEN, allowedOrigins: [ALLOWED_ORIGIN] });
+      const document = getDocument(documentedApp);
+
+      assert.deepEqual(document.components?.securitySchemes?.bearerAuth, {
+        type: "http",
+        scheme: "bearer",
+        bearerFormat: "SNA auth token",
+      });
+      assert.deepEqual(document.security, [{ bearerAuth: [] }]);
+      assert.deepEqual(document.paths["/health"].get.security, []);
+      assert.deepEqual(document.paths["/agent/sessions"].get.security, [{ bearerAuth: [] }]);
+      assert.equal(document.paths["/agent/sessions"].get.responses["401"].description, "Authentication required.");
+      assert.equal(document.paths["/agent/sessions"].get.responses["403"].description, "Origin not allowed.");
+      assert.ok(document.paths["/agent/sessions"].get.responses["401"].content["application/json"].schema);
+    });
+
+    it("can generate the documented auth contract with runtime auth disabled for tooling", async () => {
+      const { createSnaApp } = await import("../src/server/index.js");
+      const docsApp = await createSnaApp({ unsafeDisableAuth: true });
+      const document = getDocument(docsApp);
+
+      assert.deepEqual(document.security, [{ bearerAuth: [] }]);
+      assert.deepEqual(document.paths["/agent/sessions"].get.security, [{ bearerAuth: [] }]);
+    });
+  });
+
   describe("Session CRUD", () => {
     it("POST /agent/sessions creates session", async () => {
       const res = await req("POST", "/agent/sessions", { label: "Test", cwd: "/tmp", meta: { app: "test" } });
