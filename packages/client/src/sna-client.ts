@@ -693,7 +693,7 @@ export interface CompletionOptions {
    */
   reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
   /**
-   * Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`).
+   * Provider-specific options passed through to the selected runtime.
    *
    * Codex-only knobs include:
    *   serviceTier?: string  — mirrors Codex `/fast` slash command. Common
@@ -748,14 +748,13 @@ export interface RunOnceResult {
 
 /**
  * Caller-supplied config for `agent.listModels`. Most fields are runtime-
- * specific. Pass an empty object (or omit) for the static-catalog case
- * (claude-code, codex). Pass `baseUrl` + `apiKey` for oMLX. Pass `cliPath` to
- * override the opencode binary lookup. Set `refresh: true` to bypass cache.
+ * specific. Pass an empty object (or omit) for static catalogs such as
+ * claude-code. `cliPath` only affects model listing for runtimes that inspect
+ * their CLI; use launcher `runtimePaths` for agent spawn paths. Set
+ * `refresh: true` to bypass provider caches.
  */
 export interface ListModelsConfig {
   cliPath?: string;
-  baseUrl?: string;
-  apiKey?: string;
   refresh?: boolean;
 }
 
@@ -787,8 +786,8 @@ export interface ListModelsResult {
   source: "static" | "api" | "cli" | "mixed";
   fetchedAt: number;
   /**
-   * Set when the call could not fully populate the list — e.g. opencode CLI
-   * not installed, oMLX server unreachable. `models` may still be a partial
+   * Set when the call could not fully populate the list — e.g. OpenCode CLI
+   * not installed or provider probing failed. `models` may still be a partial
    * fallback the caller can use.
    */
   error?: string;
@@ -1523,16 +1522,12 @@ class AgentApi {
    *
    * Use cases:
    *   - Settings UI populating a "registered models" picker
-   *   - Validating that a configured oMLX server is reachable and serves
-   *     the expected models
    *   - Refreshing the catalog after the user edits opencode.json
    *
    * Per-runtime behavior:
    *   - "claude-code": static curated catalog of Anthropic aliases + IDs
    *   - "codex":       static curated catalog of GPT-5 family
    *   - "opencode":    parses `opencode models` CLI output (5min cache)
-   *   - "omlx":        fetches `{baseUrl}/v1/models` (1min cache).
-   *                    Pass `config.baseUrl` and optional `config.apiKey`.
    *
    * The result `error` field is populated on partial failure (CLI missing,
    * server unreachable) — `models` may still contain a fallback and is safe

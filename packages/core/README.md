@@ -1,9 +1,9 @@
 # @sna-sdk/core
 
-HTTP/WebSocket server that wraps Claude Code, Codex, and OpenCode as backend processes, plus the launcher API for embedding it inside another app.
+HTTP/WebSocket server that wraps agentic CLI runtimes as backend processes, plus the launcher API for embedding it inside another app.
 
 ```
-Your app → SNA server → spawn(claude-code | codex | opencode) → events back over WS
+Your app → SNA server → spawn(agentic CLI runtime) → events back over WS
 ```
 
 ## What's inside
@@ -11,11 +11,11 @@ Your app → SNA server → spawn(claude-code | codex | opencode) → events bac
 - **HTTP server (`createSnaApp`)** — Hono app (built on `@hono/zod-openapi`) with `/agent/*`, `/chat/*`, `/health` routes. Single source of truth for response shapes via `server/api-types.ts`. Live OpenAPI 3.1 spec published at `/openapi.json`, with Swagger UI at `/docs` and a plain-text viewer at `/spec`.
 - **WebSocket handler (`attachWebSocket`)** — Mounts at `/ws`. Wraps the full HTTP API plus push channels (`agent.event`, `sessions.snapshot`, `permission.request`, `session.lifecycle`, `session.state-changed`, `session.config-changed`).
 - **`SessionManager`** — Multi-session lifecycle, per-session event buffer, lifecycle/state/config pub/sub, permission-request bridging, `runtime_sessions` chain for per-mutation history.
-- **Providers** — `ClaudeCodeProvider`, `CodexProvider`, and `OpenCodeProvider`, all exposing a uniform `AgentProcess` interface (`send`, `setModel`, `setPermissionMode`, `interrupt`, `kill`, `applyPatch`, `respondToPermission`). Codex and OpenCode are pooled through `RuntimePool`; Claude Code is stateless per-session.
+- **Providers** — `ClaudeCodeProvider`, `CodexProvider`, `OpenCodeProvider`, `GrokProvider`, and `CursorProvider`, all exposing a uniform `AgentProcess` interface (`send`, `setModel`, `setPermissionMode`, `interrupt`, `kill`, `applyPatch`, `respondToPermission`). Codex and OpenCode are pooled through `RuntimePool`; the others are stateless per-session.
 - **Canonical conversation model** — `chat_messages` rows split a message into orthogonal `actor` × `kind` axes. `history/canonical.ts` rebuilds blocks; `history/{claude-code,codex,opencode}.ts` adapters convert canonical → native wire format.
 - **One-shot completion** — `completion({ prompt, model?, provider?, reasoningLevel? })` for short single-prompt jobs. Each provider implements its own optimal one-shot path (Codex `exec --ephemeral` or pooled thread; Claude `-p`; OpenCode pooled session or ephemeral serve). Opportunistically reuses a pooled daemon when one is already alive for the cwd, so high-frequency callers (autocomplete, etc.) don't pay per-call cold-start.
-- **Cross-provider latency and Codex config knobs** — `reasoningLevel: 0..5` (Claude `--effort` / Codex `model_reasoning_effort`), Codex-only `providerOptions.serviceTier` (mirrors Codex `/fast`: `"priority"`, `"flex"`, `"batch"`), `providerOptions.profile` (`--profile`), and `providerOptions.config` (repeatable `-c key=value` overrides).
-- **Launcher API** — `startSnaServer({ port, dbPath, ... })` from `@sna-sdk/core/node` or `@sna-sdk/core/electron`. Forks the standalone server, resolves native bindings, waits for ready.
+- **Cross-runtime latency and Codex config knobs** — `reasoningLevel: 0..5` (mapped per runtime), Codex-only `providerOptions.serviceTier` (mirrors Codex `/fast`: `"priority"`, `"flex"`, `"batch"`), `providerOptions.profile` (`--profile`), and `providerOptions.config` (repeatable `-c key=value` overrides, including Codex `model_providers.*` entries for OpenAI-compatible gateways such as OpenRouter or local model servers).
+- **Launcher API** — `startSnaServer({ port, dbPath, runtimePaths, ... })` from `@sna-sdk/core/node` or `@sna-sdk/core/electron`. Forks the standalone server, resolves native bindings, registers runtime CLI paths, waits for ready.
 - **PreToolUse hook** — `scripts/hook.ts`, auto-injected by `ClaudeCodeProvider.spawn()`. No manual `.claude/settings.json` editing needed.
 
 ## Install
@@ -37,6 +37,9 @@ const sna = await startSnaServer({
   port: 3099,
   dbPath: "./data/sna.db",
   maxSessions: 20,
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+  },
 });
 ```
 
@@ -83,6 +86,30 @@ await completion({
   },
 });
 ```
+
+For OpenRouter or a local OpenAI-compatible endpoint, keep the Codex
+runtime and pass Codex's native provider config through
+`providerOptions.config`:
+
+```ts
+await completion({
+  prompt: "Implement this change.",
+  provider: "codex",
+  model: "openrouter/model-id",
+  providerOptions: {
+    config: {
+      model_provider: "openrouter",
+      "model_providers.openrouter.name": "OpenRouter",
+      "model_providers.openrouter.base_url": "https://openrouter.ai/api/v1",
+      "model_providers.openrouter.env_key": "OPENROUTER_API_KEY",
+      "model_providers.openrouter.wire_api": "responses",
+    },
+  },
+});
+```
+
+Do not route OpenAI-compatible gateways through Claude Code's Anthropic
+environment variables; that bypasses the Codex harness SNA is preserving.
 
 Streaming UX with the same call — pass `onDelta` to receive text chunks
 as the provider produces them. The Promise still resolves to the full
@@ -152,6 +179,13 @@ const db = getDb();
 | `SNA_PERMISSION_TIMEOUT_MS` | Auto-deny after N ms (0 = app controls) |
 | `SNA_SQLITE_NATIVE_BINDING` | Absolute path to `better_sqlite3.node` (Electron packaged apps) |
 | `SNA_CLAUDE_COMMAND` | Override the Claude binary |
+| `SNA_CODEX_COMMAND` | Override the Codex binary |
+| `SNA_OPENCODE_COMMAND` | Override the OpenCode binary |
+| `SNA_GROK_COMMAND` | Override the Grok binary |
+| `SNA_CURSOR_COMMAND` | Override the Cursor headless agent binary |
+
+When launching SNA through `@sna-sdk/core/node` or `@sna-sdk/core/electron`,
+prefer `startSnaServer({ runtimePaths })` over setting these variables by hand.
 
 ## Documentation
 

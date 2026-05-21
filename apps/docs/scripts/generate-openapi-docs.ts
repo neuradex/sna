@@ -22,7 +22,7 @@ const endpoints: Endpoint[] = [
   e('post', '/agent/sessions', 'agent/sessions/post', ['Create a session', '세션 생성', 'セッション作成'], ['Create an agent session record without starting a process.', '프로세스를 시작하지 않고 에이전트 세션 레코드를 생성합니다.', 'プロセスを開始せずにエージェントセッションレコードを作成します。']),
   e('get', '/agent/sessions', 'agent/sessions/get', ['List sessions', '세션 목록 조회', 'セッション一覧取得'], ['List agent sessions.', '에이전트 세션 목록을 조회합니다.', 'エージェントセッション一覧を取得します。']),
   e('patch', '/agent/sessions/{id}', 'agent/sessions/id/patch', ['Update session', '세션 갱신', 'セッション更新'], ['Update session metadata: label, meta, and cwd.', '세션의 label, meta, cwd를 갱신합니다.', 'セッションの label、meta、cwd を更新します。']),
-  e('delete', '/agent/sessions/{id}', 'agent/sessions/id/delete', ['Remove a session', '세션 삭제', 'セッション削除'], ['Remove an agent session and its history.', '에이전트 세션과 히스토리를 삭제합니다.', 'エージェントセッションと履歴を削除します。']),
+  e('delete', '/agent/sessions/{id}', 'agent/sessions/id/delete', ['Remove a session', '세션 삭제', 'セッション削除'], ['Remove an agent session, its history, runtime chain, and pending permission request.', '에이전트 세션, 히스토리, runtime chain, 대기 중인 권한 요청을 삭제합니다.', 'エージェントセッション、履歴、runtime chain、保留中の権限要求を削除します。']),
   e('post', '/agent/start', 'agent/start/post', ['Start agent', '에이전트 시작', 'エージェント開始'], ['Start an agent process inside a session.', '세션 안에서 에이전트 프로세스를 시작합니다.', 'セッション内でエージェントプロセスを開始します。']),
   e('post', '/agent/send', 'agent/send/post', ['Send message', '메시지 전송', 'メッセージ送信'], ['Send a message to the active agent. Images are supported.', '활성 에이전트에 메시지를 보냅니다. 이미지도 함께 전송할 수 있습니다.', 'アクティブなエージェントへメッセージを送信します。画像も送信できます。']),
   e('post', '/agent/restart', 'agent/restart/post', ['Restart agent', '에이전트 재시작', 'エージェント再起動'], ['Kill and re-spawn an agent.', '에이전트를 종료한 뒤 다시 spawn합니다.', 'エージェントを終了して再 spawn します。']),

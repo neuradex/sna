@@ -26,7 +26,7 @@ export interface RunOnceOptions {
    * Reasoning effort 0..5. See {@link import("../core/providers/types.js").SpawnOptions.reasoningLevel}.
    */
   reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
-  /** Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`). */
+  /** Provider-specific options passed through to the selected runtime. */
   providerOptions?: Record<string, unknown>;
   /**
    * Streaming callback for assistant-text chunks. When set, each

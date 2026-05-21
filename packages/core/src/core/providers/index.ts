@@ -33,7 +33,6 @@ const providers: Record<string, AgentProvider> = {
   "claude-code": new ClaudeCodeProvider(),
   "codex": new CodexProvider(),
   "opencode": new OpenCodeProvider(),
-  "omlx": new ClaudeCodeProvider(),
   "grok": new GrokProvider(),
   "cursor": new CursorProvider(),
 };

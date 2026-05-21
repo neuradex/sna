@@ -26,7 +26,7 @@ await client.agent.start(session: string, config?: AgentStartConfig): Promise<{
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `session` | `string` | yes | 대상 SNA session ID. 없으면 서버가 자동으로 생성합니다. |
-| `config.provider` | `string` | no | `claude-code`, `codex`, `opencode`, `omlx` 같은 runtime id입니다. |
+| `config.provider` | `string` | no | `claude-code`, `codex`, `opencode`, `grok`, `cursor` 같은 runtime id입니다. |
 | `config.modelProvider` | `string` | no | 모델 벤더 어트리뷰션 메타데이터입니다. assistant가 작성한 canonical row에 저장됩니다. |
 | `config.prompt` | `string` | no | 시작 직후 바로 보낼 초기 prompt입니다. |
 | `config.model` | `string` | no | 런타임 모델 slug입니다. |
@@ -378,10 +378,8 @@ await client.agent.listModels(runtime: string, config?: ListModelsConfig): Promi
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `runtime` | `string` | 조회할 런타임입니다. 예: `claude-code`, `codex`, `opencode`, `omlx`. |
-| `config.cliPath` | `string` | 런타임 CLI path override입니다. |
-| `config.baseUrl` | `string` | OMLX-style 런타임의 API base URL입니다. |
-| `config.apiKey` | `string` | OMLX-style 런타임의 API key입니다. |
+| `runtime` | `string` | 조회할 런타임입니다. 예: `claude-code`, `codex`, `opencode`, `grok`, `cursor`. |
+| `config.cliPath` | `string` | 모델 목록 조회에만 쓰는 런타임 CLI 경로 덮어쓰기입니다. 에이전트 spawn 경로는 런처의 `runtimePaths`를 사용하십시오. |
 | `config.refresh` | `boolean` | cache를 건너뜁니다. |
 
 **Returns**
@@ -406,10 +404,7 @@ type ListModelsResult = {
 **Example**
 
 ```ts
-const catalog = await client.agent.listModels("omlx", {
-  baseUrl: "http://localhost:11434",
-  refresh: true,
-});
+const catalog = await client.agent.listModels("opencode", { refresh: true });
 if (catalog.error) console.warn(catalog.error);
 ```
 

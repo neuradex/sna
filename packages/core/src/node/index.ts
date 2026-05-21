@@ -22,5 +22,27 @@
  * // sna.stop()  — graceful shutdown
  */
 
-export { startSnaServer } from "../electron/index.js";
-export type { SnaServerOptions, SnaServerHandle } from "../electron/index.js";
+export {
+  startSnaServer,
+  resolveClaudeCli,
+  validateClaudePath,
+  cacheClaudePath,
+  parseCommandVOutput,
+  resolveCodexCli,
+  validateCodexPath,
+  cacheCodexPath,
+  resolveOpenCodeCli,
+  validateOpenCodePath,
+  cacheOpenCodePath,
+  resolveGrokPath,
+  resolveCursorPath,
+  runtimePathsToEnv,
+} from "../electron/index.js";
+export type {
+  SnaServerOptions,
+  SnaServerHandle,
+  RuntimePaths,
+  ResolveResult,
+  CodexResolveResult,
+  OpenCodeResolveResult,
+} from "../electron/index.js";

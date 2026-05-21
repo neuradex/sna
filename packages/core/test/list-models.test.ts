@@ -8,9 +8,8 @@
  *   - HTTP-shape parity check via api-types.ts (typed at compile time, but
  *     we sanity-check the runtime response shape here too)
  *
- * The omlx baseUrl branch and the opencode CLI branch are NOT exercised
- * here — both require live external state (HTTP server / CLI binary) and
- * have separate integration coverage.
+ * The opencode CLI branch is NOT exercised here because it requires a live
+ * external CLI binary and has separate integration coverage.
  */
 
 import { describe, it } from "node:test";

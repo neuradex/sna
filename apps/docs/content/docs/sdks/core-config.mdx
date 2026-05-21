@@ -24,7 +24,6 @@ Configuration is resolved in this order:
 | `SNA_DB_PATH` | Explicit SQLite database path. Defaults to `data/sna.db`. |
 | `SNA_DATA_DIR` | Directory for SNA data such as images. Defaults to `<cwd>/data`. |
 | `SNA_PERMISSION_TIMEOUT_MS` | Permission prompt timeout in milliseconds. `0` means the app is responsible for responding. |
-| `SNA_OMLX_BASE_URL` | oMLX-compatible base URL for local model inference. |
 
 ## Default values
 
@@ -66,4 +65,4 @@ Clears runtime overrides and returns configuration resolution to defaults plus e
 
 The typed shape of SNA configuration. Prefer this type when building host-level settings UIs or validating configuration objects.
 
-`langfuse`, `apiProxyPort`, and `omlxBaseUrl` are optional. They are only active when the host explicitly configures tracing or local inference.
+`langfuse` and `apiProxyPort` are optional. They are only active when the host explicitly configures tracing or debug proxy capture.

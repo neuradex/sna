@@ -46,7 +46,7 @@ directories on a single pooled daemon. The two ACP-speaking runtimes
 | `kill()` / `closeThread()` | ✓ | ✓ (pool refcount aware) | ✓ (pool refcount aware) | ✓ | ✓ |
 | `complete(opts)` one-shot | ✓ | ✓ | ✓ | ✓ (`grok -p`) | ✓ (`agent -p`) |
 | `complete()` `onDelta` streaming | ✓ stream-json | ✓ `item/agentMessage/delta` | ✓ `prompt_async` SSE text deltas | ✓ streaming-json text events | ✓ stream-json `assistant` chunks (no `model_call_id`) |
-| `listModels()` | ✓ static + oMLX API | ✓ probes `codex debug models` + static fallback | ✓ probes `opencode` CLI | ✓ static (single entry: `grok-build`) | ✓ parses `agent models` (plain text) + static fallback |
+| `listModels()` | ✓ static catalog | ✓ probes `codex debug models` + static fallback | ✓ probes `opencode` CLI | ✓ static (single entry: `grok-build`) | ✓ parses `agent models` (plain text) + static fallback |
 
 OpenCode uses two paths for `complete()`: the sync SDK call when no
 callback is present, and `prompt_async` plus the event stream when
@@ -131,6 +131,14 @@ agent's turn suspends until SNA sends a permission response.
 
 ### `providerOptions` (runtime-specific escape hatches)
 
+SNA promotes an option into a runtime-neutral field only when every
+runtime can honor the same semantics. API endpoint overrides do not meet
+that bar: Codex can be pointed at OpenAI-compatible gateways through its
+native `-c model_providers.*` configuration, Claude Code uses
+Anthropic-specific environment variables, OpenCode has its own config
+file, and Cursor currently has no SNA-supported base URL override. Use
+the runtime-native escape hatch instead of a fake shared `apiBaseUrl`.
+
 | Key | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
 | `settings` | ✓ merged into `--settings` JSON | ✓ only `hooks.PreToolUse` is honored | — | — | — |
@@ -138,10 +146,9 @@ agent's turn suspends until SNA sends a permission response.
 | `strictMcpConfig` | ✓ `--strict-mcp-config` | — | — | — | — |
 | `maxTurns` | ✓ `--max-turns` | — | — | — | — |
 | `disableSlashCommands` | ✓ `--disable-slash-commands` | — | — | — | — |
-| `omlxBaseUrl` | ✓ routes `ANTHROPIC_BASE_URL` | — | — | — | — |
 | `serviceTier` | ✗ would mis-bill (`/fast` is a model, not a tier) | ✓ `priority` / `flex` / `batch` | — | — | — |
 | `profile` | — | ✓ passed as `--profile` to `codex app-server` and `codex exec`; also isolates the runtime pool | — | — | — |
-| `config` (`-c key=value`) | — | ✓ passed to `codex app-server` and `codex exec`; the object is included in the pool key | — | — | — |
+| `config` (`-c key=value`) | — | ✓ passed to `codex app-server` and `codex exec`; use this for OpenAI-compatible gateways such as OpenRouter or local model servers | — | — | — |
 | `hooksHash` / `configHash` | — | ✓ manual runtime pool isolation keys for generated hooks/config | — | — | — |
 | `serverUrl` | — | — | ✓ skip spawn, attach to existing daemon | — | — |
 | `modelProviderId` | — | — | ✓ provider half of `{providerID, modelID}` | — | — |

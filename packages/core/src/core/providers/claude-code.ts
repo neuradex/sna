@@ -210,13 +210,11 @@ export interface ClaudeEnvOptions {
   env?: Record<string, string>;
   /** Override config directory (sets CLAUDE_CONFIG_DIR). */
   configDir?: string;
-  /** oMLX base URL from provider options (takes highest priority). */
-  providerOmlxUrl?: string;
 }
 
 /**
  * Build a clean environment for a Claude Code process.
- * Handles API routing (oMLX > proxy), inherited env cleanup, and PATH setup.
+ * Handles debug proxy routing, inherited env cleanup, and PATH setup.
  * Shared between the agent provider and the completion helper.
  */
 /**
@@ -254,16 +252,12 @@ export function buildClaudeEnv(
     cleanEnv.CLAUDE_CONFIG_DIR = opts.configDir;
   }
 
-  // Route API calls: providerOptions.omlxBaseUrl > config.omlxBaseUrl > debug proxy
+  // Route API calls through the debug proxy when system-prompt capture is active.
+  // Caller-supplied env remains the escape hatch for Claude-native endpoint overrides.
   const config = getConfig();
-  const omlxUrl = opts.providerOmlxUrl ?? config.omlxBaseUrl;
-  if (omlxUrl) {
-    cleanEnv.ANTHROPIC_BASE_URL = typeof omlxUrl === "string" ? omlxUrl : String(omlxUrl);
-  } else {
-    const proxyPort = config.apiProxyPort;
-    if (proxyPort) {
-      cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
-    }
+  const proxyPort = config.apiProxyPort;
+  if (proxyPort) {
+    cleanEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${proxyPort}`;
   }
 
   // Clean up inherited Claude Code env vars
@@ -867,10 +861,8 @@ export class ClaudeCodeProvider implements AgentProvider {
     if (options.extraArgs) args.push(...options.extraArgs);
     args.push(options.prompt);
 
-    const po = (options.providerOptions ?? {}) as Record<string, unknown>;
     const cleanEnv = buildClaudeEnv(claudePath, {
       env: options.env,
-      providerOmlxUrl: po.omlxBaseUrl as string | undefined,
     });
 
     const timeout = options.timeout ?? 60_000;
@@ -1188,7 +1180,6 @@ export class ClaudeCodeProvider implements AgentProvider {
     const cleanEnv = buildClaudeEnv(claudePath, {
       env: options.env,
       configDir: options.configDir,
-      providerOmlxUrl: po.omlxBaseUrl as string | undefined,
     });
 
     const proc = spawn(claudePath, [...claudePrefix, ...args], {
@@ -1203,19 +1194,13 @@ export class ClaudeCodeProvider implements AgentProvider {
   }
 
   /**
-   * List models for claude-code (Anthropic cloud) or oMLX (local Anthropic-
-   * compatible server) when `config.baseUrl` is provided. The "omlx" runtime
-   * registers as an alias to ClaudeCodeProvider, so this method handles both
-   * via the same code path — branching on baseUrl.
+   * List models for claude-code.
    *
    * Static catalog: returned without network access. Mirrors the aliases and
    * full IDs the Claude CLI accepts. Curated rather than authoritative — when
    * Anthropic ships a new model family, this list updates with the SDK.
    */
-  async listModels(config?: ListModelsConfig): Promise<ListModelsResult> {
-    if (config?.baseUrl) {
-      return listModelsFromAnthropicCompatible(config.baseUrl, config.apiKey, config.refresh);
-    }
+  async listModels(_config?: ListModelsConfig): Promise<ListModelsResult> {
     return {
       models: CLAUDE_STATIC_MODELS.slice(),
       source: "static",
@@ -1234,67 +1219,3 @@ const CLAUDE_STATIC_MODELS: RuntimeModelInfo[] = [
   { id: "haiku",                      label: "Claude Haiku 4.5 (alias)",  provider: "anthropic", source: "static", notes: "alias → latest haiku" },
   { id: "claude-haiku-4-5-20251001",  label: "Claude Haiku 4.5",          provider: "anthropic", source: "static" },
 ];
-
-// ── oMLX (Anthropic-compatible) live fetch ──────────────────────────────────
-
-interface OmlxCacheEntry {
-  result: ListModelsResult;
-  expiresAt: number;
-}
-
-const OMLX_CACHE_TTL_MS = 60_000;
-const omlxCache = new Map<string, OmlxCacheEntry>();
-
-async function listModelsFromAnthropicCompatible(
-  baseUrl: string,
-  apiKey: string | undefined,
-  refresh: boolean | undefined,
-): Promise<ListModelsResult> {
-  const key = `${baseUrl}::${apiKey ?? ""}`;
-  const now = Date.now();
-  if (!refresh) {
-    const cached = omlxCache.get(key);
-    if (cached && cached.expiresAt > now) return cached.result;
-  }
-
-  const url = baseUrl.replace(/\/+$/, "") + "/v1/models";
-  const headers: Record<string, string> = {
-    "anthropic-version": "2023-06-01",
-  };
-  if (apiKey) headers["x-api-key"] = apiKey;
-
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 5_000);
-    const res = await fetch(url, { headers, signal: ctrl.signal }).finally(() => clearTimeout(timer));
-    if (!res.ok) {
-      const result: ListModelsResult = {
-        models: [],
-        source: "api",
-        fetchedAt: now,
-        error: `oMLX /v1/models returned ${res.status}`,
-      };
-      return result;
-    }
-    const body = await res.json() as { data?: Array<{ id?: string; display_name?: string }> };
-    const data = Array.isArray(body.data) ? body.data : [];
-    const models: RuntimeModelInfo[] = data
-      .filter((m) => typeof m.id === "string" && m.id.length > 0)
-      .map((m) => ({
-        id: m.id as string,
-        label: m.display_name || (m.id as string),
-        provider: "oss",
-        source: "api" as const,
-      }));
-    const result: ListModelsResult = { models, source: "api", fetchedAt: now };
-    omlxCache.set(key, { result, expiresAt: now + OMLX_CACHE_TTL_MS });
-    return result;
-  } catch (err) {
-    return {
-      models: [],
-      source: "api",
-      fetchedAt: now,
-      error: `oMLX fetch failed: ${(err as Error).message}`,
-    };
-  }
-}

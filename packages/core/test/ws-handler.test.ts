@@ -124,6 +124,52 @@ describe("WebSocket Handler", () => {
     assert.equal(msg.status, "removed");
   });
 
+  it("sessions.remove updates list counts and rejects later session-scoped commands", async () => {
+    const beforeRid = send(ctx, "sessions.list");
+    const before = await waitForReply(ctx, beforeRid);
+
+    const createRid = send(ctx, "sessions.create", { id: "ws-delete-followup", label: "WS Delete Followup" });
+    const created = await waitForReply(ctx, createRid);
+
+    const afterCreateRid = send(ctx, "sessions.list");
+    const afterCreate = await waitForReply(ctx, afterCreateRid);
+    assert.equal(afterCreate.sessions.some((s: any) => s.id === created.sessionId), true);
+    assert.equal(afterCreate.sessions.length, before.sessions.length + 1);
+
+    const removeRid = send(ctx, "sessions.remove", { session: created.sessionId });
+    const removed = await waitForReply(ctx, removeRid);
+    assert.equal(removed.status, "removed");
+
+    const afterRemoveRid = send(ctx, "sessions.list");
+    const afterRemove = await waitForReply(ctx, afterRemoveRid);
+    assert.equal(afterRemove.sessions.some((s: any) => s.id === created.sessionId), false);
+    assert.equal(afterRemove.sessions.length, before.sessions.length);
+
+    const sendRid = send(ctx, "agent.send", { session: created.sessionId, message: "after delete" });
+    const sendReply = await waitForReply(ctx, sendRid);
+    assert.equal(sendReply.type, "error");
+    assert.match(sendReply.message, /No active agent session/);
+
+    const updateRid = send(ctx, "sessions.update", { session: created.sessionId, label: "gone" });
+    const updateReply = await waitForReply(ctx, updateRid);
+    assert.equal(updateReply.type, "error");
+    assert.match(updateReply.message, /not found/);
+
+    const modelRid = send(ctx, "agent.set-model", { session: created.sessionId, model: "fake-2" });
+    const modelReply = await waitForReply(ctx, modelRid);
+    assert.equal(modelReply.status, "no_session");
+
+    const permissionRid = send(ctx, "permission.respond", { session: created.sessionId, approved: true });
+    const permissionReply = await waitForReply(ctx, permissionRid);
+    assert.equal(permissionReply.type, "error");
+    assert.match(permissionReply.message, /No pending permission request/);
+
+    const removeAgainRid = send(ctx, "sessions.remove", { session: created.sessionId });
+    const removeAgain = await waitForReply(ctx, removeAgainRid);
+    assert.equal(removeAgain.type, "error");
+    assert.match(removeAgain.message, /Session not found/);
+  });
+
   it("sessions.remove default blocked", async () => {
     // Ensure default exists
     send(ctx, "sessions.create", { id: "default" });

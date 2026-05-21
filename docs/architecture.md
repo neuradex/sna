@@ -129,7 +129,7 @@ The HTTP routes are defined with `@hono/zod-openapi` in `server/routes/openapi.t
 | `POST`   | `/agent/sessions` | Create a session |
 | `GET`    | `/agent/sessions` | List sessions (pass `?include=chain` for `runtimeChain` on each entry) |
 | `PATCH`  | `/agent/sessions/:id` | Update session metadata (label, meta, cwd) |
-| `DELETE` | `/agent/sessions/:id` | Remove a session |
+| `DELETE` | `/agent/sessions/:id` | Remove a session, its history, runtime chain, and pending permission request |
 | `POST`   | `/agent/start` | Start (spawn) agent in a session |
 | `POST`   | `/agent/send` | Send a message (supports `images[]`) |
 | `POST`   | `/agent/resume` | Restart with canonical history rebuilt for the provider |
@@ -195,6 +195,8 @@ Claude Code uses a PreToolUse hook; Codex uses JSON-RPC bidirectional approval; 
 4. UI calls `permission.respond({ session, approved })`.
 5. Server unblocks the agent.
 
+If the owning session is removed while a permission request is pending, the pending request resolves as denied before the session row and runtime chain are deleted.
+
 `ClaudeCodeProvider.spawn` auto-injects the hook via `--settings`. Consumers don't write `.claude/settings.json` themselves. Safe tools (`Read`, `Glob`, `Grep`, `Agent`, `TodoRead`, `TodoWrite`) auto-allow without prompting.
 
 ### Runtime control
@@ -257,6 +259,9 @@ const sna = await startSnaServer({
   dbPath: path.join(process.cwd(), "data/sna.db"),
   maxSessions: 20,
   permissionMode: "acceptEdits",
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+  },
   onLog: (line) => console.log("[sna]", line),
 });
 // sna.process — ChildProcess
@@ -266,7 +271,7 @@ const sna = await startSnaServer({
 
 The Electron variant additionally resolves asar-unpacked paths and locates the consumer app's electron-rebuilt `better-sqlite3`. Add `asarUnpack: ["node_modules/@sna-sdk/core/**"]` to electron-builder.
 
-Supported `SnaServerOptions`: `port`, `dbPath`, `cwd`, `maxSessions`, `permissionMode`, `model`, `nativeBinding`, `env`, `readyTimeout`, `onLog`.
+Supported `SnaServerOptions`: `port`, `dbPath`, `cwd`, `maxSessions`, `permissionMode`, `model`, `nativeBinding`, `env`, `runtimePaths`, `readyTimeout`, `onLog`.
 
 ### Configuration
 
@@ -283,3 +288,11 @@ Supported `SnaServerOptions`: `port`, `dbPath`, `cwd`, `maxSessions`, `permissio
 | `SNA_PERMISSION_TIMEOUT_MS` | Auto-deny after this many ms (0 = app controls) |
 | `SNA_SQLITE_NATIVE_BINDING` | Absolute path to `better_sqlite3.node` (Electron) |
 | `SNA_CLAUDE_COMMAND` | Override the Claude binary |
+| `SNA_CODEX_COMMAND` | Override the Codex binary |
+| `SNA_OPENCODE_COMMAND` | Override the OpenCode binary |
+| `SNA_GROK_COMMAND` | Override the Grok binary |
+| `SNA_CURSOR_COMMAND` | Override the Cursor headless agent binary |
+
+Embedded hosts should prefer `startSnaServer({ runtimePaths })`, which maps to
+the same `SNA_*_COMMAND` variables while keeping runtime path registration in
+the server startup config.

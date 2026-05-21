@@ -38,9 +38,15 @@ import { fileURLToPath } from "url";
 import fs from "fs";
 import http from "http";
 
-// Re-export Claude CLI resolution utilities for consumer apps (e.g., Loom preflight)
+// Re-export CLI resolution utilities for consumer app setup/preflight screens.
 export { resolveClaudeCli, validateClaudePath, cacheClaudePath, parseCommandVOutput } from "../core/providers/claude-code.js";
 export type { ResolveResult } from "../core/providers/claude-code.js";
+export { resolveCodexCli, validateCodexPath, cacheCodexPath } from "../core/providers/codex.js";
+export type { CodexResolveResult } from "../core/providers/codex.js";
+export { resolveOpenCodeCli, validateOpenCodePath, cacheOpenCodePath } from "../core/providers/opencode.js";
+export type { OpenCodeResolveResult } from "../core/providers/opencode.js";
+export { resolveGrokPath } from "../core/providers/grok.js";
+export { resolveCursorPath } from "../core/providers/cursor.js";
 export type { LogLevel } from "../lib/logger.js";
 import path from "path";
 
@@ -100,8 +106,8 @@ export interface SnaServerOptions {
   nativeBinding?: string;
 
   /**
-   * Extra env vars merged into the server process environment.
-   * These take precedence over the launcher's defaults.
+   * Extra env vars merged into the server process environment. Runtime command
+   * variables here take precedence over values generated from `runtimePaths`.
    */
   env?: Record<string, string>;
 
@@ -137,6 +143,22 @@ export interface SnaServerOptions {
   logLevel?: LogLevel;
 
   /**
+   * Explicit CLI commands or absolute paths for agent runtimes.
+   *
+   * These map to the same environment variables used by the lower-level
+   * provider resolvers:
+   * - claudeCode -> SNA_CLAUDE_COMMAND
+   * - codex      -> SNA_CODEX_COMMAND
+   * - opencode   -> SNA_OPENCODE_COMMAND
+   * - grok       -> SNA_GROK_COMMAND
+   * - cursor     -> SNA_CURSOR_COMMAND
+   *
+   * Values may be absolute binary paths or wrapper commands. `env` is merged
+   * after this object, so `env.SNA_*_COMMAND` remains the final escape hatch.
+   */
+  runtimePaths?: RuntimePaths;
+
+  /**
    * Optional Langfuse tracing config.
    * When present, sessions with `meta.langfuseTrace: true` emit Langfuse traces.
    * Requires `langfuse` npm package installed.
@@ -147,14 +169,19 @@ export interface SnaServerOptions {
     baseUrl?: string;
   };
 
-  /**
-   * oMLX base URL for local LLM inference.
-   * When set, routes Claude Code's API calls to the oMLX endpoint
-   * instead of Anthropic's cloud API.
-   *
-   * @example "http://localhost:8000/v1"
-   */
-  omlxBaseUrl?: string;
+}
+
+export interface RuntimePaths {
+  /** Claude Code CLI command/path. Maps to SNA_CLAUDE_COMMAND. */
+  claudeCode?: string;
+  /** Codex CLI command/path. Maps to SNA_CODEX_COMMAND. */
+  codex?: string;
+  /** OpenCode CLI command/path. Maps to SNA_OPENCODE_COMMAND. */
+  opencode?: string;
+  /** Grok CLI command/path. Maps to SNA_GROK_COMMAND. */
+  grok?: string;
+  /** Cursor headless agent CLI command/path. Maps to SNA_CURSOR_COMMAND. */
+  cursor?: string;
 }
 
 export interface SnaServerHandle {
@@ -214,6 +241,30 @@ function buildNodePath(): string | undefined {
   return existing ? `${unpacked}${path.delimiter}${existing}` : unpacked;
 }
 
+const runtimePathEnvKeys: Record<keyof RuntimePaths, string> = {
+  claudeCode: "SNA_CLAUDE_COMMAND",
+  codex: "SNA_CODEX_COMMAND",
+  opencode: "SNA_OPENCODE_COMMAND",
+  grok: "SNA_GROK_COMMAND",
+  cursor: "SNA_CURSOR_COMMAND",
+};
+
+export function runtimePathsToEnv(runtimePaths?: RuntimePaths): Record<string, string> {
+  const env: Record<string, string> = {};
+  if (!runtimePaths) return env;
+  for (const [runtime, envKey] of Object.entries(runtimePathEnvKeys) as Array<[keyof RuntimePaths, string]>) {
+    const value = runtimePaths[runtime]?.trim();
+    if (value) env[envKey] = value;
+  }
+  return env;
+}
+
+function applyProcessEnv(env: Record<string, string>): void {
+  for (const [key, value] of Object.entries(env)) {
+    process.env[key] = value;
+  }
+}
+
 // ── Core launcher ─────────────────────────────────────────────────────────────
 
 /**
@@ -239,6 +290,7 @@ export async function startSnaServer(options: SnaServerOptions): Promise<SnaServ
     consumerModules = path.resolve(bsPkg, "../..");
   } catch { /* not found — peer dep will resolve normally */ }
 
+  const runtimeEnv = runtimePathsToEnv(options.runtimePaths);
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     SNA_PORT: String(port),
@@ -248,10 +300,10 @@ export async function startSnaServer(options: SnaServerOptions): Promise<SnaServ
     ...(options.model ? { SNA_MODEL: options.model } : {}),
     ...(options.permissionTimeoutMs != null ? { SNA_PERMISSION_TIMEOUT_MS: String(options.permissionTimeoutMs) } : {}),
     ...(options.dataDir ? { SNA_DATA_DIR: options.dataDir } : {}),
-    ...(options.omlxBaseUrl ? { SNA_OMLX_BASE_URL: options.omlxBaseUrl } : {}),
     ...(options.nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: options.nativeBinding } : {}),
     ...(consumerModules ? { SNA_MODULES_PATH: consumerModules } : {}),
     ...(nodePath ? { NODE_PATH: nodePath } : {}),
+    ...runtimeEnv,
     // Consumer overrides last so they can always win
     ...(options.env ?? {}),
   };
@@ -379,6 +431,11 @@ export async function startSnaServerInProcess(
   // Apply log level filtering (default: "info" = current behavior)
   snaLogger.setLogLevel(options.logLevel ?? "info");
 
+  applyProcessEnv({
+    ...runtimePathsToEnv(options.runtimePaths),
+    ...(options.env ?? {}),
+  });
+
   // Configure SNA SDK before any module reads config
   setConfig({
     port,
@@ -388,7 +445,6 @@ export async function startSnaServerInProcess(
     ...(options.permissionMode ? { defaultPermissionMode: options.permissionMode } : {}),
     ...(options.model ? { model: options.model } : {}),
     ...(options.permissionTimeoutMs != null ? { permissionTimeoutMs: options.permissionTimeoutMs } : {}),
-    ...(options.omlxBaseUrl ? { omlxBaseUrl: options.omlxBaseUrl } : {}),
   });
 
   // Also set env vars so any module reading process.env directly works
@@ -399,7 +455,6 @@ export async function startSnaServerInProcess(
   if (options.model) process.env.SNA_MODEL = options.model;
   if (options.permissionTimeoutMs != null) process.env.SNA_PERMISSION_TIMEOUT_MS = String(options.permissionTimeoutMs);
   if (options.dataDir) process.env.SNA_DATA_DIR = options.dataDir;
-  if (options.omlxBaseUrl) process.env.SNA_OMLX_BASE_URL = options.omlxBaseUrl;
   if (options.nativeBinding) process.env.SNA_SQLITE_NATIVE_BINDING = options.nativeBinding;
 
   // Resolve consumer's node_modules for better-sqlite3.

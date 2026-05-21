@@ -11,7 +11,7 @@ description: "SNA サーバーを起動するための Node および Electron �
 | `@sna-sdk/core/node` | `startSnaServer(options)` | Node host から SNA を起動します。 |
 | `@sna-sdk/core/electron` | `startSnaServer(options)` | Electron host から SNA を forked child process として起動します。 |
 | `@sna-sdk/core/electron` | `startSnaServerInProcess(options)` | 現在の Electron main process 内で SNA を実行します。 |
-| `@sna-sdk/core/electron` | `resolveClaudeCli`, `validateClaudePath`, `cacheClaudePath` | Claude Code CLI installation を検出、検証します。 |
+| `@sna-sdk/core/node`, `@sna-sdk/core/electron` | `resolveClaudeCli`, `resolveCodexCli`, `resolveOpenCodeCli` | setup / diagnostics 画面で使うランタイム CLI installation を検出します。 |
 
 Launcher handle は、サーバー停止と、検出された URL を `@sna-sdk/client` または `@sna-sdk/react` へ渡すために十分な情報を公開します。
 
@@ -34,8 +34,16 @@ type SnaServerOptions = {
   onLog?: (line: string) => void;
   dataDir?: string;
   logLevel?: "info" | "warn" | "error" | "silent";
+  runtimePaths?: RuntimePaths;
   langfuse?: { publicKey: string; secretKey: string; baseUrl?: string };
-  omlxBaseUrl?: string;
+};
+
+type RuntimePaths = {
+  claudeCode?: string;
+  codex?: string;
+  opencode?: string;
+  grok?: string;
+  cursor?: string;
 };
 ```
 
@@ -49,13 +57,17 @@ type SnaServerOptions = {
 | `model` | SDK default | Runtime call のデフォルト model。 |
 | `permissionTimeoutMs` | `0` | `0` の場合、permission prompt response は host が管理します。正の値なら timeout 後に自動 deny します。 |
 | `nativeBinding` | auto-detected | 明示的な `better-sqlite3` native binding path。Custom Electron build で使います。 |
-| `env` | `{}` | 追加 environment variable。Launcher が生成した値を override します。 |
+| `env` | `{}` | 追加環境変数。ここに置いたランタイムコマンド環境変数は `runtimePaths` から生成された値を上書きします。 |
 | `readyTimeout` | `15000` | Standalone process が ready line を出すまで待つ時間(ms)。 |
 | `onLog` | none | Child process の stdout/stderr line、または in-process mode の SDK logger line を受け取ります。 |
 | `dataDir` | `dbPath` から計算 | Image と asset storage の base directory。 |
 | `logLevel` | `info` | In-process logger output を filter します。Forked server の file log は全 level を記録し続けます。 |
+| `runtimePaths` | auto-detect | 明示的なランタイム CLI コマンドまたは絶対パス。`SNA_CLAUDE_COMMAND`、`SNA_CODEX_COMMAND`、`SNA_OPENCODE_COMMAND`、`SNA_GROK_COMMAND`、`SNA_CURSOR_COMMAND` に変換されます。 |
 | `langfuse` | none | Metadata で tracing を opt in した session で Langfuse tracing を有効にします。 |
-| `omlxBaseUrl` | none | Claude-compatible call を oMLX endpoint へ route します。 |
+
+ホストアプリに設定画面がある場合や、ユーザーが選んだ CLI 位置を保存する
+場合は `runtimePaths` を使ってください。`env` は最後の退避手段として
+残り、`runtimePaths` から生成された値を上書きします。
 
 ## Forked vs in-process
 
@@ -76,6 +88,9 @@ In-process mode は default agent を自動 spawn しません。Host が HTTP�
 const handle = await startSnaServer({
   dbPath: "/Users/me/Library/Application Support/MyApp/sna.db",
   port: 3099,
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+  },
 });
 
 handle.stop();
@@ -129,6 +144,14 @@ type InProcessSnaServerHandle = {
 ### `resolveClaudeCli(options?)`
 
 利用可能な Claude Code CLI path を探します。ランタイムを開始できない理由を setup または diagnostics 画面で説明する場合に使います。
+
+### `resolveCodexCli(options?)`
+
+同じ env/cache/static/shell 順序で利用可能な Codex CLI path を探します。
+
+### `resolveOpenCodeCli(options?)`
+
+同じ env/cache/static/shell 順序で利用可能な OpenCode CLI path を探します。
 
 ### `validateClaudePath(path)`
 

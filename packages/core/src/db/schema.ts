@@ -50,6 +50,7 @@ export function getDb(): Database.Database {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const nativeBinding = process.env.SNA_SQLITE_NATIVE_BINDING || undefined;
     _db = nativeBinding ? new BetterSqlite3(getDbPath(), { nativeBinding }) : new BetterSqlite3(getDbPath());
+    _db.pragma("foreign_keys = ON");
     _db.pragma("journal_mode = WAL");
     initSchema(_db);
   }

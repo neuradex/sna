@@ -11,7 +11,7 @@ description: "SNA 서버를 시작하기 위한 Node 및 Electron 실행 표면�
 | `@sna-sdk/core/node` | `startSnaServer(options)` | Node host에서 SNA를 시작합니다. |
 | `@sna-sdk/core/electron` | `startSnaServer(options)` | Electron host에서 SNA를 forked child process로 시작합니다. |
 | `@sna-sdk/core/electron` | `startSnaServerInProcess(options)` | 현재 Electron main process 안에서 SNA를 실행합니다. |
-| `@sna-sdk/core/electron` | `resolveClaudeCli`, `validateClaudePath`, `cacheClaudePath` | Claude Code CLI 설치를 찾고 검증합니다. |
+| `@sna-sdk/core/node`, `@sna-sdk/core/electron` | `resolveClaudeCli`, `resolveCodexCli`, `resolveOpenCodeCli` | setup 및 diagnostics 화면에서 사용할 런타임 CLI 설치를 찾습니다. |
 
 Launcher handle은 서버를 중지하고 발견된 URL을 `@sna-sdk/client` 또는 `@sna-sdk/react`에 전달하기에 충분한 정보를 노출합니다.
 
@@ -34,8 +34,16 @@ type SnaServerOptions = {
   onLog?: (line: string) => void;
   dataDir?: string;
   logLevel?: "info" | "warn" | "error" | "silent";
+  runtimePaths?: RuntimePaths;
   langfuse?: { publicKey: string; secretKey: string; baseUrl?: string };
-  omlxBaseUrl?: string;
+};
+
+type RuntimePaths = {
+  claudeCode?: string;
+  codex?: string;
+  opencode?: string;
+  grok?: string;
+  cursor?: string;
 };
 ```
 
@@ -49,13 +57,17 @@ type SnaServerOptions = {
 | `model` | SDK default | Runtime call의 기본 model. |
 | `permissionTimeoutMs` | `0` | `0`이면 permission prompt 응답을 host가 직접 관리합니다. 양수면 timeout 뒤 자동 deny됩니다. |
 | `nativeBinding` | auto-detected | 명시적인 `better-sqlite3` native binding path. Custom Electron build에서 사용합니다. |
-| `env` | `{}` | 추가 environment variable. Launcher가 만든 값을 override합니다. |
+| `env` | `{}` | 추가 환경 변수. 여기에 둔 런타임 명령 환경 변수는 `runtimePaths`에서 생성된 값을 덮어씁니다. |
 | `readyTimeout` | `15000` | Standalone process가 ready line을 출력할 때까지 기다리는 시간(ms). |
 | `onLog` | none | Child process의 stdout/stderr line, 또는 in-process mode의 SDK logger line을 받습니다. |
 | `dataDir` | `dbPath`에서 계산 | Image와 asset storage의 base directory. |
 | `logLevel` | `info` | In-process logger output을 filter합니다. Forked server의 file log는 모든 level을 계속 기록합니다. |
+| `runtimePaths` | auto-detect | 명시적인 런타임 CLI 명령 또는 절대 경로입니다. 각각 `SNA_CLAUDE_COMMAND`, `SNA_CODEX_COMMAND`, `SNA_OPENCODE_COMMAND`, `SNA_GROK_COMMAND`, `SNA_CURSOR_COMMAND`로 변환됩니다. |
 | `langfuse` | none | Metadata로 tracing을 opt-in한 session에서 Langfuse tracing을 켭니다. |
-| `omlxBaseUrl` | none | Claude-compatible call을 oMLX endpoint로 route합니다. |
+
+호스트 앱에 설정 화면이 있거나 사용자가 선택한 CLI 위치를 저장한다면
+`runtimePaths`를 사용하십시오. `env`는 여전히 마지막 우회 수단으로 남아
+있으며, `runtimePaths`에서 생성된 값을 덮어씁니다.
 
 ## Forked vs in-process
 
@@ -76,6 +88,9 @@ In-process mode는 default agent를 자동으로 spawn하지 않습니다. Host�
 const handle = await startSnaServer({
   dbPath: "/Users/me/Library/Application Support/MyApp/sna.db",
   port: 3099,
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+  },
 });
 
 handle.stop();
@@ -129,6 +144,14 @@ type InProcessSnaServerHandle = {
 ### `resolveClaudeCli(options?)`
 
 사용 가능한 Claude Code CLI path를 찾습니다. Provider를 시작할 수 없는 이유를 setup 또는 diagnostics 화면에서 설명할 때 사용합니다.
+
+### `resolveCodexCli(options?)`
+
+같은 env/cache/static/shell 순서로 사용 가능한 Codex CLI path를 찾습니다.
+
+### `resolveOpenCodeCli(options?)`
+
+같은 env/cache/static/shell 순서로 사용 가능한 OpenCode CLI path를 찾습니다.
 
 ### `validateClaudePath(path)`
 

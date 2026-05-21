@@ -23,6 +23,9 @@ const sna = await startSnaServer({
   dbPath: path.join(app.getPath("userData"), "sna.db"),
   maxSessions: 20,
   permissionMode: "acceptEdits",
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+  },
   onLog: (line) => console.log("[sna]", line),
 });
 
@@ -41,6 +44,8 @@ const sna = await startSnaServer({
   ```
 - `dbPath`는 `app.getPath("userData")` 하위에 둡니다. 그래야 업그레이드
   후에도 SQLite 파일이 유지됩니다.
+- 사용자가 선택한 런타임 CLI 경로는 앱 설정에 저장하고, SNA 시작 시
+  `runtimePaths`로 넘깁니다.
 - 커스텀 빌드한 `better_sqlite3.node`를 기본 위치 밖에 둔다면
   `nativeBinding`을 넘깁니다.
 

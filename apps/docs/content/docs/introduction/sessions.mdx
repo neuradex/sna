@@ -29,8 +29,13 @@ PATCH /agent/session      → unified mutator for {cwd, model, permissionMode}
 POST /agent/resume        → rebuild runtime-native history, respawn
 POST /agent/restart       → respawn with same config (kept verbatim)
 POST /agent/kill          → tear down process (session record stays)
-DELETE /agent/sessions/:id → drop session + history
+DELETE /agent/sessions/:id → drop session, history, runtime chain, pending permission
 ```
+
+Deletion is final. If a process is alive, SNA stops it first; any pending
+permission request is resolved as denied, persisted chat/runtime rows are
+deleted, and later calls for that session return no-session or no-active-session
+errors.
 
 ## PATCH semantics
 

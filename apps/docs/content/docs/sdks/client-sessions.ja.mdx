@@ -74,7 +74,7 @@ await client.sessions.update(session: string, opts: {
 await client.sessions.remove(session: string): Promise<{ status: "removed" }>
 ```
 
-session record を削除します。agent process が存在する場合は、削除前に停止されます。`default` session は削除できません。
+session record、保存済み履歴、runtime chain、保留中の権限要求を削除します。agent process が存在する場合は、削除前に停止されます。`default` session は削除できません。削除済み session への後続呼び出しは no-session または no-active-session エラーを返します。
 
 ## `sessions.onSnapshot(callback)`
 

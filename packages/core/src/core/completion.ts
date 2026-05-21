@@ -56,7 +56,7 @@ export interface CompletionOptions {
    * for per-provider wiring notes.
    */
   onDelta?: (delta: string) => void;
-  /** Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`). */
+  /** Provider-specific options passed through to the selected runtime. */
   providerOptions?: Record<string, unknown>;
 }
 

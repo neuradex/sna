@@ -199,7 +199,6 @@ export interface SpawnOptions {
    *   strictMcpConfig?: boolean      — --strict-mcp-config
    *   maxTurns?: number              — --max-turns
    *   disableSlashCommands?: boolean — --disable-slash-commands
-   *   omlxBaseUrl?: string           — route ANTHROPIC_BASE_URL to oMLX local LLM
    * Codex:
    *   config?: Record<string, string> — extra `-c key=value` config overrides for `codex app-server`
    *                                     and `codex exec`; the object contributes to the runtime pool key
@@ -300,8 +299,8 @@ export interface AgentProvider {
    *
    * The returned IDs are the slugs that should be passed back to `spawn`'s
    * `model` field. Some providers expose a static curated catalog
-   * (claude-code, codex), others probe a live source (opencode CLI, oMLX
-   * server). Callers must treat results as a hint — model availability can
+   * (claude-code, codex), others probe a live source (opencode CLI, Cursor
+   * CLI). Callers must treat results as a hint — model availability can
    * change between calls.
    *
    * Optional: providers without a meaningful catalog can omit this.
@@ -314,21 +313,13 @@ export interface AgentProvider {
 /**
  * Caller-supplied configuration for listModels.
  *
- * Most fields are only used by specific providers — claude-code uses
- * `baseUrl` to switch into oMLX (Anthropic-compatible local server) mode;
- * opencode honors `cliPath` to override the default `opencode` binary.
+ * Most fields are only used by specific providers. `cliPath` only affects
+ * model listing for runtimes that inspect their CLI. Use launcher
+ * `runtimePaths` for agent spawn paths.
  */
 export interface ListModelsConfig {
-  /** Override CLI binary path (opencode). */
+  /** Override CLI binary path for model listing. */
   cliPath?: string;
-  /**
-   * Anthropic-compatible base URL. When set on the claude-code provider,
-   * triggers oMLX mode: fetches `{baseUrl}/v1/models` instead of returning
-   * the static cloud catalog.
-   */
-  baseUrl?: string;
-  /** Bearer token for the baseUrl request. */
-  apiKey?: string;
   /** Bypass the in-memory cache. */
   refresh?: boolean;
 }
@@ -363,7 +354,7 @@ export interface ListModelsResult {
   fetchedAt: number;
   /**
    * Set when the call could not fully populate the list — e.g. opencode CLI
-   * not installed, oMLX server unreachable. `models` may still be populated
+   * not installed or provider probing failed. `models` may still be populated
    * with a partial / fallback result.
    */
   error?: string;
@@ -413,7 +404,7 @@ export interface CompleteOptions {
    * completion with the thrown error.
    */
   onDelta?: (delta: string) => void;
-  /** Provider-specific options (e.g. `omlxBaseUrl` to override API endpoint). */
+  /** Provider-specific options. */
   providerOptions?: Record<string, unknown>;
 }
 
