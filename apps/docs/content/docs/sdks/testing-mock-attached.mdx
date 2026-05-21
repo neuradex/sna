@@ -1,0 +1,267 @@
+---
+title: "Mock-Attached Runtime Tests"
+description: "Run real Claude Code, Codex, OpenCode, and Grok Build CLIs while routing only their model API calls to local mocks."
+---
+
+# Mock-Attached Runtime Tests
+
+Mock-attached tests run the real runtime CLI and replace only the model API endpoint with a local mock server. This is stronger than a pure fake because the test still exercises the provider's real spawn arguments, config files, environment variables, stream parser, and request shape.
+
+Use this mode when you need to prove that SNA actually passes the right prompt, model, auth, streaming flag, reasoning settings, and provider-specific config to the runtime.
+
+## What it verifies
+
+| Runtime | Real process | Mock API route | Main helper |
+| --- | --- | --- | --- |
+| Claude Code | `claude` | Anthropic `POST /v1/messages` | `createClaudeMockEnv()` |
+| Codex | `codex` | OpenAI Responses `POST /v1/responses` | `createCodexMockEnv()` |
+| OpenCode | `opencode serve` | OpenAI Chat Completions `POST /v1/chat/completions` | `createOpenCodeMockConfig()` |
+| Grok Build | `grok agent ... stdio` | OpenAI Responses `POST /v1/responses` | `createGrokMockEnv()` |
+
+The captured request records include `authorization`, `model`, `stream`, `userText`, `systemPromptLength`, and `requestBody`. Assert against the raw body when you need to verify exact prompt placement or provider-specific fields.
+
+Cursor is not covered by mock-attached helpers yet because the current supported CLI path does not expose a stable API-base override equivalent to the other runtimes.
+
+## Binary locations
+
+Tests use the same command override environment variables as the providers. This keeps test runs portable across developer machines where the runtime binary is installed in a different location.
+
+```bash
+SNA_CLAUDE_COMMAND=/absolute/path/to/claude \
+SNA_CODEX_COMMAND=/absolute/path/to/codex \
+SNA_GROK_COMMAND=/absolute/path/to/grok \
+SNA_OPENCODE_COMMAND=/absolute/path/to/opencode \
+pnpm --filter @sna-sdk/core exec tsx --test test/runtime-mock-attached.test.ts
+```
+
+If an override is not set, each provider falls back to its normal path lookup. Tests that require an unavailable binary should skip instead of silently replacing it with a fake.
+
+## Request assertions
+
+Use `waitForRequest()` instead of sleeping. It polls the mock server's captured request list until a predicate matches or the timeout expires.
+
+```ts
+import { startMockOpenAIServer, waitForRequest } from "@sna-sdk/testing";
+
+const openai = await startMockOpenAIServer({ responseText: "OK" });
+
+const request = await waitForRequest(
+  openai,
+  (entry) =>
+    entry.endpoint === "responses" &&
+    entry.userText?.includes("mock attached") &&
+    JSON.stringify(entry.requestBody).includes("SNA system prompt"),
+  { timeoutMs: 15_000 },
+);
+
+expect(request.url).toBe("/v1/responses");
+expect(request.stream).toBe(true);
+expect(request.authorization).toBe("Bearer sk-test");
+```
+
+## Claude Code
+
+`createClaudeMockEnv()` writes an isolated Claude config directory and returns environment variables for routing Claude Code to `startMockAnthropicServer()`.
+
+```ts
+import { ClaudeCodeProvider } from "@sna-sdk/core/providers";
+import {
+  createClaudeMockEnv,
+  startMockAnthropicServer,
+  waitForRequest,
+} from "@sna-sdk/testing";
+
+const anthropic = await startMockAnthropicServer();
+const mockEnv = createClaudeMockEnv({
+  cwd,
+  anthropicBaseUrl: `http://127.0.0.1:${anthropic.port}`,
+  apiKey: "sk-claude-mock",
+});
+
+try {
+  const deltas: string[] = [];
+  const result = await new ClaudeCodeProvider().complete({
+    cwd,
+    prompt: "mock attached claude",
+    model: "claude-sonnet-4-6",
+    systemPrompt: "SNA mock-attached Claude system prompt",
+    extraArgs: ["--bare", "--permission-mode", "bypassPermissions", "--setting-sources", ""],
+    env: mockEnv.env,
+    onDelta: (delta) => deltas.push(delta),
+  });
+
+  const request = await waitForRequest(
+    anthropic,
+    (entry) => JSON.stringify(entry.requestBody).includes("SNA mock-attached Claude system prompt"),
+  );
+
+  expect(request.stream).toBe(true);
+  expect(result.text).toContain("edualc");
+  expect(deltas.join("")).toContain("edualc");
+} finally {
+  anthropic.close();
+}
+```
+
+The helper sets `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, and `CLAUDE_CONFIG_DIR`. With `inheritEnv: false`, only a small shell allowlist is inherited before mock-specific values are added.
+
+## Codex
+
+`createCodexMockEnv()` writes an isolated `CODEX_HOME/config.toml` with an OpenAI Responses provider pointing at the mock server.
+
+```ts
+import { CodexProvider } from "@sna-sdk/core/providers";
+import {
+  createCodexMockEnv,
+  startMockOpenAIServer,
+  waitForRequest,
+} from "@sna-sdk/testing";
+
+const openai = await startMockOpenAIServer({ responseText: "codex mock response" });
+const mockEnv = createCodexMockEnv({
+  cwd,
+  openAIBaseUrl: openai.url,
+  apiKey: "sk-codex-mock",
+  model: "gpt-5.4",
+});
+
+try {
+  const result = await new CodexProvider().complete({
+    cwd,
+    prompt: "mock attached codex",
+    model: mockEnv.model,
+    systemPrompt: "SNA mock-attached Codex system prompt",
+    reasoningLevel: 4,
+    providerOptions: { serviceTier: "priority" },
+    env: mockEnv.env,
+  });
+
+  const request = await waitForRequest(openai, (entry) => entry.endpoint === "responses");
+
+  expect(result.text).toBe("codex mock response");
+  expect(request.url).toBe("/v1/responses");
+  expect(request.requestBody.reasoning).toEqual({ effort: "high" });
+  expect(request.requestBody.service_tier).toBe("priority");
+} finally {
+  await openai.close();
+}
+```
+
+The helper sets `CODEX_HOME` and `OPENAI_API_KEY`. The generated config uses `wire_api = "responses"` and `base_url = "<mock>/v1"`.
+
+## OpenCode
+
+OpenCode is configured through SNA provider options rather than process environment. `createOpenCodeMockConfig()` returns a provider config that SNA passes to the real `opencode serve` runtime.
+
+```ts
+import { OpenCodeProvider } from "@sna-sdk/core/providers";
+import {
+  createOpenCodeMockConfig,
+  startMockOpenAIServer,
+  waitForRequest,
+} from "@sna-sdk/testing";
+
+const openai = await startMockOpenAIServer({ responseText: "Done." });
+const mockConfig = createOpenCodeMockConfig({
+  openAIBaseUrl: openai.url,
+  apiKey: "sk-opencode-mock",
+  providerId: "sna-mock",
+  modelId: "sna-model",
+});
+
+const provider = new OpenCodeProvider();
+const runtime = await provider.prepareRuntime({
+  cwd,
+  model: mockConfig.model,
+  providerOptions: mockConfig.providerOptions,
+});
+
+try {
+  const agent = provider.spawn({
+    cwd,
+    prompt: "mock attached opencode",
+    model: mockConfig.model,
+    systemPrompt: "SNA mock-attached OpenCode system prompt",
+    providerOptions: mockConfig.providerOptions,
+  }, runtime);
+
+  const request = await waitForRequest(
+    openai,
+    (entry) => entry.endpoint === "chat.completions" &&
+      entry.userText === "mock attached opencode",
+    { timeoutMs: 15_000 },
+  );
+
+  expect(request.url).toBe("/v1/chat/completions");
+  expect(request.model).toBe("sna-model");
+  expect(request.stream).toBe(true);
+  agent.kill();
+} finally {
+  await runtime.dispose();
+  await openai.close();
+}
+```
+
+When `SNA_OPENCODE_COMMAND` points to a custom binary, the provider prepends that binary's directory to `PATH` so the SDK's internal `opencode serve` launch uses the same executable.
+
+## Grok Build
+
+`createGrokMockEnv()` isolates Grok's `HOME`, writes `~/.grok/config.toml`, sets `XAI_API_KEY`, and returns provider options for SNA's Grok provider. The provider starts `grok agent --no-leader --xai-api-base-url <mock>/v1 ... stdio`.
+
+```ts
+import { GrokProvider } from "@sna-sdk/core/providers";
+import {
+  createGrokMockEnv,
+  startMockOpenAIServer,
+  waitForRequest,
+} from "@sna-sdk/testing";
+
+const openai = await startMockOpenAIServer({
+  models: [{ id: "grok-build", owned_by: "xai" }],
+  responseText: "OK",
+});
+const mockEnv = createGrokMockEnv({
+  cwd,
+  openAIBaseUrl: openai.url,
+  apiKey: "sk-grok-mock",
+  model: "grok-build",
+});
+
+try {
+  const events: any[] = [];
+  const agent = new GrokProvider().spawn({
+    cwd,
+    prompt: "Reply with exactly OK for mock attached grok.",
+    model: mockEnv.model,
+    permissionMode: "bypassPermissions",
+    systemPrompt: "SNA mock-attached Grok system prompt",
+    env: mockEnv.env,
+    providerOptions: mockEnv.providerOptions,
+  });
+  agent.on("event", (event) => events.push(event));
+
+  const request = await waitForRequest(
+    openai,
+    (entry) => entry.endpoint === "responses" &&
+      JSON.stringify(entry.requestBody).includes("SNA mock-attached Grok system prompt"),
+    { timeoutMs: 20_000 },
+  );
+
+  expect(request.authorization).toBe("Bearer sk-grok-mock");
+  expect(request.stream).toBe(true);
+  expect(request.model).toBe("grok-build");
+  agent.kill();
+} finally {
+  await openai.close();
+}
+```
+
+The helper returns `providerOptions` with `{ xaiApiBaseUrl: "<mock>/v1", noLeader: true }`. Use `extraEnv` for additional process variables and `inheritEnv: false` when a test must avoid inheriting local auth state.
+
+## Cleanup checklist
+
+- Close mock servers with `mock.close()` or `await mock.close()`.
+- Kill spawned `AgentProcess` instances.
+- Dispose prepared runtime handles such as OpenCode's `RuntimeHandle`.
+- Remove temporary cwd/config directories created by the test.
+- Prefer fake API keys like `sk-test-mock-sna`; never rely on developer-local real tokens.

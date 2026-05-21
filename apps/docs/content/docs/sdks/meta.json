@@ -25,6 +25,7 @@
     "---@sna-sdk/testing---",
     "testing",
     "testing-mock-api",
+    "testing-mock-attached",
     "testing-cli"
   ]
 }

@@ -1,12 +1,12 @@
 ---
 title: "Testing SDK"
-description: "決定的な SNA 統合テストのための Mock runtime サーバーと CLI ハーネスです。"
+description: "決定的な SNA 統合テストのための mock LLM API、実 runtime の mock-attached helper、CLI ハーネスです。"
 ---
 # Testing SDK
 
-`@sna-sdk/testing` は、テストが実際の Anthropic、OpenAI、Claude アカウントに依存しないようにするためのパッケージです。ローカルの Anthropic 互換 API サーバー、OpenAI 互換 API サーバー、インスタンスごとに設定とログを分離する CLI wrapper を提供します。
+`@sna-sdk/testing` は、テストが実際の Anthropic、OpenAI、xAI、Claude アカウントに依存しないようにするためのパッケージです。ローカルの Anthropic 互換 API サーバー、OpenAI 互換 API サーバー、実 runtime CLI を mock API に接続する helper、インスタンスごとに設定とログを分離する CLI wrapper を提供します。
 
-スモークテスト、runtime adapter テスト、予測可能な agent 出力が必要な UI flow に使ってください。
+スモークテスト、runtime adapter テスト、mock-attached CLI contract テスト、予測可能な agent 出力が必要な UI flow に使ってください。
 
 ## Install
 
@@ -17,4 +17,5 @@ pnpm add @sna-sdk/testing@0.15.0
 ## Public surfaces
 
 - [testing-mock-api](/ja/docs/sdks/testing-mock-api)
+- [testing-mock-attached](/ja/docs/sdks/testing-mock-attached)
 - [testing-cli](/ja/docs/sdks/testing-cli)

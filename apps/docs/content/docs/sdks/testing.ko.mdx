@@ -1,12 +1,12 @@
 ---
 title: "Testing SDK"
-description: "결정적인 SNA 통합 테스트를 위한 Mock runtime 서버와 CLI 하네스입니다."
+description: "결정적인 SNA 통합 테스트를 위한 mock LLM API, 실제 런타임 mock-attached helper, CLI 하네스입니다."
 ---
 # Testing SDK
 
-`@sna-sdk/testing`은 테스트가 실제 Anthropic, OpenAI, Claude 계정에 의존하지 않도록 제공됩니다. 로컬 Anthropic 호환 API 서버, OpenAI 호환 API 서버, 인스턴스별 설정 및 로그를 분리하는 CLI wrapper를 제공합니다.
+`@sna-sdk/testing`은 테스트가 실제 Anthropic, OpenAI, xAI, Claude 계정에 의존하지 않도록 제공됩니다. 로컬 Anthropic 호환 API 서버, OpenAI 호환 API 서버, 실제 runtime CLI를 mock API에 연결하는 helper, 인스턴스별 설정 및 로그를 분리하는 CLI wrapper를 제공합니다.
 
-스모크 테스트, runtime adapter 테스트, 예측 가능한 agent 출력이 필요한 UI flow에 사용하십시오.
+스모크 테스트, runtime adapter 테스트, mock-attached CLI contract 테스트, 예측 가능한 agent 출력이 필요한 UI flow에 사용하십시오.
 
 ## Install
 
@@ -17,4 +17,5 @@ pnpm add @sna-sdk/testing@0.15.0
 ## Public surfaces
 
 - [testing-mock-api](/ko/docs/sdks/testing-mock-api)
+- [testing-mock-attached](/ko/docs/sdks/testing-mock-attached)
 - [testing-cli](/ko/docs/sdks/testing-cli)
