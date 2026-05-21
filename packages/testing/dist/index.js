@@ -723,6 +723,82 @@ trust_level = "trusted"`).join("\n\n");
   };
 }
 
+// src/opencode-config.ts
+import crypto from "crypto";
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`);
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+function hashConfig(config) {
+  return crypto.createHash("sha256").update(stableJson(config)).digest("hex").slice(0, 16);
+}
+function createOpenCodeMockConfig(options) {
+  const providerId = options.providerId ?? "sna-mock";
+  const modelId = options.modelId ?? "sna-model";
+  const model = `${providerId}/${modelId}`;
+  const apiKey = options.apiKey ?? "sk-test-mock-sna";
+  const baseUrl = options.openAIBaseUrl.replace(/\/+$/, "");
+  const agent = options.agent ?? "build";
+  const maxSteps = options.maxSteps ?? 1;
+  const contextWindow = options.contextWindow ?? 8192;
+  const outputLimit = options.outputLimit ?? 4096;
+  const agentConfig = {
+    model,
+    maxSteps,
+    tools: {}
+  };
+  const config = {
+    enabled_providers: [providerId],
+    model,
+    small_model: model,
+    plugin: [],
+    agent: {
+      build: agentConfig,
+      [agent]: agentConfig
+    },
+    provider: {
+      [providerId]: {
+        npm: "@ai-sdk/openai-compatible",
+        name: "SNA Mock OpenAI",
+        options: {
+          baseURL: `${baseUrl}/v1`,
+          apiKey
+        },
+        models: {
+          [modelId]: {
+            name: options.modelName ?? "SNA Mock Model",
+            tool_call: false,
+            attachment: false,
+            reasoning: false,
+            temperature: true,
+            cost: { input: 0, output: 0 },
+            limit: { context: contextWindow, output: outputLimit }
+          }
+        }
+      }
+    },
+    ...options.extraConfig ?? {}
+  };
+  return {
+    config,
+    providerOptions: {
+      modelProviderId: providerId,
+      opencodeConfig: config,
+      opencodeConfigHash: hashConfig(config),
+      agent
+    },
+    model,
+    providerId,
+    modelId,
+    apiKey,
+    openAIBaseUrl: baseUrl
+  };
+}
+
 // src/mock-cli.ts
 import fs3 from "fs";
 import os from "os";
@@ -1211,7 +1287,7 @@ Log files:`);
 // src/instance.ts
 import fs5 from "fs";
 import path5 from "path";
-import crypto from "crypto";
+import crypto2 from "crypto";
 var ADJECTIVES = [
   "happy",
   "calm",
@@ -1265,7 +1341,7 @@ var NOUNS = [
   "puma"
 ];
 function randomPick(arr) {
-  return arr[crypto.randomInt(arr.length)];
+  return arr[crypto2.randomInt(arr.length)];
 }
 function generateInstanceName() {
   return `${randomPick(ADJECTIVES)}-${randomPick(NOUNS)}`;
@@ -1329,6 +1405,7 @@ export {
   createCodexMockEnv,
   createMockClaudeCli,
   createMockCodexExecCli,
+  createOpenCodeMockConfig,
   generateInstanceName,
   getInstanceDir,
   getInstancesDir,

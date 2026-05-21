@@ -284,6 +284,10 @@ export class RuntimePool {
     if (config.providerOptions?.opencodeConfigHash) {
       parts.push(`opencodeCfg=${config.providerOptions.opencodeConfigHash}`);
     }
+    const opencodeConfig = stableRecordString(config.providerOptions?.opencodeConfig);
+    if (opencodeConfig) {
+      parts.push(`opencodeConfig=${opencodeConfig}`);
+    }
 
     return parts.join("|");
   }

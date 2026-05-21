@@ -174,6 +174,39 @@ interface CodexMockEnv {
 }
 declare function createCodexMockEnv(options: CodexMockEnvOptions): CodexMockEnv;
 
+interface OpenCodeMockConfigOptions {
+    /** OpenAI-compatible mock base URL, for example http://127.0.0.1:12345. */
+    openAIBaseUrl: string;
+    /** Fake API key passed to OpenCode's provider config. */
+    apiKey?: string;
+    /** OpenCode provider id. Defaults to "sna-mock". */
+    providerId?: string;
+    /** OpenCode model id under the provider. Defaults to "sna-model". */
+    modelId?: string;
+    /** Human readable model name shown by OpenCode. */
+    modelName?: string;
+    /** Agent name to pass through providerOptions.agent. Defaults to "build". */
+    agent?: string;
+    /** Maximum OpenCode agent loop steps for the generated agent config. */
+    maxSteps?: number;
+    /** Model context window advertised to OpenCode. */
+    contextWindow?: number;
+    /** Model output limit advertised to OpenCode. */
+    outputLimit?: number;
+    /** Merge extra top-level OpenCode config fields after the mock provider config. */
+    extraConfig?: Record<string, unknown>;
+}
+interface OpenCodeMockConfig {
+    config: Record<string, unknown>;
+    providerOptions: Record<string, unknown>;
+    model: string;
+    providerId: string;
+    modelId: string;
+    apiKey: string;
+    openAIBaseUrl: string;
+}
+declare function createOpenCodeMockConfig(options: OpenCodeMockConfigOptions): OpenCodeMockConfig;
+
 interface MockCliInvocation {
     argv: string[];
     cwd: string;
@@ -245,4 +278,4 @@ declare function readInstanceMeta(name: string): InstanceMeta | null;
 declare function listInstances(): InstanceMeta[];
 declare function removeInstance(name: string): boolean;
 
-export { type ClaudeMockEnv, type ClaudeMockEnvOptions, type CodexMockEnv, type CodexMockEnvOptions, type InstanceMeta, type MockClaudeCliOptions, type MockCliInvocation, type MockCodexExecCliOptions, type MockLogEntry, type MockOpenAIEndpoint, type MockOpenAILogEntry, type MockOpenAIModel, type MockOpenAIOptions, type MockOpenAIRequest, type MockOpenAIResponseContext, type MockOpenAIServer, type MockRuntimeCli, type MockServer, type WaitForRequestOptions, createClaudeMockEnv, createCodexMockEnv, createMockClaudeCli, createMockCodexExecCli, generateInstanceName, getInstanceDir, getInstancesDir, listInstances, readInstanceMeta, readSseData, removeInstance, runOneshot, startMockAnthropicServer, startMockOpenAIServer, waitForRequest, withMockAnthropicServer, withMockOpenAIServer, writeInstanceMeta };
+export { type ClaudeMockEnv, type ClaudeMockEnvOptions, type CodexMockEnv, type CodexMockEnvOptions, type InstanceMeta, type MockClaudeCliOptions, type MockCliInvocation, type MockCodexExecCliOptions, type MockLogEntry, type MockOpenAIEndpoint, type MockOpenAILogEntry, type MockOpenAIModel, type MockOpenAIOptions, type MockOpenAIRequest, type MockOpenAIResponseContext, type MockOpenAIServer, type MockRuntimeCli, type MockServer, type OpenCodeMockConfig, type OpenCodeMockConfigOptions, type WaitForRequestOptions, createClaudeMockEnv, createCodexMockEnv, createMockClaudeCli, createMockCodexExecCli, createOpenCodeMockConfig, generateInstanceName, getInstanceDir, getInstancesDir, listInstances, readInstanceMeta, readSseData, removeInstance, runOneshot, startMockAnthropicServer, startMockOpenAIServer, waitForRequest, withMockAnthropicServer, withMockOpenAIServer, writeInstanceMeta };

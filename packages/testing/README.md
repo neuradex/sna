@@ -104,6 +104,7 @@ actual CLI contract while keeping CI deterministic and offline from paid LLMs.
 import {
   createClaudeMockEnv,
   createCodexMockEnv,
+  createOpenCodeMockConfig,
   startMockAnthropicServer,
   startMockOpenAIServer,
 } from "@sna-sdk/testing";
@@ -119,6 +120,11 @@ const codexEnv = createCodexMockEnv({
   openAIBaseUrl: openai.url,
 });
 // Run real `codex` with codexEnv.env.
+
+const opencodeConfig = createOpenCodeMockConfig({
+  openAIBaseUrl: openai.url,
+});
+// Pass opencodeConfig.providerOptions to SNA's OpenCode provider.
 ```
 
 ### Runtime CLI fakes
@@ -182,6 +188,7 @@ await withMockOpenAIServer({ responseText: "ok" }, async (mock) => {
 | `startMockOpenAIServer()` | Boot a mock OpenAI-compatible API on a random port |
 | `createClaudeMockEnv()` | Create isolated Claude config and env for mock Anthropic routing |
 | `createCodexMockEnv()` | Create isolated Codex config and env for mock OpenAI routing |
+| `createOpenCodeMockConfig()` | Create OpenCode config/providerOptions for mock OpenAI routing |
 | `createMockClaudeCli()` | Create a fake `claude` executable backed by the Anthropic mock |
 | `createMockCodexExecCli()` | Create a fake `codex exec` executable backed by the OpenAI mock |
 | `withMockAnthropicServer()`, `withMockOpenAIServer()` | Start a mock for a callback and always close it |

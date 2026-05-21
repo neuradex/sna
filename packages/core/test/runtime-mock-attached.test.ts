@@ -4,15 +4,19 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ClaudeCodeProvider, CodexProvider } from "../src/core/providers/index.js";
+import { ClaudeCodeProvider, CodexProvider, OpenCodeProvider } from "../src/core/providers/index.js";
 import {
   createClaudeMockEnv,
   createCodexMockEnv,
+  createOpenCodeMockConfig,
   startMockAnthropicServer,
   startMockOpenAIServer,
+  waitForRequest,
   type MockOpenAIServer,
   type MockServer,
 } from "../../testing/src/index.js";
+import type { AgentProcess } from "../src/core/providers/types.js";
+import type { RuntimeHandle } from "../src/core/providers/runtime.js";
 
 function commandAvailable(command: string): boolean {
   try {
@@ -37,6 +41,8 @@ function systemText(system: unknown): string {
 describe("real runtime CLIs with mock-attached LLM APIs", () => {
   let anthropic: MockServer | null = null;
   let openai: MockOpenAIServer | null = null;
+  let opencodeProcess: AgentProcess | null = null;
+  let opencodeRuntime: RuntimeHandle | null = null;
   const originalClaudeCommand = process.env.SNA_CLAUDE_COMMAND;
   const originalCodexCommand = process.env.SNA_CODEX_COMMAND;
 
@@ -47,6 +53,10 @@ describe("real runtime CLIs with mock-attached LLM APIs", () => {
     else process.env.SNA_CODEX_COMMAND = originalCodexCommand;
     anthropic?.close();
     anthropic = null;
+    opencodeProcess?.kill();
+    opencodeProcess = null;
+    opencodeRuntime?.dispose();
+    opencodeRuntime = null;
     if (openai) await openai.close();
     openai = null;
   });
@@ -143,5 +153,57 @@ describe("real runtime CLIs with mock-attached LLM APIs", () => {
     } finally {
       fs.rmSync(codexHomeRoot, { recursive: true, force: true });
     }
+  });
+
+  it("runs real OpenCode against the mock OpenAI Chat Completions API and captures streaming request shape", {
+    skip: !commandAvailable("opencode") ? "opencode CLI is not installed" : undefined,
+    timeout: 45_000,
+  }, async () => {
+    const cwd = process.cwd();
+    openai = await startMockOpenAIServer({
+      responseText: (ctx) => ctx.userText.includes("mock attached opencode") ? "Done." : "Ok.",
+      chunkSize: 1000,
+    });
+    const mockConfig = createOpenCodeMockConfig({
+      openAIBaseUrl: openai.url,
+      apiKey: "sk-opencode-mock-attached",
+      providerId: "sna-mock",
+      modelId: "sna-model",
+    });
+    const provider = new OpenCodeProvider();
+
+    opencodeRuntime = await provider.prepareRuntime({
+      cwd,
+      model: mockConfig.model,
+      providerOptions: {
+        ...mockConfig.providerOptions,
+        logLevel: "ERROR",
+      },
+    });
+    opencodeProcess = provider.spawn({
+      cwd,
+      prompt: "mock attached opencode",
+      model: mockConfig.model,
+      systemPrompt: "SNA mock-attached OpenCode system prompt",
+      providerOptions: mockConfig.providerOptions,
+      timeout: 30_000,
+    }, opencodeRuntime);
+
+    const request = await waitForRequest(openai, (entry) =>
+      entry.endpoint === "chat.completions"
+      && entry.userText === "mock attached opencode"
+      && JSON.stringify(entry.requestBody).includes("SNA mock-attached OpenCode system prompt"),
+    { timeoutMs: 15_000 });
+
+    assert.equal(request.url, "/v1/chat/completions");
+    assert.equal(request.authorization, "Bearer sk-opencode-mock-attached");
+    assert.equal(request.model, "sna-model");
+    assert.equal(request.stream, true);
+    assert.equal(request.userText, "mock attached opencode");
+    assert.equal(JSON.stringify(request.requestBody).includes("SNA mock-attached OpenCode system prompt"), true);
+    assert.ok(
+      Array.isArray(request.requestBody?.messages),
+      "OpenCode should send OpenAI-compatible chat messages",
+    );
   });
 });

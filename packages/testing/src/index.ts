@@ -20,6 +20,11 @@ export {
   type CodexMockEnvOptions,
 } from "./codex-env.js";
 export {
+  createOpenCodeMockConfig,
+  type OpenCodeMockConfig,
+  type OpenCodeMockConfigOptions,
+} from "./opencode-config.js";
+export {
   createMockClaudeCli,
   createMockCodexExecCli,
   type MockClaudeCliOptions,
