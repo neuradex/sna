@@ -955,9 +955,13 @@ export class SessionManager {
         session.process.kill();
       }
     }
+    const pending = this.pendingPermissions.get(id);
+    if (pending) {
+      pending.resolve(false);
+      this.pendingPermissions.delete(id);
+    }
     // Cleanup listeners
     this.eventListeners.delete(id);
-    this.pendingPermissions.delete(id);
     this.sessions.delete(id);
     return true;
   }
