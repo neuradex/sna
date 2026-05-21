@@ -37,13 +37,12 @@
  *    clients but irrelevant to SNA's normalized event model. The prefix
  *    each subclass wants to drop is supplied via `vendorNotificationPrefix`.
  *
- * 5. ACP has no terminal "agent message complete" notification — the turn
- *    ends implicitly when `session/prompt` resolves. SNA's persistence
- *    layer only writes assistant rows for the `assistant` event (the full
- *    message), not the streaming `assistant_delta` chunks. So we
- *    accumulate chunks per turn and flush them as a synthetic `assistant`
- *    event right before `complete`, otherwise reload-the-chat wipes every
- *    streamed reply.
+ * 5. ACP has no terminal "agent message/thought complete" notification —
+ *    the turn ends implicitly when `session/prompt` resolves. SNA's
+ *    persistence layer writes full rows for terminal `assistant` /
+ *    `thinking` events, not just streaming deltas. So we accumulate chunks
+ *    per turn and flush synthetic terminal events right before `complete`,
+ *    otherwise reload-the-chat loses streamed-only content.
  *
  * Subclasses only need to implement `resolveSpawn()` and `name`. The
  * remaining hooks (`authenticate`, `preHandshake`, `onExit`,
@@ -249,6 +248,8 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
    * decision (5) in the file header.
    */
   protected assistantTurnBuffer = "";
+  /** Per-turn accumulator for `agent_thought_chunk` text. */
+  protected thinkingTurnBuffer = "";
   /** Captured permission mode — see design decision (3). */
   protected readonly permissionMode: string | undefined;
   /**
@@ -780,6 +781,7 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
     const text = (update.content as { text?: string } | undefined)?.text ?? "";
     switch (update.sessionUpdate) {
       case "agent_thought_chunk":
+        this.thinkingTurnBuffer += text;
         return { type: "thinking_delta", delta: text, timestamp: now };
       case "agent_message_chunk":
         // Accumulate so the final `assistant` event (flushed when
@@ -955,6 +957,7 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
         sessionId: this._sessionId,
         prompt: promptBlocks,
       })) as { stopReason?: string } | undefined;
+      this.flushThinkingTurn();
       this.flushAssistantTurn();
       this.emitEvent({
         type: "complete",
@@ -964,6 +967,7 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
     } catch (err) {
       // Flush whatever text streamed before the failure so a partial turn
       // still lands in chat_messages and the user sees it after reload.
+      this.flushThinkingTurn();
       this.flushAssistantTurn();
       const message = err instanceof Error ? err.message : String(err);
       this.emitEvent({ type: "error", message, timestamp: Date.now() });
@@ -982,6 +986,22 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
     if (!text) return;
     this.emitEvent({
       type: "assistant",
+      message: text,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * Emit accumulated `agent_thought_chunk` text as a terminal `thinking`
+   * event. Mirrors `flushAssistantTurn()` for ACP runtimes, whose wire
+   * stream only sends thought deltas.
+   */
+  protected flushThinkingTurn(): void {
+    const text = this.thinkingTurnBuffer;
+    this.thinkingTurnBuffer = "";
+    if (!text) return;
+    this.emitEvent({
+      type: "thinking",
       message: text,
       timestamp: Date.now(),
     });

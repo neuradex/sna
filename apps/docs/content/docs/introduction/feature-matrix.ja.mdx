@@ -68,7 +68,7 @@ chunk と最終 usage の両方を受け取れます。
 | Assistant text delta | ✓ stream-json の `assistant_delta` | ✓ `item/agentMessage/delta` | ✓ `message.part.delta` | ✓ ACP `agent_message_chunk` | ✓ ACP `agent_message_chunk` |
 | 最終 assistant イベント | ✓ `assistant` / `result` | ✓ `item/completed` agent message | ✓ finalized text part | ✓ ACP chunk を `complete` 直前に合成 | ✓ ACP chunk を `complete` 直前に合成 |
 | Thinking delta | ✓ `thinking_delta` | ✓ `item/reasoning/summaryTextDelta` | ✓ reasoning `message.part.delta` | ✓ ACP `agent_thought_chunk` | ✓ ACP `agent_thought_chunk` |
-| 最終 thinking イベント | ✓ signed thinking block | ✓ completed reasoning item | ✓ finalized reasoning part | ✗ delta のみ | ✗ delta のみ |
+| 最終 thinking イベント | ✓ signed thinking block | ✓ completed reasoning item | ✓ finalized reasoning part | ✓ ACP thought chunk から合成 | ✓ ACP thought chunk から合成 |
 | Tool call 開始 | ✓ `streaming: true` 付き `tool_use` | ✓ typed item start (`shell`, `file_change`, MCP, hosted tools) | ✓ running/pending tool part | ✓ ACP `tool_call` | ✓ ACP `tool_call` |
 | Tool input delta | ✓ Anthropic `input_json_delta` → `tool_use_delta` | ✗ ネイティブ input delta なし | ✗ ネイティブ input delta なし | ⚠ ACP `tool_call_update` で input 更新は可能だが byte/token 単位の delta ではない | ⚠ ACP `tool_call_update` で input 更新は可能だが byte/token 単位の delta ではない |
 | Tool output streaming | ✗ 最終 `tool_result` のみ | ✓ shell `outputDelta` を `tool_use` update として渡す。file patch delta は捨てる | ✗ 最終 part status のみ | ✗ 最終/update payload のみ | ✗ 最終/update payload のみ |
