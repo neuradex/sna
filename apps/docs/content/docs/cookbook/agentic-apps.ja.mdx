@@ -1,10 +1,10 @@
 ---
-title: Agentic app hosting
-description: 実アプリに SNA を組み込むときに Loom で使っている product integration pattern。
+title: アプリに SNA を組み込む
+description: 実アプリに SNA を組み込むときの product integration pattern。
 icon: AppWindow
 ---
 
-Loom は SNA を一回限りの chat endpoint としてではなく、local / cloud 対応の agent runtime としてアプリ内に組み込んでいます。Product が project、tab、document、permission、background workflow を agent の周辺に持つ場合、次の pattern が役立ちます。
+SNA は一回限りの chat endpoint としてだけでなく、local / cloud 対応の agent runtime としてアプリ内に組み込めます。Product が project、tab、document、permission、background workflow を agent の周辺に持つ場合、次の pattern が役立ちます。
 
 ## 1. App session と SNA session を分ける
 
@@ -97,7 +97,7 @@ export function onAgentEventAll(listener: (event: unknown) => void) {
 
 ## 3. Command は host 経由、event は SNA から直接受ける
 
-Loom は path を分けています。
+Product app では、path を次のように分けると扱いやすいです。
 
 | Path | Route | 理由 |
 | --- | --- | --- |

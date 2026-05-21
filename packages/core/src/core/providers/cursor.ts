@@ -2,8 +2,7 @@
  * Cursor provider — ACP-over-stdio adapter, second provider on the shared
  * `AcpStdioProcess` base.
  *
- * Backed by Cursor's `agent acp` subcommand (the headless CLI shipped at
- * `~/.local/bin/agent` on macOS/Linux). The wire protocol is the standard
+ * Backed by Cursor's `cursor-agent acp` subcommand. The wire protocol is the standard
  * Agent Client Protocol (https://agentclientprotocol.com), so the bulk of
  * the work lives in `acp/base.ts` shared with Grok Build. This file is
  * the Cursor-specific subclass + provider entry: CLI path resolution,
@@ -12,12 +11,12 @@
  * drop, the `tool_call.<kind>ToolCall` wrapper unwrap (Cursor nests every
  * tool call under a per-tool variant key like `shellToolCall` /
  * `writeToolCall` / `readToolCall` / `createPlanToolCall`), and the
- * headless `agent -p` path used by `complete()`.
+ * headless `cursor-agent -p` path used by `complete()`.
  *
  * Design decisions specific to Cursor (the shared ACP decisions live at
  * the top of `acp/base.ts`):
  *
- *   • Authentication relies on the user's existing `agent login` —
+ *   • Authentication relies on the user's existing `cursor-agent login` —
  *     credentials live in the macOS Keychain (`cursor-access-token` /
  *     `cursor-refresh-token` under account `cursor-user`) and the
  *     Cursor subscription billing is used. We never touch
@@ -74,16 +73,16 @@ import {
 // ── CLI discovery ────────────────────────────────────────────────────────────
 
 /**
- * Resolve the path to the `agent` CLI (Cursor's headless binary).
+ * Resolve the path to the `cursor-agent` CLI (Cursor's headless binary).
  * Env override → static common locations → PATH lookup.
  */
 export function resolveCursorPath(_cwd: string = process.cwd()): string {
   if (process.env.SNA_CURSOR_COMMAND) return process.env.SNA_CURSOR_COMMAND;
   const home = process.env.HOME ?? "";
   const candidates = [
-    `${home}/.local/bin/agent`,
-    "/usr/local/bin/agent",
-    "/opt/homebrew/bin/agent",
+    `${home}/.local/bin/cursor-agent`,
+    "/usr/local/bin/cursor-agent",
+    "/opt/homebrew/bin/cursor-agent",
   ];
   for (const p of candidates) {
     try {
@@ -93,7 +92,7 @@ export function resolveCursorPath(_cwd: string = process.cwd()): string {
       // try next
     }
   }
-  return "agent";
+  return "cursor-agent";
 }
 
 // ── Cursor tool_call wrapper variants ───────────────────────────────────────
@@ -148,7 +147,7 @@ export class CursorProcess extends AcpStdioProcess {
   protected get vendorNotificationPrefix(): string { return "cursor/"; }
 
   protected resolveSpawn(options: SpawnOptions): AcpSpawnDescriptor {
-    // `agent acp` is the only subcommand for ACP mode. Unlike Grok, Cursor
+    // `cursor-agent acp` is the only subcommand for ACP mode. Unlike Grok, Cursor
     // doesn't accept top-level model/effort/permission flags on this path —
     // reasoning is encoded into the model id itself (composed by the
     // caller via applyCursorReasoning), and permissions are negotiated
@@ -172,7 +171,7 @@ export class CursorProcess extends AcpStdioProcess {
   /**
    * Cursor requires an explicit `authenticate({methodId: "cursor_login"})`
    * step between `initialize` and `session/new`. The actual credential
-   * comes from the macOS Keychain (populated by `agent login`); we never
+   * comes from the macOS Keychain (populated by `cursor-agent login`); we never
    * pass it inline — that would force per-token billing rather than the
    * user's Cursor subscription.
    */
@@ -183,7 +182,7 @@ export class CursorProcess extends AcpStdioProcess {
       // If the user is already authenticated, Cursor returns an error like
       // "already authenticated". That's not fatal — session/new will work.
       // Anything else, surface as a real failure so the consumer knows
-      // they need to run `agent login`.
+      // they need to run `cursor-agent login`.
       const msg = err instanceof Error ? err.message : String(err);
       if (!/already authenticated|already logged in/i.test(msg)) {
         throw err;
@@ -385,7 +384,7 @@ export class CursorProvider implements AgentProvider {
   }
 
   async complete(options: CompleteOptions): Promise<CompletionResult> {
-    // One-shot path uses `agent -p` headless mode (stream-json or json),
+    // One-shot path uses `cursor-agent -p` headless mode (stream-json or json),
     // not ACP. The wire format is Anthropic-shape so we mostly mirror
     // Claude Code's complete() — including the streaming-json delta
     // shape (`{type:"assistant",message:{content:[{type:"text",text}]}}`).
@@ -563,7 +562,7 @@ export class CursorProvider implements AgentProvider {
   }
 
   async listModels(_config?: ListModelsConfig): Promise<ListModelsResult> {
-    // Cursor's `agent models` prints a human-readable list (`<id> - <label>`,
+    // Cursor's `cursor-agent models` prints a human-readable list (`<id> - <label>`,
     // newline-separated). No `--json` flag exists today, so we parse the
     // text. On failure, fall back to a hard-coded subset of widely-available
     // ids observed at the time of writing.
@@ -583,7 +582,7 @@ export class CursorProvider implements AgentProvider {
           source: "cli",
         });
       }
-      if (models.length === 0) throw new Error("agent models returned no parseable entries");
+      if (models.length === 0) throw new Error("cursor-agent models returned no parseable entries");
       return { models, source: "cli", fetchedAt: Date.now() };
     } catch (err) {
       logger.log(

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "SNA SDK API",
-    "version": "0.15.0",
+    "version": "0.16.0",
     "description": "Skills-Native Application SDK — AI agent provider (Claude Code、Codex、OpenCode) を backend process として spawn し、通信するための HTTP API です。"
   },
   "components": {

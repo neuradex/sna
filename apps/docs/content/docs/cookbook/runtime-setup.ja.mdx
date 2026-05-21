@@ -4,7 +4,7 @@ description: runtime 検出、CLI path 保存、model 登録、install test の 
 icon: Settings2
 ---
 
-Agentic product には、runtime settings flow が必要になることがよくあります。Loom では runtime setup を 2 つの関心事に分けています。
+Agentic product には、runtime settings flow が必要になることがよくあります。Runtime setup は 2 つの関心事に分けると理解しやすくなります。
 
 - **Path detection** は、ユーザーの machine 上にある実際の CLI binary を見つけます。
 - **Runtime registration** は、product UI にどの runtime と model を出すかを決めます。
@@ -50,7 +50,7 @@ type RuntimeSlot = {
 
 ## CLI path は予測しやすい順序で resolve する
 
-Loom は CLI path を次の順序で resolve しています。
+CLI path は次の順序で resolve すると扱いやすいです。
 
 1. Settings で保存した user override。
 2. 以前の detection が残した cache entry。

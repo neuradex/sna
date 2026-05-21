@@ -4,7 +4,7 @@ description: Detect runtimes, persist CLI paths, register models, and test insta
 icon: Settings2
 ---
 
-Agentic products usually need a settings flow around runtimes. Loom treats runtime setup as two separate concerns:
+Agentic products usually need a settings flow around runtimes. It helps to treat runtime setup as two separate concerns:
 
 - **Path detection** finds the real CLI binary on the user's machine.
 - **Runtime registration** decides which runtimes and models the product exposes in its UI.
@@ -50,7 +50,7 @@ type RuntimeSlot = {
 
 ## Resolve CLI paths in a predictable order
 
-Loom resolves CLI paths in this order:
+Resolve CLI paths in this order:
 
 1. A user override saved from settings.
 2. A cache entry written by earlier detection.

@@ -9,6 +9,24 @@ Each runtime is implemented as a class behind a common
 `core/providers/{claude-code,codex,opencode,grok,cursor}.ts`.
 ACP-speaking runtimes (Grok Build, Cursor) share `core/providers/acp/base.ts`.
 
+## Supported runtimes
+
+SNA is designed to let a product choose the runtime that fits the workflow
+instead of baking in one CLI forever. The table below is a product-level
+overview; for exact feature support, see the
+**[Feature × runtime matrix](/docs/introduction/feature-matrix)**.
+
+| Runtime | Best fit | Strengths | Tradeoffs |
+|---------|----------|-----------|-----------|
+| **Claude Code** | Reliable local coding sessions with Anthropic models and rich permission behavior. | Mature CLI behavior, good tool-use UX, detailed token/cost metadata, strong streaming for thinking and tool input deltas. | Stateless per call/session, so there is no daemon pooling. Permission approval is hook-based rather than bidirectional over SNA. |
+| **Codex** | Low-latency product integrations that need many sessions, one-shot jobs, or frequent runtime reuse. | `RuntimePool` reuses a daemon, supports cwd changes per thread, emits rich item lifecycle events and shell output deltas. | Codex-specific configuration has its own native shape; tool input deltas are not exposed like Claude Code's stream-json path. |
+| **OpenCode** | Apps that already use OpenCode or want an HTTP daemon with OpenCode model/provider configuration. | Pooled daemon, SDK-backed HTTP path, good fit for repeated prompts in one cwd. | Daemon is single-cwd, some runtime mutations require respawn, and event detail depends on what OpenCode's stream exposes. |
+| **Grok Build** | ACP-based sessions with Grok Build and a public protocol surface. | Shares the SNA ACP adapter, has bidirectional permission requests, straightforward stateless session lifecycle. | No runtime pooling, model/cwd changes require respawn, and metadata is thinner than Claude/Codex for token and tool detail. |
+| **Cursor** | Users who already live in Cursor and want SNA to drive the Cursor subscription-backed headless CLI. | Uses `cursor-agent` with existing Cursor login, ACP permissions, Cursor model selection, and model-id reasoning variants. | No daemon pooling, model/cwd changes require respawn, and setup depends on the user's Cursor CLI authentication state. |
+
+The rest of this page describes the adapter internals behind that
+product-facing choice.
+
 ## AgentProvider
 
 ```ts
@@ -44,7 +62,7 @@ apply in-place vs which require a respawn-with-history-replay.
 | **codex** | `codex app-server` daemon, JSON-RPC over stdio | persistent daemon, multi-thread | yes |
 | **opencode** | `opencode serve` daemon plus SDK HTTP | persistent daemon, single-cwd | yes |
 | **grok** | `grok agent stdio` (Agent Client Protocol over stdio — Grok Build CLI) | stateless per session | no |
-| **cursor** | `agent acp` (Agent Client Protocol over stdio — Cursor CLI) | stateless per session | no |
+| **cursor** | `cursor-agent acp` (Agent Client Protocol over stdio — Cursor CLI) | stateless per session | no |
 
 The Codex and OpenCode runtime adapters share daemons through `RuntimePool`.
 When a session opens, the pool is queried by `(provider, cwd, config)`
@@ -68,7 +86,7 @@ SNA's canonical history into a single ACP `resource` block on the first
 [Cross-runtime history replay](/docs/introduction/feature-matrix)
 on the feature matrix page.
 
-Cursor uses the user's existing `agent login` (macOS Keychain entries
+Cursor uses the user's existing `cursor-agent login` (macOS Keychain entries
 `cursor-access-token` / `cursor-refresh-token`) — and therefore the
 Cursor subscription. No `CURSOR_API_KEY` is required; SNA passes the
 spawn's environment through unchanged, and the child process picks up
