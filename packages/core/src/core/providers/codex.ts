@@ -1380,6 +1380,10 @@ class CodexProcess implements AgentProcess {
           timestamp: Date.now(),
         };
 
+      case "agent_message":
+      case "agentMessage":
+        return null;
+
       case "userMessage":
       case "user_message":
         return null; // echo of user input — skip
