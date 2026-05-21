@@ -1,0 +1,167 @@
+---
+title: One-shot jobs
+description: Product patterns for completion, runOnce, and runOnceStream calls.
+icon: Zap
+---
+
+Loom uses one-shot calls for work that should not become part of a user's long-lived chat thread: session titles, query parsing, retrieval filtering, runtime health checks, and small background decisions.
+
+## Choose the smallest surface
+
+| Job shape | API | Why |
+| --- | --- | --- |
+| Text transform, classification, JSON extraction | `agent.completion()` | Fastest path; no temporary session lifecycle. |
+| Agent can use tools or needs provider-specific agent behavior | `agent.runOnce()` | Creates a temporary session, waits for completion, then cleans up. |
+| Browser/Electron UI needs live progress for a one-shot | `agent.runOnceStream()` | HTTP SSE stream; no long-lived chat session. |
+
+Keep one-shot prompts narrow. They are product plumbing, not open-ended conversations.
+
+## Text-only utility with `completion`
+
+This pattern is useful for title generation, intent classification, and small parser calls.
+
+```ts
+import type { SnaClient } from "@sna-sdk/client";
+
+export async function generateSessionTitle(client: SnaClient, firstMessage: string) {
+  const result = await client.agent.completion({
+    // Keep the prompt single-purpose so failures are easy to diagnose.
+    prompt: `Create a 2-5 word title for this first user message:\n\n${firstMessage}`,
+
+    // Use a cheap/fast model chosen by your app's model registry.
+    model: "claude-haiku-4-5-20251001",
+
+    // Labels make traces and logs searchable by product feature.
+    label: "session-title",
+
+    // One-shot UX should fail quickly and fall back to a default title.
+    timeout: 30_000,
+
+    // Do not allow tools for pure text transforms.
+    permissionMode: "bypassPermissions",
+  });
+
+  if (!result.text?.trim()) return null;
+
+  // Strip quotes/newlines because titles are UI strings, not model prose.
+  return result.text.trim().replace(/^["']|["']$/g, "").split("\n")[0].slice(0, 50);
+}
+```
+
+## Structured extraction with a fallback
+
+Models sometimes wrap JSON in fences or return malformed output. Treat parsing failure as a normal branch.
+
+```ts
+type ParsedQuery = {
+  subject: string | null;
+  predicate: string | null;
+  object: string | null;
+  mode: "exact" | "broad";
+};
+
+const FALLBACK_QUERY: ParsedQuery = {
+  subject: null,
+  predicate: null,
+  object: null,
+  mode: "broad",
+};
+
+export async function parseQuery(client: SnaClient, userText: string): Promise<ParsedQuery> {
+  const result = await client.agent.completion({
+    // Include the schema in the prompt, but keep it short enough to inspect in logs.
+    prompt: [
+      "Return ONLY JSON matching this TypeScript type:",
+      "{ subject: string|null; predicate: string|null; object: string|null; mode: 'exact'|'broad' }",
+      "",
+      userText,
+    ].join("\n"),
+    model: "claude-haiku-4-5-20251001",
+    label: "query-parse",
+    timeout: 30_000,
+    permissionMode: "bypassPermissions",
+  });
+
+  if (!result.text) return FALLBACK_QUERY;
+
+  // Accept common fenced output without silently accepting arbitrary prose.
+  const cleaned = result.text
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/i, "")
+    .trim();
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    return {
+      subject: typeof parsed.subject === "string" ? parsed.subject : null,
+      predicate: typeof parsed.predicate === "string" ? parsed.predicate : null,
+      object: typeof parsed.object === "string" ? parsed.object : null,
+      mode: parsed.mode === "exact" ? "exact" : "broad",
+    };
+  } catch {
+    // A malformed one-shot result should degrade the feature, not crash the app.
+    return FALLBACK_QUERY;
+  }
+}
+```
+
+## Runtime health check with `runOnce`
+
+Use `runOnce` when you need the real runtime path and agent bootstrap to execute. Apply the selected CLI path in the host settings or SNA launcher environment first; `runOnce` then verifies that the configured runtime can actually answer.
+
+```ts
+export async function testRuntime(client: SnaClient, runtimeId: string) {
+  const result = await client.agent.runOnce({
+    provider: runtimeId,
+
+    // Use an isolated cwd so runtime caches or project files do not pollute dev mode.
+    cwd: `/tmp/my-app-runtime-tests/${runtimeId}`,
+
+    // Health checks should not prompt for permissions or call tools.
+    permissionMode: "bypassPermissions",
+    systemPrompt: "Reply exactly APP_RUNTIME_OK and do not use tools.",
+    message: "Reply exactly: APP_RUNTIME_OK",
+
+    // Runtime first-run setup can be slow; keep a cap but give it enough room.
+    timeout: 120_000,
+  });
+
+  if (!result.result?.includes("APP_RUNTIME_OK")) {
+    return { ok: false, reason: "unexpected-response", response: result.result };
+  }
+  return { ok: true };
+}
+```
+
+## Streaming one-shot UI
+
+Use `runOnceStream` when a UI wants live progress but the work should not attach to an existing session.
+
+```ts
+export async function previewPlan(client: SnaClient, request: string, append: (text: string) => void) {
+  for await (const event of client.agent.runOnceStream({
+    // This is still a temporary one-shot run; no session is kept afterward.
+    message: request,
+    provider: "codex",
+    model: "gpt-5.4-mini",
+    permissionMode: "bypassPermissions",
+    timeout: 60_000,
+  })) {
+    if (event.type === "assistant_delta") {
+      // Render token deltas as they arrive.
+      append(String(event.delta ?? ""));
+    }
+    if (event.type === "error") {
+      throw new Error(String(event.error ?? "runOnceStream failed"));
+    }
+  }
+}
+```
+
+## Guardrails
+
+- Give every call a `label`; product traces are much easier to read.
+- Set a timeout and write an explicit fallback.
+- Use `permissionMode: "bypassPermissions"` only when the prompt is not allowed to use tools.
+- Keep one-shot results out of the user conversation unless the user explicitly asked for that output.
+- For repeated background work, route model choice through your runtime/model registry instead of hardcoding one provider.

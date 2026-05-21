@@ -12,10 +12,19 @@ Product には通常、独自の session または project row があります�
 
 ```ts
 type AppSession = {
+  // Product が所有する安定した identity です。Rename/archive/fork はこの id を基準にします。
   id: string;
+
+  // User-facing label です。Runtime process label とは分けておくと移行しやすいです。
   name: string;
+
+  // Local project がまだない session もあるため nullable にします。
   projectPath: string | null;
+
+  // 現在接続している SNA head です。Runtime switch、fold、fork で変わることがあります。
   snaSessionId: string | null;
+
+  // Local SNA と cloud SNA instance を同じ product model で扱うための field です。
   snaInstanceId: "local" | string;
 };
 ```
@@ -42,20 +51,27 @@ WebSocket state は connection 単位です。App が local SNA と cloud SNA in
 ```ts
 import { SnaClient } from "@sna-sdk/client";
 
+// Instance id ごとに client を 1 つだけ作り、WebSocket の重複接続を避けます。
 const clients = new Map<string, SnaClient>();
+
+// UI は特定 client ではなく app-level listener set に subscribe します。
 const eventListeners = new Set<(event: unknown) => void>();
 const permissionListeners = new Set<(event: unknown) => void>();
 
 function installAggregator(client: SnaClient) {
+  // Runtime event を 1 つの product event bus に集めます。
   client.agent.onEvent((event) => {
     for (const listener of eventListeners) listener(event);
   });
+
+  // Permission request も connection ごとに届くため、同じように fan-in します。
   client.agent.onPermissionRequest((event) => {
     for (const listener of permissionListeners) listener(event);
   });
 }
 
 export function snaFor(instanceId: string, baseUrl?: string): SnaClient {
+  // すでに接続済みの instance なら同じ client を再利用します。
   const existing = clients.get(instanceId);
   if (existing) return existing;
   if (!baseUrl) throw new Error(`baseUrl required for ${instanceId}`);
@@ -63,12 +79,15 @@ export function snaFor(instanceId: string, baseUrl?: string): SnaClient {
   const client = new SnaClient({ baseUrl, ws: true, http: true });
   clients.set(instanceId, client);
   installAggregator(client);
+
+  // connect と permission subscription は client 作成時に一度だけ行います。
   client.connect();
   client.agent.subscribePermissions().catch(() => {});
   return client;
 }
 
 export function onAgentEventAll(listener: (event: unknown) => void) {
+  // React effect の cleanup としてそのまま使える unsubscribe を返します。
   eventListeners.add(listener);
   return () => eventListeners.delete(listener);
 }
@@ -89,7 +108,10 @@ Renderer には raw SNA call ではなく domain wrapper を公開します。
 
 ```ts
 export async function ensureAgentAlive(snaSessionId: string, isNewSession = false) {
+  // Renderer が SNA id を持っていても、product session は host 側で resolve します。
   const appSession = sessionStore.findBySnaId(snaSessionId);
+
+  // Host endpoint が cwd、model、cloud wake、context injection などの product logic を持ちます。
   await appFetch("/agent/ensure", {
     method: "POST",
     body: JSON.stringify({
@@ -101,6 +123,7 @@ export async function ensureAgentAlive(snaSessionId: string, isNewSession = fals
 }
 
 export async function sendMessage(snaSessionId: string, message: string) {
+  // Send も host 経由にすると、pending model/runtime change を user-turn 境界で適用できます。
   return appFetch("/agent/send", {
     method: "POST",
     body: JSON.stringify({ snaSessionId, message }),
@@ -108,6 +131,7 @@ export async function sendMessage(snaSessionId: string, message: string) {
 }
 
 export function subscribeAgent(snaSessionId: string) {
+  // Event stream は token latency を下げるため SNA WebSocket に直接接続します。
   return clientForSnaSession(snaSessionId).agent.subscribe(snaSessionId, { since: 0 });
 }
 ```
@@ -116,18 +140,21 @@ Component は `ensureAgentAlive`、`sendMessage`、`subscribeAgent` という pr
 
 ## 4. `/agent/ensure` を idempotent にする
 
-Start-vs-resume の判断は host が持つべきです。UI が runtime history の有無、cloud wake の必要性、remote container 内で有効な cwd を判断しないようにします。
+Start-vs-resume の判断は host が持つと責任範囲が明確になります。UI が runtime history の有無、cloud wake の必要性、remote container 内で有効な cwd を判断しない形にすると安定します。
 
 ```ts
 async function ensureAgent({ appSessionId, requestedSnaId, isNewSession }) {
+  // Product session を基準に local/cloud SNA instance を選びます。
   const instance = snaForAppSession(appSessionId);
   await wakeIfCloudInstance(instance);
 
+  // Request に id がなければ product DB に保存された SNA id を使うか、新しく作ります。
   const snaSessionId = requestedSnaId ?? await loadOrCreateSnaId(appSessionId);
   if (await instance.isAlive(snaSessionId)) {
     return { status: "already_alive", snaSessionId };
   }
 
+  // Agent config は host で組み立て、renderer は domain-level に保ちます。
   const { config, cwd } = await buildAgentConfig(appSessionId, snaSessionId);
   await instance.createSession({
     id: snaSessionId,
@@ -140,30 +167,35 @@ async function ensureAgent({ appSessionId, requestedSnaId, isNewSession }) {
     .then((res) => res.ok && res.data.messages.length > 0)
     .catch(() => false);
 
+  // 新規または history のない head は start、既存 history がある head は resume します。
   return isNewSession || !hasHistory
     ? instance.startAgent(snaSessionId, { ...config, force: true, cwd })
     : instance.resumeAgent(snaSessionId, config);
 }
 ```
 
-この endpoint は tab focus、reload recovery、send preflight から何度呼ばれても安全であるべきです。
+この endpoint は tab focus、reload recovery、send preflight から何度呼ばれても安全な形にしておくと扱いやすいです。
 
 ## 5. Product context は user-turn 境界で注入する
 
-Metadata を独立した model turn として送らないでください。User message を forward する直前に context を作り、その message に product-owned tag を prepend / append します。
+Metadata は独立した model turn として送るより、User message を forward する直前に context を作り、その message に product-owned tag を prepend / append する形が扱いやすいです。
 
 ```ts
 async function sendAgentMessage({ snaSessionId, message }) {
   let finalMessage = message;
 
+  // Pending model/runtime selection は実際の user turn 直前に reconcile します。
   await reconcileSelectedModel(snaSessionId);
 
+  // 一度だけ消費する system metadata は user turn に付けて送ります。
   const pendingMeta = consumePendingSystemMeta(snaSessionId);
   if (pendingMeta) finalMessage = `${pendingMeta}\n${finalMessage}`;
 
+  // Retrieval context は現在の user message を基準に作ると stale context を減らせます。
   const retrievalContext = await maybeBuildRetrievalContext(snaSessionId, finalMessage);
   if (retrievalContext) finalMessage += `\n${retrievalContext}`;
 
+  // Agent が見るのは、product context が付いた最終 user turn です。
   return snaForSnaSession(snaSessionId).sendMessage(snaSessionId, finalMessage);
 }
 ```
@@ -187,7 +219,7 @@ User message が保存される前に新しい SNA head を broadcast すると�
 
 ## 7. Permission はすべての client で subscribe する
 
-Permission subscription は WebSocket ごとです。Permission dialog が mount されたあとに cloud client が作られる可能性があるなら、その新しい client でも subscribe してください。
+Permission subscription は WebSocket ごとです。Permission dialog が mount されたあとに cloud client が作られる可能性があるなら、その新しい client でも subscribe しておくと安全です。
 
 ```ts
 export async function subscribePermissions() {
@@ -209,21 +241,26 @@ export function respondPermission(snaSessionId: string, approved: boolean) {
 
 ## 8. React subscription は app root に置く
 
-SNA event bridge は chat surface より上に mount します。Chat pane、route、side panel は agent が streaming 中でも unmount されることがあります。Root-level hook が WebSocket listener を維持し、event を store に流し込むべきです。
+SNA event bridge は chat surface より上に mount します。Chat pane、route、side panel は agent が streaming 中でも unmount されることがあります。Root-level hook が WebSocket listener を維持し、event を store に流し込む構成が安定します。
 
 ```tsx
 function AppShell() {
+  // Product session hydration は app boot の責務として root に置きます。
   const hydrateSessions = useSessionStore((state) => state.hydrate);
   const sessions = useSessionStore((state) => state.sessions);
+
+  // Permission UI は現在 route だけでなく、既知の全 session を見られると安全です。
   const sessionIds = useMemo(
     () => sessions.flatMap((session) => session.snaSessionId ? [session.snaSessionId] : []),
     [sessions],
   );
 
+  // Event bridge は route/chat pane より上に置くと streaming 中の unmount に強くなります。
   useAgentEventStream();
   const { pending, clearPending } = usePermissionRequests(sessionIds);
 
   useEffect(() => {
+    // SNA connection lifecycle も root component が所有します。
     hydrateSessions();
     connectSna();
     return () => disconnectSna();
@@ -252,6 +289,7 @@ function useAgentEventStream() {
   const handleEvent = useMessageStore((state) => state.handleEvent);
 
   useEffect(() => {
+    // Listener は一度だけ設置し、event を store に正規化して入れます。
     return onAgentEvent(({ session, cursor, event, isHistory }) => {
       handleEvent(session, { cursor, event, isHistory });
     });
@@ -261,8 +299,13 @@ function useAgentEventStream() {
     const cleanups = sessions
       .filter((session) => session.snaSessionId)
       .map((session) => {
+        // Product session id と SNA session id の mapping を store に伝えます。
         register(session.snaSessionId!, session.id);
+
+        // Mount 時に最近の event を復元し、その後の stream を続けます。
         subscribeAgent(session.snaSessionId!, { since: 0, tail: 200 }).catch(() => {});
+
+        // Session list が変わったら古い subscription を片付けます。
         return () => unsubscribeAgent(session.snaSessionId!).catch(() => {});
       });
 
@@ -277,7 +320,7 @@ Permission UI も同じ理由で root に mount する方が安全です。こ�
 
 | 状況 | この pattern を使うか |
 | --- | --- |
-| Product DB のない単一 CLI wrapper | 通常は不要です。SNA を直接呼んでください。 |
-| Local SNA と renderer UI を持つ Electron app | 使ってください。Command path と event path を分けます。 |
-| Local + cloud SNA instance を同時に扱う app | 使ってください。Client registry と event aggregator が必要です。 |
-| Retrieval、project、policy context を注入する app | 使ってください。Send-time context building を host に集約します。 |
+| Product DB のない単一 CLI wrapper | 通常は不要です。SNA を直接呼ぶ方が単純です。 |
+| Local SNA と renderer UI を持つ Electron app | よく合います。Command path と event path を分けると扱いやすいです。 |
+| Local + cloud SNA instance を同時に扱う app | よく合います。Client registry と event aggregator が必要です。 |
+| Retrieval、project、policy context を注入する app | よく合います。Send-time context building を host に集約すると扱いやすいです。 |
