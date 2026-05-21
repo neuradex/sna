@@ -30,6 +30,7 @@ export const AgentEventSchema = z.object({
     "assistant_delta",
     "assistant",
     "tool_use",
+    "tool_use_delta",
     "tool_result",
     "permission_needed",
     "milestone",

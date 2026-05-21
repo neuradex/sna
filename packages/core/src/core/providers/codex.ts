@@ -124,6 +124,60 @@ function codexConfigValue(value: unknown): string | null {
   return JSON.stringify(value);
 }
 
+type CodexItemKind =
+  | "assistant_text"
+  | "thinking"
+  | "user_echo"
+  | "command_execution"
+  | "file_change"
+  | "mcp_tool_call"
+  | "web_search"
+  | "image_generation"
+  | "todo_list"
+  | "error"
+  | "unknown";
+
+/**
+ * Codex `item.type` names are provider-native lifecycle labels. Classify them
+ * once into SNA's semantic categories so start/completed normalization cannot
+ * drift: content items are never tools, tool items get tool_use/tool_result,
+ * and genuinely unknown items keep the explicit fail-open behavior.
+ */
+function classifyCodexItemType(type: unknown): CodexItemKind {
+  switch (type) {
+    case "agent_message":
+    case "agentMessage":
+      return "assistant_text";
+    case "reasoning":
+      return "thinking";
+    case "user_message":
+    case "userMessage":
+      return "user_echo";
+    case "command_execution":
+    case "commandExecution":
+      return "command_execution";
+    case "file_change":
+    case "fileChange":
+      return "file_change";
+    case "mcp_tool_call":
+    case "mcpToolCall":
+      return "mcp_tool_call";
+    case "web_search":
+    case "webSearch":
+      return "web_search";
+    case "image_generation":
+    case "imageGeneration":
+      return "image_generation";
+    case "todo_list":
+    case "todoList":
+      return "todo_list";
+    case "error":
+      return "error";
+    default:
+      return "unknown";
+  }
+}
+
 /** @internal Exported for tests. Builds top-level Codex CLI args shared by app-server and exec. */
 export function buildCodexGlobalArgs(providerOptions?: Record<string, unknown>): string[] {
   const args: string[] = [];
@@ -1313,9 +1367,8 @@ class CodexProcess implements AgentProcess {
     // (rare) just don't get duration tracking.
     if (item.id) this._itemStartedAt.set(item.id, Date.now());
 
-    switch (item.type) {
+    switch (classifyCodexItemType(item.type)) {
       case "command_execution":
-      case "commandExecution":
         return {
           type: "tool_use",
           message: "shell",
@@ -1329,7 +1382,6 @@ class CodexProcess implements AgentProcess {
         };
 
       case "file_change":
-      case "fileChange":
         return {
           type: "tool_use",
           message: "file_change",
@@ -1343,7 +1395,6 @@ class CodexProcess implements AgentProcess {
         };
 
       case "mcp_tool_call":
-      case "mcpToolCall":
         return {
           type: "tool_use",
           message: `${item.server}:${item.tool}`,
@@ -1357,7 +1408,6 @@ class CodexProcess implements AgentProcess {
         };
 
       case "web_search":
-      case "webSearch":
         return {
           type: "tool_use",
           message: "web_search",
@@ -1366,7 +1416,6 @@ class CodexProcess implements AgentProcess {
         };
 
       case "image_generation":
-      case "imageGeneration":
         // OpenAI's hosted image_generation tool — `revised_prompt` and
         // `result` are empty at start; they get populated in item/completed.
         return {
@@ -1380,15 +1429,18 @@ class CodexProcess implements AgentProcess {
           timestamp: Date.now(),
         };
 
-      case "agent_message":
-      case "agentMessage":
+      case "assistant_text":
+      case "thinking":
         return null;
 
-      case "userMessage":
-      case "user_message":
+      case "user_echo":
         return null; // echo of user input — skip
 
-      default:
+      case "todo_list":
+        return null; // internal tracking
+
+      case "error":
+      case "unknown":
         // Fail-open: forward any item.type SNA doesn't have a specific
         // shape for as a generic tool_use. Without this, new Codex tool
         // types ship to consumers as silent invisibility — they happen
@@ -1416,16 +1468,15 @@ class CodexProcess implements AgentProcess {
     if (item.id) this._itemStartedAt.delete(item.id);
     const durationMs = startedAt !== undefined ? Date.now() - startedAt : undefined;
 
-    switch (item.type) {
-      case "agent_message":
-      case "agentMessage":
+    switch (classifyCodexItemType(item.type)) {
+      case "assistant_text":
         return {
           type: "assistant",
           message: item.text ?? "",
           timestamp: Date.now(),
         };
 
-      case "reasoning":
+      case "thinking":
         return {
           type: "thinking",
           message: item.text ?? "",
@@ -1433,7 +1484,6 @@ class CodexProcess implements AgentProcess {
         };
 
       case "command_execution":
-      case "commandExecution":
         return {
           type: "tool_result",
           message: item.aggregated_output ?? item.aggregatedOutput ?? "",
@@ -1449,7 +1499,6 @@ class CodexProcess implements AgentProcess {
         };
 
       case "file_change":
-      case "fileChange":
         return {
           type: "tool_result",
           message: `File changes ${item.status}`,
@@ -1465,7 +1514,6 @@ class CodexProcess implements AgentProcess {
         };
 
       case "mcp_tool_call":
-      case "mcpToolCall":
         return {
           type: "tool_result",
           message: item.result
@@ -1481,7 +1529,6 @@ class CodexProcess implements AgentProcess {
         };
 
       case "web_search":
-      case "webSearch":
         return {
           type: "tool_result",
           message: "Web search completed",
@@ -1490,7 +1537,6 @@ class CodexProcess implements AgentProcess {
         };
 
       case "image_generation":
-      case "imageGeneration":
         // saved_path is set by codex daemon after writing the PNG;
         // see codex-rs/core/src/stream_events_utils.rs:save_image_generation_result.
         return {
@@ -1508,8 +1554,10 @@ class CodexProcess implements AgentProcess {
           timestamp: Date.now(),
         };
 
+      case "user_echo":
+        return null;
+
       case "todo_list":
-      case "todoList":
         return null; // internal tracking
 
       case "error":
@@ -1519,7 +1567,7 @@ class CodexProcess implements AgentProcess {
           timestamp: Date.now(),
         };
 
-      default:
+      case "unknown":
         // Fail-open: forward any item.type SNA doesn't have a specific
         // shape for. Without this, new Codex tool types ship to consumers
         // as silent invisibility — the model invoked something but the

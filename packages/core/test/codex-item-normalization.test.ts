@@ -122,6 +122,70 @@ describe("CodexProcess — item normalization", () => {
     assert.ok(events.some((e) => e.type === "complete"), "turn should still complete");
   });
 
+  it("does not treat reasoning starts as tool_use while preserving thinking deltas and completion", async () => {
+    process.env.CODEX_MOCK_TURN_NOTIFICATIONS = JSON.stringify([
+      {
+        jsonrpc: "2.0",
+        method: "item/started",
+        params: {
+          item: {
+            type: "reasoning",
+            id: "rs_1",
+            status: "in_progress",
+          },
+        },
+      },
+      {
+        jsonrpc: "2.0",
+        method: "item/reasoning/summaryTextDelta",
+        params: {
+          itemId: "rs_1",
+          delta: "Let me think",
+        },
+      },
+      {
+        jsonrpc: "2.0",
+        method: "item/completed",
+        params: {
+          item: {
+            type: "reasoning",
+            id: "rs_1",
+            status: "completed",
+            text: "Let me think",
+          },
+        },
+      },
+      {
+        jsonrpc: "2.0",
+        method: "thread/status/changed",
+        params: { status: "idle" },
+      },
+    ]);
+
+    const provider = new CodexProvider();
+    const proc = provider.spawn({ cwd: process.cwd(), prompt: "think" });
+    const events: AgentEvent[] = [];
+    proc.on("event", (e) => events.push(e));
+
+    await waitFor(() => events.some((e) => e.type === "complete"));
+    proc.kill();
+
+    assert.equal(
+      events.some((e) => e.type === "tool_use" && (e.data as any)?.toolName === "reasoning"),
+      false,
+      "reasoning item/started must not surface as a fake tool_use",
+    );
+    assert.equal(
+      events.some((e) => e.type === "tool_result" && (e.data as any)?.toolName === "reasoning"),
+      false,
+      "reasoning messages should not require a matching tool_result",
+    );
+
+    assert.equal(events.find((e) => e.type === "thinking_delta")?.message, "Let me think");
+    assert.equal(events.find((e) => e.type === "thinking")?.message, "Let me think");
+    assert.ok(events.some((e) => e.type === "complete"), "turn should still complete");
+  });
+
   it("forwards image_generation lifecycle as tool_use (start) + tool_result (savedPath + revisedPrompt + duration)", async () => {
     process.env.CODEX_MOCK_TURN_NOTIFICATIONS = JSON.stringify([
       {

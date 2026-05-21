@@ -3,6 +3,15 @@
  *
  * Providers translate their native event format (Claude Code stream-json,
  * Codex JSONL, etc.) into these common types.
+ *
+ * Adapter contract:
+ * - Assistant text is `assistant_delta` while streaming and `assistant` when
+ *   the block is final.
+ * - Reasoning/thinking is `thinking_delta` while streaming and `thinking` when
+ *   the block is final.
+ * - Native lifecycle "start" events for assistant text or thinking are not
+ *   user-visible events; they must never be surfaced as `tool_use`.
+ * - Only actual runtime tool invocations become `tool_use` / `tool_result`.
  */
 export interface AgentEvent {
   type:

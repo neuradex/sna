@@ -186,6 +186,28 @@ function migrateDropSkillName(db: Database.Database) {
   }
 }
 
+/**
+ * Remove rows created by an older Codex item-start fail-open bug.
+ *
+ * Codex content items (`agentMessage`, `reasoning`) emit lifecycle starts just
+ * like tools do, but they are not tools. Before the explicit non-tool cases
+ * existed, those starts were persisted as assistant/tool_use rows and then
+ * replayed as fake function calls on resume/provider-switch.
+ */
+function migrateFakeCodexContentToolUses(db: Database.Database) {
+  const cols = db.prepare("PRAGMA table_info(chat_messages)").all() as { name: string }[];
+  if (cols.length === 0) return;
+  const names = new Set(cols.map((c) => c.name));
+  if (!names.has("actor") || !names.has("kind") || !names.has("meta")) return;
+
+  db.exec(`
+    DELETE FROM chat_messages
+    WHERE actor = 'assistant'
+      AND kind = 'tool_use'
+      AND json_extract(meta, '$.raw.type') IN ('agentMessage', 'agent_message', 'reasoning')
+  `);
+}
+
 function extToMime(ext: string): string {
   switch (ext.toLowerCase()) {
     case "png": return "image/png";
@@ -341,6 +363,8 @@ function initSchema(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_runtime_sessions_alive ON runtime_sessions(sna_session_id)
       WHERE retired_at IS NULL;
   `);
+
+  migrateFakeCodexContentToolUses(db);
 
   // Backfill must run after chat_sessions / runtime_sessions exist.
   migrateRuntimeSessions(db);
