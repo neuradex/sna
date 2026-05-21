@@ -1,12 +1,12 @@
 ---
 title: "Testing SDK"
-description: "Mock runtime server and CLI harness for deterministic SNA integration tests."
+description: "Mock LLM APIs, real-runtime mock-attached helpers, and CLI harnesses for deterministic SNA integration tests."
 ---
 # Testing SDK
 
-`@sna-sdk/testing` exists so tests do not need real Anthropic, OpenAI, or Claude accounts. It provides local Anthropic-compatible and OpenAI-compatible API servers plus a CLI wrapper that isolates configuration and logs per instance.
+`@sna-sdk/testing` exists so tests do not need real Anthropic, OpenAI, xAI, or Claude accounts. It provides local Anthropic-compatible and OpenAI-compatible API servers, helpers for running real runtime CLIs against those mocks, and a CLI wrapper that isolates configuration and logs per instance.
 
-Use it for smoke tests, runtime-adapter tests, and UI flows that need predictable agent output.
+Use it for smoke tests, runtime-adapter tests, mock-attached CLI contract tests, and UI flows that need predictable agent output.
 
 ## Install
 
@@ -17,4 +17,5 @@ pnpm add @sna-sdk/testing@0.15.0
 ## Public surfaces
 
 - [testing-mock-api](/docs/sdks/testing-mock-api)
+- [testing-mock-attached](/docs/sdks/testing-mock-attached)
 - [testing-cli](/docs/sdks/testing-cli)
