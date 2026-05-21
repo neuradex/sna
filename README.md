@@ -45,17 +45,28 @@ https://github.com/neuradex/sna/issues
 - **Reasoning effort knob.** A provider-agnostic `reasoningLevel: 0..5` flows to Claude Code's `--effort` and Codex's `model_reasoning_effort` / `turn/start.effort`. Set 0 for autocomplete-grade latency, 5 for deep thinking.
 - **Codex runtime knobs.** `providerOptions.serviceTier` mirrors Codex's `/fast` slash command (values: `"priority"`, `"flex"`, `"batch"`), `providerOptions.profile` maps to `--profile`, and `providerOptions.config` maps to repeatable `-c key=value` overrides. Use `providerOptions.config` for OpenAI-compatible gateways such as OpenRouter or local model servers by configuring Codex's native `model_providers.*` settings. Codex-only on purpose — Claude's `/fast` is a different MODEL variant with its own billing pool, so it's not auto-translated.
 - **Hooks / MCP / policy abstraction.** Define hooks, MCP servers, allowed/disallowed tools once; per-provider adapters apply them. Mid-session provider switches keep the same configuration.
-- **Embedded launcher.** `startSnaServer({ port, dbPath, ... })` from `@sna-sdk/core/electron` or `@sna-sdk/core/node` forks the standalone server, resolves native bindings (asar-aware), and waits for ready.
+- **Embedded launcher.** `startSnaServer({ port, dbPath, runtimePaths, ... })` from `@sna-sdk/core/electron` or `@sna-sdk/core/node` forks the standalone server, resolves native bindings (asar-aware), registers runtime CLI paths, and waits for ready.
 
 ## Quick start
 
 ### As a consumer app
 
 ```ts
-import { startSnaServer } from "@sna-sdk/core/node";
+import { resolveClaudeCli, startSnaServer } from "@sna-sdk/core/node";
 import { SnaClient } from "@sna-sdk/client";
 
-const sna = await startSnaServer({ port: 3099, dbPath: "./data/sna.db" });
+const claude = resolveClaudeCli();
+if (claude.source === "fallback") {
+  throw new Error("Claude Code CLI was not found. Install it or pass runtimePaths.claudeCode.");
+}
+
+const sna = await startSnaServer({
+  port: 3099,
+  dbPath: "./data/sna.db",
+  runtimePaths: {
+    claudeCode: claude.path,
+  },
+});
 
 const client = new SnaClient({ baseUrl: "localhost:3099", ws: true, http: true });
 client.connect();
@@ -63,12 +74,28 @@ client.connect();
 const { sessionId } = await client.sessions.create({ label: "research" });
 await client.agent.start(sessionId, { provider: "claude-code", model: "claude-sonnet-4-6" });
 
-client.agent.onEvent(({ event }) => {
-  if (event.type === "assistant") console.log(event.message);
+let unsubscribe = () => {};
+const done = new Promise<void>((resolve, reject) => {
+  let streamed = false;
+  unsubscribe = client.agent.onEvent(({ event, isHistory }) => {
+    if (isHistory) return;
+    if (event.type === "assistant_delta") {
+      streamed = true;
+      process.stdout.write(event.delta ?? "");
+    }
+    if (event.type === "assistant" && event.message && !streamed) process.stdout.write(event.message);
+    if (event.type === "complete") resolve();
+    if (event.type === "error") reject(new Error(event.message ?? "Agent error"));
+  });
 });
 await client.agent.subscribe(sessionId);
 
 await client.agent.send(sessionId, "What's in this directory?");
+await done;
+
+unsubscribe();
+client.disconnect();
+sna.stop();
 ```
 
 > The running server publishes its own live OpenAPI 3.1 spec — open `http://localhost:3099/docs` for Swagger UI, `http://localhost:3099/openapi.json` for the raw JSON, or `http://localhost:3099/spec` for a plain-text view.

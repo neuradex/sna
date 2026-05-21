@@ -24,6 +24,9 @@ const sna = await startSnaServer({
   dbPath: "./data/sna.db",
   maxSessions: 20,
   permissionMode: "acceptEdits",
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+  },
   onLog: (line) => console.log("[sna]", line),
 });
 // sna.port    — actual port (may differ from `port` if 0 was passed)
@@ -31,7 +34,7 @@ const sna = await startSnaServer({
 // sna.stop()  — graceful SIGTERM
 ```
 
-For Electron, swap to `@sna-sdk/core/electron` and add `asarUnpack: ["node_modules/@sna-sdk/core/**"]` to electron-builder. The Electron launcher additionally locates the consumer app's electron-rebuilt `better-sqlite3` and threads the binding path through.
+For Electron, swap to `@sna-sdk/core/electron` and add `asarUnpack: ["node_modules/@sna-sdk/core/**"]` to electron-builder. The Electron launcher additionally locates the consumer app's electron-rebuilt `better-sqlite3` and threads the binding path through. Store user-selected runtime CLI paths in your app settings and pass them through `runtimePaths`.
 
 ### Connecting from any framework
 

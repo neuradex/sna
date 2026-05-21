@@ -11,7 +11,7 @@ Launchers are for host applications that need to start SNA as part of their own 
 | `@sna-sdk/core/node` | `startSnaServer(options)` | Starts SNA from a Node host. |
 | `@sna-sdk/core/electron` | `startSnaServer(options)` | Starts SNA from an Electron host as a forked child process. |
 | `@sna-sdk/core/electron` | `startSnaServerInProcess(options)` | Runs SNA in the current Electron main process. |
-| `@sna-sdk/core/electron` | `resolveClaudeCli`, `validateClaudePath`, `cacheClaudePath` | Finds and validates Claude Code CLI installations. |
+| `@sna-sdk/core/node`, `@sna-sdk/core/electron` | `resolveClaudeCli`, `resolveCodexCli`, `resolveOpenCodeCli` | Finds runtime CLI installations for setup and diagnostics. |
 
 Launcher handles expose enough information to stop the server and pass the discovered URL to `@sna-sdk/client` or `@sna-sdk/react`.
 
@@ -34,7 +34,16 @@ type SnaServerOptions = {
   onLog?: (line: string) => void;
   dataDir?: string;
   logLevel?: "info" | "warn" | "error" | "silent";
+  runtimePaths?: RuntimePaths;
   langfuse?: { publicKey: string; secretKey: string; baseUrl?: string };
+};
+
+type RuntimePaths = {
+  claudeCode?: string;
+  codex?: string;
+  opencode?: string;
+  grok?: string;
+  cursor?: string;
 };
 ```
 
@@ -48,12 +57,17 @@ type SnaServerOptions = {
 | `model` | SDK default | Default model for runtime calls. |
 | `permissionTimeoutMs` | `0` | `0` leaves permission prompts under host control; positive values auto-deny after the timeout. |
 | `nativeBinding` | auto-detected | Explicit `better-sqlite3` native binding path. Use this for custom Electron builds. |
-| `env` | `{}` | Extra environment variables. These override launcher-generated values. |
+| `env` | `{}` | Extra environment variables. Runtime command variables here override values generated from `runtimePaths`. |
 | `readyTimeout` | `15000` | Milliseconds to wait for the standalone process to print the ready line. |
 | `onLog` | none | Receives stdout/stderr lines from the child process or SDK logger lines in in-process mode. |
 | `dataDir` | derived from `dbPath` | Base directory for image and asset storage. |
 | `logLevel` | `info` | Filters in-process logger output. Forked server file logs still record all levels. |
+| `runtimePaths` | auto-detect | Explicit runtime CLI commands or absolute paths. They map to `SNA_CLAUDE_COMMAND`, `SNA_CODEX_COMMAND`, `SNA_OPENCODE_COMMAND`, `SNA_GROK_COMMAND`, and `SNA_CURSOR_COMMAND`. |
 | `langfuse` | none | Enables tracing for sessions whose metadata opts in. |
+
+Use `runtimePaths` when the host app has a setup screen or stores user-selected
+CLI locations. `env` is still available as the final escape hatch and overrides
+the values generated from `runtimePaths`.
 
 ## Forked vs in-process
 
@@ -74,6 +88,9 @@ Starts SNA from a plain Node host and returns a handle with connection informati
 const handle = await startSnaServer({
   dbPath: "/Users/me/Library/Application Support/MyApp/sna.db",
   port: 3099,
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+  },
 });
 
 handle.stop();
@@ -127,6 +144,14 @@ type InProcessSnaServerHandle = {
 ### `resolveClaudeCli(options?)`
 
 Finds a usable Claude Code CLI path. Use it during setup or diagnostics to explain why a runtime cannot start.
+
+### `resolveCodexCli(options?)`
+
+Finds a usable Codex CLI path with the same env/cache/static/shell lookup order.
+
+### `resolveOpenCodeCli(options?)`
+
+Finds a usable OpenCode CLI path with the same env/cache/static/shell lookup order.
 
 ### `validateClaudePath(path)`
 

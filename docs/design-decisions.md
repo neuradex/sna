@@ -70,7 +70,7 @@ Conversation history is the SDK's source of truth. Provider-native session ids (
 
 ### Launcher API, not "is the app"
 
-The earlier shape of this project tried to own the entire app environment — `sna up` would install dependencies, manage `pnpm dev`, set up `.claude/settings.json`. That coupling fights the "library you embed" framing. The current recommendation is `startSnaServer({ port, dbPath, ... })`: forks the standalone server, resolves native bindings, waits for ready. The consumer app's web framework, lifecycle, and process supervision stay in the consumer app.
+The earlier shape of this project tried to own the entire app environment — `sna up` would install dependencies, manage `pnpm dev`, set up `.claude/settings.json`. That coupling fights the "library you embed" framing. The current recommendation is `startSnaServer({ port, dbPath, runtimePaths, ... })`: forks the standalone server, resolves native bindings, registers runtime CLI paths, waits for ready. The consumer app's web framework, lifecycle, setup UI, and process supervision stay in the consumer app.
 
 ### Mock Anthropic API for tests
 

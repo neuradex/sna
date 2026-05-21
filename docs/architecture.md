@@ -259,6 +259,9 @@ const sna = await startSnaServer({
   dbPath: path.join(process.cwd(), "data/sna.db"),
   maxSessions: 20,
   permissionMode: "acceptEdits",
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+  },
   onLog: (line) => console.log("[sna]", line),
 });
 // sna.process — ChildProcess
@@ -268,7 +271,7 @@ const sna = await startSnaServer({
 
 The Electron variant additionally resolves asar-unpacked paths and locates the consumer app's electron-rebuilt `better-sqlite3`. Add `asarUnpack: ["node_modules/@sna-sdk/core/**"]` to electron-builder.
 
-Supported `SnaServerOptions`: `port`, `dbPath`, `cwd`, `maxSessions`, `permissionMode`, `model`, `nativeBinding`, `env`, `readyTimeout`, `onLog`.
+Supported `SnaServerOptions`: `port`, `dbPath`, `cwd`, `maxSessions`, `permissionMode`, `model`, `nativeBinding`, `env`, `runtimePaths`, `readyTimeout`, `onLog`.
 
 ### Configuration
 
@@ -285,3 +288,11 @@ Supported `SnaServerOptions`: `port`, `dbPath`, `cwd`, `maxSessions`, `permissio
 | `SNA_PERMISSION_TIMEOUT_MS` | Auto-deny after this many ms (0 = app controls) |
 | `SNA_SQLITE_NATIVE_BINDING` | Absolute path to `better_sqlite3.node` (Electron) |
 | `SNA_CLAUDE_COMMAND` | Override the Claude binary |
+| `SNA_CODEX_COMMAND` | Override the Codex binary |
+| `SNA_OPENCODE_COMMAND` | Override the OpenCode binary |
+| `SNA_GROK_COMMAND` | Override the Grok binary |
+| `SNA_CURSOR_COMMAND` | Override the Cursor headless agent binary |
+
+Embedded hosts should prefer `startSnaServer({ runtimePaths })`, which maps to
+the same `SNA_*_COMMAND` variables while keeping runtime path registration in
+the server startup config.

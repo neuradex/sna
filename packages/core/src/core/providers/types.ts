@@ -312,11 +312,12 @@ export interface AgentProvider {
 /**
  * Caller-supplied configuration for listModels.
  *
- * Most fields are only used by specific providers. OpenCode honors `cliPath`
- * to override the default `opencode` binary.
+ * Most fields are only used by specific providers. `cliPath` only affects
+ * model listing for runtimes that inspect their CLI. Use launcher
+ * `runtimePaths` for agent spawn paths.
  */
 export interface ListModelsConfig {
-  /** Override CLI binary path (opencode). */
+  /** Override CLI binary path for model listing. */
   cliPath?: string;
   /** Bypass the in-memory cache. */
   refresh?: boolean;

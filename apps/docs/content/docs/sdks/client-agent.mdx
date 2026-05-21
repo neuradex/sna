@@ -379,7 +379,7 @@ await client.agent.listModels(runtime: string, config?: ListModelsConfig): Promi
 | Field | Type | Description |
 | --- | --- | --- |
 | `runtime` | `string` | Runtime to inspect, for example `claude-code`, `codex`, `opencode`, `grok`, or `cursor`. |
-| `config.cliPath` | `string` | Runtime CLI path override. |
+| `config.cliPath` | `string` | Runtime CLI path override for model listing only. Use launcher `runtimePaths` for agent spawn paths. |
 | `config.refresh` | `boolean` | Bypass cache. |
 
 **Returns**
