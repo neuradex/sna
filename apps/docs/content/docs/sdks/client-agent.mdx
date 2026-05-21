@@ -558,11 +558,15 @@ const unsubscribe = client.agent.onEvent((event: {
 | Type | Meaning |
 | --- | --- |
 | `thinking` | Agent internal reasoning block. |
+| `thinking_delta` | Streaming reasoning fragment. |
 | `assistant` | Assistant-visible response block. |
 | `assistant_delta` | Streaming text fragment. |
 | `tool_use` | Agent is calling a tool. |
+| `tool_use_delta` | Streaming tool-input fragment when the runtime exposes one. |
 | `tool_result` | Tool execution result. |
+| `permission_needed` | Runtime is waiting for an approval decision. |
 | `complete` | Turn completed. |
+| `interrupted` | Turn was interrupted before normal completion. |
 | `error` | Runtime error. |
 | `user_message` | Echoed user message for multi-client sync. |
 

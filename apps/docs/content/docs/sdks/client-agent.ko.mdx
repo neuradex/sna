@@ -558,11 +558,15 @@ const unsubscribe = client.agent.onEvent((event: {
 | Type | Meaning |
 | --- | --- |
 | `thinking` | agent 내부 reasoning block입니다. |
+| `thinking_delta` | Reasoning을 스트리밍하는 조각입니다. |
 | `assistant` | assistant에게 보이는 response block입니다. |
 | `assistant_delta` | streaming text fragment입니다. |
 | `tool_use` | agent가 tool을 호출 중입니다. |
+| `tool_use_delta` | runtime이 제공하는 경우 tool input을 스트리밍하는 조각입니다. |
 | `tool_result` | tool 실행 결과입니다. |
+| `permission_needed` | runtime이 승인 결정을 기다립니다. |
 | `complete` | turn이 완료되었습니다. |
+| `interrupted` | turn이 정상 완료 전에 중단되었습니다. |
 | `error` | runtime error입니다. |
 | `user_message` | multi-client sync를 위해 echo된 user message입니다. |
 

@@ -71,6 +71,7 @@ OpenCode의 `complete()`는 두 경로를 씁니다. 콜백이 없으면 낮은 
 | 최종 assistant 이벤트 | ✓ `assistant` / `result` | ✓ `item/completed` agent message | ✓ finalized text part | ✓ ACP chunk를 `complete` 직전에 합성 | ✓ ACP chunk를 `complete` 직전에 합성 |
 | Thinking delta | ✓ `thinking_delta` | ✓ `item/reasoning/summaryTextDelta` | ✓ reasoning `message.part.delta` | ✓ ACP `agent_thought_chunk` | ✓ ACP `agent_thought_chunk` |
 | 최종 thinking 이벤트 | ✓ signed thinking block | ✓ completed reasoning item | ✓ finalized reasoning part | ✓ ACP thought chunk에서 합성 | ✓ ACP thought chunk에서 합성 |
+| 콘텐츠 시작 lifecycle | ✓ block이 tool일 때만 이벤트로 노출 | ✓ `agentMessage` / `reasoning` start는 무시 | ✓ text/reasoning part start는 추적만 하고 tool로 내보내지 않음 | ✓ message/thought chunk는 content이며 tool이 아님 | ✓ message/thought chunk는 content이며 tool이 아님 |
 | Tool call 시작 | ✓ `streaming: true` 포함 `tool_use` | ✓ typed item start (`shell`, `file_change`, MCP, hosted tools) | ✓ running/pending tool part | ✓ ACP `tool_call` | ✓ ACP `tool_call` |
 | Tool input delta | ✓ Anthropic `input_json_delta` → `tool_use_delta` | ✗ 네이티브 input delta 없음 | ✗ 네이티브 input delta 없음 | ⚠ ACP `tool_call_update`로 input 갱신은 가능하지만 byte/token 단위 delta는 아님 | ⚠ ACP `tool_call_update`로 input 갱신은 가능하지만 byte/token 단위 delta는 아님 |
 | Tool output streaming | ✗ 최종 `tool_result`만 있음 | ✓ shell `outputDelta`를 `tool_use` update로 전달. file patch delta는 버림 | ✗ 최종 part status만 있음 | ✗ 최종/update payload만 전달 | ✗ 최종/update payload만 전달 |
@@ -83,6 +84,10 @@ OpenCode의 `complete()`는 두 경로를 씁니다. 콜백이 없으면 낮은 
 metadata와 live shell output은 더 풍부하지만, partial tool argument는
 없습니다. ACP 런타임은 `tool_call_update`와 최종 raw output은 주지만,
 SNA에서는 세밀한 delta가 아니라 이벤트 단위 update로 다룹니다.
+
+Assistant text와 reasoning의 lifecycle start는 `tool_use`로 노출하지
+않습니다. 런타임이 content block 시작을 알려주더라도 실제 tool 호출만
+`tool_use` / `tool_result` 계약에 들어갑니다.
 
 ## 인플레이스 변경 (`applyPatch`)
 
