@@ -11,13 +11,16 @@ const ENV_KEYS = [
   "SNA_DB_PATH",
   "SNA_DATA_DIR",
   "SNA_PERMISSION_TIMEOUT_MS",
+] as const;
+
+const LEGACY_ENV_KEYS = [
   "SNA_OMLX_BASE_URL",
 ] as const;
 
-const savedEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
+const savedEnv = Object.fromEntries([...ENV_KEYS, ...LEGACY_ENV_KEYS].map((key) => [key, process.env[key]]));
 
 function restoreEnv() {
-  for (const key of ENV_KEYS) {
+  for (const key of [...ENV_KEYS, ...LEGACY_ENV_KEYS]) {
     const value = savedEnv[key];
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
@@ -56,7 +59,6 @@ describe("SNA config helpers", () => {
     process.env.SNA_DB_PATH = "/tmp/sna-test.db";
     process.env.SNA_DATA_DIR = "/tmp/sna-data";
     process.env.SNA_PERMISSION_TIMEOUT_MS = "2500";
-    process.env.SNA_OMLX_BASE_URL = "http://localhost:11434/v1";
     resetConfig();
 
     const cfg = getConfig();
@@ -67,7 +69,13 @@ describe("SNA config helpers", () => {
     assert.equal(cfg.dbPath, "/tmp/sna-test.db");
     assert.equal(cfg.dataDir, "/tmp/sna-data");
     assert.equal(cfg.permissionTimeoutMs, 2500);
-    assert.equal(cfg.omlxBaseUrl, "http://localhost:11434/v1");
+  });
+
+  it("does not expose the removed oMLX endpoint override as SNA config", () => {
+    process.env.SNA_OMLX_BASE_URL = "http://localhost:11434/v1";
+    resetConfig();
+
+    assert.equal((getConfig() as Record<string, unknown>).omlxBaseUrl, undefined);
   });
 
   it("setConfig merges process-local overrides and resetConfig returns to defaults plus env", () => {

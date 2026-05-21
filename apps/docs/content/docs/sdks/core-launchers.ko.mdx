@@ -35,7 +35,6 @@ type SnaServerOptions = {
   dataDir?: string;
   logLevel?: "info" | "warn" | "error" | "silent";
   langfuse?: { publicKey: string; secretKey: string; baseUrl?: string };
-  omlxBaseUrl?: string;
 };
 ```
 
@@ -55,7 +54,6 @@ type SnaServerOptions = {
 | `dataDir` | `dbPath`에서 계산 | Image와 asset storage의 base directory. |
 | `logLevel` | `info` | In-process logger output을 filter합니다. Forked server의 file log는 모든 level을 계속 기록합니다. |
 | `langfuse` | none | Metadata로 tracing을 opt-in한 session에서 Langfuse tracing을 켭니다. |
-| `omlxBaseUrl` | none | Claude-compatible call을 oMLX endpoint로 route합니다. |
 
 ## Forked vs in-process
 

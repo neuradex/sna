@@ -26,7 +26,7 @@ await client.agent.start(session: string, config?: AgentStartConfig): Promise<{
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `session` | `string` | yes | Target SNA session ID. The server auto-creates it if it does not exist. |
-| `config.provider` | `string` | no | Runtime id such as `claude-code`, `codex`, `opencode`, or `omlx`. |
+| `config.provider` | `string` | no | Runtime id such as `claude-code`, `codex`, `opencode`, `grok`, or `cursor`. |
 | `config.modelProvider` | `string` | no | Attribution metadata for the model vendor. Stored on assistant-authored canonical rows. |
 | `config.prompt` | `string` | no | Initial prompt sent immediately after startup. |
 | `config.model` | `string` | no | Runtime model slug. |
@@ -378,10 +378,8 @@ await client.agent.listModels(runtime: string, config?: ListModelsConfig): Promi
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `runtime` | `string` | Runtime to inspect, for example `claude-code`, `codex`, `opencode`, or `omlx`. |
+| `runtime` | `string` | Runtime to inspect, for example `claude-code`, `codex`, `opencode`, `grok`, or `cursor`. |
 | `config.cliPath` | `string` | Runtime CLI path override. |
-| `config.baseUrl` | `string` | API base URL for OMLX-style runtimes. |
-| `config.apiKey` | `string` | API key for OMLX-style runtimes. |
 | `config.refresh` | `boolean` | Bypass cache. |
 
 **Returns**
@@ -406,10 +404,7 @@ type ListModelsResult = {
 **Example**
 
 ```ts
-const catalog = await client.agent.listModels("omlx", {
-  baseUrl: "http://localhost:11434",
-  refresh: true,
-});
+const catalog = await client.agent.listModels("opencode", { refresh: true });
 if (catalog.error) console.warn(catalog.error);
 ```
 

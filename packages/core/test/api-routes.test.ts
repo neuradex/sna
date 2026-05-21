@@ -5,6 +5,7 @@
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import fs from "fs";
 import path from "path";
 
@@ -20,6 +21,67 @@ function setup() {
   const origCwd = process.cwd;
   process.cwd = () => TEST_DB_DIR;
   return () => { process.cwd = origCwd; removeTestDir(); };
+}
+
+class FakeApiAgentProcess extends EventEmitter {
+  private live = true;
+  readonly pid = null;
+  readonly sessionId: string | null;
+
+  constructor(sessionId: string | null) {
+    super();
+    this.sessionId = sessionId;
+  }
+
+  get alive() {
+    return this.live;
+  }
+
+  send(input: string | unknown[]) {
+    const text = typeof input === "string" ? input : "content blocks";
+    this.emit("event", {
+      type: "assistant",
+      message: `echo: ${text}`,
+      timestamp: Date.now(),
+    });
+    this.emit("event", {
+      type: "complete",
+      message: "done",
+      timestamp: Date.now(),
+    });
+  }
+
+  interrupt() {
+    this.emit("event", {
+      type: "interrupted",
+      message: "interrupted",
+      timestamp: Date.now(),
+    });
+  }
+
+  setModel() {}
+  setPermissionMode() {}
+  applyPatch() { return {}; }
+
+  kill() {
+    if (!this.live) return;
+    this.live = false;
+    this.emit("exit", 0);
+  }
+
+  closeThread() {
+    this.kill();
+  }
+}
+
+function createFakeApiProvider(name: string) {
+  return {
+    name,
+    supportsRuntimePooling: false,
+    async isAvailable() { return true; },
+    spawn() { return new FakeApiAgentProcess(`native-${name}`); },
+    async complete() { return { result: "ok", usage: null }; },
+  };
 }
 
 describe("HTTP API Routes", () => {
@@ -94,6 +156,123 @@ describe("HTTP API Routes", () => {
     it("DELETE /agent/sessions/default is blocked", async () => {
       const res = await req("DELETE", "/agent/sessions/default");
       assert.equal(res.status, 400);
+    });
+
+    it("removes spawned sessions from API lists and rejects follow-up operations", async () => {
+      const providerName = `test-delete-${Date.now()}`;
+      const { registerProvider } = await import("../src/core/providers/index.js");
+      registerProvider(createFakeApiProvider(providerName));
+
+      const sessionId = "delete-followup";
+      await req("POST", "/agent/sessions", { id: sessionId, label: "Delete Followup" });
+      const startRes = await req("POST", `/agent/start?session=${sessionId}`, {
+        provider: providerName,
+        model: "fake-1",
+      });
+      assert.equal(startRes.status, 200);
+
+      const beforeList = await (await req("GET", "/agent/sessions")).json();
+      assert.ok(beforeList.sessions.some((s: any) => s.id === sessionId));
+      const pendingApproval = sm.createPendingPermission(
+        sessionId,
+        { tool_name: "Bash", command: "echo hi" },
+        { timeoutMs: 0 },
+      );
+
+      const delRes = await req("DELETE", `/agent/sessions/${sessionId}`);
+      assert.equal(delRes.status, 200);
+      assert.equal((await delRes.json()).status, "removed");
+
+      const pendingResult = await Promise.race([
+        pendingApproval.then((value: boolean) => ({ settled: true, value })),
+        new Promise((resolve) => setTimeout(() => resolve({ settled: false }), 100)),
+      ]);
+      assert.deepEqual(pendingResult, { settled: true, value: false });
+
+      const afterList = await (await req("GET", "/agent/sessions")).json();
+      assert.equal(afterList.sessions.some((s: any) => s.id === sessionId), false);
+      assert.equal(afterList.sessions.length, beforeList.sessions.length - 1);
+
+      const statusRes = await req("GET", `/agent/status?session=${sessionId}`);
+      assert.equal(statusRes.status, 200);
+      const status = await statusRes.json();
+      assert.equal(status.alive, false);
+      assert.equal(status.config, null);
+
+      const sendRes = await req("POST", `/agent/send?session=${sessionId}`, { message: "after delete" });
+      assert.equal(sendRes.status, 400);
+      assert.match((await sendRes.json()).message, /No active agent session/);
+
+      const patchRes = await req("PATCH", `/agent/session?session=${sessionId}`, { model: "fake-2" });
+      assert.equal(patchRes.status, 404);
+      assert.match((await patchRes.json()).message, /Session not found/);
+
+      const updateRes = await req("PATCH", `/agent/sessions/${sessionId}`, { label: "gone" });
+      assert.equal(updateRes.status, 404);
+      assert.match((await updateRes.json()).message, /not found/);
+
+      const permissionRes = await req("POST", `/agent/permission-respond?session=${sessionId}`, { approved: true });
+      assert.equal(permissionRes.status, 404);
+
+      const deleteAgainRes = await req("DELETE", `/agent/sessions/${sessionId}`);
+      assert.equal(deleteAgainRes.status, 404);
+    });
+  });
+
+  describe("Agent lifecycle with spawned runtime", () => {
+    it("POST /agent/start exposes runtime-chain and message-count changes through APIs", async () => {
+      const providerName = `test-spawn-${Date.now()}`;
+      const { registerProvider } = await import("../src/core/providers/index.js");
+      registerProvider(createFakeApiProvider(providerName));
+
+      const sessionId = "spawn-api-counts";
+      await req("POST", "/agent/sessions", { id: sessionId, label: "Spawn API Counts" });
+
+      const createdList = await (await req("GET", "/agent/sessions?include=chain")).json();
+      const created = createdList.sessions.find((s: any) => s.id === sessionId);
+      assert.ok(created);
+      assert.equal(created.alive, false);
+      assert.equal(created.runtimeChain?.length ?? 0, 0);
+
+      const startRes = await req("POST", `/agent/start?session=${sessionId}`, {
+        provider: providerName,
+        model: "fake-1",
+      });
+      assert.equal(startRes.status, 200);
+      assert.equal((await startRes.json()).status, "started");
+
+      const startedList = await (await req("GET", "/agent/sessions?include=chain")).json();
+      const started = startedList.sessions.find((s: any) => s.id === sessionId);
+      assert.ok(started);
+      assert.equal(started.alive, true);
+      assert.equal(started.config.provider, providerName);
+      assert.equal(started.runtimeChain.length, 1);
+      assert.equal(started.runtimeChain[0].config.model, "fake-1");
+
+      const sendRes = await req("POST", `/agent/send?session=${sessionId}`, { message: "ping" });
+      assert.equal(sendRes.status, 200);
+
+      const statusAfterSend = await (await req("GET", `/agent/status?session=${sessionId}`)).json();
+      assert.equal(statusAfterSend.alive, true);
+      assert.ok(statusAfterSend.eventCount >= 3, `expected user + assistant + complete events, got ${statusAfterSend.eventCount}`);
+      assert.ok(statusAfterSend.messageCount >= 3, `expected persisted messages to grow, got ${statusAfterSend.messageCount}`);
+
+      const forceRes = await req("POST", `/agent/start?session=${sessionId}`, {
+        provider: providerName,
+        model: "fake-2",
+        force: true,
+      });
+      assert.equal(forceRes.status, 200);
+      assert.equal((await forceRes.json()).status, "started");
+
+      const restartedList = await (await req("GET", "/agent/sessions?include=chain")).json();
+      const restarted = restartedList.sessions.find((s: any) => s.id === sessionId);
+      assert.ok(restarted);
+      assert.equal(restarted.alive, true);
+      assert.equal(restarted.runtimeChain.length, 2);
+      assert.equal(restarted.runtimeChain[0].retiredAt != null, true);
+      assert.equal(restarted.runtimeChain[1].parentId, restarted.runtimeChain[0].id);
+      assert.equal(restarted.runtimeChain[1].config.model, "fake-2");
     });
   });
 

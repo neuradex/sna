@@ -35,7 +35,6 @@ type SnaServerOptions = {
   dataDir?: string;
   logLevel?: "info" | "warn" | "error" | "silent";
   langfuse?: { publicKey: string; secretKey: string; baseUrl?: string };
-  omlxBaseUrl?: string;
 };
 ```
 
@@ -55,7 +54,6 @@ type SnaServerOptions = {
 | `dataDir` | derived from `dbPath` | Base directory for image and asset storage. |
 | `logLevel` | `info` | Filters in-process logger output. Forked server file logs still record all levels. |
 | `langfuse` | none | Enables tracing for sessions whose metadata opts in. |
-| `omlxBaseUrl` | none | Routes Claude-compatible calls to an oMLX endpoint. |
 
 ## Forked vs in-process
 

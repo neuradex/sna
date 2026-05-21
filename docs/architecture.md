@@ -129,7 +129,7 @@ The HTTP routes are defined with `@hono/zod-openapi` in `server/routes/openapi.t
 | `POST`   | `/agent/sessions` | Create a session |
 | `GET`    | `/agent/sessions` | List sessions (pass `?include=chain` for `runtimeChain` on each entry) |
 | `PATCH`  | `/agent/sessions/:id` | Update session metadata (label, meta, cwd) |
-| `DELETE` | `/agent/sessions/:id` | Remove a session |
+| `DELETE` | `/agent/sessions/:id` | Remove a session, its history, runtime chain, and pending permission request |
 | `POST`   | `/agent/start` | Start (spawn) agent in a session |
 | `POST`   | `/agent/send` | Send a message (supports `images[]`) |
 | `POST`   | `/agent/resume` | Restart with canonical history rebuilt for the provider |
@@ -194,6 +194,8 @@ Claude Code uses a PreToolUse hook; Codex uses JSON-RPC bidirectional approval; 
 3. Server emits `permission.request` to subscribers and blocks the agent.
 4. UI calls `permission.respond({ session, approved })`.
 5. Server unblocks the agent.
+
+If the owning session is removed while a permission request is pending, the pending request resolves as denied before the session row and runtime chain are deleted.
 
 `ClaudeCodeProvider.spawn` auto-injects the hook via `--settings`. Consumers don't write `.claude/settings.json` themselves. Safe tools (`Read`, `Glob`, `Grep`, `Agent`, `TodoRead`, `TodoWrite`) auto-allow without prompting.
 

@@ -74,7 +74,7 @@ This does not change model or permission mode for a running agent. Use `client.a
 await client.sessions.remove(session: string): Promise<{ status: "removed" }>
 ```
 
-Deletes the session record. If an agent process exists, it is stopped before removal. The `default` session cannot be removed.
+Deletes the session record, persisted history, runtime chain, and any pending permission request. If an agent process exists, it is stopped before removal. The `default` session cannot be removed. Calls that still target the removed session return no-session or no-active-session errors.
 
 ## `sessions.onSnapshot(callback)`
 

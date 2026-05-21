@@ -955,10 +955,17 @@ export class SessionManager {
         session.process.kill();
       }
     }
+    const pending = this.pendingPermissions.get(id);
+    if (pending) {
+      pending.resolve(false);
+      this.pendingPermissions.delete(id);
+    }
     // Cleanup listeners
     this.eventListeners.delete(id);
-    this.pendingPermissions.delete(id);
     this.sessions.delete(id);
+    try {
+      getDb().prepare("DELETE FROM chat_sessions WHERE id = ?").run(id);
+    } catch { /* DB not ready - memory removal still succeeds */ }
     return true;
   }
 

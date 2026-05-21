@@ -24,7 +24,6 @@ Configuration は次の順序で決まります。
 | `SNA_DB_PATH` | 明示的な SQLite database path。デフォルトは `data/sna.db` です。 |
 | `SNA_DATA_DIR` | image などの SNA data を保存する directory。デフォルトは `<cwd>/data` です。 |
 | `SNA_PERMISSION_TIMEOUT_MS` | Permission prompt timeout(ms)。`0` の場合、host app が応答を管理します。 |
-| `SNA_OMLX_BASE_URL` | local model inference に使う oMLX-compatible base URL。 |
 
 ## デフォルト値
 
@@ -66,4 +65,4 @@ runtime override を消し、configuration resolution を default plus environme
 
 SNA configuration の typed shape です。Host-level settings UI を作る場合や configuration object を検証する場合はこの型を優先してください。
 
-`langfuse`、`apiProxyPort`、`omlxBaseUrl` は optional です。Host が tracing または local inference を明示的に設定した場合だけ有効になります。
+`langfuse` と `apiProxyPort` は optional です。Host が tracing または debug proxy capture を明示的に設定した場合だけ有効になります。

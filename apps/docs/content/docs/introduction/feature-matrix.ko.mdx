@@ -45,7 +45,7 @@ ACP를 사용하는 두 런타임(Grok Build, Cursor)은
 | `kill()` / `closeThread()` | ✓ | ✓ (풀 refcount 인식) | ✓ (풀 refcount 인식) | ✓ | ✓ |
 | `complete(opts)` one-shot | ✓ | ✓ | ✓ | ✓ (`grok -p`) | ✓ (`agent -p`) |
 | `complete()` `onDelta` 스트리밍 | ✓ stream-json | ✓ `item/agentMessage/delta` | ✓ `prompt_async` SSE 텍스트 델타 | ✓ streaming-json text 이벤트 | ✓ stream-json `assistant` 청크 (`model_call_id` 없음) |
-| `listModels()` | ✓ static + oMLX API | ✓ `codex debug models` 프로브 + static fallback | ✓ `opencode` CLI 프로브 | ✓ static (`grok-build` 단일 항목) | ✓ `agent models` 텍스트 파싱 + static fallback |
+| `listModels()` | ✓ static catalog | ✓ `codex debug models` 프로브 + static fallback | ✓ `opencode` CLI 프로브 | ✓ static (`grok-build` 단일 항목) | ✓ `agent models` 텍스트 파싱 + static fallback |
 
 OpenCode의 `complete()`는 두 경로를 씁니다. 콜백이 없으면 낮은 오버헤드의
 동기 SDK 호출을 유지하고, `onDelta`가 있으면 `prompt_async`와 이벤트
@@ -127,6 +127,14 @@ Claude Code의 권한 모델은 out-of-band입니다. SNA가 hook 스크립트�
 
 ### `providerOptions` (런타임별 escape hatch)
 
+SNA는 모든 런타임이 같은 의미로 지원할 수 있는 값만 런타임 중립 필드로
+올립니다. API endpoint override는 그 기준을 충족하지 않습니다. Codex는
+네이티브 `-c model_providers.*` 설정으로 OpenAI-compatible gateway를
+가리킬 수 있고, Claude Code는 Anthropic 전용 환경 변수를 사용하며,
+OpenCode는 자체 설정 파일을 사용하고, Cursor는 현재 SNA가 지원하는 base
+URL override가 없습니다. 가짜 공통 `apiBaseUrl`을 만들지 말고 각 런타임의
+네이티브 escape hatch를 사용하십시오.
+
 | 키 | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
 | `settings` | ✓ `--settings` JSON에 병합 | ✓ `hooks.PreToolUse`만 반영 | — | — | — |
@@ -134,10 +142,9 @@ Claude Code의 권한 모델은 out-of-band입니다. SNA가 hook 스크립트�
 | `strictMcpConfig` | ✓ `--strict-mcp-config` | — | — | — | — |
 | `maxTurns` | ✓ `--max-turns` | — | — | — | — |
 | `disableSlashCommands` | ✓ `--disable-slash-commands` | — | — | — | — |
-| `omlxBaseUrl` | ✓ `ANTHROPIC_BASE_URL` 라우팅 | — | — | — | — |
 | `serviceTier` | ✗ 잘못 과금됨 (`/fast`는 모델, tier가 아님) | ✓ `priority` / `flex` / `batch` | — | — | — |
 | `profile` | — | ✓ `codex app-server`와 `codex exec`에 `--profile`로 전달. runtime pool도 분리 | — | — | — |
-| `config` (`-c key=value`) | — | ✓ `codex app-server`와 `codex exec`에 전달. `config` object는 pool key에도 포함 | — | — | — |
+| `config` (`-c key=value`) | — | ✓ `codex app-server`와 `codex exec`에 전달. OpenRouter나 로컬 모델 서버 같은 OpenAI-compatible gateway는 이 경로를 사용 | — | — | — |
 | `hooksHash` / `configHash` | — | ✓ 생성된 hooks/config용 수동 runtime pool 분리 key | — | — | — |
 | `serverUrl` | — | — | ✓ spawn 생략, 기존 데몬에 attach | — | — |
 | `modelProviderId` | — | — | ✓ `{providerID, modelID}`의 provider 절반 | — | — |

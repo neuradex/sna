@@ -8,6 +8,7 @@ function useAgent(options = {}) {
     baseUrl = `${ctx.apiUrl}/agent`,
     provider = "claude-code",
     permissionMode,
+    reasoningLevel,
     providerOptions
   } = options;
   const sessionParam = `session=${encodeURIComponent(sessionId)}`;
@@ -95,14 +96,14 @@ function useAgent(options = {}) {
     const res = await fetch(`${baseUrl}/start?${sessionParam}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider, prompt, permissionMode, providerOptions })
+      body: JSON.stringify({ provider, prompt, permissionMode, reasoningLevel, providerOptions })
     });
     const data = await res.json();
     if (data.status === "started" || data.status === "already_running") {
       setAlive(true);
     }
     return data;
-  }, [baseUrl, sessionParam, provider, permissionMode, providerOptions]);
+  }, [baseUrl, sessionParam, provider, permissionMode, reasoningLevel, providerOptions]);
   const kill = useCallback(async () => {
     setAlive(false);
     await fetch(`${baseUrl}/kill?${sessionParam}`, { method: "POST" });
@@ -111,10 +112,14 @@ function useAgent(options = {}) {
     const res = await fetch(`${baseUrl}/completion`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider, ...opts })
+      body: JSON.stringify({
+        provider,
+        reasoningLevel,
+        ...opts
+      })
     });
     return res.json();
-  }, [baseUrl, provider]);
+  }, [baseUrl, provider, reasoningLevel]);
   return { connected, alive, start, send, kill, completion };
 }
 export {
