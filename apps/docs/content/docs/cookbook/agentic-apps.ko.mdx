@@ -1,0 +1,283 @@
+---
+title: Agentic app hosting
+description: 실제 앱 안에 SNA를 내장할 때 Loom에서 쓰는 제품 통합 패턴입니다.
+icon: AppWindow
+---
+
+Loom은 SNA를 일회성 chat endpoint로 쓰지 않고, local/cloud agent runtime으로 앱 안에 내장합니다. 제품이 project, tab, document, permission, background workflow를 agent 주변에 가지고 있을 때 아래 패턴이 유용합니다.
+
+## 1. 앱 세션과 SNA 세션을 분리하기
+
+제품에는 보통 자체 session 또는 project row가 있습니다. 그 row를 사용자에게 보이는 객체로 유지하고, 현재 붙어 있는 SNA session id를 별도 필드로 저장하십시오.
+
+```ts
+type AppSession = {
+  id: string;
+  name: string;
+  projectPath: string | null;
+  snaSessionId: string | null;
+  snaInstanceId: "local" | string;
+};
+```
+
+이 분리 덕분에 앱은 runtime process를 제품 객체로 착각하지 않고 rename, archive, move, fork를 처리할 수 있습니다. 앱 세션의 identity를 유지한 채 local SNA에서 cloud SNA로 옮기는 것도 가능합니다.
+
+한 앱 세션이 시간이 지나며 여러 SNA session head를 만들 수 있다면 link table을 두십시오.
+
+```sql
+CREATE TABLE session_sna_links (
+  session_id TEXT NOT NULL,
+  sna_session_id TEXT NOT NULL,
+  instance_id TEXT NOT NULL DEFAULT 'local',
+  source TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (session_id, sna_session_id)
+);
+```
+
+## 2. SNA instance마다 `SnaClient` 하나 사용하기
+
+WebSocket state는 connection 단위입니다. 앱이 local SNA와 cloud SNA instance를 동시에 다룰 수 있다면 instance마다 client를 cache하고, event는 하나의 listener set으로 fan-in하십시오.
+
+```ts
+import { SnaClient } from "@sna-sdk/client";
+
+const clients = new Map<string, SnaClient>();
+const eventListeners = new Set<(event: unknown) => void>();
+const permissionListeners = new Set<(event: unknown) => void>();
+
+function installAggregator(client: SnaClient) {
+  client.agent.onEvent((event) => {
+    for (const listener of eventListeners) listener(event);
+  });
+  client.agent.onPermissionRequest((event) => {
+    for (const listener of permissionListeners) listener(event);
+  });
+}
+
+export function snaFor(instanceId: string, baseUrl?: string): SnaClient {
+  const existing = clients.get(instanceId);
+  if (existing) return existing;
+  if (!baseUrl) throw new Error(`baseUrl required for ${instanceId}`);
+
+  const client = new SnaClient({ baseUrl, ws: true, http: true });
+  clients.set(instanceId, client);
+  installAggregator(client);
+  client.connect();
+  client.agent.subscribePermissions().catch(() => {});
+  return client;
+}
+
+export function onAgentEventAll(listener: (event: unknown) => void) {
+  eventListeners.add(listener);
+  return () => eventListeners.delete(listener);
+}
+```
+
+핵심은 UI component가 특정 WebSocket이 아니라 앱 레벨 aggregator에 subscribe한다는 점입니다. 나중에 cloud instance가 추가되어도 UI를 remount하지 않고 해당 client를 aggregator에 붙일 수 있습니다.
+
+## 3. Command는 host를 통하고 event는 SNA로 직접 받기
+
+Loom은 경로를 분리합니다.
+
+| Path | Route | 이유 |
+| --- | --- | --- |
+| Lifecycle command | renderer → app host HTTP → SNA HTTP | Host가 앱 DB에서 config를 만들고, cloud instance를 깨우고, model selection을 reconcile하고, 제품 context를 주입할 수 있습니다. |
+| Event stream | renderer → SNA WebSocket | 모든 token을 앱 서버로 proxy하지 않고 UI가 낮은 latency로 runtime event를 받습니다. |
+
+Renderer에는 raw SNA call보다 domain wrapper를 노출하십시오.
+
+```ts
+export async function ensureAgentAlive(snaSessionId: string, isNewSession = false) {
+  const appSession = sessionStore.findBySnaId(snaSessionId);
+  await appFetch("/agent/ensure", {
+    method: "POST",
+    body: JSON.stringify({
+      appSessionId: appSession.id,
+      snaSessionId,
+      isNewSession,
+    }),
+  });
+}
+
+export async function sendMessage(snaSessionId: string, message: string) {
+  return appFetch("/agent/send", {
+    method: "POST",
+    body: JSON.stringify({ snaSessionId, message }),
+  });
+}
+
+export function subscribeAgent(snaSessionId: string) {
+  return clientForSnaSession(snaSessionId).agent.subscribe(snaSessionId, { since: 0 });
+}
+```
+
+Component는 `ensureAgentAlive`, `sendMessage`, `subscribeAgent` 같은 제품 verb만 알면 됩니다.
+
+## 4. `/agent/ensure`를 idempotent하게 만들기
+
+Start-vs-resume 판단은 host가 소유해야 합니다. UI가 runtime history 유무, cloud wake 필요 여부, remote container 안에서 유효한 cwd를 판단하게 하지 마십시오.
+
+```ts
+async function ensureAgent({ appSessionId, requestedSnaId, isNewSession }) {
+  const instance = snaForAppSession(appSessionId);
+  await wakeIfCloudInstance(instance);
+
+  const snaSessionId = requestedSnaId ?? await loadOrCreateSnaId(appSessionId);
+  if (await instance.isAlive(snaSessionId)) {
+    return { status: "already_alive", snaSessionId };
+  }
+
+  const { config, cwd } = await buildAgentConfig(appSessionId, snaSessionId);
+  await instance.createSession({
+    id: snaSessionId,
+    label: config.label ?? appSessionId,
+    cwd,
+    meta: debugMode ? { langfuseTrace: true } : undefined,
+  });
+
+  const hasHistory = await instance.getMessages(snaSessionId, { limit: 1 })
+    .then((res) => res.ok && res.data.messages.length > 0)
+    .catch(() => false);
+
+  return isNewSession || !hasHistory
+    ? instance.startAgent(snaSessionId, { ...config, force: true, cwd })
+    : instance.resumeAgent(snaSessionId, config);
+}
+```
+
+이 endpoint는 tab focus, reload recovery, send preflight에서 반복 호출되어도 안전해야 합니다.
+
+## 5. 제품 context는 user-turn 경계에서 주입하기
+
+Metadata를 별도 model turn으로 보내지 마십시오. 사용자 message를 forwarding하기 직전에 context를 만들고, 그 message에 제품 소유 tag를 prepend/append하십시오.
+
+```ts
+async function sendAgentMessage({ snaSessionId, message }) {
+  let finalMessage = message;
+
+  await reconcileSelectedModel(snaSessionId);
+
+  const pendingMeta = consumePendingSystemMeta(snaSessionId);
+  if (pendingMeta) finalMessage = `${pendingMeta}\n${finalMessage}`;
+
+  const retrievalContext = await maybeBuildRetrievalContext(snaSessionId, finalMessage);
+  if (retrievalContext) finalMessage += `\n${retrievalContext}`;
+
+  return snaForSnaSession(snaSessionId).sendMessage(snaSessionId, finalMessage);
+}
+```
+
+이렇게 하면 runtime history가 깨끗하게 유지됩니다. Start/resume 이후 agent가 처음 보는 것은 앱의 현재 world로 보강된 실제 사용자 turn입니다.
+
+## 6. 비용 큰 상태 변경은 send 시점까지 미루기
+
+Context folding, model change, runtime switch 같은 pending operation이 있다면 다음 user-turn 경계에서 적용하십시오. 사용자가 보낸 직후 model이 응답하기 전의 자연스러운 대기 시간이 kill/resume/replay 비용을 가려줍니다.
+
+안전한 순서는 다음과 같습니다.
+
+1. Active SNA head를 resolve합니다.
+2. Pending fork/fold operation을 적용합니다.
+3. 선택된 model/runtime을 reconcile합니다.
+4. 최종 message context를 만듭니다.
+5. `sendMessage`를 호출합니다.
+6. User message가 persist된 뒤 session 변경을 broadcast합니다.
+
+User message가 저장되기 전에 새 SNA head를 broadcast하면 renderer가 optimistic user message가 없는 timeline에 먼저 resubscribe할 수 있습니다.
+
+## 7. Permission은 모든 client에서 subscribe하기
+
+Permission subscription은 WebSocket별입니다. Permission dialog가 mount된 뒤 cloud client가 생성될 수 있다면, 새 client에도 subscribe해야 합니다.
+
+```ts
+export async function subscribePermissions() {
+  await Promise.all(
+    [...clients.values()].map((client) =>
+      client.agent.subscribePermissions().catch(() => {}),
+    ),
+  );
+}
+
+export function respondPermission(snaSessionId: string, approved: boolean) {
+  return clientForSnaSession(snaSessionId)
+    .agent
+    .respondPermission(snaSessionId, approved);
+}
+```
+
+이 처리가 없으면 cloud instance의 agent가 tool decision을 기다리는데 UI는 local SNA에만 subscribe한 상태가 될 수 있습니다.
+
+## 8. React subscription은 app root에 유지하기
+
+SNA event bridge는 chat surface보다 위에 mount하십시오. Chat pane, route, side panel은 agent가 streaming 중일 때도 unmount될 수 있습니다. Root-level hook이 WebSocket listener를 유지하고 event를 store로 전달해야 합니다.
+
+```tsx
+function AppShell() {
+  const hydrateSessions = useSessionStore((state) => state.hydrate);
+  const sessions = useSessionStore((state) => state.sessions);
+  const sessionIds = useMemo(
+    () => sessions.flatMap((session) => session.snaSessionId ? [session.snaSessionId] : []),
+    [sessions],
+  );
+
+  useAgentEventStream();
+  const { pending, clearPending } = usePermissionRequests(sessionIds);
+
+  useEffect(() => {
+    hydrateSessions();
+    connectSna();
+    return () => disconnectSna();
+  }, [hydrateSessions]);
+
+  return (
+    <>
+      <AppRoutes />
+      {pending[0] && (
+        <PermissionDialog
+          request={pending[0]}
+          onDone={() => clearPending(pending[0].sessionId)}
+        />
+      )}
+    </>
+  );
+}
+```
+
+Event hook은 한 번만 listener를 등록하고, session list가 바뀔 때 보이는/알려진 SNA session들을 subscribe해야 합니다.
+
+```ts
+function useAgentEventStream() {
+  const sessions = useSessionStore((state) => state.sessions);
+  const register = useMessageStore((state) => state.register);
+  const handleEvent = useMessageStore((state) => state.handleEvent);
+
+  useEffect(() => {
+    return onAgentEvent(({ session, cursor, event, isHistory }) => {
+      handleEvent(session, { cursor, event, isHistory });
+    });
+  }, [handleEvent]);
+
+  useEffect(() => {
+    const cleanups = sessions
+      .filter((session) => session.snaSessionId)
+      .map((session) => {
+        register(session.snaSessionId!, session.id);
+        subscribeAgent(session.snaSessionId!, { since: 0, tail: 200 }).catch(() => {});
+        return () => unsubscribeAgent(session.snaSessionId!).catch(() => {});
+      });
+
+    return () => cleanups.forEach((cleanup) => cleanup());
+  }, [sessions, register]);
+}
+```
+
+Permission UI도 같은 이유로 root에 mount하는 편이 안전합니다. 이것은 현재 선택된 chat panel의 자식 상태가 아니라 제품 상태입니다.
+
+## 언제 쓰나
+
+| 상황 | 이 패턴 사용? |
+| --- | --- |
+| 제품 DB가 없는 단일 CLI wrapper | 보통 필요 없습니다. SNA를 직접 호출하십시오. |
+| Local SNA와 renderer UI가 있는 Electron 앱 | 사용하십시오. Command와 event path를 분리하십시오. |
+| Local + cloud SNA instance를 함께 쓰는 앱 | 사용하십시오. Client registry와 event aggregator가 필요합니다. |
+| Retrieval, project, policy context를 주입하는 앱 | 사용하십시오. Send-time context building을 host에 모으십시오. |

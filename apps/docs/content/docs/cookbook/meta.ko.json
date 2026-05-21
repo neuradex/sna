@@ -1,7 +1,7 @@
 {
   "title": "Cookbook",
-  "description": "스트리밍, 권한 UI, 멀티 프로바이더 패턴.",
+  "description": "스트리밍, 권한 UI, 멀티 프로바이더, 앱 호스팅 패턴.",
   "icon": "ChefHat",
   "root": true,
-  "pages": ["index", "streaming", "permissions", "multi-provider"]
+  "pages": ["index", "streaming", "permissions", "multi-provider", "agentic-apps"]
 }
