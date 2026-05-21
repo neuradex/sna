@@ -17,6 +17,8 @@
     "feature-matrix",
     "permissions",
     "---철학---",
-    "philosophy"
+    "philosophy/origin",
+    "philosophy/actor-kind",
+    "philosophy/acp"
   ]
 }

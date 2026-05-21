@@ -17,6 +17,8 @@
     "feature-matrix",
     "permissions",
     "---Philosophy---",
-    "philosophy"
+    "philosophy/origin",
+    "philosophy/actor-kind",
+    "philosophy/acp"
   ]
 }
