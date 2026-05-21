@@ -71,6 +71,29 @@ describe("connection lifecycle", () => {
     assert.deepEqual(statuses, ["connecting", "connected"]);
   });
 
+  it("adds authToken to the WebSocket URL", async () => {
+    sna = new SnaClient({ baseUrl: mock.host, authToken: "secret-token", ws: true, http: false, reconnect: false });
+
+    sna.connect();
+    await waitFor(() => sna.connected);
+
+    const url = new URL(mock.wsRequests[0], "ws://localhost");
+    assert.equal(url.pathname, "/ws");
+    assert.equal(url.searchParams.get("token"), "secret-token");
+  });
+
+  it("accepts launcher connection objects with default transports", async () => {
+    const connection = { baseUrl: mock.host, authToken: "secret-token" };
+    sna = new SnaClient({ ...connection, reconnect: false });
+
+    assert.equal(sna._httpUrl, `http://${mock.host}`);
+    sna.connect();
+    await waitFor(() => sna.connected);
+
+    const url = new URL(mock.wsRequests[0], "ws://localhost");
+    assert.equal(url.searchParams.get("token"), "secret-token");
+  });
+
   it("disconnect fires status callback and closes socket", async () => {
     const statuses: string[] = [];
     sna = new SnaClient({ baseUrl: mock.host, ws: true, http: false, reconnect: false });
@@ -1056,6 +1079,15 @@ describe("HTTP transport (http: true)", () => {
     assert.equal(req.url, "/agent/sessions");
     assert.equal(req.body.label, "test");
     assert.equal(req.body.id, "s1");
+  });
+
+  it("sends authToken as a bearer token on HTTP requests", async () => {
+    mock.queueHttpResponse(200, { sessions: [] });
+    sna = new SnaClient({ baseUrl: mock.host, authToken: "secret-token", ws: false, http: true, reconnect: false });
+
+    await sna.sessions.list();
+
+    assert.equal(mock.httpRequests[0].headers.authorization, "Bearer secret-token");
   });
 
   it("sessions.create — no opts sends empty body", async () => {

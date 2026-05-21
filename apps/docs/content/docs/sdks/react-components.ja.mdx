@@ -34,7 +34,7 @@ import { useChatStore } from "@sna-sdk/react/stores/chat-store";
 `SnaChatUI` は application content を包み、built-in panel layout を管理します。
 
 ```tsx
-<SnaProvider snaUrl="http://localhost:3099">
+<SnaProvider connection={sna.connection}>
   <SnaChatUI defaultOpen={false}>
     <App />
   </SnaChatUI>

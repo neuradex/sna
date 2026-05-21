@@ -22,11 +22,11 @@ await client.agent.start(sessionId, {
 // ...ターンが進行し、履歴が積み上がり...
 
 // 会話を保ったまま Codex に切り替え
-await client.agent.patch(sessionId, { provider: "codex", model: "gpt-5.4" });
+await client.agent.restart(sessionId, { provider: "codex", model: "gpt-5.4" });
 ```
 
-`provider` フィールドを持つ `PATCH /agent/session` は現在のプロセス
-を終了し、新ランタイムで respawn し、正規化履歴を新ランタイムのネイティブ
+`provider` フィールドに新しい runtime id を渡した `agent.restart()` は
+現在のプロセスを終了し、新ランタイムで respawn し、正規化履歴を新ランタイムのネイティブ
 形に replay します。セッションレコード、イベントカーソル、runtime chain
 はすべて維持されます。
 
@@ -36,10 +36,11 @@ await client.agent.patch(sessionId, { provider: "codex", model: "gpt-5.4" });
 |------|----------|------|
 | `restart` | 同じ設定で respawn | replay しない (warm restart) |
 | `resume` | 同じ設定で respawn | 再構築して再注入 |
-| `patch` (ランタイム変更) | 新設定で respawn | 新ランタイム用に再構築 |
+| `restart` (ランタイム変更) | 新設定で respawn | 新ランタイム用に再構築 |
 
 長いアイドル後やランタイムが終了したときは `resume` を使います。
-アプリがランタイム切り替えを必要とするときは `patch` を使います。
+アプリがランタイム切り替えを必要とするときは、`provider` フィールドに
+新しい runtime id を渡して `restart` します。
 
 ## なぜ重要か
 

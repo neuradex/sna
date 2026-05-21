@@ -82,6 +82,7 @@ import { resolveClaudeCli, startSnaServer } from "@sna-sdk/core/node";
 const claude = resolveClaudeCli();
 
 const sna = await startSnaServer({
+  appId: "my-app",
   port: 3099,
   dbPath: "./data/sna.db",
   runtimePaths: {
@@ -91,18 +92,16 @@ const sna = await startSnaServer({
 ```
 
 This forks the SNA server as a managed child process. `sna.port` holds
-the bound port (auto-allocated if `0`), `sna.stop()` sends SIGTERM.
+the bound port (auto-allocated if `0`), `sna.connection` is passed to SDK
+clients, `sna.appId` is tagged onto sessions created by this server, and
+`sna.stop()` sends SIGTERM.
 
 ## 3. Connect a client
 
 ```ts
 import { SnaClient } from "@sna-sdk/client";
 
-const client = new SnaClient({
-  baseUrl: `localhost:${sna.port}`,
-  http: true,   // POST /agent/* etc.
-  ws: true,     // live event stream
-});
+const client = new SnaClient(sna.connection);
 client.connect();
 ```
 

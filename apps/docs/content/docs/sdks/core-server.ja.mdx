@@ -9,7 +9,8 @@ description: "`@sna-sdk/core/server` から export されるサーバー側エ�
 | サーフェス | 目的 |
 | --- | --- |
 | `createSnaApp(options?)` | SNA HTTP application を作成します。 |
-| `attachWebSocket(server, sessionManager)` | 既存 HTTP server に SNA WebSocket protocol を接続します。 |
+| `attachWebSocket(server, sessionManager, options?)` | 既存 HTTP server に SNA WebSocket protocol を接続します。 |
+| `generateSnaAuthToken()` | Protected HTTP / WebSocket route 用の bearer token を生成します。 |
 | `SessionManager` | Server-side agent session と lifecycle event を管理します。 |
 | `snaPortRoute` | ブラウザ自動検出のため現在の SNA port を公開します。 |
 | `runOnce`, `completion` | この entry point からも re-export される direct server-side helper です。 |
@@ -20,13 +21,14 @@ description: "`@sna-sdk/core/server` から export されるサーバー側エ�
 
 ~~~ts
 import { serve } from "@hono/node-server";
-import { createSnaApp, attachWebSocket, SessionManager } from "@sna-sdk/core/server";
+import { createSnaApp, attachWebSocket, generateSnaAuthToken, SessionManager } from "@sna-sdk/core/server";
 
 const sessionManager = new SessionManager({ maxSessions: 10 });
-const app = await createSnaApp({ sessionManager });
+const authToken = generateSnaAuthToken();
+const app = await createSnaApp({ sessionManager, authToken });
 
-const server = serve({ fetch: app.fetch, port: 3099 }) as unknown as import("node:http").Server;
-attachWebSocket(server, sessionManager);
+const server = serve({ fetch: app.fetch, port: 3099, hostname: "127.0.0.1" }) as unknown as import("node:http").Server;
+attachWebSocket(server, sessionManager, { authToken });
 ~~~
 
 サーバー entry point は agent lifecycle を所有する process の近くに置いてください。Browser client は server module を直接 import せず、`@sna-sdk/client` または `@sna-sdk/react` 経由で接続する方が安全です。
@@ -36,6 +38,8 @@ attachWebSocket(server, sessionManager);
 ```ts
 declare function createSnaApp(options?: {
   sessionManager?: SessionManager;
+  authToken?: string;
+  allowedOrigins?: string[];
 }): Promise<Hono>;
 ```
 
@@ -43,10 +47,10 @@ SNA route を公開する Hono HTTP application を作成します。OpenAPI app
 
 `sessionManager` を省略すると server が 1 つ作成します。HTTP route と WebSocket client が同じ session state を共有する必要がある場合、または host が lifecycle event に直接アクセスする必要がある場合は、manager を作成して渡してください。
 
-## `attachWebSocket(server, sessionManager)`
+## `attachWebSocket(server, sessionManager, options?)`
 
 ```ts
-const wss = attachWebSocket(httpServer, sessionManager);
+const wss = attachWebSocket(httpServer, sessionManager, { authToken, allowedOrigins });
 ```
 
 既存 Node HTTP server の `/ws` upgrade path に WebSocket server を接続します。`createSnaApp` に渡したものと同じ `SessionManager` を使ってください。そうしないと、HTTP command と WebSocket subscription が別々の session state を見ることになります。

@@ -10,6 +10,8 @@ interface SnaConfig {
      * Override via <SnaProvider snaUrl="..."> for custom deployments.
      */
     apiUrl: string;
+    /** Bearer token issued by the SNA server. */
+    authToken?: string;
     /**
      * Active session ID for this scope.
      * Set by <SnaSession id="...">. Defaults to "default".
@@ -18,5 +20,6 @@ interface SnaConfig {
 }
 declare const SnaContext: react.Context<SnaConfig>;
 declare function useSnaContext(): SnaConfig;
+declare function authHeaders(authToken: string | undefined, headers?: Record<string, string>): Record<string, string> | undefined;
 
-export { DEFAULT_SNA_URL, type SnaConfig, SnaContext, useSnaContext };
+export { DEFAULT_SNA_URL, type SnaConfig, SnaContext, authHeaders, useSnaContext };

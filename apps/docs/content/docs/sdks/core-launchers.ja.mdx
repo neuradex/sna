@@ -22,6 +22,10 @@ Launcher handle は、サーバー停止と、検出された URL を `@sna-sdk/
 ```ts
 type SnaServerOptions = {
   port?: number;
+  host?: string;
+  appId?: string;
+  authToken?: string;
+  allowedOrigins?: string[];
   dbPath: string;
   cwd?: string;
   maxSessions?: number;
@@ -50,6 +54,10 @@ type RuntimePaths = {
 | Field | Default | 説明 |
 | --- | --- | --- |
 | `port` | `3099` | Server に渡す API port。 |
+| `host` | `127.0.0.1` | Bind host。Host app により強い transport boundary がない限り loopback を維持してください。 |
+| `appId` | `sna-sdk` | この server instance の owner ID。このサーバが作る session metadata に付きます。 |
+| `authToken` | generated | Protected HTTP route と WebSocket upgrade に必要な bearer token。 |
+| `allowedOrigins` | `[]` | Browser `Origin` request のうち許可する値。`Origin` を送らない native client は許可されます。 |
 | `dbPath` | required | Absolute SQLite path。`cwd` がない場合、launcher はこの path から `cwd` を計算します。 |
 | `cwd` | `dirname(dbPath)` | Server process と runtime session の working directory。 |
 | `maxSessions` | `5` | 同時に保持できる agent session 数。 |
@@ -57,7 +65,7 @@ type RuntimePaths = {
 | `model` | SDK default | Runtime call のデフォルト model。 |
 | `permissionTimeoutMs` | `0` | `0` の場合、permission prompt response は host が管理します。正の値なら timeout 後に自動 deny します。 |
 | `nativeBinding` | auto-detected | 明示的な `better-sqlite3` native binding path。Custom Electron build で使います。 |
-| `env` | `{}` | 追加環境変数。ここに置いたランタイムコマンド環境変数は `runtimePaths` から生成された値を上書きします。 |
+| `env` | `{}` | 追加環境変数。ここに置いた runtime command 環境変数は `runtimePaths` から生成された値を上書きします。ただし `SNA_APP_ID`、`SNA_AUTH_TOKEN`、`SNA_HOST`、`SNA_ALLOWED_ORIGINS` など launcher 所有の値は typed option が最終値です。 |
 | `readyTimeout` | `15000` | Standalone process が ready line を出すまで待つ時間(ms)。 |
 | `onLog` | none | Child process の stdout/stderr line、または in-process mode の SDK logger line を受け取ります。 |
 | `dataDir` | `dbPath` から計算 | Image と asset storage の base directory。 |
@@ -67,7 +75,8 @@ type RuntimePaths = {
 
 ホストアプリに設定画面がある場合や、ユーザーが選んだ CLI 位置を保存する
 場合は `runtimePaths` を使ってください。`env` は最後の退避手段として
-残り、`runtimePaths` から生成された値を上書きします。
+残り、`runtimePaths` から生成された値を上書きします。Server identity、
+auth、bind host、origin policy は typed launcher field で指定してください。
 
 ## Forked vs in-process
 
@@ -78,6 +87,11 @@ type RuntimePaths = {
 
 In-process mode は default agent を自動 spawn しません。Host が HTTP、WebSocket、または返された `sessionManager` から session を開始します。
 
+Standalone server を直接実行する方法は開発/デバッグ用です。Product
+integration では `startSnaServer()` または `startSnaServerInProcess()` を
+優先してください。Token、owner identity、bind host、shutdown lifecycle を
+host app が所有できます。
+
 ## 関数リファレンス
 
 ### `@sna-sdk/core/node` の `startSnaServer(options)`
@@ -86,12 +100,16 @@ In-process mode は default agent を自動 spawn しません。Host が HTTP�
 
 ```ts
 const handle = await startSnaServer({
+  appId: "my-app",
   dbPath: "/Users/me/Library/Application Support/MyApp/sna.db",
   port: 3099,
+  allowedOrigins: ["http://localhost:5173"],
   runtimePaths: {
     claudeCode: "/opt/homebrew/bin/claude",
   },
 });
+
+const client = new SnaClient(handle.connection);
 
 handle.stop();
 ```
@@ -117,6 +135,11 @@ Returns:
 type SnaServerHandle = {
   process: ChildProcess;
   port: number;
+  host: string;
+  appId: string;
+  baseUrl: string;
+  authToken: string;
+  connection: { baseUrl: string; authToken: string };
   stop(): void;
 };
 ```
@@ -131,6 +154,11 @@ Returns:
 type InProcessSnaServerHandle = {
   process: null;
   port: number;
+  host: string;
+  appId: string;
+  baseUrl: string;
+  authToken: string;
+  connection: { baseUrl: string; authToken: string };
   sessionManager: SessionManager;
   httpServer: http.Server;
   initLangfuse(config: { publicKey: string; secretKey: string; baseUrl?: string }): Promise<void>;

@@ -40,6 +40,7 @@ export {
 } from "../electron/index.js";
 export type {
   SnaServerOptions,
+  SnaServerConnection,
   SnaServerHandle,
   RuntimePaths,
   ResolveResult,

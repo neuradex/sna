@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { AgentEvent } from "@sna-sdk/core";
-import { useSnaContext } from "../context.js";
+import { authHeaders, useSnaContext } from "../context.js";
 
 export type { AgentEvent };
 
@@ -11,6 +11,8 @@ interface UseAgentOptions {
   sessionId?: string;
   /** Override base URL for agent API. Defaults to SnaContext apiUrl + "/agent" */
   baseUrl?: string;
+  /** Override bearer token. Defaults to SnaContext authToken. */
+  authToken?: string;
   /** Provider name. Defaults to "claude-code" */
   provider?: string;
   /** Permission mode for the agent */
@@ -49,6 +51,7 @@ export function useAgent(options: UseAgentOptions = {}) {
   const {
     sessionId = ctx.sessionId,
     baseUrl = `${ctx.apiUrl}/agent`,
+    authToken = ctx.authToken,
     provider = "claude-code",
     permissionMode,
     reasoningLevel,
@@ -59,7 +62,7 @@ export function useAgent(options: UseAgentOptions = {}) {
 
   const [connected, setConnected] = useState(false);
   const [alive, setAlive] = useState(false);
-  const esRef = useRef<EventSource | null>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
 
   const onEventRef = useRef(options.onEvent);
   const onThinkingRef = useRef(options.onThinking);
@@ -84,7 +87,9 @@ export function useAgent(options: UseAgentOptions = {}) {
       // Get current event count so we only receive NEW events
       let cursor = 0;
       try {
-        const res = await fetch(`${baseUrl}/status?${sessionParam}`);
+        const res = await fetch(`${baseUrl}/status?${sessionParam}`, {
+          headers: authHeaders(authToken),
+        });
         const data = await res.json();
         cursor = data.eventCount ?? 0;
         if (data.alive) setAlive(true);
@@ -92,35 +97,41 @@ export function useAgent(options: UseAgentOptions = {}) {
 
       function connect() {
         if (disposed) return;
-        if (esRef.current) esRef.current.close();
+        streamAbortRef.current?.abort();
 
-        const es = new EventSource(`${baseUrl}/events?${sessionParam}&since=${cursor}`);
-        esRef.current = es;
+        const ctrl = new AbortController();
+        streamAbortRef.current = ctrl;
 
-        es.onopen = () => setConnected(true);
+        fetch(`${baseUrl}/events?${sessionParam}&since=${cursor}`, {
+          headers: authHeaders(authToken, { Accept: "text/event-stream" }),
+          signal: ctrl.signal,
+        })
+          .then(async (res) => {
+            if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+            setConnected(true);
+            await readSse(res, {
+              onId: (id) => { cursor = parseInt(id, 10); },
+              onData: (data) => {
+                if (!data || disposed) return;
+                try {
+                  const event: AgentEvent = JSON.parse(data);
+                  onEventRef.current?.(event);
 
-        es.onmessage = (e) => {
-          if (!e.data || disposed) return;
-          // Track cursor from SSE id
-          if (e.lastEventId) cursor = parseInt(e.lastEventId, 10);
-          try {
-            const event: AgentEvent = JSON.parse(e.data);
-            onEventRef.current?.(event);
-
-            if (event.type === "init") onInitRef.current?.(event);
-            if (event.type === "thinking") onThinkingRef.current?.(event);
-            if (event.type === "assistant") onAssistantRef.current?.(event);
-            if (event.type === "tool_result") onToolResultRef.current?.(event);
-            if (event.type === "complete") onCompleteRef.current?.(event);
-            if (event.type === "error") onErrorRef.current?.(event);
-          } catch { /* malformed */ }
-        };
-
-        es.onerror = () => {
-          setConnected(false);
-          es.close();
-          if (!disposed) setTimeout(connect, 3000);
-        };
+                  if (event.type === "init") onInitRef.current?.(event);
+                  if (event.type === "thinking") onThinkingRef.current?.(event);
+                  if (event.type === "assistant") onAssistantRef.current?.(event);
+                  if (event.type === "tool_result") onToolResultRef.current?.(event);
+                  if (event.type === "complete") onCompleteRef.current?.(event);
+                  if (event.type === "error") onErrorRef.current?.(event);
+                } catch { /* malformed */ }
+              },
+            });
+          })
+          .catch(() => { /* reconnect below */ })
+          .finally(() => {
+            setConnected(false);
+            if (!disposed && !ctrl.signal.aborted) setTimeout(connect, 3000);
+          });
       }
 
       connect();
@@ -130,10 +141,10 @@ export function useAgent(options: UseAgentOptions = {}) {
 
     return () => {
       disposed = true;
-      esRef.current?.close();
+      streamAbortRef.current?.abort();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseUrl, sessionParam]);
+  }, [baseUrl, sessionParam, authToken]);
 
   // Send message to agent
   const send = useCallback(async (message: string) => {
@@ -142,7 +153,7 @@ export function useAgent(options: UseAgentOptions = {}) {
     try {
       const res = await fetch(`${baseUrl}/send?${sessionParam}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(authToken, { "Content-Type": "application/json" }),
         body: JSON.stringify({ message }),
       });
       const data = await res.json();
@@ -152,13 +163,13 @@ export function useAgent(options: UseAgentOptions = {}) {
       console.error("[useAgent:send] FAILED:", err);
       return { status: "error", message: String(err) };
     }
-  }, [baseUrl, sessionParam, sessionId]);
+  }, [baseUrl, sessionParam, sessionId, authToken]);
 
   // Start agent session (if not already running)
   const start = useCallback(async (prompt?: string) => {
     const res = await fetch(`${baseUrl}/start?${sessionParam}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders(authToken, { "Content-Type": "application/json" }),
       body: JSON.stringify({ provider, prompt, permissionMode, reasoningLevel, providerOptions }),
     });
     const data = await res.json();
@@ -166,13 +177,16 @@ export function useAgent(options: UseAgentOptions = {}) {
       setAlive(true);
     }
     return data;
-  }, [baseUrl, sessionParam, provider, permissionMode, reasoningLevel, providerOptions]);
+  }, [baseUrl, sessionParam, authToken, provider, permissionMode, reasoningLevel, providerOptions]);
 
   // Kill agent
   const kill = useCallback(async () => {
     setAlive(false);
-    await fetch(`${baseUrl}/kill?${sessionParam}`, { method: "POST" });
-  }, [baseUrl, sessionParam]);
+    await fetch(`${baseUrl}/kill?${sessionParam}`, {
+      method: "POST",
+      headers: authHeaders(authToken),
+    });
+  }, [baseUrl, sessionParam, authToken]);
 
   // One-shot completion
   const completion = useCallback(async (opts: {
@@ -186,7 +200,7 @@ export function useAgent(options: UseAgentOptions = {}) {
   }) => {
     const res = await fetch(`${baseUrl}/completion`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders(authToken, { "Content-Type": "application/json" }),
       body: JSON.stringify({
         provider,
         reasoningLevel,
@@ -194,7 +208,47 @@ export function useAgent(options: UseAgentOptions = {}) {
       }),
     });
     return res.json();
-  }, [baseUrl, provider, reasoningLevel]);
+  }, [baseUrl, authToken, provider, reasoningLevel]);
 
   return { connected, alive, start, send, kill, completion };
+}
+
+async function readSse(
+  response: Response,
+  handlers: { onId: (id: string) => void; onData: (data: string) => void },
+): Promise<void> {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let eventId = "";
+  let data = "";
+
+  const flush = () => {
+    if (eventId) handlers.onId(eventId);
+    if (data) handlers.onData(data.replace(/\n$/, ""));
+    eventId = "";
+    data = "";
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line === "") {
+          flush();
+        } else if (line.startsWith("id:")) {
+          eventId = line.slice(3).trim();
+        } else if (line.startsWith("data:")) {
+          data += `${line.slice(5).trimStart()}\n`;
+        }
+      }
+    }
+    if (buffer) flush();
+  } finally {
+    reader.releaseLock();
+  }
 }

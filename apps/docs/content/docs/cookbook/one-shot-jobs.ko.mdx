@@ -11,7 +11,7 @@ icon: Zap
 | 작업 형태 | API | 이유 |
 | --- | --- | --- |
 | Text transform, classification, JSON extraction | `agent.completion()` | 가장 빠른 경로입니다. 임시 session lifecycle이 없습니다. |
-| Agent가 tool을 쓰거나 provider별 agent behavior가 필요함 | `agent.runOnce()` | 임시 session을 만들고 완료를 기다린 뒤 정리합니다. |
+| Agent가 tool을 쓰거나 runtime별 behavior가 필요함 | `agent.runOnce()` | 임시 session을 만들고 완료를 기다린 뒤 정리합니다. |
 | Browser/Electron UI가 one-shot 진행 상황을 live로 보여줘야 함 | `agent.runOnceStream()` | HTTP SSE stream입니다. 장기 chat session은 만들지 않습니다. |
 
 One-shot prompt는 좁게 유지합니다. 이것은 제품 plumbing이지 open-ended conversation이 아닙니다.
@@ -164,4 +164,4 @@ export async function previewPlan(client: SnaClient, request: string, append: (t
 - Timeout과 명시적인 fallback을 함께 둡니다.
 - Prompt가 tool을 쓰면 안 되는 작업일 때만 `permissionMode: "bypassPermissions"`를 쓰면 안전합니다.
 - User가 명시적으로 요청한 출력이 아니라면 one-shot 결과를 user conversation에 넣지 않는 쪽이 낫습니다.
-- 반복되는 background work는 provider를 hardcode하지 않고 runtime/model registry를 통해 model을 고릅니다.
+- 반복되는 background work는 runtime을 hardcode하지 않고 runtime/model registry를 통해 model을 고릅니다.

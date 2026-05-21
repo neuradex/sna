@@ -455,7 +455,7 @@ export class SessionManager {
   }
 
   /** Get or create a session (used for "default" backward compat). */
-  getOrCreateSession(id: string, opts?: { label?: string; cwd?: string }): Session {
+  getOrCreateSession(id: string, opts?: { label?: string; cwd?: string; meta?: Record<string, unknown> | null }): Session {
     const existing = this.sessions.get(id);
     if (existing) {
       // Update cwd if provided (handles server restart where session was recreated with wrong cwd)

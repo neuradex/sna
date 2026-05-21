@@ -23,11 +23,11 @@ await client.agent.start(sessionId, {
 ## Subscribe + respond
 
 ```ts
-await client.permissions.subscribe();
+await client.agent.subscribePermissions();
 
-client.permissions.onRequest(async ({ session, tool, input, decisionId }) => {
-  const approved = await showApprovalDialog({ tool, input });
-  await client.permissions.respond(session, approved, { decisionId });
+client.agent.onPermissionRequest(async ({ session, request }) => {
+  const approved = await showApprovalDialog(request);
+  await client.agent.respondPermission(session, approved);
 });
 ```
 
@@ -60,22 +60,21 @@ automatically. For custom UI:
 ```tsx
 function PermissionGuard({ children }: React.PropsWithChildren) {
   const [pending, setPending] = useState(null);
+  const client = getSnaClient();
 
   useEffect(() => {
-    const client = getSnaClient();
-    client.permissions.subscribe();
-    return client.permissions.onRequest(setPending);
-  }, []);
+    client.agent.subscribePermissions().catch(() => {});
+    return client.agent.onPermissionRequest(setPending);
+  }, [client]);
 
   return (
     <>
       {children}
       {pending && (
         <Dialog
-          tool={pending.tool}
-          input={pending.input}
-          onApprove={() => respond(true)}
-          onDeny={() => respond(false)}
+          request={pending.request}
+          onApprove={() => client.agent.respondPermission(pending.session, true)}
+          onDeny={() => client.agent.respondPermission(pending.session, false)}
         />
       )}
     </>

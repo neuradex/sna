@@ -28,8 +28,9 @@ type RegisteredModel = {
   // Human label shown in the settings UI and model picker.
   label: string;
 
-  // Provider family is useful for grouping, attribution, and billing views.
-  provider: "anthropic" | "openai" | "oss" | string;
+  // Inference backend family. SNA's catalog calls this `provider`;
+  // storing it as `modelProvider` avoids confusing it with the SNA runtime id.
+  modelProvider: "anthropic" | "openai" | "oss" | string;
 };
 
 type RuntimeSlot = {
@@ -37,10 +38,12 @@ type RuntimeSlot = {
   enabled: boolean;
 
   config: {
-    // CLI runtimes use cliPath. Hosted or local API runtimes may use baseUrl/apiKey.
+    // SNA runtimes are agentic CLIs. Use cliPath for runtime path overrides.
     cliPath?: string;
-    baseUrl?: string;
-    apiKey?: string;
+
+    // For OpenRouter or local OpenAI-compatible APIs, configure Codex's
+    // native model_providers.* settings through providerOptions.config.
+    codexConfig?: Record<string, string>;
   };
 
   // The app owns this curated list. It may be seeded from SNA's model catalog.
@@ -90,14 +93,14 @@ async function setRuntimePath(runtimeId: RuntimeId, cliPath: string) {
   await settingsDb.set(`runtime:${runtimeId}:path`, cliPath);
 
   // If SNA is embedded in the same process, mirroring to process.env lets
-  // future provider spawns resolve the same path immediately.
+  // future runtime spawns resolve the same path immediately.
   process.env[RUNTIME_ENV[runtimeId]] = cliPath;
 }
 ```
 
 ## Pass runtime paths to the SNA launcher
 
-When launching SNA from Electron, pass the resolved runtime paths at startup. SNA maps these values to the provider environment variables used by runtime resolvers.
+When launching SNA from Electron, pass the resolved runtime paths at startup. SNA maps these values to the environment variables read by runtime resolvers.
 
 ```ts
 import { startSnaServerInProcess } from "@sna-sdk/core/electron";
@@ -112,20 +115,28 @@ const runtimePaths = {
 };
 
 const sna = await startSnaServerInProcess({
+  appId: "my-app",
   port: 3099,
   dbPath: appPaths.snaDb,
+  allowedOrigins: ["http://localhost:5173"],
 
   // runtimePaths becomes SNA_CLAUDE_COMMAND, SNA_CODEX_COMMAND, and siblings.
   runtimePaths,
 
-  // env is merged after runtimePaths, so it works as a final escape hatch.
+  // env is merged after runtimePaths for runtime command variables and other
+  // runtime-specific escape hatches. Launcher-owned auth/identity fields stay
+  // controlled by options.
   env: {
     SNA_MAX_SESSIONS: "20",
   },
 });
 ```
 
-For a forked standalone SNA server, path changes should usually be applied before launch or by restarting SNA. For in-process SNA, updating `process.env.SNA_*_COMMAND` in the host can affect later spawns because the providers resolve paths inside the same process.
+Pass `sna.connection` to `SnaClient` or `SnaProvider`. The token is generated
+for this server process and stays paired with that connection object; do not
+store it as a long-lived user setting.
+
+For a forked standalone SNA server, path changes should usually be applied before launch or by restarting SNA. For in-process SNA, updating `process.env.SNA_*_COMMAND` in the host can affect later spawns because the runtime adapters resolve paths inside the same process.
 
 ## Test the real runtime with `runOnce`
 
@@ -176,7 +187,7 @@ async function refreshCatalog(client: SnaClient, runtimeId: RuntimeId, cliPath?:
     // Useful when the user just edited a CLI path in settings.
     cliPath,
 
-    // Bypass provider-side cache for an explicit refresh button.
+    // Bypass runtime-side cache for an explicit refresh button.
     refresh: true,
   });
 
@@ -195,7 +206,7 @@ async function registerModel(runtimeId: RuntimeId, model: RuntimeModelInfo) {
     id: `${runtimeId}/${model.id}`,
     modelSlug: model.id,
     label: model.label,
-    provider: model.provider,
+    modelProvider: model.provider,
   });
 }
 ```
@@ -221,7 +232,7 @@ function RuntimeSetupPanel({ runtimeId }: { runtimeId: RuntimeId }) {
   async function saveAndTest() {
     setTesting(true);
     try {
-      // Persist first so the SNA provider resolves this path during runOnce.
+      // Persist first so the SNA runtime adapter resolves this path during runOnce.
       await window.appRuntime.setPath(runtimeId, cliPath);
 
       // This is a real runtime invocation through SNA, not only a fake ping.

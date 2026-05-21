@@ -6,6 +6,8 @@ interface UseAgentOptions {
     sessionId?: string;
     /** Override base URL for agent API. Defaults to SnaContext apiUrl + "/agent" */
     baseUrl?: string;
+    /** Override bearer token. Defaults to SnaContext authToken. */
+    authToken?: string;
     /** Provider name. Defaults to "claude-code" */
     provider?: string;
     /** Permission mode for the agent */

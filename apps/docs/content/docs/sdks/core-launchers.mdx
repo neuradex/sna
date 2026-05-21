@@ -22,6 +22,10 @@ Launcher handles expose enough information to stop the server and pass the disco
 ```ts
 type SnaServerOptions = {
   port?: number;
+  host?: string;
+  appId?: string;
+  authToken?: string;
+  allowedOrigins?: string[];
   dbPath: string;
   cwd?: string;
   maxSessions?: number;
@@ -50,6 +54,10 @@ type RuntimePaths = {
 | Field | Default | Description |
 | --- | --- | --- |
 | `port` | `3099` | API port passed to the server. |
+| `host` | `127.0.0.1` | Bind host. Keep loopback unless the host app has a stronger transport boundary. |
+| `appId` | `sna-sdk` | Owner ID for this server instance. Sessions created through the server are tagged with this value. |
+| `authToken` | generated | Bearer token required by protected HTTP routes and WebSocket upgrades. |
+| `allowedOrigins` | `[]` | Browser `Origin` values allowed to call the server. Native clients that send no `Origin` are allowed. |
 | `dbPath` | required | Absolute SQLite path. The launcher also derives `cwd` from this path when `cwd` is omitted. |
 | `cwd` | `dirname(dbPath)` | Working directory for the server process and runtime sessions. |
 | `maxSessions` | `5` | Maximum concurrent agent sessions. |
@@ -57,7 +65,7 @@ type RuntimePaths = {
 | `model` | SDK default | Default model for runtime calls. |
 | `permissionTimeoutMs` | `0` | `0` leaves permission prompts under host control; positive values auto-deny after the timeout. |
 | `nativeBinding` | auto-detected | Explicit `better-sqlite3` native binding path. Use this for custom Electron builds. |
-| `env` | `{}` | Extra environment variables. Runtime command variables here override values generated from `runtimePaths`. |
+| `env` | `{}` | Extra environment variables. Runtime command variables here override values generated from `runtimePaths`; launcher-owned values such as `SNA_APP_ID`, `SNA_AUTH_TOKEN`, `SNA_HOST`, and `SNA_ALLOWED_ORIGINS` remain controlled by launcher options. |
 | `readyTimeout` | `15000` | Milliseconds to wait for the standalone process to print the ready line. |
 | `onLog` | none | Receives stdout/stderr lines from the child process or SDK logger lines in in-process mode. |
 | `dataDir` | derived from `dbPath` | Base directory for image and asset storage. |
@@ -67,7 +75,8 @@ type RuntimePaths = {
 
 Use `runtimePaths` when the host app has a setup screen or stores user-selected
 CLI locations. `env` is still available as the final escape hatch and overrides
-the values generated from `runtimePaths`.
+the values generated from `runtimePaths`. Use the typed launcher fields for
+server identity, auth, bind host, and origin policy.
 
 ## Forked vs in-process
 
@@ -78,6 +87,11 @@ the values generated from `runtimePaths`.
 
 In-process mode does not spawn a default agent. The host starts sessions through HTTP, WebSocket, or the returned `sessionManager`.
 
+Directly running the standalone server is a development/debugging path. Product
+integrations should prefer `startSnaServer()` or `startSnaServerInProcess()` so
+the token, owner identity, bind host, and shutdown lifecycle stay under the host
+app's control.
+
 ## Function reference
 
 ### `startSnaServer(options)` from `@sna-sdk/core/node`
@@ -86,12 +100,16 @@ Starts SNA from a plain Node host and returns a handle with connection informati
 
 ```ts
 const handle = await startSnaServer({
+  appId: "my-app",
   dbPath: "/Users/me/Library/Application Support/MyApp/sna.db",
   port: 3099,
+  allowedOrigins: ["http://localhost:5173"],
   runtimePaths: {
     claudeCode: "/opt/homebrew/bin/claude",
   },
 });
+
+const client = new SnaClient(handle.connection);
 
 handle.stop();
 ```
@@ -117,6 +135,11 @@ Returns:
 type SnaServerHandle = {
   process: ChildProcess;
   port: number;
+  host: string;
+  appId: string;
+  baseUrl: string;
+  authToken: string;
+  connection: { baseUrl: string; authToken: string };
   stop(): void;
 };
 ```
@@ -131,6 +154,11 @@ Returns:
 type InProcessSnaServerHandle = {
   process: null;
   port: number;
+  host: string;
+  appId: string;
+  baseUrl: string;
+  authToken: string;
+  connection: { baseUrl: string; authToken: string };
   sessionManager: SessionManager;
   httpServer: http.Server;
   initLangfuse(config: { publicKey: string; secretKey: string; baseUrl?: string }): Promise<void>;

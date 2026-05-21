@@ -54,6 +54,12 @@ import { SnaClient } from "@sna-sdk/client";
 // One client per instance prevents duplicate WebSocket connections.
 const clients = new Map<string, SnaClient>();
 
+type SnaConnection = {
+  // For local embedded SNA, use the values returned by startSnaServer().
+  baseUrl: string;
+  authToken: string;
+};
+
 // UI subscribes to the app-level listener set, not to a specific client.
 const eventListeners = new Set<(event: unknown) => void>();
 const permissionListeners = new Set<(event: unknown) => void>();
@@ -70,13 +76,12 @@ function installAggregator(client: SnaClient) {
   });
 }
 
-export function snaFor(instanceId: string, baseUrl?: string): SnaClient {
+export function snaFor(instanceId: string, connection: SnaConnection): SnaClient {
   // Reuse the existing client if this instance is already connected.
   const existing = clients.get(instanceId);
   if (existing) return existing;
-  if (!baseUrl) throw new Error(`baseUrl required for ${instanceId}`);
 
-  const client = new SnaClient({ baseUrl, ws: true, http: true });
+  const client = new SnaClient(connection);
   clients.set(instanceId, client);
   installAggregator(client);
 
@@ -102,7 +107,7 @@ A common product architecture uses a split path:
 | Path | Route | Why |
 | --- | --- | --- |
 | Lifecycle commands | renderer → app host HTTP → SNA HTTP | The host can build config from app DB, wake cloud instances, reconcile model selection, and inject product context. |
-| Event stream | renderer → SNA WebSocket | The UI receives low-latency runtime events without proxying every token through the app server. |
+| Event stream | renderer → SNA WebSocket | The UI receives low-latency runtime events without proxying every token through the app server. Pass the SDK launcher `connection` through a trusted host channel. |
 
 In the renderer, expose a domain wrapper rather than raw SNA calls:
 
@@ -145,6 +150,7 @@ The host should own start-vs-resume. The UI should not decide whether a runtime 
 ```ts
 async function ensureAgent({ appSessionId, requestedSnaId, isNewSession }) {
   // Pick local or cloud SNA from the product session, not from UI state.
+  // `instance` is the host-owned wrapper around the SnaClient connection.
   const instance = snaForAppSession(appSessionId);
   await wakeIfCloudInstance(instance);
 

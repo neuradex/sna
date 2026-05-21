@@ -10,7 +10,7 @@ description: "SnaProvider, SnaSession, useSnaContext의 props와 반환값."
 **Signature**
 
 ```tsx
-<SnaProvider snaUrl?: string sessionId?: string hydrate?: boolean>
+<SnaProvider connection?: SnaConnection snaUrl?: string authToken?: string sessionId?: string hydrate?: boolean>
   {children}
 </SnaProvider>
 ```
@@ -20,7 +20,9 @@ description: "SnaProvider, SnaSession, useSnaContext의 props와 반환값."
 | Prop | Type | Default | Description |
 | --- | --- | --- | --- |
 | `children` | `React.ReactNode` | required | SNA context를 받을 subtree입니다. |
+| `connection` | `{ baseUrl: string; authToken?: string }` | none | SDK launcher가 반환한 connection object입니다. Embedded SNA에서는 이 값을 우선 사용합니다. |
 | `snaUrl` | `string` | auto-discovery | SNA internal API server URL입니다. 생략하면 `/api/sna-port`를 먼저 조회하고, 실패하면 `http://localhost:3099`를 사용합니다. |
+| `authToken` | `string` | none | Custom deployment용 token override입니다. SDK 앱은 보통 `connection`을 사용합니다. |
 | `sessionId` | `string` | `default` | subtree의 기본 session ID입니다. |
 | `hydrate` | `boolean` | `true` | mount 시 chat store가 저장된 session/message를 가져올지 결정합니다. Chat store를 쓰지 않으면 `false`로 둘 수 있습니다. |
 
@@ -30,13 +32,13 @@ description: "SnaProvider, SnaSession, useSnaContext의 props와 반환값."
 import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
 
 export function Root({ children }: { children: React.ReactNode }) {
-  return <SnaProvider snaUrl="http://localhost:3099">{children}</SnaProvider>;
+  return <SnaProvider connection={sna.connection}>{children}</SnaProvider>;
 }
 ```
 
 **Output**
 
-`SnaProvider` 자체는 UI를 렌더링하지 않습니다. React context에 `{ apiUrl, sessionId }`를 넣고, 필요하면 `useChatStore`를 hydrate합니다.
+`SnaProvider` 자체는 UI를 렌더링하지 않습니다. React context에 `{ apiUrl, authToken, sessionId }`를 넣고, 필요하면 `useChatStore`를 hydrate합니다.
 
 ## `<SnaSession>`
 
@@ -74,7 +76,7 @@ export function Root({ children }: { children: React.ReactNode }) {
 **Signature**
 
 ```ts
-const context = useSnaContext(): { apiUrl: string; sessionId: string }
+const context = useSnaContext(): { apiUrl: string; authToken?: string; sessionId: string }
 ```
 
 **Returns**
@@ -82,6 +84,7 @@ const context = useSnaContext(): { apiUrl: string; sessionId: string }
 | Field | Description |
 | --- | --- |
 | `apiUrl` | 현재 SNA server base URL입니다. |
+| `authToken` | hook과 chat store가 사용할 token입니다. |
 | `sessionId` | 현재 subtree의 active session ID입니다. |
 
 **Example**

@@ -9,7 +9,8 @@ Use these APIs when you want to host SNA inside your own server process. The ser
 | Surface | Purpose |
 | --- | --- |
 | `createSnaApp(options?)` | Creates the SNA HTTP application. |
-| `attachWebSocket(server, sessionManager)` | Attaches the SNA WebSocket protocol to an existing HTTP server. |
+| `attachWebSocket(server, sessionManager, options?)` | Attaches the SNA WebSocket protocol to an existing HTTP server. |
+| `generateSnaAuthToken()` | Generates a bearer token for protected HTTP and WebSocket routes. |
 | `SessionManager` | Manages server-side agent sessions and lifecycle events. |
 | `snaPortRoute` | Exposes the current SNA port for browser auto-discovery. |
 | `runOnce`, `completion` | Direct server-side helpers also re-exported from this entry point. |
@@ -20,13 +21,14 @@ Deprecated compatibility route modules under `@sna-sdk/core/server/routes/*` rem
 
 ~~~ts
 import { serve } from "@hono/node-server";
-import { createSnaApp, attachWebSocket, SessionManager } from "@sna-sdk/core/server";
+import { createSnaApp, attachWebSocket, generateSnaAuthToken, SessionManager } from "@sna-sdk/core/server";
 
 const sessionManager = new SessionManager({ maxSessions: 10 });
-const app = await createSnaApp({ sessionManager });
+const authToken = generateSnaAuthToken();
+const app = await createSnaApp({ sessionManager, authToken });
 
-const server = serve({ fetch: app.fetch, port: 3099 }) as unknown as import("node:http").Server;
-attachWebSocket(server, sessionManager);
+const server = serve({ fetch: app.fetch, port: 3099, hostname: "127.0.0.1" }) as unknown as import("node:http").Server;
+attachWebSocket(server, sessionManager, { authToken });
 ~~~
 
 Keep the server entry point close to the process that owns the agent lifecycle. Browser clients should connect through `@sna-sdk/client` or `@sna-sdk/react` instead of importing server modules.
@@ -36,6 +38,8 @@ Keep the server entry point close to the process that owns the agent lifecycle. 
 ```ts
 declare function createSnaApp(options?: {
   sessionManager?: SessionManager;
+  authToken?: string;
+  allowedOrigins?: string[];
 }): Promise<Hono>;
 ```
 
@@ -43,10 +47,10 @@ Creates the Hono HTTP application that exposes SNA routes. It delegates to the O
 
 If `sessionManager` is omitted, the server creates one. Pass your own manager when HTTP routes and WebSocket clients must share the same session state, or when the host needs direct access to lifecycle events.
 
-## `attachWebSocket(server, sessionManager)`
+## `attachWebSocket(server, sessionManager, options?)`
 
 ```ts
-const wss = attachWebSocket(httpServer, sessionManager);
+const wss = attachWebSocket(httpServer, sessionManager, { authToken, allowedOrigins });
 ```
 
 Attaches a WebSocket server to the `/ws` upgrade path of an existing Node HTTP server. Use the same `SessionManager` passed to `createSnaApp`; otherwise HTTP commands and WebSocket subscriptions will observe different session state.

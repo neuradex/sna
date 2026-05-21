@@ -11,6 +11,8 @@ import { WebSocket } from "ws";
 import http from "http";
 
 const TEST_DB_DIR = path.join(import.meta.dirname, "../.test-data-ws");
+const TEST_TOKEN = "test-sna-token";
+const ALLOWED_ORIGIN = "http://localhost:5173";
 
 function setup() {
   if (fs.existsSync(TEST_DB_DIR)) fs.rmSync(TEST_DB_DIR, { recursive: true });
@@ -28,23 +30,87 @@ interface TestContext {
   rid: number;
 }
 
-async function startServer(): Promise<TestContext> {
+interface ServerOnlyContext {
+  server: http.Server;
+  port: number;
+  cleanup: () => void;
+}
+
+async function startServerOnly(): Promise<ServerOnlyContext> {
   const cleanup = setup();
   const { createSnaApp, SessionManager, attachWebSocket } = await import("../src/server/index.js");
   const { serve } = await import("@hono/node-server");
 
   const sm = new SessionManager();
-  const app = createSnaApp({ sessionManager: sm });
+  const app = await createSnaApp({
+    sessionManager: sm,
+    authToken: TEST_TOKEN,
+    allowedOrigins: [ALLOWED_ORIGIN],
+  });
 
   return new Promise((resolve) => {
     const server = serve({ fetch: app.fetch, port: 0 }, (info) => {
       const port = (info as any).port ?? (server.address() as any)?.port;
-      attachWebSocket(server, sm);
-
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-      ws.on("open", () => {
-        resolve({ ws, server, port, cleanup, rid: 0 });
+      attachWebSocket(server, sm, {
+        authToken: TEST_TOKEN,
+        allowedOrigins: [ALLOWED_ORIGIN],
       });
+      resolve({ server, port, cleanup });
+    });
+  });
+}
+
+async function startServer(): Promise<TestContext> {
+  const ctx = await startServerOnly();
+  const ws = await openWs(ctx.port, { token: TEST_TOKEN, origin: ALLOWED_ORIGIN });
+  return { ...ctx, ws, rid: 0 };
+}
+
+async function openWs(
+  port: number,
+  options: { token?: string; origin?: string } = {},
+): Promise<WebSocket> {
+  const url = new URL(`ws://localhost:${port}/ws`);
+  if (options.token) url.searchParams.set("token", options.token);
+  const ws = new WebSocket(url, {
+    headers: options.origin ? { Origin: options.origin } : undefined,
+  });
+  return await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Timeout opening WebSocket")), 1000);
+    ws.once("open", () => {
+      clearTimeout(timer);
+      resolve(ws);
+    });
+    ws.once("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
+async function assertWsRejected(
+  port: number,
+  options: { token?: string; origin?: string } = {},
+): Promise<void> {
+  const url = new URL(`ws://localhost:${port}/ws`);
+  if (options.token) url.searchParams.set("token", options.token);
+  const ws = new WebSocket(url, {
+    headers: options.origin ? { Origin: options.origin } : undefined,
+  });
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      ws.close();
+      reject(new Error("Timeout waiting for WebSocket rejection"));
+    }, 1000);
+    ws.once("open", () => {
+      clearTimeout(timer);
+      ws.close();
+      reject(new Error("WebSocket unexpectedly opened"));
+    });
+    ws.once("error", (err) => {
+      clearTimeout(timer);
+      assert.match(String(err), /Unexpected server response: (401|403)/);
+      resolve();
     });
   });
 }
@@ -89,6 +155,26 @@ describe("WebSocket Handler", () => {
     ctx.ws.close();
     ctx.server.close();
     ctx.cleanup();
+  });
+
+  it("rejects WebSocket upgrades without a token", async () => {
+    const serverCtx = await startServerOnly();
+    try {
+      await assertWsRejected(serverCtx.port, { origin: ALLOWED_ORIGIN });
+    } finally {
+      serverCtx.server.close();
+      serverCtx.cleanup();
+    }
+  });
+
+  it("rejects WebSocket upgrades from unapproved origins", async () => {
+    const serverCtx = await startServerOnly();
+    try {
+      await assertWsRejected(serverCtx.port, { token: TEST_TOKEN, origin: "https://evil.example" });
+    } finally {
+      serverCtx.server.close();
+      serverCtx.cleanup();
+    }
   });
 
   // ── Session CRUD ────────────────────────────────────

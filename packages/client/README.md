@@ -11,13 +11,15 @@ npm install @sna-sdk/client
 ## Quick start
 
 ```ts
+import { startSnaServer } from "@sna-sdk/core/node";
 import { SnaClient } from "@sna-sdk/client";
 
-const sna = new SnaClient({
-  baseUrl: "localhost:3099",
-  ws: true,    // real-time push (subscriptions, snapshots, permission requests)
-  http: true,  // ordering guarantees on state-changing ops
+const handle = await startSnaServer({
+  appId: "my-app",
+  dbPath: "./data/sna.db",
 });
+
+const sna = new SnaClient(handle.connection);
 
 sna.sessions.onSnapshot((sessions) => updateSessionList(sessions));
 sna.connect();
@@ -45,6 +47,10 @@ await sna.agent.send(sessionId, "What's in this directory?");
 - WS endpoint: `ws://<baseUrl>/ws` (or `wss://` for HTTPS)
 - HTTP base:  `http://<baseUrl>` (or `https://`)
 
+Protected SNA servers require a bearer token, but SDK launchers keep it paired
+with the server handle. Pass `handle.connection` to `SnaClient` instead of
+copying the token into app settings.
+
 ### What HTTP guarantees (`http: true`)
 
 State-changing ops resolve only after the server has committed:
@@ -66,7 +72,7 @@ State-changing ops resolve only after the server has committed:
 ### Pure-WS mode
 
 ```ts
-new SnaClient({ baseUrl: "localhost:3099", ws: true, http: false });
+new SnaClient({ ...handle.connection, ws: true, http: false });
 ```
 
 Server ACKs immediately; async work may not be done when the Promise resolves. Use only for read-only or fire-and-forget flows.

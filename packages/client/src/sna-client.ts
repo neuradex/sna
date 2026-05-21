@@ -5,8 +5,8 @@
  *
  * ## Transport model
  *
- * Configure both transports explicitly via `ws` and `http` boolean flags.
- * Both URLs are derived from a single `baseUrl` — no need to specify them separately.
+ * Configure both transports with optional `ws` and `http` boolean flags.
+ * Both default to `true`, and both URLs are derived from a single `baseUrl`.
  *
  * | Transport | Used for | Enabled by |
  * |-----------|----------|------------|
@@ -52,11 +52,8 @@
  * ```ts
  * import { SnaClient } from "@sna-sdk/client";
  *
- * const sna = new SnaClient({
- *   baseUrl: "localhost:3099",
- *   ws: true,
- *   http: true,
- * });
+ * const handle = await startSnaServer({ ... });
+ * const sna = new SnaClient(handle.connection);
  *
  * sna.sessions.onSnapshot((sessions) => setSessions(sessions));
  * sna.connect();
@@ -107,7 +104,7 @@ export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 /**
  * Options for creating an {@link SnaClient} instance.
  */
-export interface SnaClientOptions {
+export interface SnaClientConnection {
   /**
    * Base URL of the SNA server.
    *
@@ -122,6 +119,21 @@ export interface SnaClientOptions {
   baseUrl: string;
 
   /**
+   * Shared token issued by the local SNA server.
+   *
+   * HTTP requests send it as `Authorization: Bearer <token>`. WebSocket
+   * connections include it in the `/ws?token=...` URL because browser
+   * WebSocket clients cannot set arbitrary headers.
+   */
+  authToken?: string;
+}
+
+/**
+ * Options for creating an {@link SnaClient} instance.
+ */
+export interface SnaClientOptions extends SnaClientConnection {
+
+  /**
    * Enable WebSocket transport.
    *
    * When `true`, the client connects to `ws(s)://<baseUrl>/ws` for
@@ -131,7 +143,7 @@ export interface SnaClientOptions {
    * When `false`, all WS-dependent operations will reject with an error.
    * Use `false` only when building an HTTP-only integration.
    */
-  ws: boolean;
+  ws?: boolean;
 
   /**
    * Enable REST (HTTP) transport.
@@ -144,7 +156,7 @@ export interface SnaClientOptions {
    * When `false`, all operations fall back to WebSocket (the server ACKs
    * immediately without waiting for async work to complete).
    */
-  http: boolean;
+  http?: boolean;
 
   /**
    * Whether to automatically reconnect when the WebSocket connection drops.
@@ -206,13 +218,19 @@ interface ResolvedTransports {
  */
 function resolveTransports(options: SnaClientOptions): ResolvedTransports {
   let base = options.baseUrl.trim().replace(/\/$/, "");
+  const authToken = options.authToken?.trim();
   if (!/^https?:\/\//i.test(base)) {
     base = "http://" + base;
   }
-  const wsUrl = options.ws
+  const wsEnabled = options.ws ?? true;
+  const httpEnabled = options.http ?? true;
+  const baseWsUrl = wsEnabled
     ? base.replace(/^https:\/\//i, "wss://").replace(/^http:\/\//i, "ws://") + "/ws"
     : null;
-  const httpBase = options.http ? base : null;
+  const wsUrl = baseWsUrl && authToken
+    ? withQueryParam(baseWsUrl, "token", authToken)
+    : baseWsUrl;
+  const httpBase = httpEnabled ? base : null;
 
   if (!wsUrl && !httpBase) {
     console.warn("[SnaClient] Both ws and http are false — no transport is available.");
@@ -221,20 +239,26 @@ function resolveTransports(options: SnaClientOptions): ResolvedTransports {
   return { wsUrl, httpBase };
 }
 
+function withQueryParam(url: string, key: string, value: string): string {
+  const parsed = new URL(url);
+  parsed.searchParams.set(key, value);
+  return parsed.toString();
+}
+
 // ── Client ────────────────────────────────────────────────────────
 
 /**
  * Dual-transport client for the SNA API server.
  *
- * Provide a single `baseUrl` and explicit `ws`/`http` flags.
- * The client derives the WS and HTTP endpoints automatically.
+ * Provide a launcher connection object, or a single `baseUrl` plus optional
+ * `ws`/`http` flags. The client derives the WS and HTTP endpoints automatically.
  *
  * @example
  * ```ts
  * const sna = new SnaClient({
  *   baseUrl: "localhost:3099",
- *   ws: true,   // real-time push, event streaming
- *   http: true, // ordering-guaranteed state changes
+ *   ws: true,   // optional, defaults true
+ *   http: true, // optional, defaults true
  * });
  * sna.connect();
  *
@@ -254,6 +278,7 @@ export class SnaClient {
   private disposed = false;
 
   private readonly wsUrl: string | null;
+  private readonly authToken: string | undefined;
   private readonly _reconnect: boolean;
   private readonly reconnectDelay: number;
   private readonly maxReconnectAttempts: number;
@@ -295,6 +320,7 @@ export class SnaClient {
     const { wsUrl, httpBase } = resolveTransports(options);
     this.wsUrl = wsUrl;
     this._httpUrl = httpBase ?? undefined;
+    this.authToken = options.authToken?.trim() || undefined;
     this._reconnect = options.reconnect ?? true;
     this.reconnectDelay = options.reconnectDelay ?? 2000;
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? 0;
@@ -497,12 +523,21 @@ export class SnaClient {
     const hasBody = body !== undefined && method !== "GET" && method !== "DELETE";
     const res = await fetch(base + path, {
       method,
-      headers: hasBody ? { "Content-Type": "application/json" } : undefined,
+      headers: this._authHeaders(hasBody ? { "Content-Type": "application/json" } : {}),
       body: hasBody ? JSON.stringify(body) : undefined,
     });
     const data = await res.json() as Record<string, unknown>;
     if (!res.ok) throw new Error((data.message as string) ?? `HTTP ${res.status}`);
     return data as T;
+  }
+
+  /** @internal */
+  _authHeaders(headers: Record<string, string> = {}): Record<string, string> | undefined {
+    const next = { ...headers };
+    if (this.authToken) {
+      next.Authorization = `Bearer ${this.authToken}`;
+    }
+    return Object.keys(next).length > 0 ? next : undefined;
   }
 
   /**
@@ -1507,7 +1542,7 @@ class AgentApi {
     const base = this.client._httpUrl.replace(/\/$/, "");
     const res = await fetch(`${base}/agent/run-once/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      headers: this.client._authHeaders({ "Content-Type": "application/json", Accept: "text/event-stream" }),
       body: JSON.stringify(opts),
     });
     if (!res.ok) {
@@ -1569,7 +1604,9 @@ class AgentApi {
     const base = this.client._httpUrl.replace(/\/$/, "");
     const params = new URLSearchParams({ session });
     if (since !== undefined) params.set("since", String(since));
-    const res = await fetch(`${base}/agent/events?${params}`);
+    const res = await fetch(`${base}/agent/events?${params}`, {
+      headers: this.client._authHeaders(),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     yield* SnaClient._parseSse(res);
   }

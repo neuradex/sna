@@ -10,6 +10,8 @@ import fs from "fs";
 import path from "path";
 
 const TEST_DB_DIR = path.join(import.meta.dirname, "../.test-data-routes");
+const TEST_TOKEN = "test-sna-token";
+const ALLOWED_ORIGIN = "http://localhost:5173";
 
 function removeTestDir() {
   fs.rmSync(TEST_DB_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
@@ -94,7 +96,11 @@ describe("HTTP API Routes", () => {
     const { createSnaApp } = await import("../src/server/index.js");
     const { SessionManager } = await import("../src/server/session-manager.js");
     sm = new SessionManager();
-    app = await createSnaApp({ sessionManager: sm });
+    app = await createSnaApp({
+      sessionManager: sm,
+      authToken: TEST_TOKEN,
+      allowedOrigins: [ALLOWED_ORIGIN],
+    });
   });
 
   afterEach(async () => {
@@ -104,21 +110,60 @@ describe("HTTP API Routes", () => {
   });
 
   // Helper
-  async function req(method: string, path: string, body?: any) {
+  async function req(
+    method: string,
+    path: string,
+    body?: any,
+    options: { auth?: boolean; token?: string; origin?: string } = {},
+  ) {
     const opts: any = { method };
+    const headers: Record<string, string> = {};
     if (body) {
-      opts.headers = { "Content-Type": "application/json" };
+      headers["Content-Type"] = "application/json";
       opts.body = JSON.stringify(body);
+    }
+    if (options.auth !== false) {
+      headers.Authorization = `Bearer ${options.token ?? TEST_TOKEN}`;
+    }
+    if (options.origin) {
+      headers.Origin = options.origin;
+    }
+    if (Object.keys(headers).length > 0) {
+      opts.headers = headers;
     }
     return app.request(path, opts);
   }
 
   describe("Health", () => {
-    it("GET /health returns ok", async () => {
-      const res = await req("GET", "/health");
+    it("GET /health returns ok without authentication", async () => {
+      const res = await req("GET", "/health", undefined, { auth: false });
       const json = await res.json();
       assert.equal(json.ok, true);
       assert.equal(json.name, "sna");
+    });
+
+    it("rejects protected HTTP routes without a bearer token", async () => {
+      const res = await req("GET", "/agent/sessions", undefined, { auth: false });
+      assert.equal(res.status, 401);
+      assert.match((await res.json()).message, /Unauthorized/);
+    });
+
+    it("rejects protected HTTP routes with the wrong bearer token", async () => {
+      const res = await req("GET", "/agent/sessions", undefined, { token: "wrong" });
+      assert.equal(res.status, 401);
+      assert.match((await res.json()).message, /Unauthorized/);
+    });
+
+    it("rejects browser-origin requests from unapproved origins", async () => {
+      const res = await req("GET", "/agent/sessions", undefined, { origin: "https://evil.example" });
+      assert.equal(res.status, 403);
+      assert.match((await res.json()).message, /Origin not allowed/);
+    });
+
+    it("allows protected HTTP routes with a bearer token from an approved origin", async () => {
+      const res = await req("GET", "/agent/sessions", undefined, { origin: ALLOWED_ORIGIN });
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.get("access-control-allow-origin"), ALLOWED_ORIGIN);
     });
   });
 
@@ -130,6 +175,22 @@ describe("HTTP API Routes", () => {
       assert.ok(json.sessionId);
       assert.equal(json.label, "Test");
       assert.deepEqual(json.meta, { app: "test" });
+    });
+
+    it("POST /agent/sessions tags sessions with the configured appId", async () => {
+      const { resetConfig, setConfig } = await import("../src/config.js");
+      setConfig({ appId: "test-host" });
+      try {
+        const res = await req("POST", "/agent/sessions", {
+          label: "Owned",
+          meta: { appId: "spoofed", feature: "chat-panel" },
+        });
+        const json = await res.json();
+        assert.equal(json.status, "created");
+        assert.deepEqual(json.meta, { appId: "test-host", feature: "chat-panel" });
+      } finally {
+        resetConfig();
+      }
     });
 
     it("GET /agent/sessions lists sessions", async () => {
@@ -422,7 +483,11 @@ describe("HTTP API Routes", () => {
       try {
         const res = await app.request("/agent/run-once/stream", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+            Authorization: `Bearer ${TEST_TOKEN}`,
+          },
           body: JSON.stringify({ message: "hi", provider: "claude-code", timeout: 200 }),
           signal: ctrl.signal,
         });
@@ -468,6 +533,19 @@ describe("HTTP API Routes", () => {
       assert.equal(json.status, "created");
       assert.ok(json.id);
       assert.deepEqual(json.meta, { x: 1 });
+    });
+
+    it("POST /chat/sessions tags chat sessions with the configured appId", async () => {
+      const { resetConfig, setConfig } = await import("../src/config.js");
+      setConfig({ appId: "test-host" });
+      try {
+        const res = await req("POST", "/chat/sessions", { label: "OwnedChat" });
+        const json = await res.json();
+        assert.equal(json.status, "created");
+        assert.deepEqual(json.meta, { appId: "test-host" });
+      } finally {
+        resetConfig();
+      }
     });
 
     it("DELETE /chat/sessions/default is blocked", async () => {

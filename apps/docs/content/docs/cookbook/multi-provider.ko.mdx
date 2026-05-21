@@ -21,11 +21,11 @@ await client.agent.start(sessionId, {
 // ...턴들이 진행되고 히스토리가 쌓이고...
 
 // 대화 보존하면서 Codex로 전환
-await client.agent.patch(sessionId, { provider: "codex", model: "gpt-5.4" });
+await client.agent.restart(sessionId, { provider: "codex", model: "gpt-5.4" });
 ```
 
-`provider` 필드가 있는 `PATCH /agent/session`은 현재 프로세스를
-종료하고 새 런타임으로 respawn해서 정규화 히스토리를 새 런타임의
+`provider` 필드에 새 runtime id를 넘긴 `agent.restart()`는 현재
+프로세스를 종료하고 새 런타임으로 respawn해서 정규화 히스토리를 새 런타임의
 네이티브 포맷으로 replay합니다. 세션 레코드, 이벤트 커서, runtime chain
 모두 유지됩니다.
 
@@ -35,10 +35,10 @@ await client.agent.patch(sessionId, { provider: "codex", model: "gpt-5.4" });
 |------|---------|---------|
 | `restart` | 같은 설정으로 respawn | replay하지 않음 (warm restart) |
 | `resume` | 같은 설정으로 respawn | 재구성해서 다시 주입 |
-| `patch` (런타임 변경) | 새 설정으로 respawn | 새 런타임용으로 재구성 |
+| `restart` (런타임 변경) | 새 설정으로 respawn | 새 런타임용으로 재구성 |
 
 긴 유휴 후나 런타임이 죽었을 때는 `resume`을 사용합니다. 앱이 런타임
-교체를 원할 때는 `patch`를 사용합니다.
+교체를 원할 때는 `provider` 필드에 새 runtime id를 넘긴 `restart`를 사용합니다.
 
 ## 왜 이게 중요한가
 

@@ -21,11 +21,11 @@ await client.agent.start(sessionId, {
 // ...some turns happen, history grows...
 
 // Switch to Codex while preserving the conversation
-await client.agent.patch(sessionId, { provider: "codex", model: "gpt-5.4" });
+await client.agent.restart(sessionId, { provider: "codex", model: "gpt-5.4" });
 ```
 
-`PATCH /agent/session` with a `provider` field tears down the current
-process and respawns under the new runtime, replaying canonical
+`agent.restart()` with a different runtime id in the `provider` field
+tears down the current process and respawns under the new runtime, replaying canonical
 history into the new runtime's native format. The session record,
 event cursor, and runtime chain all survive.
 
@@ -35,10 +35,10 @@ event cursor, and runtime chain all survive.
 |-----------|---------|---------|
 | `restart` | respawn with same config | not replayed (warm restart) |
 | `resume` | respawn with same config | rebuilt + fed back in |
-| `patch` (runtime change) | respawn under new config | rebuilt for new runtime |
+| `restart` (runtime change) | respawn under new config | rebuilt for new runtime |
 
 Use `resume` after long idle periods or when the runtime crashed.
-Use `patch` when the consumer wants a runtime swap.
+Use `restart` with a new runtime id in the `provider` field when the consumer wants a runtime swap.
 
 ## Why this matters
 
