@@ -70,6 +70,14 @@ await sna.agent.send(sessionId, "What's in this directory?");
 
 `http: true` means each Promise resolves only after the server has committed the state change — safe to chain `sessions.create` → `agent.start` → `agent.send` without polling. Pure-WS mode (`http: false`) ACKs immediately and gives no ordering guarantees; use it only for read-only or fire-and-forget flows.
 
+For normal chat continuation, keep the same `sessionId` and call
+`sna.agent.send(sessionId, nextMessage)`. Do not call `resume` on every
+turn. SNA keeps the active runtime conversation/thread attached, so your
+app does not reload history, rebuild prompts, or configure prompt-cache
+keys just to continue a conversation. `resume` is for a stopped process,
+explicit recovery, or a runtime boundary that needs canonical history
+replay.
+
 #### Permission handling
 
 ```ts

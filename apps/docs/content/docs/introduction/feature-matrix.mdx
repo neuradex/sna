@@ -42,11 +42,17 @@ directories on a single pooled daemon. The two ACP-speaking runtimes
 |---|---|---|---|---|---|
 | `spawn(opts)` → AgentProcess | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Streaming `AgentEvent` during session | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Active same-session continuation | ✓ same stream-json process | ✓ same Codex thread | ✓ same OpenCode session | ✓ same ACP session | ✓ same ACP session |
 | `interrupt()` mid-turn | ✓ | ✓ | ✓ | ✓ (ACP `session/cancel`) | ✓ (ACP `session/cancel`) |
 | `kill()` / `closeThread()` | ✓ | ✓ (pool refcount aware) | ✓ (pool refcount aware) | ✓ | ✓ |
 | `complete(opts)` one-shot | ✓ | ✓ | ✓ | ✓ (`grok -p`) | ✓ (`agent -p`) |
 | `complete()` `onDelta` streaming | ✓ stream-json | ✓ `item/agentMessage/delta` | ✓ `prompt_async` SSE text deltas | ✓ streaming-json text events | ✓ stream-json `assistant` chunks (no `model_call_id`) |
 | `listModels()` | ✓ static catalog | ✓ probes `codex debug models` + static fallback | ✓ probes `opencode` CLI | ✓ static (single entry: `grok-build`) | ✓ parses `agent models` (plain text) + static fallback |
+
+The "same-session continuation" row is the default chat path: call
+`agent.send` again on the same SNA session. `resumeSessionId` and
+canonical history replay are recovery/restart tools, not something a
+client should run on every turn.
 
 OpenCode uses two paths for `complete()`: the sync SDK call when no
 callback is present, and `prompt_async` plus the event stream when

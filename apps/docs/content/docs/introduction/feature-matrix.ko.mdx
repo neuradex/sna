@@ -41,11 +41,16 @@ ACP를 사용하는 두 런타임(Grok Build, Cursor)은
 |---|---|---|---|---|---|
 | `spawn(opts)` → AgentProcess | ✓ | ✓ | ✓ | ✓ | ✓ |
 | 세션 중 `AgentEvent` 스트리밍 | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 같은 세션 이어가기 | ✓ 같은 stream-json 프로세스 | ✓ 같은 Codex thread | ✓ 같은 OpenCode session | ✓ 같은 ACP session | ✓ 같은 ACP session |
 | turn 중간 `interrupt()` | ✓ | ✓ | ✓ | ✓ (ACP `session/cancel`) | ✓ (ACP `session/cancel`) |
 | `kill()` / `closeThread()` | ✓ | ✓ (풀 refcount 인식) | ✓ (풀 refcount 인식) | ✓ | ✓ |
 | `complete(opts)` one-shot | ✓ | ✓ | ✓ | ✓ (`grok -p`) | ✓ (`agent -p`) |
 | `complete()` `onDelta` 스트리밍 | ✓ stream-json | ✓ `item/agentMessage/delta` | ✓ `prompt_async` SSE 텍스트 델타 | ✓ streaming-json text 이벤트 | ✓ stream-json `assistant` 청크 (`model_call_id` 없음) |
 | `listModels()` | ✓ static catalog | ✓ `codex debug models` 프로브 + static fallback | ✓ `opencode` CLI 프로브 | ✓ static (`grok-build` 단일 항목) | ✓ `agent models` 텍스트 파싱 + static fallback |
+
+"같은 세션 이어가기"는 기본 채팅 경로입니다. 같은 SNA 세션에 다시
+`agent.send`를 호출하면 됩니다. `resumeSessionId`와 정규화 히스토리 재주입은
+복구나 재시작을 위한 경로이지, 클라이언트가 매 턴 실행할 작업이 아닙니다.
 
 OpenCode의 `complete()`는 두 경로를 씁니다. 콜백이 없으면 낮은 오버헤드의
 동기 SDK 호출을 유지하고, `onDelta`가 있으면 `prompt_async`와 이벤트

@@ -31,6 +31,19 @@ flat list and rebuilds the nested shape that runtime expects.
 For the design rationale behind `actor` and `kind`, see
 **[Actor and kind](/docs/introduction/philosophy/actor-kind)**.
 
+## Continuation and cache locality
+
+Most apps should not call `resume` on every turn. Once a session is
+running, send the next message to the same SNA session and SNA keeps the
+runtime-native conversation/thread alive. When a restart, process
+recovery, or explicit runtime boundary requires it, SNA rebuilds the
+native shape from canonical blocks.
+
+That split matters for cost and latency. The active runtime can keep
+using its own conversation state and any vendor-side cache behavior
+available for that conversation. The host app does not implement cache
+keys, history compaction, or prompt replay just to continue a chat.
+
 ## Replay adapters
 
 | Path | Adapter |

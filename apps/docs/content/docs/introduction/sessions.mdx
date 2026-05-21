@@ -18,6 +18,12 @@ then bumps the reasoning level, that's three distinct RuntimeSessions
 on one SnaSession. Attribution stays honest per row, and replay can
 rebuild each runtime's native history without losing prior turns.
 
+The usual continuation path stays on the same SnaSession: call
+`agent.send` again. SNA keeps the active runtime conversation/thread
+attached, so the app does not reload history or configure prompt caching
+on each turn. `resume` is for stopped processes, explicit recovery, or a
+runtime boundary that needs canonical replay.
+
 ## Lifecycle
 
 ```
