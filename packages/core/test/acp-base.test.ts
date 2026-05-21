@@ -223,6 +223,7 @@ describe("ACP shared adapter base", () => {
       ["Hel", "lo"],
     );
     assert.ok(events.some((event) => event.type === "assistant" && event.message === "Hello"));
+    assert.ok(events.some((event) => event.type === "thinking" && event.message === "plan"));
     assert.ok(events.some((event) => event.type === "tool_use" && event.data?.toolName === "Read" && event.data?.input && !(event.data as any).fromUpdate));
     assert.ok(events.some((event) => event.type === "tool_use" && event.data?.toolName === "Read" && (event.data as any).fromUpdate === true));
     assert.ok(events.some((event) => event.type === "tool_result" && event.data?.status === "completed" && event.data?.rawOutput === "ok"));
