@@ -138,6 +138,42 @@ interface ClaudeMockEnv {
 }
 declare function createClaudeMockEnv(options: ClaudeMockEnvOptions): ClaudeMockEnv;
 
+interface CodexMockEnvOptions {
+    /** Project cwd to mark trusted in the isolated Codex config. Defaults to process.cwd(). */
+    cwd?: string;
+    /** OpenAI-compatible mock base URL, for example http://127.0.0.1:12345. */
+    openAIBaseUrl: string;
+    /** Fake API key exposed through OPENAI_API_KEY. */
+    apiKey?: string;
+    /** Codex home directory. Defaults to <cwd>/.sna/mock-codex. */
+    codexHome?: string;
+    /** Provider ID written into model_provider and [model_providers.<id>]. */
+    providerId?: string;
+    /** Default model written into config.toml. */
+    model?: string;
+    /** Base env. Defaults to process.env. */
+    env?: Record<string, string | undefined>;
+    /** Extra env appended after mock-specific values. */
+    extraEnv?: Record<string, string | undefined>;
+    /** When false, only a small shell env allowlist is inherited. */
+    inheritEnv?: boolean;
+    /** Extra project paths to mark trusted in config.toml. */
+    trustedProjectPaths?: string[];
+    /** Rewrite config.toml even if it already exists. */
+    overwrite?: boolean;
+}
+interface CodexMockEnv {
+    env: Record<string, string>;
+    cwd: string;
+    codexHome: string;
+    configFile: string;
+    apiKey: string;
+    openAIBaseUrl: string;
+    providerId: string;
+    model: string;
+}
+declare function createCodexMockEnv(options: CodexMockEnvOptions): CodexMockEnv;
+
 interface MockCliInvocation {
     argv: string[];
     cwd: string;
@@ -209,4 +245,4 @@ declare function readInstanceMeta(name: string): InstanceMeta | null;
 declare function listInstances(): InstanceMeta[];
 declare function removeInstance(name: string): boolean;
 
-export { type ClaudeMockEnv, type ClaudeMockEnvOptions, type InstanceMeta, type MockClaudeCliOptions, type MockCliInvocation, type MockCodexExecCliOptions, type MockLogEntry, type MockOpenAIEndpoint, type MockOpenAILogEntry, type MockOpenAIModel, type MockOpenAIOptions, type MockOpenAIRequest, type MockOpenAIResponseContext, type MockOpenAIServer, type MockRuntimeCli, type MockServer, type WaitForRequestOptions, createClaudeMockEnv, createMockClaudeCli, createMockCodexExecCli, generateInstanceName, getInstanceDir, getInstancesDir, listInstances, readInstanceMeta, readSseData, removeInstance, runOneshot, startMockAnthropicServer, startMockOpenAIServer, waitForRequest, withMockAnthropicServer, withMockOpenAIServer, writeInstanceMeta };
+export { type ClaudeMockEnv, type ClaudeMockEnvOptions, type CodexMockEnv, type CodexMockEnvOptions, type InstanceMeta, type MockClaudeCliOptions, type MockCliInvocation, type MockCodexExecCliOptions, type MockLogEntry, type MockOpenAIEndpoint, type MockOpenAILogEntry, type MockOpenAIModel, type MockOpenAIOptions, type MockOpenAIRequest, type MockOpenAIResponseContext, type MockOpenAIServer, type MockRuntimeCli, type MockServer, type WaitForRequestOptions, createClaudeMockEnv, createCodexMockEnv, createMockClaudeCli, createMockCodexExecCli, generateInstanceName, getInstanceDir, getInstancesDir, listInstances, readInstanceMeta, readSseData, removeInstance, runOneshot, startMockAnthropicServer, startMockOpenAIServer, waitForRequest, withMockAnthropicServer, withMockOpenAIServer, writeInstanceMeta };

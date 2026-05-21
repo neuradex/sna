@@ -15,6 +15,11 @@ export {
   type ClaudeMockEnvOptions,
 } from "./claude-env.js";
 export {
+  createCodexMockEnv,
+  type CodexMockEnv,
+  type CodexMockEnvOptions,
+} from "./codex-env.js";
+export {
   createMockClaudeCli,
   createMockCodexExecCli,
   type MockClaudeCliOptions,

@@ -656,14 +656,81 @@ function createClaudeMockEnv(options) {
   };
 }
 
-// src/mock-cli.ts
+// src/codex-env.ts
 import fs2 from "fs";
-import os from "os";
 import path2 from "path";
+var SAFE_ENV_KEYS2 = ["PATH", "HOME", "SHELL", "TERM", "LANG", "TMPDIR"];
+function compactEnv2(input) {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== void 0)
+  );
+}
+function baseEnv2(options) {
+  const source = options.env ?? process.env;
+  if (options.inheritEnv !== false) {
+    return compactEnv2(source);
+  }
+  const clean = {};
+  for (const key of SAFE_ENV_KEYS2) clean[key] = source[key];
+  return compactEnv2(clean);
+}
+function quoteToml(value) {
+  return JSON.stringify(value);
+}
+function createCodexMockEnv(options) {
+  const cwd = options.cwd ?? process.cwd();
+  const apiKey = options.apiKey ?? "sk-test-mock-sna";
+  const codexHome = options.codexHome ?? path2.join(cwd, ".sna", "mock-codex");
+  const configFile = path2.join(codexHome, "config.toml");
+  const providerId = options.providerId ?? "mock-openai";
+  const model = options.model ?? "gpt-5.4";
+  const baseUrl = options.openAIBaseUrl.replace(/\/+$/, "");
+  fs2.mkdirSync(codexHome, { recursive: true });
+  if (options.overwrite || !fs2.existsSync(configFile)) {
+    const projects = [cwd, ...options.trustedProjectPaths ?? []].map((projectPath) => `[projects.${quoteToml(projectPath)}]
+trust_level = "trusted"`).join("\n\n");
+    fs2.writeFileSync(configFile, [
+      `model_provider = ${quoteToml(providerId)}`,
+      `model = ${quoteToml(model)}`,
+      `approval_policy = "never"`,
+      `sandbox_mode = "danger-full-access"`,
+      ``,
+      `[model_providers.${providerId}]`,
+      `name = ${quoteToml(providerId)}`,
+      `base_url = ${quoteToml(`${baseUrl}/v1`)}`,
+      `env_key = "OPENAI_API_KEY"`,
+      `wire_api = "responses"`,
+      ``,
+      projects,
+      ``
+    ].join("\n"));
+  }
+  const env = {
+    ...baseEnv2(options),
+    CODEX_HOME: codexHome,
+    OPENAI_API_KEY: apiKey,
+    ...compactEnv2(options.extraEnv ?? {})
+  };
+  return {
+    env,
+    cwd,
+    codexHome,
+    configFile,
+    apiKey,
+    openAIBaseUrl: baseUrl,
+    providerId,
+    model
+  };
+}
+
+// src/mock-cli.ts
+import fs3 from "fs";
+import os from "os";
+import path3 from "path";
 function executableScript(dir, name, body) {
-  const script = path2.join(dir, `${name}.js`);
-  fs2.writeFileSync(script, body);
-  fs2.chmodSync(script, 493);
+  const script = path3.join(dir, `${name}.js`);
+  fs3.writeFileSync(script, body);
+  fs3.chmodSync(script, 493);
   return script;
 }
 function createCliHandle(dir, command, invocationsFile) {
@@ -672,11 +739,11 @@ function createCliHandle(dir, command, invocationsFile) {
     dir,
     invocationsFile,
     readInvocations() {
-      if (!fs2.existsSync(invocationsFile)) return [];
-      return fs2.readFileSync(invocationsFile, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+      if (!fs3.existsSync(invocationsFile)) return [];
+      return fs3.readFileSync(invocationsFile, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
     },
     close() {
-      fs2.rmSync(dir, { recursive: true, force: true });
+      fs3.rmSync(dir, { recursive: true, force: true });
     }
   };
 }
@@ -687,8 +754,8 @@ function anthropicUrl(input) {
   return typeof input === "string" ? input : `http://127.0.0.1:${input.port}`;
 }
 function createMockCodexExecCli(input, options = {}) {
-  const dir = fs2.mkdtempSync(path2.join(os.tmpdir(), "sna-mock-codex-"));
-  const invocationsFile = path2.join(dir, "invocations.jsonl");
+  const dir = fs3.mkdtempSync(path3.join(os.tmpdir(), "sna-mock-codex-"));
+  const invocationsFile = path3.join(dir, "invocations.jsonl");
   const endpoint = openAIUrl(input);
   const apiKey = options.apiKey ?? "sk-codex-test";
   const command = executableScript(dir, "codex", `#!/usr/bin/env node
@@ -805,8 +872,8 @@ main().catch((err) => {
   return createCliHandle(dir, command, invocationsFile);
 }
 function createMockClaudeCli(input, options = {}) {
-  const dir = fs2.mkdtempSync(path2.join(os.tmpdir(), "sna-mock-claude-"));
-  const invocationsFile = path2.join(dir, "invocations.jsonl");
+  const dir = fs3.mkdtempSync(path3.join(os.tmpdir(), "sna-mock-claude-"));
+  const invocationsFile = path3.join(dir, "invocations.jsonl");
   const endpoint = anthropicUrl(input);
   const apiKey = options.apiKey ?? "sk-test-mock-sna";
   const defaultModel = options.defaultModel ?? "claude-mock";
@@ -1077,20 +1144,20 @@ async function withMockOpenAIServer(optionsOrFn, maybeFn) {
 
 // src/oneshot.ts
 import { spawn } from "child_process";
-import fs3 from "fs";
-import path3 from "path";
+import fs4 from "fs";
+import path4 from "path";
 async function runOneshot(cliArgs) {
   const ROOT = process.cwd();
-  const STATE_DIR = path3.join(ROOT, ".sna");
+  const STATE_DIR = path4.join(ROOT, ".sna");
   const args = cliArgs ?? process.argv.slice(2);
   let claudePath = "claude";
-  const cachedPath = path3.join(STATE_DIR, "claude-path");
-  if (fs3.existsSync(cachedPath)) {
-    claudePath = fs3.readFileSync(cachedPath, "utf8").trim() || claudePath;
+  const cachedPath = path4.join(STATE_DIR, "claude-path");
+  if (fs4.existsSync(cachedPath)) {
+    claudePath = fs4.readFileSync(cachedPath, "utf8").trim() || claudePath;
   }
   const mock = await startMockAnthropicServer();
-  const mockConfigDir = path3.join(STATE_DIR, "mock-claude-oneshot");
-  fs3.mkdirSync(mockConfigDir, { recursive: true });
+  const mockConfigDir = path4.join(STATE_DIR, "mock-claude-oneshot");
+  fs4.mkdirSync(mockConfigDir, { recursive: true });
   const env = {
     PATH: process.env.PATH ?? "",
     HOME: process.env.HOME ?? "",
@@ -1101,8 +1168,8 @@ async function runOneshot(cliArgs) {
     ANTHROPIC_API_KEY: "sk-test-mock-oneshot",
     CLAUDE_CONFIG_DIR: mockConfigDir
   };
-  const stdoutPath = path3.join(STATE_DIR, "mock-claude-stdout.log");
-  const stderrPath = path3.join(STATE_DIR, "mock-claude-stderr.log");
+  const stdoutPath = path4.join(STATE_DIR, "mock-claude-stdout.log");
+  const stderrPath = path4.join(STATE_DIR, "mock-claude-stderr.log");
   const proc = spawn(claudePath, args, {
     env,
     cwd: ROOT,
@@ -1118,8 +1185,8 @@ async function runOneshot(cliArgs) {
   });
   proc.stdout.pipe(process.stdout);
   proc.on("exit", (code) => {
-    fs3.writeFileSync(stdoutPath, stdout);
-    fs3.writeFileSync(stderrPath, stderr);
+    fs4.writeFileSync(stdoutPath, stdout);
+    fs4.writeFileSync(stderrPath, stderr);
     console.log(`
 ${"\u2500".repeat(60)}`);
     console.log(`Mock API: ${mock.requests.length} request(s)`);
@@ -1130,7 +1197,7 @@ ${"\u2500".repeat(60)}`);
 Log files:`);
     console.log(`  stdout:   ${stdoutPath}`);
     console.log(`  stderr:   ${stderrPath}`);
-    console.log(`  api log:  ${path3.join(STATE_DIR, "mock-api-last-request.json")}`);
+    console.log(`  api log:  ${path4.join(STATE_DIR, "mock-api-last-request.json")}`);
     console.log(`  config:   ${mockConfigDir}`);
     console.log(`  exit:     ${code}`);
     mock.close();
@@ -1142,8 +1209,8 @@ Log files:`);
 }
 
 // src/instance.ts
-import fs4 from "fs";
-import path4 from "path";
+import fs5 from "fs";
+import path5 from "path";
 import crypto from "crypto";
 var ADJECTIVES = [
   "happy",
@@ -1204,19 +1271,19 @@ function generateInstanceName() {
   return `${randomPick(ADJECTIVES)}-${randomPick(NOUNS)}`;
 }
 function getInstancesDir() {
-  return path4.join(process.cwd(), ".sna/instances");
+  return path5.join(process.cwd(), ".sna/instances");
 }
 function getInstanceDir(name) {
-  return path4.join(getInstancesDir(), name);
+  return path5.join(getInstancesDir(), name);
 }
 function writeInstanceMeta(name, meta) {
   const dir = getInstanceDir(name);
-  fs4.mkdirSync(dir, { recursive: true });
-  fs4.writeFileSync(path4.join(dir, "meta.json"), JSON.stringify(meta, null, 2));
+  fs5.mkdirSync(dir, { recursive: true });
+  fs5.writeFileSync(path5.join(dir, "meta.json"), JSON.stringify(meta, null, 2));
 }
 function readInstanceMeta(name) {
   try {
-    const raw = fs4.readFileSync(path4.join(getInstanceDir(name), "meta.json"), "utf8");
+    const raw = fs5.readFileSync(path5.join(getInstanceDir(name), "meta.json"), "utf8");
     return JSON.parse(raw);
   } catch {
     return null;
@@ -1224,8 +1291,8 @@ function readInstanceMeta(name) {
 }
 function listInstances() {
   const dir = getInstancesDir();
-  if (!fs4.existsSync(dir)) return [];
-  const entries = fs4.readdirSync(dir, { withFileTypes: true });
+  if (!fs5.existsSync(dir)) return [];
+  const entries = fs5.readdirSync(dir, { withFileTypes: true });
   const instances = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
@@ -1246,7 +1313,7 @@ function listInstances() {
 }
 function removeInstance(name) {
   const dir = getInstanceDir(name);
-  if (!fs4.existsSync(dir)) return false;
+  if (!fs5.existsSync(dir)) return false;
   const meta = readInstanceMeta(name);
   if (meta?.pid && meta.status === "running") {
     try {
@@ -1254,11 +1321,12 @@ function removeInstance(name) {
     } catch {
     }
   }
-  fs4.rmSync(dir, { recursive: true, force: true });
+  fs5.rmSync(dir, { recursive: true, force: true });
   return true;
 }
 export {
   createClaudeMockEnv,
+  createCodexMockEnv,
   createMockClaudeCli,
   createMockCodexExecCli,
   generateInstanceName,
