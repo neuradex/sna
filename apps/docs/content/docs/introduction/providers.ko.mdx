@@ -9,6 +9,23 @@ icon: Boxes
 ACP로 말하는 런타임(Grok Build, Cursor)은 `core/providers/acp/base.ts`를
 공유합니다.
 
+## 지원 런타임 개요
+
+SNA는 제품이 하나의 CLI에 고정되지 않고, workflow에 맞는 runtime을 고를 수
+있도록 설계되어 있습니다. 아래 표는 제품 관점의 개요입니다. 세부 기능 대응은
+**[기능 × 런타임 매트릭스](/ko/docs/introduction/feature-matrix)** 에서
+확인할 수 있습니다.
+
+| 런타임 | 잘 맞는 경우 | 장점 | Tradeoff |
+|--------|--------------|------|----------|
+| **Claude Code** | Anthropic model과 안정적인 local coding session, 풍부한 permission behavior가 필요한 경우. | CLI behavior가 성숙했고, tool-use UX가 좋습니다. Thinking/tool input delta streaming과 token/cost metadata가 자세합니다. | 호출/세션 단위 stateless 구조라 daemon pooling은 없습니다. Permission approval은 SNA와 양방향으로 주고받는 방식이 아니라 hook 기반입니다. |
+| **Codex** | 여러 session, one-shot job, 잦은 runtime reuse가 필요한 low-latency 제품 통합. | `RuntimePool`로 daemon을 재사용하고, thread별 cwd 변경을 지원합니다. Item lifecycle event와 shell output delta가 풍부합니다. | Codex native config shape가 따로 있고, Claude Code의 stream-json처럼 tool input delta를 노출하지는 않습니다. |
+| **OpenCode** | 이미 OpenCode를 쓰거나 OpenCode model/provider 설정을 HTTP daemon으로 활용하고 싶은 앱. | Pooled daemon과 SDK-backed HTTP path를 쓸 수 있고, 하나의 cwd에서 반복 prompt를 처리하기 좋습니다. | Daemon이 single-cwd이며, 일부 runtime mutation은 respawn이 필요합니다. Event detail은 OpenCode stream이 제공하는 범위에 좌우됩니다. |
+| **Grok Build** | Grok Build와 공개 protocol surface인 ACP를 쓰고 싶은 session. | SNA의 shared ACP adapter를 쓰고, bidirectional permission request와 단순한 stateless session lifecycle을 제공합니다. | Runtime pooling은 없고, model/cwd 변경은 respawn이 필요합니다. Token/tool detail metadata는 Claude/Codex보다 얇습니다. |
+| **Cursor** | Cursor를 주 작업 환경으로 쓰고, Cursor subscription-backed headless CLI를 SNA에서 구동하고 싶은 경우. | `cursor-agent`와 기존 Cursor login을 사용합니다. ACP permission, Cursor model selection, model-id reasoning variant를 활용할 수 있습니다. | Daemon pooling은 없고, model/cwd 변경은 respawn이 필요합니다. 사용자의 Cursor CLI 인증 상태에 setup이 의존합니다. |
+
+아래 내용은 이 product-level 선택지 뒤에 있는 adapter 내부 구조를 설명합니다.
+
 ## AgentProvider
 
 ```ts
@@ -44,7 +61,7 @@ respawn-with-history-replay가 필요한지 결정합니다.
 | **codex** | `codex app-server` 데몬, stdio 위 JSON-RPC | 영구 데몬, 멀티 스레드 | 예 |
 | **opencode** | `opencode serve` 데몬 + SDK HTTP | 영구 데몬, single-cwd | 예 |
 | **grok** | `grok agent stdio` (stdio 위 Agent Client Protocol — Grok Build CLI) | 세션 단위 무상태 | 아니오 |
-| **cursor** | `agent acp` (stdio 위 Agent Client Protocol — Cursor CLI) | 세션 단위 무상태 | 아니오 |
+| **cursor** | `cursor-agent acp` (stdio 위 Agent Client Protocol — Cursor CLI) | 세션 단위 무상태 | 아니오 |
 
 Codex와 OpenCode 런타임 어댑터는 `RuntimePool`을 통해 데몬을 공유합니다.
 세션이 열릴 때 `(provider, cwd, config)` 키로 풀이 조회되고, 호환되는
@@ -68,7 +85,7 @@ spawn 인자, 선택적 인증 단계(Cursor의 `authenticate({methodId:"cursor_
 [런타임 간 history replay](/ko/docs/introduction/feature-matrix)
 항목에 정리되어 있습니다.
 
-Cursor는 사용자가 이미 끝낸 `agent login`을 그대로 씁니다(macOS Keychain의
+Cursor는 사용자가 이미 끝낸 `cursor-agent login`을 그대로 씁니다(macOS Keychain의
 `cursor-access-token` / `cursor-refresh-token` 항목 → Cursor 구독 사용).
 `CURSOR_API_KEY` 같은 추가 발급이 필요 없습니다. SNA는 spawn 환경변수를
 그대로 통과시키고, 자식 프로세스는 사용자가 인터랙티브하게 쓸 때와 동일한

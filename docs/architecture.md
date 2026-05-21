@@ -26,7 +26,7 @@ Every running agent is a `Session` owned by `SessionManager`. Each session has:
 
 - `process` — the spawned `AgentProcess` (Claude Code, Codex, or OpenCode), or `null` when idle
 - `eventBuffer` + `eventCounter` — append-only stream consumed by subscribers via `since`
-- `cwd`, `label`, `meta` — metadata persisted to `chat_sessions` so the SDK can be shared across apps. Use `meta.app: "loom"` (for example) to isolate sessions per consumer.
+- `cwd`, `label`, `meta` — metadata persisted to `chat_sessions` so the SDK can be shared across apps. Use `meta.app: "my-app"` (for example) to isolate sessions per consumer.
 - `config` — `SessionConfig` (`{ provider, modelProvider, model, cwd, permissionMode, providerOptions, ... }`), used by `agent.restart` to bring the same config back. The legacy field name was `lastStartConfig`; the type alias `StartConfig` is kept for one release.
 - `state` — `idle` | `processing` | `waiting` | `permission`
 - `ccSessionId` — the runtime's own session id, captured from the `init` event so `--resume` works
@@ -298,7 +298,7 @@ Supported `SnaServerOptions`: `port`, `dbPath`, `cwd`, `maxSessions`, `permissio
 | `SNA_CODEX_COMMAND` | Override the Codex binary |
 | `SNA_OPENCODE_COMMAND` | Override the OpenCode binary |
 | `SNA_GROK_COMMAND` | Override the Grok binary |
-| `SNA_CURSOR_COMMAND` | Override the Cursor headless agent binary |
+| `SNA_CURSOR_COMMAND` | Override the Cursor headless `cursor-agent` binary |
 
 Embedded hosts should prefer `startSnaServer({ runtimePaths })`, which maps to
 the same `SNA_*_COMMAND` variables while keeping runtime path registration in

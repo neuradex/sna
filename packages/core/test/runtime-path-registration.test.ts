@@ -49,13 +49,13 @@ describe("runtime path registration", () => {
       codex: "/bin/codex",
       opencode: "/bin/opencode",
       grok: "/bin/grok",
-      cursor: "/bin/agent",
+      cursor: "/bin/cursor-agent",
     }), {
       SNA_CLAUDE_COMMAND: "/bin/claude",
       SNA_CODEX_COMMAND: "/bin/codex",
       SNA_OPENCODE_COMMAND: "/bin/opencode",
       SNA_GROK_COMMAND: "/bin/grok",
-      SNA_CURSOR_COMMAND: "/bin/agent",
+      SNA_CURSOR_COMMAND: "/bin/cursor-agent",
     });
   });
 
@@ -72,7 +72,7 @@ describe("runtime path registration", () => {
         codex: "/runtime/codex",
         opencode: "/runtime/opencode",
         grok: "/runtime/grok",
-        cursor: "/runtime/agent",
+        cursor: "/runtime/cursor-agent",
       },
       env: {
         SNA_CLAUDE_COMMAND: "/env/claude",
@@ -84,7 +84,7 @@ describe("runtime path registration", () => {
       assert.equal(process.env.SNA_CODEX_COMMAND, "/runtime/codex");
       assert.equal(process.env.SNA_OPENCODE_COMMAND, "/runtime/opencode");
       assert.equal(process.env.SNA_GROK_COMMAND, "/runtime/grok");
-      assert.equal(process.env.SNA_CURSOR_COMMAND, "/runtime/agent");
+      assert.equal(process.env.SNA_CURSOR_COMMAND, "/runtime/cursor-agent");
     } finally {
       await handle.stop();
     }

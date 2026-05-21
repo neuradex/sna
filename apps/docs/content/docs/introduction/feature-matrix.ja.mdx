@@ -23,7 +23,7 @@ SNA のすべての機能は同じ `AgentProvider` インターフェースを�
 
 | 能力 | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
-| ワイヤプロトコル | `claude -p` stream-json / `--resume` JSONL | `codex app-server` JSON-RPC stdio | `opencode serve` HTTP + SDK | `grok agent stdio` ACP JSON-RPC stdio | `agent acp` ACP JSON-RPC stdio |
+| ワイヤプロトコル | `claude -p` stream-json / `--resume` JSONL | `codex app-server` JSON-RPC stdio | `opencode serve` HTTP + SDK | `grok agent stdio` ACP JSON-RPC stdio | `cursor-agent acp` ACP JSON-RPC stdio |
 | `supportsRuntimePooling` | ✗ | ✓ | ✓ | ✗ | ✗ |
 | `supportsCwdPerThread` | 該当なし | ✓ | ✗ | 該当なし | 該当なし |
 | 公開標準プロトコル | ✗ ベンダ | ✗ ベンダ | ✗ ベンダ | ✓ [ACP](https://agentclientprotocol.com) | ✓ [ACP](https://agentclientprotocol.com) |
@@ -45,9 +45,9 @@ Claude Code、Grok Build、Cursor は呼び出しまたはセッション単位�
 | 同じセッションの継続 | ✓ 同じ stream-json プロセス | ✓ 同じ Codex thread | ✓ 同じ OpenCode session | ✓ 同じ ACP session | ✓ 同じ ACP session |
 | turn 中の `interrupt()` | ✓ | ✓ | ✓ | ✓ (ACP `session/cancel`) | ✓ (ACP `session/cancel`) |
 | `kill()` / `closeThread()` | ✓ | ✓ (プール refcount 認識) | ✓ (プール refcount 認識) | ✓ | ✓ |
-| `complete(opts)` one-shot | ✓ | ✓ | ✓ | ✓ (`grok -p`) | ✓ (`agent -p`) |
+| `complete(opts)` one-shot | ✓ | ✓ | ✓ | ✓ (`grok -p`) | ✓ (`cursor-agent -p`) |
 | `complete()` `onDelta` ストリーミング | ✓ stream-json | ✓ `item/agentMessage/delta` | ✓ `prompt_async` SSE テキスト delta | ✓ streaming-json text イベント | ✓ stream-json `assistant` チャンク (`model_call_id` なし) |
-| `listModels()` | ✓ static catalog | ✓ `codex debug models` プローブ + static fallback | ✓ `opencode` CLI プローブ | ✓ static (単一: `grok-build`) | ✓ `agent models` テキストパース + static fallback |
+| `listModels()` | ✓ static catalog | ✓ `codex debug models` プローブ + static fallback | ✓ `opencode` CLI プローブ | ✓ static (単一: `grok-build`) | ✓ `cursor-agent models` テキストパース + static fallback |
 
 「同じセッションの継続」は、通常のチャット経路です。同じ SNA セッションに
 もう一度 `agent.send` を呼びます。`resumeSessionId` と正規化履歴の再投入は
