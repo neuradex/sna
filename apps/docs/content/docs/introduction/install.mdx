@@ -15,12 +15,21 @@ SNA ships as three published packages plus a testing helper.
 
 For the full package surface, see the [SDK reference](/docs/sdks).
 
+## Version stability
+
+SNA is still in the `0.x.x` line, so public APIs and runtime behavior may
+change between minor releases while the SDK settles. Pin exact package
+versions in your app instead of relying on a floating range.
+
+If you find a bug or have a feature request, please open an issue on
+[GitHub](https://github.com/neuradex/sna/issues).
+
 ## In a consumer app
 
 ```bash
-pnpm add @sna-sdk/core @sna-sdk/client
+pnpm add @sna-sdk/core@0.15.0 @sna-sdk/client@0.15.0
 # React app?
-pnpm add @sna-sdk/react
+pnpm add @sna-sdk/react@0.15.0
 ```
 
 ## From the monorepo

@@ -16,12 +16,21 @@ SNA は 3 つの公開パッケージと 1 つのテストヘルパーパッケ�
 
 各パッケージの公開 API は [SDK リファレンス](/ja/docs/sdks) にまとめています。
 
+## バージョンの安定性
+
+SNA はまだ `0.x.x` 系です。SDK が安定するまでは、minor バージョン間でも
+公開 API やランタイム動作が変わる可能性があります。アプリで使う場合は、
+floating range に頼らず、`package.json` で正確なバージョンを固定してください。
+
+バグを見つけた場合や要望がある場合は、
+[GitHub Issues](https://github.com/neuradex/sna/issues) に残してください。
+
 ## アプリへ追加する
 
 ```bash
-pnpm add @sna-sdk/core @sna-sdk/client
+pnpm add @sna-sdk/core@0.15.0 @sna-sdk/client@0.15.0
 # React アプリの場合
-pnpm add @sna-sdk/react
+pnpm add @sna-sdk/react@0.15.0
 ```
 
 ## モノレポで作業する

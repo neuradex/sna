@@ -17,6 +17,21 @@ The SDK normalizes all three runtimes into a single API surface: one canonical c
 | `packages/react` | `@sna-sdk/react` | React bindings — hooks (`useAgent`, `useSessionManager`, `useResponsiveChat`) and a drop-in chat UI |
 | `packages/testing` | `@sna-sdk/testing` | Mock Anthropic Messages API + `sna-test` CLI for running Claude Code in an isolated test env |
 
+## Version stability
+
+SNA is still in the `0.x.x` line, so public APIs and runtime behavior may
+change between minor releases while the SDK settles. If you use SNA in an
+app, pin exact package versions in `package.json` instead of relying on a
+floating range.
+
+```bash
+pnpm add @sna-sdk/core@0.15.0 @sna-sdk/client@0.15.0
+pnpm add @sna-sdk/react@0.15.0
+```
+
+If you find a bug or have a feature request, please open an issue:
+https://github.com/neuradex/sna/issues
+
 ## What the SDK gives you
 
 - **Multi-session agents.** `POST /agent/sessions` creates a session record; `POST /agent/start?session=<id>` spawns the Claude Code, Codex, or OpenCode subprocess for it. Call them again with a new id and you get another. Each session has its own cwd, meta, event buffer, lifecycle, and a `runtimeChain` of `RuntimeSession` rows recording every config mutation.

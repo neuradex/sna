@@ -15,12 +15,21 @@ SNA는 세 개의 공개 패키지와 하나의 테스트 헬퍼 패키지로 �
 
 각 패키지의 공개 API는 [SDK 레퍼런스](/ko/docs/sdks)에 정리되어 있습니다.
 
+## 버전 안정성
+
+SNA는 아직 `0.x.x` 버전대입니다. SDK가 안정화되는 동안 minor 버전 사이에도
+공개 API나 런타임 동작이 바뀔 수 있습니다. 앱에서 사용할 때는 floating
+range에 의존하지 말고 `package.json`에 정확한 버전을 고정하십시오.
+
+버그를 발견했거나 요청 사항이 있으면
+[GitHub 이슈](https://github.com/neuradex/sna/issues)로 남겨주십시오.
+
 ## 앱에 추가하기
 
 ```bash
-pnpm add @sna-sdk/core @sna-sdk/client
+pnpm add @sna-sdk/core@0.15.0 @sna-sdk/client@0.15.0
 # React 앱이라면
-pnpm add @sna-sdk/react
+pnpm add @sna-sdk/react@0.15.0
 ```
 
 ## 모노레포에서 작업하기
