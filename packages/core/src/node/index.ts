@@ -37,11 +37,18 @@ export {
   resolveGrokPath,
   resolveCursorPath,
   runtimePathsToEnv,
+  SnaDaemonManager,
+  startSnaDaemon,
 } from "../electron/index.js";
 export type {
   SnaServerOptions,
   SnaServerConnection,
   SnaServerHandle,
+  SnaDaemonHandle,
+  SnaDaemonHealth,
+  SnaDaemonOptions,
+  SnaDaemonState,
+  SnaDaemonStatus,
   RuntimePaths,
   ResolveResult,
   CodexResolveResult,

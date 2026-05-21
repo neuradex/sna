@@ -8,6 +8,7 @@ import { startSnaDaemon } from "../src/electron/index.js";
 
 const tempDirs: string[] = [];
 const handles: Array<{ stop(): Promise<boolean> }> = [];
+const servers: http.Server[] = [];
 
 function makeTempDir(prefix: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -62,6 +63,20 @@ async function getFreePort(): Promise<number> {
   });
 }
 
+async function startForeignHealthServer(port: number): Promise<void> {
+  const server = http.createServer((req, res) => {
+    if (req.url === "/health") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, name: "other-service" }));
+      return;
+    }
+    res.writeHead(404);
+    res.end("not found");
+  });
+  await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
+  servers.push(server);
+}
+
 async function waitFor(
   predicate: () => Promise<boolean> | boolean,
   timeoutMs = 5_000,
@@ -77,6 +92,9 @@ async function waitFor(
 afterEach(async () => {
   for (const handle of handles.splice(0).reverse()) {
     try { await handle.stop(); } catch { /* ignore cleanup failures */ }
+  }
+  for (const server of servers.splice(0).reverse()) {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -95,7 +113,6 @@ describe("SNA daemon launcher", () => {
       daemonDir: path.join(dir, ".sna"),
       serverScript,
       readyTimeout: 5_000,
-      autoRestart: false,
     });
     handles.push(handle);
 
@@ -134,7 +151,6 @@ describe("SNA daemon launcher", () => {
       daemonDir,
       serverScript,
       readyTimeout: 5_000,
-      autoRestart: false,
     });
     handles.push(owner);
 
@@ -144,7 +160,6 @@ describe("SNA daemon launcher", () => {
       daemonDir,
       serverScript,
       readyTimeout: 5_000,
-      autoRestart: false,
     });
     handles.push(adopted);
 
@@ -158,5 +173,23 @@ describe("SNA daemon launcher", () => {
 
     assert.equal(await owner.stop(), true);
     handles.pop();
+  });
+
+  it("does not adopt a non-SNA service that happens to expose /health", async () => {
+    const dir = makeTempDir("sna-daemon-foreign-");
+    const serverScript = writeFakeServerScript(dir);
+    const port = await getFreePort();
+    await startForeignHealthServer(port);
+
+    await assert.rejects(
+      startSnaDaemon({
+        port,
+        dbPath: path.join(dir, "sna.db"),
+        daemonDir: path.join(dir, ".sna"),
+        serverScript,
+        readyTimeout: 500,
+      }),
+      /already serving a non-SNA \/health endpoint/,
+    );
   });
 });

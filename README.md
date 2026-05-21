@@ -46,7 +46,7 @@ https://github.com/neuradex/sna/issues
 - **Reasoning effort knob.** A provider-agnostic `reasoningLevel: 0..5` flows to Claude Code's `--effort` and Codex's `model_reasoning_effort` / `turn/start.effort`. Set 0 for autocomplete-grade latency, 5 for deep thinking.
 - **Codex runtime knobs.** `providerOptions.serviceTier` mirrors Codex's `/fast` slash command (values: `"priority"`, `"flex"`, `"batch"`), `providerOptions.profile` maps to `--profile`, and `providerOptions.config` maps to repeatable `-c key=value` overrides. Use `providerOptions.config` for OpenAI-compatible gateways such as OpenRouter or local model servers by configuring Codex's native `model_providers.*` settings. Codex-only on purpose — Claude's `/fast` is a different MODEL variant with its own billing pool, so it's not auto-translated.
 - **Hooks / MCP / policy abstraction.** Define hooks, MCP servers, allowed/disallowed tools once; per-provider adapters apply them. Mid-session provider switches keep the same configuration.
-- **Embedded launcher.** `startSnaServer({ port, dbPath, runtimePaths, ... })` from `@sna-sdk/core/electron` or `@sna-sdk/core/node` forks the standalone server, resolves native bindings (asar-aware), registers runtime CLI paths, and waits for ready.
+- **Embedded launchers.** `startSnaServer({ port, dbPath, runtimePaths, ... })` starts a host-owned child server. `startSnaDaemon(...)` starts a detached background server, writes pid/log files under `.sna`, and can adopt an already healthy SNA daemon on the same port.
 
 ## Quick start
 
@@ -101,6 +101,30 @@ sna.stop();
 ```
 
 > Launchers bind to `127.0.0.1` by default, generate an auth token, and tag sessions with `appId`. SDK clients should pass the returned `sna.connection` object instead of handling the token separately. Protected HTTP and SSE routes use `Authorization: Bearer <authToken>`, and browser WebSocket upgrades use `/ws?token=<authToken>`. Direct standalone server usage is intended for development/debugging and must set `SNA_AUTH_TOKEN` explicitly.
+
+For desktop apps that want SNA to keep running after the launcher process
+returns, use the daemon launcher:
+
+```ts
+import { startSnaDaemon } from "@sna-sdk/core/node";
+
+const sna = await startSnaDaemon({
+  port: 3099,
+  dbPath: "./data/sna.db",
+  runtimePaths: {
+    claudeCode: claude.path,
+  },
+});
+
+console.log(`SNA daemon pid=${sna.pid}, log=${sna.logPath}`);
+```
+
+`startSnaDaemon()` stores `.sna/sna-daemon.pid`, `.sna/sna-daemon.log`,
+and `.sna/sna-api.port`. If another healthy SNA daemon is already serving
+the requested port, the launcher adopts it and `stop()` returns `false`
+instead of killing a process it does not own.
+
+> The running server publishes its own live OpenAPI 3.1 spec — open `http://localhost:3099/docs` for Swagger UI, `http://localhost:3099/openapi.json` for the raw JSON, or `http://localhost:3099/spec` for a plain-text view.
 
 ### As a React app
 

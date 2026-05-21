@@ -11,13 +11,14 @@ description: "SNA サーバーを起動するための Node および Electron �
 | `@sna-sdk/core/node` | `startSnaServer(options)` | Node host から SNA を起動します。 |
 | `@sna-sdk/core/electron` | `startSnaServer(options)` | Electron host から SNA を forked child process として起動します。 |
 | `@sna-sdk/core/electron` | `startSnaServerInProcess(options)` | 現在の Electron main process 内で SNA を実行します。 |
+| `@sna-sdk/core/node`, `@sna-sdk/core/electron` | `startSnaDaemon(options)` | SNA を切り離したバックグラウンドデーモンとして起動し、pid/log ファイルを残します。 |
 | `@sna-sdk/core/node`, `@sna-sdk/core/electron` | `resolveClaudeCli`, `resolveCodexCli`, `resolveOpenCodeCli` | setup / diagnostics 画面で使うランタイム CLI installation を検出します。 |
 
-Launcher handle は、サーバー停止と、検出された URL を `@sna-sdk/client` または `@sna-sdk/react` へ渡すために十分な情報を公開します。
+Launcher handle は、サーバー停止と、検出された URL を `@sna-sdk/client` または `@sna-sdk/react` へ渡すために必要な情報を提供します。
 
 ## Options
 
-`dbPath` は必須です。その他の field は optional です。
+`dbPath` は必須です。その他の項目は任意です。
 
 ```ts
 type SnaServerOptions = {
@@ -51,6 +52,32 @@ type RuntimePaths = {
 };
 ```
 
+`startSnaDaemon()` は database、runtime、model、permission、timeout 系の
+項目を共有し、デーモン制御用のファイルパスを追加で受け取ります。
+
+```ts
+type SnaDaemonOptions = {
+  port?: number;
+  dbPath: string;
+  cwd?: string;
+  daemonDir?: string;
+  pidPath?: string;
+  logPath?: string;
+  maxSessions?: number;
+  permissionMode?: "acceptEdits" | "bypassPermissions" | "default";
+  model?: string;
+  permissionTimeoutMs?: number;
+  nativeBinding?: string;
+  env?: Record<string, string>;
+  readyTimeout?: number;
+  healthTimeout?: number;
+  stopTimeout?: number;
+  dataDir?: string;
+  runtimePaths?: RuntimePaths;
+  adoptExisting?: boolean;
+};
+```
+
 | Field | Default | 説明 |
 | --- | --- | --- |
 | `port` | `3099` | Server に渡す API port。 |
@@ -72,6 +99,12 @@ type RuntimePaths = {
 | `logLevel` | `info` | In-process logger output を filter します。Forked server の file log は全 level を記録し続けます。 |
 | `runtimePaths` | auto-detect | 明示的なランタイム CLI コマンドまたは絶対パス。`SNA_CLAUDE_COMMAND`、`SNA_CODEX_COMMAND`、`SNA_OPENCODE_COMMAND`、`SNA_GROK_COMMAND`、`SNA_CURSOR_COMMAND` に変換されます。 |
 | `langfuse` | none | Metadata で tracing を opt in した session で Langfuse tracing を有効にします。 |
+| `daemonDir` | `path.join(cwd, ".sna")` | デーモンのメタデータディレクトリ。`startSnaDaemon()` のみで使います。 |
+| `pidPath` | `<daemonDir>/sna-daemon.pid` | 切り離したサーバーの PID ファイルパス。 |
+| `logPath` | `<daemonDir>/sna-daemon.log` | 切り離したサーバーの stdout/stderr を記録するログファイル。 |
+| `adoptExisting` | `true` | 指定 port の `/health` がすでに SNA と応答する場合、新しい process を作らず既存デーモンに接続します。 |
+| `healthTimeout` | `1000` | デーモンの `/health` 確認 1 回あたりの timeout(ms)。 |
+| `stopTimeout` | `5000` | Graceful stop を待つ時間。超過すると launcher が `SIGKILL` を送ります。 |
 
 Launcher は `authToken` と `connection: { baseUrl, authToken }` を一緒に
 返します。Token を保存したり environment variable から組み立てたりせず、
@@ -90,6 +123,7 @@ auth、bind host、origin policy は typed launcher field で指定してくだ�
 | --- | --- | --- |
 | Forked `startSnaServer` | プロセス分離が必要で、standalone child server を持ちたい場合。 | Packaged Electron app は `@sna-sdk/core` を unpack する必要があります。Ready になるには child process が正常に起動する必要があります。 |
 | `startSnaServerInProcess` | asar path、environment propagation、orphaned child の問題で Electron `fork()` が不安定な場合。 | Caller の Node event loop を共有します。Host は shutdown 時に `stop()` を呼ぶ必要があります。 |
+| Detached `startSnaDaemon` | Launcher が返ったあとも SNA を local background server として残したい場合。 | SDK は pid/log/status/adoption を管理しますが、OS service manager ではありません。ログイン時起動やクラッシュ時の再起動が必要なら launchd、systemd、または host app supervisor と組み合わせてください。 |
 
 In-process mode は default agent を自動 spawn しません。Host が HTTP、WebSocket、または返された `sessionManager` から session を開始します。
 
@@ -149,6 +183,43 @@ type SnaServerHandle = {
   stop(): void;
 };
 ```
+
+### `@sna-sdk/core/node` または `@sna-sdk/core/electron` の `startSnaDaemon(options)`
+
+同じ standalone SNA server を切り離した background process として起動します。
+Launcher は `/health` が ready になるまで待ち、`.sna/sna-daemon.pid`、
+`.sna/sna-daemon.log`、`.sna/sna-api.port` を記録してから control handle
+を返します。
+
+```ts
+const daemon = await startSnaDaemon({
+  dbPath: "/Users/me/Library/Application Support/MyApp/sna.db",
+  port: 3099,
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+  },
+});
+
+console.log(await daemon.status());
+```
+
+Returns:
+
+```ts
+type SnaDaemonHandle = {
+  pid?: number;
+  port: number;
+  adopted: boolean;
+  pidPath: string;
+  logPath: string;
+  status(): Promise<SnaDaemonStatus>;
+  stop(): Promise<boolean>;
+};
+```
+
+指定 port で健康な SNA daemon がすでに動いている場合、launcher は
+`adopted: true` の handle を返し、その process の所有権は取得しません。
+この場合、`stop()` は `false` を返します。
 
 ### `startSnaServerInProcess(options)`
 

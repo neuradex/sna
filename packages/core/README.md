@@ -16,7 +16,7 @@ Your app → SNA server → spawn(agentic CLI runtime) → events back over WS
 - **Cache-friendly session continuity** — normal turns call `send()` on the same SNA session, so the active runtime conversation/thread stays attached. `resume` and restart paths rebuild from canonical history only when a process or runtime boundary requires it.
 - **One-shot completion** — `completion({ prompt, model?, provider?, reasoningLevel? })` for short single-prompt jobs. Each provider implements its own optimal one-shot path (Codex `exec --ephemeral` or pooled thread; Claude `-p`; OpenCode pooled session or ephemeral serve). Opportunistically reuses a pooled daemon when one is already alive for the cwd, so high-frequency callers (autocomplete, etc.) don't pay per-call cold-start.
 - **Cross-runtime latency and Codex config knobs** — `reasoningLevel: 0..5` (mapped per runtime), Codex-only `providerOptions.serviceTier` (mirrors Codex `/fast`: `"priority"`, `"flex"`, `"batch"`), `providerOptions.profile` (`--profile`), and `providerOptions.config` (repeatable `-c key=value` overrides, including Codex `model_providers.*` entries for OpenAI-compatible gateways such as OpenRouter or local model servers).
-- **Launcher API** — `startSnaServer({ port, dbPath, runtimePaths, ... })` from `@sna-sdk/core/node` or `@sna-sdk/core/electron`. Forks the standalone server, resolves native bindings, registers runtime CLI paths, waits for ready.
+- **Launcher API** — `startSnaServer({ port, dbPath, runtimePaths, ... })` starts a host-owned child server. `startSnaDaemon(...)` starts a detached background server, records pid/log files, and can adopt an already healthy SNA daemon on the same port.
 - **PreToolUse hook** — `scripts/hook.ts`, auto-injected by `ClaudeCodeProvider.spawn()`. No manual `.claude/settings.json` editing needed.
 
 ## Install
@@ -55,6 +55,28 @@ listed in `allowedOrigins`. Direct standalone server launches are for
 development/debugging and must provide `SNA_AUTH_TOKEN` explicitly.
 
 For Electron, use `@sna-sdk/core/electron` and add `asarUnpack: ["node_modules/@sna-sdk/core/**"]`.
+
+### Start a background daemon
+
+```ts
+import { startSnaDaemon } from "@sna-sdk/core/node";
+
+const sna = await startSnaDaemon({
+  port: 3099,
+  dbPath: "./data/sna.db",
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+  },
+});
+
+console.log(await sna.status());
+console.log(`pid=${sna.pid} log=${sna.logPath}`);
+```
+
+The daemon launcher writes `.sna/sna-daemon.pid`, `.sna/sna-daemon.log`,
+and `.sna/sna-api.port`. If a healthy SNA daemon is already serving the
+requested port, the returned handle is marked `adopted: true` and
+`stop()` returns `false`.
 
 ### Mount the routes manually
 
@@ -175,8 +197,8 @@ const db = getDb();
 | `@sna-sdk/core/server` | `createSnaApp`, `attachWebSocket`, `generateSnaAuthToken`, `SessionManager`, `snaPortRoute`, `buildCanonicalFromDb`, `completion`, `runOnce`, related types |
 | `@sna-sdk/core/db/schema` | `getDb`, `resetDb`, schema types (`ChatSession`, `ChatMessage`, `ChatActor`, `ChatKind`) |
 | `@sna-sdk/core/providers` | `getProvider`, `registerProvider`, `getRuntimePool`, `ClaudeCodeProvider`, `CodexProvider`, `OpenCodeProvider`, `RuntimePool`, schemas (`SpawnOptionsSchema`, `RuntimeConfigSchema`, `RuntimeHandleSchema`) |
-| `@sna-sdk/core/electron` | `startSnaServer` (Electron-aware launcher) |
-| `@sna-sdk/core/node` | `startSnaServer` (plain Node launcher) |
+| `@sna-sdk/core/electron` | `startSnaServer`, `startSnaServerInProcess`, `startSnaDaemon`, runtime CLI resolution helpers |
+| `@sna-sdk/core/node` | `startSnaServer`, `startSnaDaemon`, runtime CLI resolution helpers |
 
 ## Environment variables
 
