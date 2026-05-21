@@ -84,6 +84,8 @@ function requireLoadedSdk(): typeof import("@opencode-ai/sdk") {
   return _sdkCache;
 }
 
+type OpenCodeSdk = typeof import("@opencode-ai/sdk");
+
 // ── Binary resolution ──────────────────────────────────────────────────────
 
 export function validateOpenCodePath(opencodePath: string): { ok: boolean; version?: string } {
@@ -160,6 +162,37 @@ export function resolveOpenCodeCli(opts?: { cacheDir?: string }): OpenCodeResolv
   } catch { /* shell detection failed */ }
 
   return { path: "opencode", source: "fallback" };
+}
+
+function withOpenCodeCommandOnPath<T>(fn: () => Promise<T>): Promise<T> {
+  let restorePath: string | undefined | null = null;
+  try {
+    const resolved = resolveOpenCodeCli();
+    if (resolved.source !== "fallback" && path.isAbsolute(resolved.path)) {
+      const dir = path.dirname(resolved.path);
+      const currentPath = process.env.PATH ?? "";
+      if (!currentPath.split(":").includes(dir)) {
+        restorePath = process.env.PATH;
+        process.env.PATH = currentPath ? `${dir}:${currentPath}` : dir;
+      }
+    }
+  } catch {
+    // SDK launch will surface the executable resolution error.
+  }
+
+  return fn().finally(() => {
+    if (restorePath !== null) {
+      if (restorePath === undefined) delete process.env.PATH;
+      else process.env.PATH = restorePath;
+    }
+  });
+}
+
+function createResolvedOpenCodeServer(
+  sdk: OpenCodeSdk,
+  options: Parameters<OpenCodeSdk["createOpencodeServer"]>[0],
+) {
+  return withOpenCodeCommandOnPath(() => sdk.createOpencodeServer(options));
 }
 
 // ── Permission mode → OpenCode agent ───────────────────────────────────────
@@ -1249,7 +1282,7 @@ export class OpenCodeProvider implements AgentProvider {
         logger.log("agent", `opencode complete: reusing pooled daemon ${serverUrl}`);
       } else {
         const port = await allocateFreePort();
-        const server = await sdk.createOpencodeServer({
+        const server = await createResolvedOpenCodeServer(sdk, {
           hostname: "127.0.0.1",
           port,
           timeout: options.timeout ?? 15_000,
@@ -1399,7 +1432,7 @@ export class OpenCodeProvider implements AgentProvider {
     const opencodeConfig = buildOpenCodeConfig(config.providerOptions, mcp);
 
     const sdk = await loadOpenCodeSdk();
-    const server = await sdk.createOpencodeServer({
+    const server = await createResolvedOpenCodeServer(sdk, {
       hostname: "127.0.0.1",
       port,
       timeout: 15_000,

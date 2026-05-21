@@ -127,6 +127,16 @@ const opencodeConfig = createOpenCodeMockConfig({
 // Pass opencodeConfig.providerOptions to SNA's OpenCode provider.
 ```
 
+When a runtime binary is not on `PATH`, set the same command override that the
+provider uses in production before running the mock-attached tests:
+
+```bash
+SNA_CLAUDE_COMMAND=/absolute/path/to/claude \
+SNA_CODEX_COMMAND=/absolute/path/to/codex \
+SNA_OPENCODE_COMMAND=/absolute/path/to/opencode \
+pnpm --filter @sna-sdk/core exec tsx --test test/runtime-mock-attached.test.ts
+```
+
 ### Runtime CLI fakes
 
 Use the mock CLIs when you need to test SNA providers or consumer app launch

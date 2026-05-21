@@ -29,6 +29,8 @@ const SHELL = process.env.SHELL || "/bin/zsh";
 // ── Helpers ──────────────────────────────────────────────────────
 
 function resolveClaudePath(): string {
+  if (process.env.SNA_CLAUDE_COMMAND) return process.env.SNA_CLAUDE_COMMAND;
+
   const stateDir = path.join(process.cwd(), ".sna");
   const cached = path.join(stateDir, "claude-path");
   if (fs.existsSync(cached)) {

@@ -27,6 +27,11 @@ function commandAvailable(command: string): boolean {
   }
 }
 
+function runtimeCliSkip(command: string, envVar: string): string | undefined {
+  if (process.env[envVar]) return undefined;
+  return commandAvailable(command) ? undefined : `${command} CLI is not installed; set ${envVar}=<path> to run this test`;
+}
+
 function systemText(system: unknown): string {
   if (typeof system === "string") return system;
   if (Array.isArray(system)) {
@@ -45,12 +50,15 @@ describe("real runtime CLIs with mock-attached LLM APIs", () => {
   let opencodeRuntime: RuntimeHandle | null = null;
   const originalClaudeCommand = process.env.SNA_CLAUDE_COMMAND;
   const originalCodexCommand = process.env.SNA_CODEX_COMMAND;
+  const originalOpenCodeCommand = process.env.SNA_OPENCODE_COMMAND;
 
   afterEach(async () => {
     if (originalClaudeCommand === undefined) delete process.env.SNA_CLAUDE_COMMAND;
     else process.env.SNA_CLAUDE_COMMAND = originalClaudeCommand;
     if (originalCodexCommand === undefined) delete process.env.SNA_CODEX_COMMAND;
     else process.env.SNA_CODEX_COMMAND = originalCodexCommand;
+    if (originalOpenCodeCommand === undefined) delete process.env.SNA_OPENCODE_COMMAND;
+    else process.env.SNA_OPENCODE_COMMAND = originalOpenCodeCommand;
     anthropic?.close();
     anthropic = null;
     opencodeProcess?.kill();
@@ -62,10 +70,9 @@ describe("real runtime CLIs with mock-attached LLM APIs", () => {
   });
 
   it("runs real Claude Code against the mock Anthropic API and captures streaming request shape", {
-    skip: !commandAvailable("claude") ? "claude CLI is not installed" : undefined,
+    skip: runtimeCliSkip("claude", "SNA_CLAUDE_COMMAND"),
     timeout: 45_000,
   }, async () => {
-    delete process.env.SNA_CLAUDE_COMMAND;
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "sna-real-claude-mock-"));
     anthropic = await startMockAnthropicServer();
 
@@ -109,10 +116,9 @@ describe("real runtime CLIs with mock-attached LLM APIs", () => {
   });
 
   it("runs real Codex against the mock OpenAI Responses API and captures request shape", {
-    skip: !commandAvailable("codex") ? "codex CLI is not installed" : undefined,
+    skip: runtimeCliSkip("codex", "SNA_CODEX_COMMAND"),
     timeout: 45_000,
   }, async () => {
-    delete process.env.SNA_CODEX_COMMAND;
     const cwd = process.cwd();
     const codexHomeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sna-real-codex-mock-"));
     openai = await startMockOpenAIServer({ responseText: "codex mock-attached response" });
@@ -156,7 +162,7 @@ describe("real runtime CLIs with mock-attached LLM APIs", () => {
   });
 
   it("runs real OpenCode against the mock OpenAI Chat Completions API and captures streaming request shape", {
-    skip: !commandAvailable("opencode") ? "opencode CLI is not installed" : undefined,
+    skip: runtimeCliSkip("opencode", "SNA_OPENCODE_COMMAND"),
     timeout: 45_000,
   }, async () => {
     const cwd = process.cwd();

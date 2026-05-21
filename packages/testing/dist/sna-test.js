@@ -368,6 +368,7 @@ function createClaudeMockEnv(options) {
 // src/cli.ts
 var SHELL = process.env.SHELL || "/bin/zsh";
 function resolveClaudePath() {
+  if (process.env.SNA_CLAUDE_COMMAND) return process.env.SNA_CLAUDE_COMMAND;
   const stateDir = path3.join(process.cwd(), ".sna");
   const cached = path3.join(stateDir, "claude-path");
   if (fs3.existsSync(cached)) {
