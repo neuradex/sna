@@ -15,7 +15,7 @@ Your app → SNA server → spawn(agentic CLI runtime) → events back over WS
 - **Canonical conversation model** — `chat_messages` rows split a message into orthogonal `actor` × `kind` axes. `history/canonical.ts` rebuilds blocks; `history/{claude-code,codex,opencode}.ts` adapters convert canonical → native wire format.
 - **One-shot completion** — `completion({ prompt, model?, provider?, reasoningLevel? })` for short single-prompt jobs. Each provider implements its own optimal one-shot path (Codex `exec --ephemeral` or pooled thread; Claude `-p`; OpenCode pooled session or ephemeral serve). Opportunistically reuses a pooled daemon when one is already alive for the cwd, so high-frequency callers (autocomplete, etc.) don't pay per-call cold-start.
 - **Cross-runtime latency and Codex config knobs** — `reasoningLevel: 0..5` (mapped per runtime), Codex-only `providerOptions.serviceTier` (mirrors Codex `/fast`: `"priority"`, `"flex"`, `"batch"`), `providerOptions.profile` (`--profile`), and `providerOptions.config` (repeatable `-c key=value` overrides, including Codex `model_providers.*` entries for OpenAI-compatible gateways such as OpenRouter or local model servers).
-- **Launcher API** — `startSnaServer({ port, dbPath, ... })` from `@sna-sdk/core/node` or `@sna-sdk/core/electron`. Forks the standalone server, resolves native bindings, waits for ready.
+- **Launcher API** — `startSnaServer({ port, dbPath, runtimePaths, ... })` from `@sna-sdk/core/node` or `@sna-sdk/core/electron`. Forks the standalone server, resolves native bindings, registers runtime CLI paths, waits for ready.
 - **PreToolUse hook** — `scripts/hook.ts`, auto-injected by `ClaudeCodeProvider.spawn()`. No manual `.claude/settings.json` editing needed.
 
 ## Install
@@ -37,6 +37,9 @@ const sna = await startSnaServer({
   port: 3099,
   dbPath: "./data/sna.db",
   maxSessions: 20,
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+  },
 });
 ```
 
@@ -176,6 +179,13 @@ const db = getDb();
 | `SNA_PERMISSION_TIMEOUT_MS` | Auto-deny after N ms (0 = app controls) |
 | `SNA_SQLITE_NATIVE_BINDING` | Absolute path to `better_sqlite3.node` (Electron packaged apps) |
 | `SNA_CLAUDE_COMMAND` | Override the Claude binary |
+| `SNA_CODEX_COMMAND` | Override the Codex binary |
+| `SNA_OPENCODE_COMMAND` | Override the OpenCode binary |
+| `SNA_GROK_COMMAND` | Override the Grok binary |
+| `SNA_CURSOR_COMMAND` | Override the Cursor headless agent binary |
+
+When launching SNA through `@sna-sdk/core/node` or `@sna-sdk/core/electron`,
+prefer `startSnaServer({ runtimePaths })` over setting these variables by hand.
 
 ## Documentation
 

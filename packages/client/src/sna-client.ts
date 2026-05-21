@@ -749,8 +749,9 @@ export interface RunOnceResult {
 /**
  * Caller-supplied config for `agent.listModels`. Most fields are runtime-
  * specific. Pass an empty object (or omit) for static catalogs such as
- * claude-code and codex. Pass `cliPath` to override OpenCode binary lookup.
- * Set `refresh: true` to bypass provider caches.
+ * claude-code. `cliPath` only affects model listing for runtimes that inspect
+ * their CLI; use launcher `runtimePaths` for agent spawn paths. Set
+ * `refresh: true` to bypass provider caches.
  */
 export interface ListModelsConfig {
   cliPath?: string;

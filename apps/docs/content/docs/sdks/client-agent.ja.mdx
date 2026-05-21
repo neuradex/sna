@@ -379,7 +379,7 @@ await client.agent.listModels(runtime: string, config?: ListModelsConfig): Promi
 | Field | Type | Description |
 | --- | --- | --- |
 | `runtime` | `string` | 調べるランタイム。例: `claude-code`、`codex`、`opencode`、`grok`、`cursor`。 |
-| `config.cliPath` | `string` | ランタイム CLI path override。 |
+| `config.cliPath` | `string` | モデル一覧取得だけに使うランタイム CLI パス上書き。エージェントの spawn パスにはランチャーの `runtimePaths` を使ってください。 |
 | `config.refresh` | `boolean` | cache を使わず再取得します。 |
 
 **Returns**

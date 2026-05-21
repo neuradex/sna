@@ -53,7 +53,7 @@ SNA server  ──spawn──►  claude | codex | opencode
 ## 사전 준비
 
 - **Node.js 20+**
-- **`PATH`에 런타임 CLI 하나 이상**: `claude`, `codex`, `opencode` 중 하나
+- **런타임 CLI 하나 이상**: `PATH`의 `claude`, `codex`, `opencode` 중 하나 또는 SNA 시작 시 넘기는 명시적 `runtimePaths`
 - 패키지 매니저. 예시는 `pnpm`이지만 npm / yarn / bun도 가능합니다.
 
 ## 1. 설치
@@ -74,11 +74,16 @@ SNA는 아직 `0.x.x` 버전대라 앱에서 사용할 때는 정확한 패키�
 앱 안에서:
 
 ```ts
-import { startSnaServer } from "@sna-sdk/core/node";
+import { resolveClaudeCli, startSnaServer } from "@sna-sdk/core/node";
+
+const claude = resolveClaudeCli();
 
 const sna = await startSnaServer({
   port: 3099,
   dbPath: "./data/sna.db",
+  runtimePaths: {
+    claudeCode: claude.path,
+  },
 });
 ```
 

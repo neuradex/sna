@@ -57,6 +57,20 @@ codex --version
 opencode --version
 ```
 
-If a binary lives somewhere non-standard, override per-call via
-`providerOptions.cliPath` or set `SNA_CLAUDE_PATH` / `SNA_CODEX_COMMAND`
-in the environment.
+If a binary lives somewhere non-standard, register it when starting SNA:
+
+```ts
+await startSnaServer({
+  dbPath: "./data/sna.db",
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+    codex: "/opt/homebrew/bin/codex",
+    opencode: "/opt/homebrew/bin/opencode",
+  },
+});
+```
+
+The lower-level environment variables are `SNA_CLAUDE_COMMAND`,
+`SNA_CODEX_COMMAND`, `SNA_OPENCODE_COMMAND`, `SNA_GROK_COMMAND`, and
+`SNA_CURSOR_COMMAND`. `runtimePaths` is preferred for embedded apps because the
+path lives in the same startup config as the server.

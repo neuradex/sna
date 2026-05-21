@@ -52,7 +52,7 @@ history, runtime swaps, attribution), read **[What is SNA?](/docs/introduction/w
 ## Prerequisites
 
 - **Node.js 20+**.
-- **At least one runtime CLI on `PATH`**: `claude`, `codex`, or `opencode`.
+- **At least one runtime CLI**: `claude`, `codex`, or `opencode` on `PATH`, or an explicit `runtimePaths` entry when starting SNA.
 - A package manager. Examples below use `pnpm`, but npm / yarn / bun work too.
 
 ## 1. Install
@@ -74,11 +74,16 @@ checklist plus CLI overrides.
 In your app:
 
 ```ts
-import { startSnaServer } from "@sna-sdk/core/node";
+import { resolveClaudeCli, startSnaServer } from "@sna-sdk/core/node";
+
+const claude = resolveClaudeCli();
 
 const sna = await startSnaServer({
   port: 3099,
   dbPath: "./data/sna.db",
+  runtimePaths: {
+    claudeCode: claude.path,
+  },
 });
 ```
 

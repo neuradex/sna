@@ -379,7 +379,7 @@ await client.agent.listModels(runtime: string, config?: ListModelsConfig): Promi
 | Field | Type | Description |
 | --- | --- | --- |
 | `runtime` | `string` | 조회할 런타임입니다. 예: `claude-code`, `codex`, `opencode`, `grok`, `cursor`. |
-| `config.cliPath` | `string` | 런타임 CLI path override입니다. |
+| `config.cliPath` | `string` | 모델 목록 조회에만 쓰는 런타임 CLI 경로 덮어쓰기입니다. 에이전트 spawn 경로는 런처의 `runtimePaths`를 사용하십시오. |
 | `config.refresh` | `boolean` | cache를 건너뜁니다. |
 
 **Returns**

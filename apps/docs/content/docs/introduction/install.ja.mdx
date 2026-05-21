@@ -60,6 +60,20 @@ codex --version
 opencode --version
 ```
 
-非標準の場所にある場合は、呼び出し時に `providerOptions.cliPath` で
-上書きするか、環境変数 `SNA_CLAUDE_PATH` / `SNA_CODEX_COMMAND` を
-設定してください。
+非標準の場所にある場合は、SNA 起動時にパスを登録します。
+
+```ts
+await startSnaServer({
+  dbPath: "./data/sna.db",
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+    codex: "/opt/homebrew/bin/codex",
+    opencode: "/opt/homebrew/bin/opencode",
+  },
+});
+```
+
+低レベルの環境変数は `SNA_CLAUDE_COMMAND`、`SNA_CODEX_COMMAND`、
+`SNA_OPENCODE_COMMAND`、`SNA_GROK_COMMAND`、`SNA_CURSOR_COMMAND` です。
+組み込みアプリでは、サーバー起動設定と同じ場所にパスを残せる
+`runtimePaths` を優先してください。
