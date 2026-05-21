@@ -73,6 +73,13 @@ type RuntimePaths = {
 | `runtimePaths` | auto-detect | Explicit runtime CLI commands or absolute paths. They map to `SNA_CLAUDE_COMMAND`, `SNA_CODEX_COMMAND`, `SNA_OPENCODE_COMMAND`, `SNA_GROK_COMMAND`, and `SNA_CURSOR_COMMAND`. |
 | `langfuse` | none | Enables tracing for sessions whose metadata opts in. |
 
+The launcher returns both `authToken` and
+`connection: { baseUrl, authToken }`. Pass `connection` to
+`SnaClient` or `SnaProvider` instead of persisting the token or
+reconstructing it from environment variables. The generated token is
+owned by the server handle; rotate it by starting the server with a new
+token.
+
 Use `runtimePaths` when the host app has a setup screen or stores user-selected
 CLI locations. `env` is still available as the final escape hatch and overrides
 the values generated from `runtimePaths`. Use the typed launcher fields for

@@ -17,6 +17,18 @@ ws://<host>:<port>/ws
 クライアントは一度接続して、その単一接続上にすべてのセッションを
 多重化します。
 
+## 認証
+
+WebSocket upgrade は保護された HTTP ルートと同じトークンを要求します。
+Browser client は任意の upgrade header を設定できないため、TypeScript
+client はトークンを `ws://<host>:<port>/ws?token=<authToken>` として送ります。
+Native client は upgrade request に `Authorization: Bearer <authToken>` または
+`X-SNA-Token` を使うこともできます。
+
+サーバに origin allowlist がある場合、browser WebSocket 接続は許可された
+`Origin` から来る必要があります。トークン失敗は upgrade を `401` で閉じ、
+origin 失敗は `403` で閉じます。
+
 ## ワイヤ形
 
 すべてのメッセージは `type` と payload を持つ JSON オブジェクトです。

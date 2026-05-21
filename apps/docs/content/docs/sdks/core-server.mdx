@@ -40,12 +40,19 @@ declare function createSnaApp(options?: {
   sessionManager?: SessionManager;
   authToken?: string;
   allowedOrigins?: string[];
+  unsafeDisableAuth?: boolean;
 }): Promise<Hono>;
 ```
 
 Creates the Hono HTTP application that exposes SNA routes. It delegates to the OpenAPI app factory, so the returned app includes generated OpenAPI metadata and Swagger UI at `/docs`.
 
 If `sessionManager` is omitted, the server creates one. Pass your own manager when HTTP routes and WebSocket clients must share the same session state, or when the host needs direct access to lifecycle events.
+
+Authentication is enabled by default. Pass `authToken` or set
+`SNA_AUTH_TOKEN`; only `GET /health` remains public. Use
+`unsafeDisableAuth` only for isolated tests or docs generation, never for
+a host app. `allowedOrigins` filters browser `Origin` values before token
+validation, while native clients that send no `Origin` are allowed.
 
 ## `attachWebSocket(server, sessionManager, options?)`
 
@@ -54,6 +61,11 @@ const wss = attachWebSocket(httpServer, sessionManager, { authToken, allowedOrig
 ```
 
 Attaches a WebSocket server to the `/ws` upgrade path of an existing Node HTTP server. Use the same `SessionManager` passed to `createSnaApp`; otherwise HTTP commands and WebSocket subscriptions will observe different session state.
+
+Pass the same `authToken` and `allowedOrigins` used by `createSnaApp`.
+The TypeScript client authenticates browser upgrades with `?token=...`;
+native clients can also send `Authorization: Bearer ...` or
+`X-SNA-Token`.
 
 The WebSocket server:
 

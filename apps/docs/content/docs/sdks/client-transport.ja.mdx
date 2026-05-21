@@ -42,6 +42,18 @@ const client = new SnaClient({
 | `localhost:3099` | `http://localhost:3099` | `ws://localhost:3099/ws` |
 | `https://sna.example.com` | `https://sna.example.com` | `wss://sna.example.com/ws` |
 
+## 認証動作
+
+`authToken` がある場合、HTTP と SSE request は
+`Authorization: Bearer <authToken>` を送ります。WebSocket 接続は browser
+runtime でも upgrade を認証できるように、同じトークンを
+`?token=<authToken>` として付けます。`baseUrl` と `authToken` がずれないよう、
+launcher の `handle.connection` object を渡すのが安全です。
+
+`401` はトークンがない、またはサーバーと一致しないことを意味します。`403`
+は request が server の `allowedOrigins` にない browser `Origin` から来た
+ことを意味します。
+
 ## `client.connect()`
 
 WebSocket 接続を開始します。すでに接続中または接続済みの場合は no-op です。接続直後に server が `sessions.snapshot` を push することがあるため、session state が必要な UI では `connect` の前に `sessions.onSnapshot` を登録してください。

@@ -54,7 +54,7 @@ type RuntimePaths = {
 | Field | Default | 설명 |
 | --- | --- | --- |
 | `port` | `3099` | Server에 전달할 API port. |
-| `host` | `127.0.0.1` | Bind host. Host app에 더 강한 transport boundary가 없다면 loopback을 유지하십시오. |
+| `host` | `127.0.0.1` | Bind host. Host app에 더 강한 transport boundary가 없다면 loopback을 유지하는 편이 안전합니다. |
 | `appId` | `sna-sdk` | 이 server instance의 owner ID입니다. 이 서버가 만든 session metadata에 붙습니다. |
 | `authToken` | generated | Protected HTTP route와 WebSocket upgrade에 필요한 bearer token. |
 | `allowedOrigins` | `[]` | Browser `Origin` 요청 중 허용할 값. `Origin`을 보내지 않는 native client는 허용됩니다. |
@@ -73,10 +73,16 @@ type RuntimePaths = {
 | `runtimePaths` | auto-detect | 명시적인 런타임 CLI 명령 또는 절대 경로입니다. 각각 `SNA_CLAUDE_COMMAND`, `SNA_CODEX_COMMAND`, `SNA_OPENCODE_COMMAND`, `SNA_GROK_COMMAND`, `SNA_CURSOR_COMMAND`로 변환됩니다. |
 | `langfuse` | none | Metadata로 tracing을 opt-in한 session에서 Langfuse tracing을 켭니다. |
 
+Launcher는 `authToken`과 `connection: { baseUrl, authToken }`을 함께
+반환합니다. Token을 저장하거나 environment variable에서 다시 만들지 말고
+`connection`을 `SnaClient`나 `SnaProvider`에 전달하는 편이 안전합니다.
+생성된 token은 server handle이 소유합니다. Token rotation이 필요하면 새 token으로
+서버를 다시 시작하면 됩니다.
+
 호스트 앱에 설정 화면이 있거나 사용자가 선택한 CLI 위치를 저장한다면
-`runtimePaths`를 사용하십시오. `env`는 여전히 마지막 우회 수단으로 남아
+`runtimePaths`를 사용하면 됩니다. `env`는 여전히 마지막 우회 수단으로 남아
 있으며, `runtimePaths`에서 생성된 값을 덮어씁니다. Server identity, auth,
-bind host, origin policy는 typed launcher field로 지정하십시오.
+bind host, origin policy는 typed launcher field로 지정합니다.
 
 ## Forked vs in-process
 

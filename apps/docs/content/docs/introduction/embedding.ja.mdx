@@ -72,4 +72,6 @@ const client = new SnaClient(sna.connection);
 自動的に使います。そのため、React アプリでは IPC なしでレンダラが
 ポートを検出できます。Host が同じ信頼済み app endpoint から
 `{ baseUrl, authToken }` を返す場合、`SnaProvider` はその値を connection
-として自動的に使います。
+として自動的に使います。この helper は host app の境界内に置くのが安全です。
+ランタイム自身の `/api/sna-port` ルートは保護されており、同じ token が SSE
+と WebSocket traffic も認証します。

@@ -70,4 +70,6 @@ const client = new SnaClient(sna.connection);
 A helper endpoint `GET /api/sna-port` is wired by `<SnaProvider>` for
 React apps so the renderer can auto-discover the port without IPC. If your
 host exposes `{ baseUrl, authToken }` from that same trusted app endpoint,
-`SnaProvider` uses it as the connection automatically.
+`SnaProvider` uses it as the connection automatically. Treat that helper as
+part of the host app boundary: the runtime's own `/api/sna-port` route is
+protected, and the token also authenticates SSE and WebSocket traffic.

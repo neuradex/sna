@@ -30,5 +30,16 @@ SNA의 HTTP/WebSocket API와 ACP를 비교하고 있다면
 | `GET /docs` | Swagger UI |
 | `GET /spec` | 평문 스펙 |
 
+## 인증
+
+`GET /health`를 제외한 모든 런타임 HTTP 라우트는
+`Authorization: Bearer <authToken>`을 요구합니다. SSE 스트림과 WebSocket
+upgrade도 같은 토큰으로 보호됩니다. SDK 런처는 이 값을
+`handle.connection.authToken`으로 반환하므로 클라이언트에는
+`handle.connection`을 그대로 전달하는 편이 안전합니다.
+
+OpenAPI 문서는 전역 `bearerAuth`를 선언하고, `/health`의 보안 요구사항은
+비우며, 보호된 라우트에 `401`/`403` 응답을 표시합니다.
+
 정확한 계약을 확인해야 할 때는 라이브 서버의 스펙을 직접 조회하세요.
 라이브 스펙이 항상 최종 기준입니다.

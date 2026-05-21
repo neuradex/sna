@@ -28,7 +28,7 @@ See [docs/architecture.md](docs/architecture.md) for the full picture. Quick map
 
 #### Server (`@sna-sdk/core`)
 
-`createSnaApp({ sessionManager })` returns an `OpenAPIHono` app exposing the full HTTP API plus its own OpenAPI 3.1 spec (`GET /openapi.json`, Swagger UI at `/docs`, plain-text viewer at `/spec`). `attachWebSocket(server, sessionManager)` mounts the WS handler on `/ws`. The standalone entry (`server/standalone.ts`) wires both up and is what the launcher API forks.
+`createSnaApp({ sessionManager, authToken })` returns an `OpenAPIHono` app exposing the full HTTP API plus its own OpenAPI 3.1 spec (`GET /openapi.json`, Swagger UI at `/docs`, plain-text viewer at `/spec`). All HTTP routes except `GET /health` require the bearer token, and the OpenAPI document declares `bearerAuth`, `401`, and `403` on protected operations. `attachWebSocket(server, sessionManager, { authToken })` mounts the WS handler on `/ws` with the same token. The standalone entry (`server/standalone.ts`) wires both up and is what the launcher API forks.
 
 The `SessionManager` owns every running agent. Each `Session` carries a `process` (Claude Code or Codex subprocess), a per-session event buffer, the current `SessionConfig` (legacy name: `StartConfig`, kept as an alias), and metadata. Every config mutation appends a `RuntimeSession` row to the chain in `runtime_sessions`; `Session.currentRuntimeId` points at the active one. Listeners cover lifecycle, config changes, state changes, agent events, permission requests, and skill events.
 
@@ -47,7 +47,7 @@ Binary attachments live in `embeds` JSON keyed by id; content text holds inline 
 
 #### Transports
 
-HTTP routes (`server/routes/{agent,chat}.ts`) cover state-changing ops with ordering guarantees. The WebSocket handler (`server/ws.ts`) wraps the same operations and adds push channels (`agent.event`, `sessions.snapshot`, `permission.request`, `session.lifecycle`).
+HTTP routes (`server/routes/{agent,chat}.ts`) cover state-changing ops with ordering guarantees. Protected HTTP and SSE calls use `Authorization: Bearer <authToken>`. The WebSocket handler (`server/ws.ts`) wraps the same operations, authenticates upgrades through bearer headers, `X-SNA-Token`, or `?token=...`, and adds push channels (`agent.event`, `sessions.snapshot`, `permission.request`, `session.lifecycle`).
 
 `server/api-types.ts` is the single source of truth for response shapes — both HTTP and WS use the typed helpers `httpJson` / `wsReply`, so drift between the two transports is a TypeScript error.
 

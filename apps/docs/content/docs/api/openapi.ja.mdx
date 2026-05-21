@@ -21,6 +21,18 @@ Hono サーバはルートが使うのと同じ Zod スキーマから生成し�
 
 `3099` は `startSnaServer({ port })` が返したポートに置き換えてください。
 
+## 認証契約
+
+ランタイム仕様は `components.securitySchemes.bearerAuth` を含み、document
+level に `security: [{ bearerAuth: [] }]` を設定します。`GET /health` だけが
+公開 operation で、`security: []` として示されます。保護された operation
+には標準 error envelope を使う共通の `401` と `403` response が含まれます。
+
+`/openapi.json`、`/docs`、`/spec` に直接アクセスする場合も、他のランタイム
+ルートと同じ認証 middleware を通ります。静的ドキュメント生成では docs build
+script 内だけで `unsafeDisableAuth` を使うため、live secret なしで published
+reference を生成できます。
+
 ## ユースケース
 
 - **他言語クライアントを生成。** `/openapi.json` に任意の OpenAPI

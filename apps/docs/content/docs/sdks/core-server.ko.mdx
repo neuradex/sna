@@ -40,12 +40,19 @@ declare function createSnaApp(options?: {
   sessionManager?: SessionManager;
   authToken?: string;
   allowedOrigins?: string[];
+  unsafeDisableAuth?: boolean;
 }): Promise<Hono>;
 ```
 
 SNA route를 노출하는 Hono HTTP application을 생성합니다. OpenAPI app factory로 위임하므로 반환된 app에는 generated OpenAPI metadata와 `/docs`의 Swagger UI가 포함됩니다.
 
 `sessionManager`를 생략하면 server가 하나를 생성합니다. HTTP route와 WebSocket client가 같은 session state를 공유해야 하거나 host가 lifecycle event에 직접 접근해야 한다면 manager를 직접 만들어 전달하십시오.
+
+인증은 기본으로 켜져 있습니다. `authToken`을 전달하거나 `SNA_AUTH_TOKEN`을
+설정해야 하며, `GET /health`만 공개 상태로 남습니다. `unsafeDisableAuth`는
+격리된 테스트나 문서 생성에만 사용하고 host app에서는 쓰지 않습니다.
+`allowedOrigins`는 token 검증 전에 browser `Origin` 값을 필터링하며,
+`Origin`을 보내지 않는 native client는 허용됩니다.
 
 ## `attachWebSocket(server, sessionManager, options?)`
 
@@ -54,6 +61,10 @@ const wss = attachWebSocket(httpServer, sessionManager, { authToken, allowedOrig
 ```
 
 기존 Node HTTP server의 `/ws` upgrade path에 WebSocket server를 붙입니다. `createSnaApp`에 전달한 것과 같은 `SessionManager`를 사용하십시오. 그렇지 않으면 HTTP command와 WebSocket subscription이 서로 다른 session state를 보게 됩니다.
+
+`createSnaApp`에 사용한 것과 같은 `authToken`과 `allowedOrigins`를 전달합니다.
+TypeScript client는 browser upgrade를 `?token=...`으로 인증합니다. Native
+client는 `Authorization: Bearer ...` 또는 `X-SNA-Token`도 보낼 수 있습니다.
 
 WebSocket server가 push하는 message:
 

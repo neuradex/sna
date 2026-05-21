@@ -21,6 +21,19 @@ When the server is running:
 
 Replace `3099` with whatever port `startSnaServer({ port })` returned.
 
+## Authentication contract
+
+The runtime spec includes `components.securitySchemes.bearerAuth` and
+sets `security: [{ bearerAuth: [] }]` at the document level. `GET /health`
+is the only public operation and is marked with `security: []`.
+Protected operations include shared `401` and `403` responses using the
+standard error envelope.
+
+Direct access to `/openapi.json`, `/docs`, and `/spec` goes through the
+same auth middleware as other runtime routes. Static docs generation uses
+`unsafeDisableAuth` only inside the docs build script so the published
+reference can be generated without a live secret.
+
 ## Use cases
 
 - **Generate clients in other languages.** Point any OpenAPI codegen

@@ -42,6 +42,18 @@ const client = new SnaClient({
 | `localhost:3099` | `http://localhost:3099` | `ws://localhost:3099/ws` |
 | `https://sna.example.com` | `https://sna.example.com` | `wss://sna.example.com/ws` |
 
+## Authentication behavior
+
+When `authToken` is present, HTTP and SSE requests send
+`Authorization: Bearer <authToken>`. WebSocket connections attach the
+same token as `?token=<authToken>` so browser runtimes can authenticate
+the upgrade. Keep `baseUrl` and `authToken` paired by passing the
+launcher's `handle.connection` object.
+
+`401` means the token is missing or does not match the server. `403`
+means the request came from a browser `Origin` that is not listed in the
+server's `allowedOrigins`.
+
 **Example**
 
 ```ts

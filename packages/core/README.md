@@ -8,8 +8,8 @@ Your app → SNA server → spawn(agentic CLI runtime) → events back over WS
 
 ## What's inside
 
-- **HTTP server (`createSnaApp`)** — Hono app (built on `@hono/zod-openapi`) with `/agent/*`, `/chat/*`, `/health` routes. Single source of truth for response shapes via `server/api-types.ts`. Live OpenAPI 3.1 spec published at `/openapi.json`, with Swagger UI at `/docs` and a plain-text viewer at `/spec`.
-- **WebSocket handler (`attachWebSocket`)** — Mounts at `/ws`. Wraps the full HTTP API plus push channels (`agent.event`, `sessions.snapshot`, `permission.request`, `session.lifecycle`, `session.state-changed`, `session.config-changed`).
+- **HTTP server (`createSnaApp`)**: Hono app (built on `@hono/zod-openapi`) with `/agent/*`, `/chat/*`, `/health` routes. Single source of truth for response shapes via `server/api-types.ts`. Live OpenAPI 3.1 spec published at `/openapi.json`, with Swagger UI at `/docs` and a plain-text viewer at `/spec`. All runtime HTTP routes except `GET /health` require bearer auth.
+- **WebSocket handler (`attachWebSocket`)**: Mounts at `/ws`. Wraps the full HTTP API plus push channels (`agent.event`, `sessions.snapshot`, `permission.request`, `session.lifecycle`, `session.state-changed`, `session.config-changed`). Uses the same auth token as HTTP.
 - **`SessionManager`** — Multi-session lifecycle, per-session event buffer, lifecycle/state/config pub/sub, permission-request bridging, `runtime_sessions` chain for per-mutation history.
 - **Providers** — `ClaudeCodeProvider`, `CodexProvider`, `OpenCodeProvider`, `GrokProvider`, and `CursorProvider`, all exposing a uniform `AgentProcess` interface (`send`, `setModel`, `setPermissionMode`, `interrupt`, `kill`, `applyPatch`, `respondToPermission`). Codex and OpenCode are pooled through `RuntimePool`; the others are stateless per-session.
 - **Canonical conversation model** — `chat_messages` rows split a message into orthogonal `actor` × `kind` axes. `history/canonical.ts` rebuilds blocks; `history/{claude-code,codex,opencode}.ts` adapters convert canonical → native wire format.
@@ -48,8 +48,10 @@ const sna = await startSnaServer({
 Launchers bind to `127.0.0.1` by default, generate a per-server
 `authToken`, and tag sessions with `appId`. Use the returned
 `sna.connection` object with `SnaClient` or `SnaProvider` so consumers do not
-handle the token separately. Browser renderer origins are rejected unless they
-are listed in `allowedOrigins`. Direct standalone server launches are for
+handle the token separately. HTTP and SSE calls send the token as
+`Authorization: Bearer <authToken>`, and browser WebSocket upgrades use
+`/ws?token=<authToken>`. Browser renderer origins are rejected unless they are
+listed in `allowedOrigins`. Direct standalone server launches are for
 development/debugging and must provide `SNA_AUTH_TOKEN` explicitly.
 
 For Electron, use `@sna-sdk/core/electron` and add `asarUnpack: ["node_modules/@sna-sdk/core/**"]`.

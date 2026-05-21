@@ -100,7 +100,7 @@ client.disconnect();
 sna.stop();
 ```
 
-> Launchers bind to `127.0.0.1` by default, generate an auth token, and tag sessions with `appId`. SDK clients should pass the returned `sna.connection` object instead of handling the token separately. Direct standalone server usage is intended for development/debugging and must set `SNA_AUTH_TOKEN` explicitly.
+> Launchers bind to `127.0.0.1` by default, generate an auth token, and tag sessions with `appId`. SDK clients should pass the returned `sna.connection` object instead of handling the token separately. Protected HTTP and SSE routes use `Authorization: Bearer <authToken>`, and browser WebSocket upgrades use `/ws?token=<authToken>`. Direct standalone server usage is intended for development/debugging and must set `SNA_AUTH_TOKEN` explicitly.
 
 ### As a React app
 

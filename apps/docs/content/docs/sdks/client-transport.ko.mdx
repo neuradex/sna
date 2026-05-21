@@ -42,6 +42,17 @@ const client = new SnaClient({
 | `localhost:3099` | `http://localhost:3099` | `ws://localhost:3099/ws` |
 | `https://sna.example.com` | `https://sna.example.com` | `wss://sna.example.com/ws` |
 
+## 인증 동작
+
+`authToken`이 있으면 HTTP와 SSE 요청은
+`Authorization: Bearer <authToken>`을 보냅니다. WebSocket 연결은 browser
+runtime도 upgrade를 인증할 수 있도록 같은 토큰을 `?token=<authToken>`으로
+붙입니다. `baseUrl`과 `authToken`이 어긋나지 않도록 launcher의
+`handle.connection` object를 전달하는 방식이 가장 안전합니다.
+
+`401`은 토큰이 없거나 서버와 맞지 않는다는 뜻입니다. `403`은 요청이 서버의
+`allowedOrigins`에 없는 browser `Origin`에서 왔다는 뜻입니다.
+
 **Example**
 
 ```ts

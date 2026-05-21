@@ -6,6 +6,18 @@ icon: Network
 
 HTTP API は表面別にまとまっています。以下の各パスはエンドポイント別の詳細仕様ページへリンクします。
 
+## 認証
+
+`GET /health` は公開されています。SNA ランタイムのその他すべてのルートは
+`/api/sna-port`、SSE ルート、chat image 取得も含めて
+`Authorization: Bearer <authToken>` を要求します。トークンがない場合や
+一致しない場合は `401`、許可されていない browser origin は `403` を返します。
+
+SDK が管理する host では、`handle.connection` を `SnaClient` または
+`SnaProvider` に渡します。別の app-owned discovery endpoint が信頼済み
+renderer に `{ baseUrl, authToken }` を返すことはできますが、SNA ランタイム
+自身の `/api/sna-port` ルートは引き続き保護されます。
+
 ## システム
 
 | メソッド | パス | 用途 |
