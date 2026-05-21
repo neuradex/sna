@@ -4,9 +4,9 @@ description: "SNA를 임베드하기 위한 런타임, 서버, 런처, 설정 �
 ---
 # Core SDK
 
-`@sna-sdk/core`는 가장 낮은 수준의 패키지입니다. 다른 프로세스 안에서 SNA를 실행하거나, 자체 서버를 통해 SNA를 노출하거나, provider/runtime primitive가 직접 필요할 때 사용합니다.
+`@sna-sdk/core`는 가장 낮은 수준의 패키지입니다. 다른 프로세스 안에서 SNA를 실행하거나, 자체 서버를 통해 SNA를 노출하거나, runtime-adapter primitive가 직접 필요할 때 사용합니다.
 
-Core는 React를 가정하지 않으며 브라우저 클라이언트도 필요로 하지 않습니다. 서버 측 런타임 계약을 담당합니다.
+Core는 React를 가정하지 않으며 브라우저 클라이언트도 필요로 하지 않습니다. 설정, runtime process lifecycle, HTTP/WS server assembly, SQLite 기반 history, Node/Electron host용 launcher를 포함한 서버 측 런타임 계약을 담당합니다.
 
 ## Install
 
@@ -14,9 +14,28 @@ Core는 React를 가정하지 않으며 브라우저 클라이언트도 필요�
 pnpm add @sna-sdk/core
 ~~~
 
+Host application에는 `better-sqlite3`도 설치해야 합니다. Electron app은 native binding을 runtime에 맞게 다시 빌드해야 하는 경우가 많기 때문에 이 dependency는 peer dependency로 둡니다.
+
 ## Public surfaces
 
 - [core-runtime](/ko/docs/sdks/core-runtime)
 - [core-server](/ko/docs/sdks/core-server)
 - [core-launchers](/ko/docs/sdks/core-launchers)
 - [core-config](/ko/docs/sdks/core-config)
+
+## Import map
+
+| import path | 사용처 |
+| --- | --- |
+| `@sna-sdk/core` | Runtime helper, shared type, configuration helper, runtime-neutral data shape. |
+| `@sna-sdk/core/server` | SNA HTTP app 생성, WebSocket 연결, server-side session 관리. |
+| `@sna-sdk/core/node` | 일반 Node process에서 standalone SNA server 시작. |
+| `@sna-sdk/core/electron` | Electron에서 SNA 시작. Packaged app path 처리와 in-process mode를 포함합니다. |
+| `@sna-sdk/core/db/schema` | 직접 migration 또는 inspection이 필요한 host를 위한 database schema helper. |
+| `@sna-sdk/core/providers` | 고급 runtime-adapter primitive. 대부분의 app은 server 또는 client API를 쓰는 편이 좋습니다. |
+
+## Core를 선택할 때
+
+Host가 local server lifecycle을 직접 소유해야 한다면 Core를 선택합니다. Desktop app, internal CLI, test harness, 자체 HTTP server 위에서 SNA를 노출하는 custom backend가 대표적인 예입니다.
+
+이미 server가 실행 중이고 typed HTTP, WebSocket, SSE 접근만 필요하다면 `@sna-sdk/client`를 사용하십시오. React UI 안에서 통합한다면 `@sna-sdk/react`가 더 적합합니다.

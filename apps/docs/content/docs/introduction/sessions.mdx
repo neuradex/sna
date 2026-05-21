@@ -26,7 +26,7 @@ POST /agent/start         → mount initial RuntimeSession, spawn process
 POST /agent/send          → send message, events flow
 POST /agent/set-model     → in-place override OR new RuntimeSession
 PATCH /agent/session      → unified mutator for {cwd, model, permissionMode}
-POST /agent/resume        → rebuild provider-native history, respawn
+POST /agent/resume        → rebuild runtime-native history, respawn
 POST /agent/restart       → respawn with same config (kept verbatim)
 POST /agent/kill          → tear down process (session record stays)
 DELETE /agent/sessions/:id → drop session + history
@@ -35,14 +35,14 @@ DELETE /agent/sessions/:id → drop session + history
 ## PATCH semantics
 
 `PATCH /agent/session` is the unified mutator. The server applies each
-field through the active provider's `applyPatch()` hook, which decides
+field through the active runtime adapter's `applyPatch()` hook, which decides
 in-place vs respawn-with-history-replay:
 
-| Field | claude-code | codex | opencode |
-|-------|-------------|-------|----------|
-| `model` | in-place | per-turn override | in-place |
-| `permissionMode` | in-place | per-turn override | in-place |
-| `cwd` | respawn + replay | in-place (per-thread cwd) | respawn |
+| Field | claude-code | codex | opencode | grok / cursor |
+|-------|-------------|-------|----------|---------------|
+| `model` | in-place | per-turn override | in-place | respawn + replay |
+| `permissionMode` | in-place | per-turn override | in-place | in-place (SNA gate) |
+| `cwd` | respawn + replay | in-place (per-thread cwd) | respawn | respawn + replay |
 
 The response's `applied` field tells you which path was taken so
 clients can show a "reloading…" affordance only when needed.

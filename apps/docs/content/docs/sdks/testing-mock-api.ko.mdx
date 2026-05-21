@@ -1,26 +1,27 @@
 ---
 title: "Testing Mock API"
-description: "startMockAnthropicServer, runOneshot, MockServer의 사용법."
+description: "Anthropic/OpenAI mock API, runOneshot, mock server type의 사용법."
 ---
 
 # Testing Mock API
 
-## `startMockAnthropicServer(options?)`
+## `startMockAnthropicServer()`
 
 **Signature**
 
 ```ts
-const server = await startMockAnthropicServer(options?: { port?: number }): Promise<MockServer>
+declare function startMockAnthropicServer(): Promise<MockServer>;
 ```
 
 **Returns**
 
 ```ts
 type MockServer = {
-  url: string;
   port: number;
-  logs: MockLogEntry[];
-  close: () => Promise<void>;
+  server: http.Server;
+  close: () => void;
+  requests: Array<{ model: string; messages: unknown[]; stream: boolean; timestamp: string }>;
+  onLog: (handler: (line: string) => void) => void;
 };
 ```
 
@@ -28,9 +29,19 @@ type MockServer = {
 
 ```ts
 type MockLogEntry = {
-  request: unknown;
-  response: unknown;
-  timestamp: number;
+  ts: string;
+  type: "request" | "response" | "error" | "info";
+  method?: string;
+  url?: string;
+  model?: string;
+  stream?: boolean;
+  messageCount?: number;
+  userText?: string;
+  systemPromptLength?: number;
+  replyText?: string;
+  requestBody?: unknown;
+  error?: string;
+  message?: string;
 };
 ```
 
@@ -40,10 +51,67 @@ type MockLogEntry = {
 import { startMockAnthropicServer } from "@sna-sdk/testing";
 
 const mock = await startMockAnthropicServer();
-process.env.ANTHROPIC_BASE_URL = mock.url;
+process.env.ANTHROPIC_BASE_URL = `http://localhost:${mock.port}`;
+process.env.ANTHROPIC_API_KEY = "sk-test";
+
+mock.onLog((line) => {
+  process.stdout.write(`${line}\n`);
+});
 
 try {
   // Anthropic-compatible API를 기대하는 코드를 실행합니다.
+} finally {
+  mock.close();
+}
+```
+
+**Behavior**
+
+- OS가 고른 사용 가능한 port에서 시작합니다. 현재 구현은 fixed port option을 받지 않습니다.
+- Anthropic-compatible `POST /v1/messages` endpoint를 제공합니다.
+- CORS preflight request를 지원합니다.
+- Parsed request를 `mock.requests`에 기록합니다.
+- `mock.onLog`로 JSONL log line을 emit합니다.
+- 일반 text는 마지막 user text를 뒤집은 값으로 응답합니다. Realistic한 답변이 아니라 deterministic test fixture입니다.
+- Tool이 선언되어 있고 최신 user text에 `[tool:Name]`이 있으면 해당 tool의 `tool_use` block을 반환하거나 stream합니다.
+- Streaming SSE와 non-streaming JSON response를 모두 지원합니다.
+
+## `startMockOpenAIServer(options?)`
+
+**Signature**
+
+```ts
+declare function startMockOpenAIServer(options?: MockOpenAIOptions): Promise<MockOpenAIServer>;
+```
+
+**Options**
+
+```ts
+type MockOpenAIOptions = {
+  models?: Array<{ id: string; owned_by?: string }>;
+  responseText?: string | ((ctx: MockOpenAIResponseContext) => string);
+  chunkSize?: number;
+};
+```
+
+**Example**
+
+```ts
+import { startMockOpenAIServer } from "@sna-sdk/testing";
+
+const mock = await startMockOpenAIServer({
+  models: [{ id: "gpt-5.4", owned_by: "openai" }],
+  responseText: ({ endpoint, userText }) => `${endpoint}: ${userText}`,
+});
+
+try {
+  const res = await fetch(`${mock.url}/v1/responses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer sk-test" },
+    body: JSON.stringify({ model: "gpt-5.4", input: "hello" }),
+  });
+  console.log(await res.json());
+  console.log(mock.requests[0]);
 } finally {
   await mock.close();
 }
@@ -51,19 +119,32 @@ try {
 
 **Behavior**
 
-- `/v1/messages` endpoint를 제공합니다.
-- 일반 user text는 deterministic response로 처리됩니다.
-- tools가 선언되어 있고 prompt에 `[tool:Name]`이 있으면 tool_use event를 만들 수 있습니다.
+- 사용 가능한 local port에서 시작하고 `mock.url`을 노출합니다.
+- `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/responses`를 제공합니다.
+- authorization, model, stream flag, user text, system prompt 길이, raw request body를 포함해 parsed request를 기록합니다.
+- `mock.onLog`로 JSONL log line을 emit합니다.
+- Chat completions와 responses 모두 non-streaming JSON 및 streaming SSE를 지원합니다.
+- 기본 응답은 마지막 user text를 뒤집은 값입니다. 고정 응답이나 요청별 응답은 `responseText`로 지정하십시오.
 
-## `runOneshot(options)`
+## `runOneshot(cliArgs?)`
 
 **Signature**
 
 ```ts
-await runOneshot(options: Record<string, unknown>): Promise<unknown>
+declare function runOneshot(cliArgs?: string[]): Promise<void>;
 ```
 
-**Use it when** 테스트에서 CLI 전체를 띄우지 않고 one-shot execution path만 검증하고 싶을 때 사용합니다.
+**Use it when** full interactive CLI harness를 띄우지 않고 mock Anthropic API에 연결된 Claude 실행만 검증하고 싶을 때 사용합니다.
+
+`runOneshot`은 mock server를 시작하고, `ANTHROPIC_BASE_URL`을 그 server로 지정한 뒤, 전달된 CLI argument로 `claude`를 실행합니다. stdout/stderr를 capture하고 Claude의 exit code로 process를 종료합니다. `CLAUDE_CONFIG_DIR`은 `.sna/mock-claude-oneshot`을 사용합니다.
+
+Written files:
+
+| File | Contents |
+| --- | --- |
+| `.sna/mock-claude-stdout.log` | Captured Claude stdout. |
+| `.sna/mock-claude-stderr.log` | Captured Claude stderr. |
+| `.sna/mock-claude-oneshot/` | Temporary Claude config directory. |
 
 ## Instance helpers
 

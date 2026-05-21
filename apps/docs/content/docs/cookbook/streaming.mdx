@@ -26,9 +26,10 @@ await completion({
 The Promise still resolves with the final concatenated text plus
 usage; `onDelta` is a side channel, not a replacement.
 
-Wired for `claude-code` and `codex` (both pool and ephemeral). On
-OpenCode the SDK call is single-shot today, so the callback is a
-documented no-op there.
+Wired for `claude-code`, `codex`, `opencode`, `grok-build`, and
+`cursor`. OpenCode switches to `prompt_async` plus the event stream when
+`onDelta` is present; without it, `complete()` keeps the lower-overhead
+sync SDK path.
 
 ## 2. In-process, full event stream: `runOnce({ onEvent })`
 

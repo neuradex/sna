@@ -1,13 +1,13 @@
 ---
 title: 権限フロー
-description: プロバイダごとに分岐しない承認 UI 配線です。
+description: ランタイム別の分岐なしで承認 UI を接続します。
 icon: ShieldCheck
 ---
 
-ユーザーに見えるパターンはプロバイダ横断で同じです。コンシューマアプリ
-が権限イベントを購読し、ダイアログを出し、評決を post-back します。
-SNA が Claude の PreToolUse フックと Codex の JSON-RPC 承認を 1 つの
-イベントの背後に隠します。
+ユーザーに見える承認フローは、ランタイムが変わっても同じです。アプリが
+権限イベントを購読し、ダイアログを出し、決定を POST します。SNA は
+Claude の PreToolUse フックと Codex の JSON-RPC 承認を 1 つのイベントに
+そろえます。
 
 ## サーバ側
 
@@ -32,7 +32,7 @@ client.permissions.onRequest(async ({ session, tool, input, decisionId }) => {
 ```
 
 同じコールバックが Claude PreToolUse フックと Codex `approval/request`
-通知の両方に発火します。
+通知の両方で呼ばれます。
 
 ## Safe-tool allowlist
 
@@ -48,13 +48,13 @@ await client.agent.start(sessionId, {
 ```
 
 パターンは Claude Code の tool-pattern 構文に従います。同じ文字列リスト
-がプロバイダ別に正規化されるので、コンシューマ設定をプロバイダで
+がランタイム別に正規化されるので、アプリ設定をランタイムで
 分岐させる必要はありません。
 
 ## レンダラパターン (Electron / React)
 
-バンドル済みの `<SnaChatUI>` は権限ダイアログを即座に提供します。
-アプリの周りに `<SnaProvider>` を巻けばプロンプトが自動的に流れます。
+バンドル済みの `<SnaChatUI>` は権限ダイアログを標準で提供します。
+アプリの周りに `<SnaProvider>` を巻けばプロンプトが自動的に届きます。
 カスタム UI を使う場合は、次のパターンを参考にしてください。
 
 ```tsx

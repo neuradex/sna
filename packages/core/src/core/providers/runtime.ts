@@ -16,6 +16,15 @@
 import type { ChildProcess } from "child_process";
 import { logger } from "../../lib/logger.js";
 
+function stableRecordString(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const sorted: Record<string, unknown> = {};
+  for (const k of Object.keys(value as Record<string, unknown>).sort()) {
+    sorted[k] = (value as Record<string, unknown>)[k];
+  }
+  return JSON.stringify(sorted);
+}
+
 // ── RuntimeHandle ──────────────────────────────────────────────────────
 
 /**
@@ -234,9 +243,7 @@ export class RuntimePool {
       // Top-level key sort gives a stable string under arbitrary insertion
       // order. Inner objects are stringified normally — any nested change
       // (env, args, headers) flips the hash.
-      const sorted: Record<string, unknown> = {};
-      for (const k of Object.keys(config.mcp).sort()) sorted[k] = config.mcp[k];
-      mcpHash = JSON.stringify(sorted);
+      mcpHash = stableRecordString(config.mcp) ?? undefined;
     }
     if (mcpHash) parts.push(`mcp=${mcpHash}`);
     if (config.settingsHash) parts.push(`settings=${config.settingsHash}`);
@@ -258,6 +265,11 @@ export class RuntimePool {
     // needs separate daemons because it's per-CODEX_HOME.
     if (config.providerOptions?.configHash) {
       parts.push(`configHash=${config.providerOptions.configHash}`);
+    }
+
+    const codexConfig = stableRecordString(config.providerOptions?.config);
+    if (codexConfig) {
+      parts.push(`codexConfig=${codexConfig}`);
     }
 
     // OpenCode-specific: caller-provided external server URL routes all

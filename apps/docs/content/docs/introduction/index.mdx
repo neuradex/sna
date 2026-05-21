@@ -9,6 +9,26 @@ you'll have an SNA server running in your app, a session attached to
 Claude Code (or Codex / OpenCode), and tokens streaming back over
 WebSocket.
 
+## Build agentic applications with SNA
+
+SNA is a runtime layer for **agentic applications**: products where a
+long-running agent is part of the application, carries session history,
+uses tools, asks for permission, and streams state back to the product.
+
+That means you can build:
+
+- **Sessionful product agents** that keep project context and continue
+  across turns instead of answering one prompt at a time.
+- **Tool-using workflows** where the agent can call the same capabilities
+  its CLI runtime already knows how to use.
+- **Human-in-the-loop applications** with permission requests surfaced
+  through your own UI.
+- **Runtime-harness-backed agents** that use the orchestration layer
+  tuned by Claude Code, Codex, or OpenCode instead of rebuilding that
+  loop from raw model APIs.
+- **Multi-runtime products** where the product API stays stable while
+  the underlying agent runtime can change.
+
 ## What you're about to build
 
 SNA is a small server you embed in your app. You ask it to **start a
@@ -125,4 +145,4 @@ streaming flavors (in-process callback, SSE, full event stream).
 
 - **[What is SNA?](/docs/introduction/what-is-sna)**: the conceptual deep dive.
 - **[Embedding](/docs/introduction/embedding)**: run SNA inside Electron.
-- **[Concepts](/docs/introduction/concepts)**: sessions, history, providers, permissions.
+- **[Concepts](/docs/introduction/concepts)**: sessions, history, runtimes, permissions.

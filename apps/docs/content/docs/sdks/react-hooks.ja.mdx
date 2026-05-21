@@ -1,14 +1,16 @@
 ---
 title: "React hooks"
-description: "useAgent、useSessionManager、useResponsiveChat の入力と返り値。"
+description: "useAgent、useSessionManager、useResponsiveChat の入力と戻り値。"
 ---
 
 # React hooks
 
+React hook は SNA HTTP API を直接使います。デフォルトでは `SnaProvider` の `apiUrl` と `sessionId` を読みますが、custom routing が必要な host は hook option で override できます。
+
 ## `useAgent(options?)`
 
 ```ts
-const agent = useAgent(options?: {
+declare function useAgent(options?: {
   sessionId?: string;
   baseUrl?: string;
   provider?: string;
@@ -22,27 +24,112 @@ const agent = useAgent(options?: {
   onComplete?: (event: AgentEvent) => void;
   onError?: (event: AgentEvent) => void;
   onInit?: (event: AgentEvent) => void;
-});
+}): UseAgentResult;
 ```
 
-`{ connected, alive, start, send, kill, completion }` を返します。この hook は mount 時に SSE event stream へ接続します。`start` は `/agent/start`、`send` は `/agent/send`、`completion` は `/agent/completion` を呼びます。
+Returns:
+
+```ts
+{
+  connected: boolean;
+  alive: boolean;
+  start: (prompt?: string) => Promise<any>;
+  send: (message: string) => Promise<any>;
+  kill: () => Promise<void>;
+  completion: (opts: {
+    prompt: string;
+    model?: string;
+    systemPrompt?: string;
+    reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
+    providerOptions?: Record<string, unknown>;
+  }) => Promise<any>;
+}
+```
+
+### Options
+
+| Field | Default | 説明 |
+| --- | --- | --- |
+| `sessionId` | context `sessionId` | 接続する agent session。 |
+| `baseUrl` | `${apiUrl}/agent` | agent HTTP API base URL。 |
+| `provider` | `claude-code` | start/completion に使う runtime id。 |
+| `permissionMode` | runtime default | tool permission mode。 |
+| `reasoningLevel` | runtime default | runtime-neutral reasoning effort。 |
+| `providerOptions` | none | ランタイム別 option。Codex の `serviceTier`、`profile`、`config` などを渡します。 |
+
+### 動作
+
+| 項目 | 説明 |
+| --- | --- |
+| Event transport | `/agent/events?session=<id>&since=<cursor>` に `EventSource` を開きます。 |
+| Cursor 処理 | 先に `/agent/status` を読み、現在の event count から始めるため、initial mount では過去 event を skip します。 |
+| Reconnect | SSE error が起きると stream を閉じ、`3000ms` 後に再接続します。 |
+| Runtime default | `provider` のデフォルトは `claude-code` です。 |
+| Session default | `sessionId` は `SnaContext` から取得します。`SnaProvider` のデフォルトは `default` です。 |
+| `alive` | 初期化時に `/agent/status` から設定し、`start` または `send` が local で成功すると optimistic に `true` にします。 |
+
+### Methods
+
+| Method | HTTP route | Notes |
+| --- | --- | --- |
+| `start(prompt?)` | `POST /agent/start?session=<id>` | `provider`、`prompt`、`permissionMode`、`reasoningLevel`、`providerOptions` を送ります。 |
+| `send(message)` | `POST /agent/send?session=<id>` | Plain text message を送ります。この hook は image attachment を公開しないため、multimodal send には `SnaClient.agent.send` を使ってください。 |
+| `kill()` | `POST /agent/kill?session=<id>` | Runtime を止め、`alive` を `false` にします。 |
+| `completion(opts)` | `POST /agent/completion` | Hook の runtime と reasoning default を使って stateless completion request を送ります。 |
+
+### Event callbacks
+
+`onEvent` は parsed `AgentEvent` をすべて受け取ります。より狭い callback は event type ごとの convenience filter です。
+
+| Callback | Event type |
+| --- | --- |
+| `onInit` | `init` |
+| `onThinking` | `thinking` |
+| `onAssistant` | `assistant` |
+| `onToolResult` | `tool_result` |
+| `onComplete` | `complete` |
+| `onError` | `error` |
+
+この hook は `SnaClient` を wrap しておらず、WebSocket subscription も使いません。Permission push handling、`runOnceStream`、message history pagination、WebSocket reconnect resubscription が必要な場合は `@sna-sdk/client` を使ってください。
 
 ## `useSessionManager(pollInterval?)`
 
 ```ts
-const manager = useSessionManager(pollInterval?: number);
+declare function useSessionManager(pollInterval?: number): UseSessionManagerResult;
 ```
 
-`{ sessions, loading, createSession, killSession, deleteSession, refresh }` を返します。`pollInterval` の default は `3000` です。polling を無効にする場合は `0` を渡してください。
+Returns:
+
+```ts
+{
+  sessions: SessionInfo[];
+  loading: boolean;
+  createSession: (opts?: { label?: string; cwd?: string }) => Promise<string | null>;
+  killSession: (id: string) => Promise<void>;
+  deleteSession: (id: string) => Promise<void>;
+  refresh: () => Promise<void>;
+}
+```
+
+`pollInterval` のデフォルトは `3000` です。Polling を止めたい場合は `0` を渡してください。
+
+| Method | Route | Notes |
+| --- | --- | --- |
+| `refresh()` | `GET /agent/sessions` | Serialized response が変わった場合だけ local state を置き換えます。 |
+| `createSession(opts?)` | `POST /agent/sessions` | `{ label?, cwd? }` を受け取り、新しい session ID または `null` を返します。 |
+| `killSession(id)` | `POST /agent/kill?session=<id>` | Agent process を停止しますが、session record は残します。 |
+| `deleteSession(id)` | `DELETE /agent/sessions/<id>` | Server に依頼して session record を削除します。 |
+
+単純な React state で十分ならこの hook を使ってください。WebSocket snapshot、metadata update、より厳密な command acknowledgement が必要なら `SnaClient.sessions` を使ってください。
 
 ## `useResponsiveChat()`
 
 ```ts
-const { mode } = useResponsiveChat(): { mode: "side-by-side" | "overlay" | "fullscreen" }
+declare function useResponsiveChat(): { mode: "side-by-side" | "overlay" | "fullscreen" };
 ```
 
 | Width | Mode | Meaning |
 | --- | --- | --- |
-| `>= 1024px` | `side-by-side` | chat panel を main content の横に置きます。 |
-| `768px - 1023px` | `overlay` | chat panel を content の上に重ねます。 |
+| `>= 1024px` | `side-by-side` | main content の横に chat panel を置きます。 |
+| `768px - 1023px` | `overlay` | content の上に chat panel を重ねます。 |
 | `< 768px` | `fullscreen` | chat が viewport 全体を覆います。 |

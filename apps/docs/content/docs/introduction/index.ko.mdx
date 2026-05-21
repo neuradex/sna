@@ -1,20 +1,41 @@
 ---
-title: Introduction
-description: SNA를 이해하고, 서버를 띄우고, 세션을 열어 첫 프롬프트를 보냅니다.
+title: 시작하기
+description: SNA의 구조를 이해하고 서버를 띄운 뒤 첫 세션에 프롬프트를 보냅니다.
 icon: Rocket
 ---
 
-아무것도 없는 상태에서 라이브 이벤트를 받기까지의 가장 짧은 경로입니다.
-이 페이지를 따라가면 앱 안에서 SNA 서버를 실행하고, Claude Code 또는
-Codex / OpenCode 세션을 열고, WebSocket으로 토큰을 스트리밍할 수 있습니다.
+빈 프로젝트에서 라이브 이벤트를 받기까지의 가장 짧은 경로입니다.
+이 페이지에서는 앱 안에서 SNA 서버를 실행하고, Claude Code 또는
+Codex / OpenCode 세션을 열고, WebSocket으로 토큰을 스트리밍합니다.
+
+## SNA로 에이전틱 애플리케이션 만들기
+
+SNA는 **에이전틱 애플리케이션**을 만들기 위한 런타임 계층입니다. 여기서
+에이전트는 단발 응답을 만드는 모델 호출이 아니라, 제품 안에서 세션
+히스토리를 이어가고, 툴을 사용하고, 권한을 요청하고, 상태를 UI로
+스트리밍하는 실행 주체입니다.
+
+SNA로 만들 수 있는 것은 이런 쪽에 가깝습니다.
+
+- **세션을 가진 제품 에이전트.** 매번 한 프롬프트에 답하는 대신 프로젝트
+  맥락을 유지하고 여러 턴에 걸쳐 이어지는 에이전트.
+- **툴을 사용하는 워크플로.** 각 CLI 런타임이 이미 다루는 툴 사용 능력을
+  제품 기능 안으로 끌어오는 흐름.
+- **사람 승인이 들어가는 애플리케이션.** 권한 요청과 승인을 제품 UI 안에서
+  직접 다루는 에이전트 경험.
+- **Runtime harness 기반 에이전트.** 낮은 수준의 모델 API 위에 루프를 다시
+  만들지 않고 Claude Code, Codex, OpenCode가 모델에 맞춰 다듬어 둔
+  오케스트레이션 계층을 사용하는 에이전트.
+- **멀티 런타임 제품.** 제품 API는 안정적으로 유지하면서 아래의 에이전트
+  런타임은 바꿀 수 있는 구조.
 
 ## 무엇을 만드는지
 
-SNA는 앱에 임베드하는 작은 서버입니다. **세션 시작**을 요청하면
-서버가 에이전트 CLI를 자식 프로세스로 실행하고, 이를 하나의 HTTP +
-WebSocket API로 노출합니다. 소비자 앱에서는 일반 백엔드에 요청하는
-것처럼 보이지만, 실제 작업은 Claude Code / Codex / OpenCode 프로세스가
-수행합니다.
+SNA는 앱 안에 넣는 작은 런타임 서버입니다. **세션 시작**을 요청하면
+서버가 에이전트 CLI를 자식 프로세스로 실행하고, 그 프로세스를 하나의
+HTTP + WebSocket API로 노출합니다. 앱 입장에서는 일반 백엔드에 요청하는
+모양이지만, 실제 작업은 Claude Code / Codex / OpenCode 프로세스가
+처리합니다.
 
 ```
 your app
@@ -25,15 +46,15 @@ your app
 SNA server  ──spawn──►  claude | codex | opencode
 ```
 
-아래 5단계를 따라 진행하면 됩니다. 정규화된 히스토리, 런타임 교체,
-어트리뷰션 같은 설계 배경은 **[What is SNA?](/ko/docs/introduction/what-is-sna)** 를
-참고하세요.
+아래 5단계를 그대로 따라가면 됩니다. 정규화 히스토리, 런타임 교체,
+어트리뷰션 같은 설계 배경은 **[SNA가 뭔가요?](/ko/docs/introduction/what-is-sna)** 에서
+다룹니다.
 
 ## 사전 준비
 
-- **Node.js 20+**.
-- **`PATH`에 런타임 CLI 하나 이상**: `claude`, `codex`, `opencode` 중.
-- 패키지 매니저. 예시는 `pnpm`을 사용하지만 npm / yarn / bun도 사용할 수 있습니다.
+- **Node.js 20+**
+- **`PATH`에 런타임 CLI 하나 이상**: `claude`, `codex`, `opencode` 중 하나
+- 패키지 매니저. 예시는 `pnpm`이지만 npm / yarn / bun도 가능합니다.
 
 ## 1. 설치
 
@@ -41,7 +62,7 @@ SNA server  ──spawn──►  claude | codex | opencode
 pnpm add @sna-sdk/core @sna-sdk/client
 ```
 
-전체 사전 조건 + CLI 경로 오버라이드는 **[Install](/ko/docs/introduction/install)** 참고하세요.
+전체 사전 조건과 CLI 경로 오버라이드는 **[설치](/ko/docs/introduction/install)** 에 정리되어 있습니다.
 
 ## 2. 서버 부팅
 
@@ -56,8 +77,8 @@ const sna = await startSnaServer({
 });
 ```
 
-SNA 서버는 관리되는 자식 프로세스로 fork됩니다. `sna.port`에는 실제로
-바인딩된 포트가 들어갑니다. `port`를 `0`으로 지정하면 자동 할당되며,
+SNA 서버는 관리되는 자식 프로세스로 fork됩니다. `sna.port`에는 실제
+바인딩 포트가 들어갑니다. `port`를 `0`으로 지정하면 자동 할당되며,
 `sna.stop()`을 호출하면 SIGTERM으로 서버를 종료합니다.
 
 ## 3. 클라이언트 연결
@@ -117,11 +138,11 @@ const result = await completion({
 // result.text, result.usage, result.costUsd, result.durationMs
 ```
 
-세 가지 스트리밍 방식(인프로세스 콜백, SSE, 전체 이벤트 스트림)에 대해서는
-**[Cookbook → Streaming](/ko/docs/cookbook/streaming)** 참고하세요.
+세 가지 스트리밍 방식(인프로세스 콜백, SSE, 전체 이벤트 스트림)은
+**[Cookbook → Streaming](/ko/docs/cookbook/streaming)** 에서 비교합니다.
 
 ## 다음
 
-- **[What is SNA?](/ko/docs/introduction/what-is-sna)**: 개념 심화 설명.
-- **[Embedding](/ko/docs/introduction/embedding)**: Electron 안에서 실행하기.
-- **[Concepts](/ko/docs/introduction/concepts)**: 세션, 히스토리, 프로바이더, 권한.
+- **[SNA가 뭔가요?](/ko/docs/introduction/what-is-sna)**: 구조와 설계 배경.
+- **[임베딩](/ko/docs/introduction/embedding)**: Electron 안에서 실행하기.
+- **[핵심 모델](/ko/docs/introduction/concepts)**: 세션, 히스토리, 런타임, 권한.

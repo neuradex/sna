@@ -1,11 +1,11 @@
 ---
 title: 권한
-description: Claude Code와 Codex를 관통하는 통합 권한 흐름.
+description: Claude Code와 Codex의 권한 요청을 같은 흐름으로 다룹니다.
 icon: Lock
 ---
 
-Claude Code와 Codex 모두 툴 단위 권한 게이팅을 지원하지만, 프로토콜은
-서로 다릅니다. SNA는 양쪽을 하나의 API 뒤로 추상화합니다.
+Claude Code와 Codex 모두 툴 단위 권한 게이팅을 지원하지만 프로토콜은
+서로 다릅니다. SNA는 양쪽을 하나의 API로 맞춥니다.
 
 ## 흐름
 
@@ -13,7 +13,7 @@ Claude Code와 Codex 모두 툴 단위 권한 게이팅을 지원하지만, 프�
 에이전트가 툴 호출
    │
    ▼
-프로바이더가 권한 요청을 띄움
+런타임이 권한 요청 생성
    │
    ▼
 SessionManager가 `permission_needed` 이벤트 emit  ──► UI가 프롬프트 표시
@@ -25,19 +25,19 @@ UI가 POST /agent/permission-respond { approved: bool } 호출
 SessionManager가 pending 요청을 resolve
    │
    ▼
-프로바이더가 결정을 받아서 툴 실행 (또는 거부)
+런타임이 결정을 받아 툴 실행 (또는 거부)
 ```
 
-## 프로바이더별 배선
+## 런타임별 배선
 
 - **Claude Code**는 `PreToolUse` 훅을 씁니다. CLI가 각 툴 호출을
-  평가하기 위해 spawn하는 별도의 Node 프로세스. SNA는
+  평가하기 위해 별도의 Node 프로세스를 spawn합니다. SNA는
   `packages/core/dist/scripts/hook.js`를 같이 배포하는데, 이게 서버에
   blocking `permission-request`를 POST하고 응답을 기다립니다.
 - **Codex**는 stdio 위 JSON-RPC로 말하고 `approval/request` 알림을
   emit합니다. SNA는 `approval/respond`로 응답합니다.
 
-컨슈머 앱은 이 프로토콜 차이를 직접 보지 않습니다. 양쪽 모두 같은
+앱은 이 프로토콜 차이를 직접 보지 않습니다. 양쪽 모두 같은
 `permission_needed` 이벤트로 표면화되고, 같은
 `POST /agent/permission-respond` 엔드포인트로 응답합니다.
 
@@ -57,6 +57,6 @@ SessionManager가 pending 요청을 resolve
 ## Safe-tool allowlist
 
 설정된 allowlist에 매치되는 툴(Read, Glob, Grep, ListFiles 등)은
-권한 게이트를 완전히 건너뛴다: 이벤트도 없고 round-trip도 없습니다.
-allowlist는 프로바이더별이지만 정규화돼 있어 컨슈머 설정은 하나의
+권한 게이트를 완전히 건너뜁니다. 이벤트도 없고 round-trip도 없습니다.
+allowlist는 런타임별이지만 정규화돼 있어 앱 설정은 하나의
 리스트만 관리하면 됩니다.

@@ -1,11 +1,11 @@
 /**
  * OpenCodeProvider.complete() tests against the mock HTTP server.
  *
- * complete() is the one-shot path — no session manager, no SSE iteration.
- * The mock server's POST /session/:id/message handler returns a sync
- * AssistantMessage payload, which is what the SDK's session.prompt method
- * calls. Tests use `providerOptions.serverUrl` to short-circuit
- * createOpencodeServer (which would spawn the real opencode binary).
+ * complete() is the one-shot path — no session manager. Non-streaming calls
+ * use the SDK's session.prompt method. Streaming calls subscribe to OpenCode's
+ * SSE events and send the prompt through session.promptAsync. Tests use
+ * `providerOptions.serverUrl` to short-circuit createOpencodeServer (which
+ * would spawn the real opencode binary).
  */
 
 import { describe, it, before, after, beforeEach } from "node:test";
@@ -33,6 +33,34 @@ describe("OpenCodeProvider.complete() against mock server", () => {
     assert.equal(result.usage.cacheCreationTokens, 0);
     assert.ok(result.durationMs >= 0);
     assert.equal(result.model, "claude-sonnet-4-6");
+  });
+
+  it("streams onDelta chunks through prompt_async and resolves the final result", async () => {
+    const deltas: string[] = [];
+
+    const result = await provider.complete({
+      prompt: "stream this",
+      providerOptions: { serverUrl: mock.url },
+      onDelta: (delta) => {
+        deltas.push(delta);
+      },
+    });
+
+    assert.deepEqual(deltas, ["Hello", " world"]);
+    assert.equal(result.text, "Hello world");
+    assert.equal(result.usage.inputTokens, 10);
+    assert.equal(result.usage.outputTokens, 5);
+    assert.equal(result.costUsd, 0);
+    assert.equal(result.model, "claude-sonnet-4-6");
+
+    const asyncPrompts = mock.requestsFor((r) =>
+      r.method === "POST" && /\/session\/[^\/]+\/prompt_async(\?|$)/.test(r.url),
+    );
+    const syncPrompts = mock.requestsFor((r) =>
+      r.method === "POST" && /\/session\/[^\/]+\/message(\?|$)/.test(r.url),
+    );
+    assert.equal(asyncPrompts.length, 1);
+    assert.equal(syncPrompts.length, 0);
   });
 
   it("creates a fresh session per call and deletes it afterward", async () => {

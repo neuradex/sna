@@ -1,4 +1,5 @@
 import http from 'http';
+import http$1 from 'node:http';
 
 /**
  * Mock Anthropic Messages API server for testing.
@@ -42,6 +43,69 @@ interface MockLogEntry {
 declare function startMockAnthropicServer(): Promise<MockServer>;
 
 /**
+ * Mock OpenAI-compatible API server for deterministic runtime tests.
+ *
+ * Implements:
+ *   - GET  /v1/models
+ *   - POST /v1/chat/completions
+ *   - POST /v1/responses
+ *
+ * The default response reverses the last user text, matching the Anthropic
+ * mock's deterministic behavior. Tests can provide a fixed string or callback
+ * via `responseText` when they need exact output.
+ */
+
+interface MockOpenAIModel {
+    id: string;
+    object?: "model";
+    created?: number;
+    owned_by?: string;
+    [key: string]: unknown;
+}
+type MockOpenAIEndpoint = "models" | "chat.completions" | "responses" | "unknown";
+interface MockOpenAIRequest {
+    timestamp: string;
+    endpoint: MockOpenAIEndpoint;
+    method: string;
+    url: string;
+    authorization?: string;
+    model?: string;
+    stream?: boolean;
+    userText?: string;
+    systemPromptLength?: number;
+    requestBody?: any;
+}
+interface MockOpenAILogEntry extends MockOpenAIRequest {
+    type: "request" | "response" | "error" | "info";
+    replyText?: string;
+    error?: string;
+    message?: string;
+}
+interface MockOpenAIResponseContext {
+    endpoint: "chat.completions" | "responses";
+    requestBody: any;
+    model: string;
+    stream: boolean;
+    userText: string;
+    systemPrompt: string;
+}
+interface MockOpenAIOptions {
+    models?: MockOpenAIModel[];
+    responseText?: string | ((ctx: MockOpenAIResponseContext) => string);
+    chunkSize?: number;
+}
+interface MockOpenAIServer {
+    url: string;
+    port: number;
+    server: http$1.Server;
+    requests: MockOpenAIRequest[];
+    close: () => Promise<void>;
+    /** Set a JSONL log writer. Each call receives one JSON line string. */
+    onLog: (handler: (line: string) => void) => void;
+}
+declare function startMockOpenAIServer(options?: MockOpenAIOptions): Promise<MockOpenAIServer>;
+
+/**
  * sna tu claude:oneshot — auto mock API + run claude + dump all logs.
  *
  * Outputs:
@@ -77,4 +141,4 @@ declare function readInstanceMeta(name: string): InstanceMeta | null;
 declare function listInstances(): InstanceMeta[];
 declare function removeInstance(name: string): boolean;
 
-export { type InstanceMeta, type MockLogEntry, type MockServer, generateInstanceName, getInstanceDir, getInstancesDir, listInstances, readInstanceMeta, removeInstance, runOneshot, startMockAnthropicServer, writeInstanceMeta };
+export { type InstanceMeta, type MockLogEntry, type MockOpenAIEndpoint, type MockOpenAILogEntry, type MockOpenAIModel, type MockOpenAIOptions, type MockOpenAIRequest, type MockOpenAIResponseContext, type MockOpenAIServer, type MockServer, generateInstanceName, getInstanceDir, getInstancesDir, listInstances, readInstanceMeta, removeInstance, runOneshot, startMockAnthropicServer, startMockOpenAIServer, writeInstanceMeta };

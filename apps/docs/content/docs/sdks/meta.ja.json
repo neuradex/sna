@@ -1,6 +1,6 @@
 {
   "title": "SDK",
-  "description": "Core、client、React、testing パッケージのリファレンス。",
+  "description": "Core、client、React、testing パッケージの公開 API。",
   "icon": "Package",
   "root": true,
   "pages": [

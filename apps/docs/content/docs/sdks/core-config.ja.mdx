@@ -4,32 +4,66 @@ description: "`@sna-sdk/core` が公開する設定ヘルパーと環境変数�
 ---
 # Core 設定
 
-`getConfig`、`setConfig`、`resetConfig` は、アプリケーションが runtime configuration を参照または上書きする場合に使います。ホストされた process では環境変数が最も単純な設定方法です。
+`getConfig`、`setConfig`、`resetConfig` は、application が runtime configuration を参照または上書きするための API です。Hosted process の設定には environment variable が最も単純です。
+
+Configuration は次の順序で決まります。
+
+| 優先度 | source | 説明 |
+| --- | --- | --- |
+| 1 | SDK default | `packages/core/src/config.ts` に定義されています。 |
+| 2 | `SNA_*` environment variable | Standalone server process や Electron launcher に向いています。 |
+| 3 | `setConfig(partial)` | 現在の Node process に適用されます。In-process launcher もこの経路を使います。 |
+| 4 | per-call parameter | Route handler や runtime call で必要な field だけをさらに override できます。 |
+
 | 変数 | 意味 |
 | --- | --- |
-| `SNA_PORT` | 優先する server port です。 |
-| `SNA_MODEL` | デフォルト model 名です。 |
-| `SNA_PERMISSION_MODE` | デフォルト permission mode です。 |
-| `SNA_MAX_SESSIONS` | 同時 session の最大数です。 |
-| `SNA_DB_PATH` | 明示的な database path です。 |
-| `SNA_DATA_DIR` | DB path がない場合に使う SNA data directory です。 |
-| `SNA_PERMISSION_TIMEOUT_MS` | permission prompt timeout です。 |
-| `SNA_OMLX_BASE_URL` | OMLX 互換 base URL です。 |
+| `SNA_PORT` | 希望する server port。デフォルトは `3099` です。 |
+| `SNA_MODEL` | デフォルト model name。デフォルトは `claude-sonnet-4-6` です。 |
+| `SNA_PERMISSION_MODE` | デフォルト permission mode。`default`、`acceptEdits`、`bypassPermissions`、`plan` をサポートします。 |
+| `SNA_MAX_SESSIONS` | 同時に保持できる session 数。デフォルトは `5` です。 |
+| `SNA_DB_PATH` | 明示的な SQLite database path。デフォルトは `data/sna.db` です。 |
+| `SNA_DATA_DIR` | image などの SNA data を保存する directory。デフォルトは `<cwd>/data` です。 |
+| `SNA_PERMISSION_TIMEOUT_MS` | Permission prompt timeout(ms)。`0` の場合、host app が応答を管理します。 |
+| `SNA_OMLX_BASE_URL` | local model inference に使う oMLX-compatible base URL。 |
+
+## デフォルト値
+
+| Field | Default | 説明 |
+| --- | --- | --- |
+| `port` | `3099` | Standalone server と browser discovery が使う HTTP server port。 |
+| `model` | `claude-sonnet-4-6` | call が model を指定しない場合に runtime adapter へ渡されるデフォルト model。 |
+| `defaultProvider` | `claude-code` | override がない場合に route と helper が使うデフォルト runtime id。 |
+| `defaultPermissionMode` | `default` | Agent operation の標準 permission policy。 |
+| `maxSessions` | `5` | 同時に保持できる server-side session 数。 |
+| `maxEventBuffer` | `500` | Session ごとの in-memory event buffer size。 |
+| `permissionTimeoutMs` | `0` | Host が指定しない限り permission prompt は自動 deny されません。 |
+| `runOnceTimeoutMs` | `120000` | デフォルト one-shot execution timeout。 |
+| `pollIntervalMs` | `500` | Agent event 用 SSE polling interval。 |
+| `keepaliveIntervalMs` | `15000` | SSE keepalive interval。 |
+| `skillPollMs` | `2000` | WebSocket skill event polling interval。 |
+| `dbPath` | `data/sna.db` | environment override がない場合の SQLite database path。 |
+| `dataDir` | `<cwd>/data` | row 外の asset を保存する base directory。 |
 
 ## 関数リファレンス
 
 ### `getConfig()`
 
-default、environment variable、runtime override が適用された effective SNA configuration を返します。Diagnostics と server startup logging に使います。
+Defaults、environment variable、runtime override が適用された effective SNA configuration を返します。
+
+Diagnostics、server startup logging、実際に適用された値を表示する host settings screen で使います。
 
 ### `setConfig(partial)`
 
-現在の process に runtime override を適用します。Application preferences 画面から設定を受け取り、embedded host が反映する場合に使います。
+現在の process に runtime override を適用します。Application preferences screen、IPC message、test fixture から設定を受け取る embedded host に向いています。
+
+`setConfig` は渡された field を現在の config に merge します。以前の override を消すわけではないため、きれいな基準に戻したい場合は先に `resetConfig()` を呼んでください。
 
 ### `resetConfig()`
 
-runtime override を消去し、configuration resolution を default plus environment variable の状態へ戻します。Test case 間で設定が漏れないよう、テストで使ってください。
+runtime override を消し、configuration resolution を default plus environment variable の状態へ戻します。Test case 間で設定が漏れないようにするために使います。
 
 ### `SnaConfig`
 
-SNA configuration の typed shape です。Host-level settings UI を作る、または configuration object を検証する場合にこの型を優先してください。
+SNA configuration の typed shape です。Host-level settings UI を作る場合や configuration object を検証する場合はこの型を優先してください。
+
+`langfuse`、`apiProxyPort`、`omlxBaseUrl` は optional です。Host が tracing または local inference を明示的に設定した場合だけ有効になります。

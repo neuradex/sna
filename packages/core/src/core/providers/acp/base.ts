@@ -37,13 +37,12 @@
  *    clients but irrelevant to SNA's normalized event model. The prefix
  *    each subclass wants to drop is supplied via `vendorNotificationPrefix`.
  *
- * 5. ACP has no terminal "agent message complete" notification — the turn
- *    ends implicitly when `session/prompt` resolves. SNA's persistence
- *    layer only writes assistant rows for the `assistant` event (the full
- *    message), not the streaming `assistant_delta` chunks. So we
- *    accumulate chunks per turn and flush them as a synthetic `assistant`
- *    event right before `complete`, otherwise reload-the-chat wipes every
- *    streamed reply.
+ * 5. ACP has no terminal "agent message/thought complete" notification —
+ *    the turn ends implicitly when `session/prompt` resolves. SNA's
+ *    persistence layer writes full rows for terminal `assistant` /
+ *    `thinking` events, not just streaming deltas. So we accumulate chunks
+ *    per turn and flush synthetic terminal events right before `complete`,
+ *    otherwise reload-the-chat loses streamed-only content.
  *
  * Subclasses only need to implement `resolveSpawn()` and `name`. The
  * remaining hooks (`authenticate`, `preHandshake`, `onExit`,
@@ -249,8 +248,10 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
    * decision (5) in the file header.
    */
   protected assistantTurnBuffer = "";
-  /** Captured permission mode — see design decision (3). */
-  protected readonly permissionMode: string | undefined;
+  /** Per-turn accumulator for `agent_thought_chunk` text. */
+  protected thinkingTurnBuffer = "";
+  /** Current permission mode — see design decision (3). */
+  protected permissionMode: string | undefined;
   /**
    * Optional allow-list of tool names. When set, any tool whose unwrapped
    * `toolName` (see {@link unwrapToolCall}) is NOT in this list gets
@@ -513,6 +514,11 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
    *   1. Subclass `preHandshake` (e.g. MCP bridge setup + config write)
    *   2. Spawn agent and wire stdio
    *   3. ACP `initialize` + optional `authenticate` + `session/new`
+   *   4. If the caller passed an initial `prompt` in SpawnOptions, send it
+   *      as the first turn. Mirrors claude-code/codex which auto-send the
+   *      prompt from spawn options — without this, `runOnce` paths (which
+   *      hand the message in via SpawnOptions and then only listen for
+   *      events) silently hang because nothing ever calls `.send()`.
    */
   private async initialize(options: SpawnOptions): Promise<void> {
     try {
@@ -524,6 +530,15 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
       // orphaned subclass resources. Trigger cleanup hook before bubbling.
       this.onPreSpawnCleanup();
       throw err;
+    }
+    if (options.prompt) {
+      // sendPrompt is fire-and-forget; surface its async failure as an
+      // error event so the consumer's event listener can react (matches
+      // how send() surfaces errors).
+      this.sendPrompt(options.prompt).catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        this.emitEvent({ type: "error", message, timestamp: Date.now() });
+      });
     }
   }
 
@@ -766,6 +781,7 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
     const text = (update.content as { text?: string } | undefined)?.text ?? "";
     switch (update.sessionUpdate) {
       case "agent_thought_chunk":
+        this.thinkingTurnBuffer += text;
         return { type: "thinking_delta", delta: text, timestamp: now };
       case "agent_message_chunk":
         // Accumulate so the final `assistant` event (flushed when
@@ -808,8 +824,47 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
         // of SNA's event vocabulary; ignore.
         return null;
       default:
-        return null;
+        return this.buildUnknownToolLikeUpdateEvent(update, now);
     }
+  }
+
+  private buildUnknownToolLikeUpdateEvent(update: AcpSessionUpdate, now: number): AgentEvent | null {
+    const hasToolSignal =
+      !!update.toolCallId ||
+      !!update.kind ||
+      !!update.title ||
+      update.rawInput !== undefined ||
+      update.rawOutput !== undefined ||
+      update.status !== undefined;
+    if (!hasToolSignal) return null;
+
+    const hasResultSignal = update.status !== undefined || update.rawOutput !== undefined;
+    if (hasResultSignal) {
+      return {
+        type: "tool_result",
+        message: typeof update.rawOutput === "string" ? update.rawOutput : undefined,
+        data: {
+          id: update.toolCallId,
+          status: update.status,
+          content: update.content,
+          rawOutput: update.rawOutput,
+          locations: update.locations,
+          kind: update.kind,
+          title: update.title || undefined,
+          sessionUpdate: update.sessionUpdate,
+          rawUpdate: update,
+        },
+        timestamp: now,
+      };
+    }
+
+    const event = this.buildToolUseEvent(update, now, false);
+    event.data = {
+      ...(event.data ?? {}),
+      sessionUpdate: update.sessionUpdate,
+      rawUpdate: update,
+    };
+    return event;
   }
 
   private buildToolUseEvent(update: AcpSessionUpdate, now: number, fromUpdate: boolean): AgentEvent {
@@ -902,6 +957,7 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
         sessionId: this._sessionId,
         prompt: promptBlocks,
       })) as { stopReason?: string } | undefined;
+      this.flushThinkingTurn();
       this.flushAssistantTurn();
       this.emitEvent({
         type: "complete",
@@ -911,6 +967,7 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
     } catch (err) {
       // Flush whatever text streamed before the failure so a partial turn
       // still lands in chat_messages and the user sees it after reload.
+      this.flushThinkingTurn();
       this.flushAssistantTurn();
       const message = err instanceof Error ? err.message : String(err);
       this.emitEvent({ type: "error", message, timestamp: Date.now() });
@@ -929,6 +986,22 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
     if (!text) return;
     this.emitEvent({
       type: "assistant",
+      message: text,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * Emit accumulated `agent_thought_chunk` text as a terminal `thinking`
+   * event. Mirrors `flushAssistantTurn()` for ACP runtimes, whose wire
+   * stream only sends thought deltas.
+   */
+  protected flushThinkingTurn(): void {
+    const text = this.thinkingTurnBuffer;
+    this.thinkingTurnBuffer = "";
+    if (!text) return;
+    this.emitEvent({
+      type: "thinking",
       message: text,
       timestamp: Date.now(),
     });
@@ -957,16 +1030,23 @@ export abstract class AcpStdioProcess extends EventEmitter implements AgentProce
     // (returned as leftover from applyPatch).
   }
 
-  setPermissionMode(_mode: string): void {
-    // ACP permissionMode is fixed at process startup. Runtime change
-    // requires respawn — returned as leftover from applyPatch.
+  setPermissionMode(mode: string): void {
+    // ACP permission prompts are handled by this adapter, not by a native
+    // per-session flag. That means SNA-side gate modes such as
+    // bypassPermissions can change without respawning the agent process.
+    this.permissionMode = mode;
+    logger.log("agent", `${this.name}: permission mode override → ${mode}`);
   }
 
   applyPatch(patch: SessionPatch): SessionPatch {
-    // No in-place patching supported in the base implementation — every
-    // mutable field requires a respawn. Return the patch unchanged so
-    // session-manager handles it.
-    return { ...patch };
+    const leftover: SessionPatch = { ...patch };
+    if (patch.permissionMode !== undefined) {
+      this.setPermissionMode(patch.permissionMode);
+      delete leftover.permissionMode;
+    }
+    // Model and cwd still have no ACP wire surface in the current Grok /
+    // Cursor adapters, so leave them for respawn-with-history.
+    return leftover;
   }
 
   respondToPermission(requestId: string, approved: boolean): void {

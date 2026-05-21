@@ -5,6 +5,7 @@ description: "Bundled UI components and chat store exports."
 # React Components and Store
 
 Use these surfaces when you want a ready-made chat panel or when you want to compose your own panel from SNA primitives.
+
 | Surface | Purpose |
 | --- | --- |
 | `SnaChatUI` | Full floating chat UI with agent auto-start. Props: `children`, `defaultOpen?`, `dangerouslySkipPermissions?`. |
@@ -16,4 +17,75 @@ Use these surfaces when you want a ready-made chat panel or when you want to com
 | `TypingIndicator` | Assistant progress indicator. |
 | `ResizeHandle` | Side-by-side panel resize handle. |
 | `useChatStore` | Zustand store for chat UI state and persisted message hydration. |
+
 `SnaChatUI` requires `@radix-ui/react-tooltip` as a peer dependency and must be rendered under `SnaProvider`.
+
+## Import paths
+
+```ts
+import { SnaChatUI } from "@sna-sdk/react/components/sna-chat-ui";
+import { ChatPanel, ChatInput, MessageBubble } from "@sna-sdk/react/components/chat";
+import { useChatStore } from "@sna-sdk/react/stores/chat-store";
+```
+
+## `SnaChatUI`
+
+`SnaChatUI` wraps the application content and manages the built-in panel layout.
+
+```tsx
+<SnaProvider snaUrl="http://localhost:3099">
+  <SnaChatUI defaultOpen={false}>
+    <App />
+  </SnaChatUI>
+</SnaProvider>
+```
+
+| Prop | Default | Description |
+| --- | --- | --- |
+| `children` | required | Main application content. In desktop side-by-side mode, this content is placed next to the chat panel. |
+| `defaultOpen` | `false` | Initial open state when `localStorage["sna-chat-panel"]` has not been set. |
+| `dangerouslySkipPermissions` | `false` | Starts the agent with `permissionMode: "bypassPermissions"`. Use only in trusted local flows. |
+
+Runtime behavior:
+
+| Concern | Detail |
+| --- | --- |
+| Agent startup | Calls `POST /agent/start?session=<runtime session>` on mount with runtime id `claude-code`. |
+| Loading state | Shows a full-screen connecting overlay until the startup request resolves or fails. |
+| Open state | Uses `useChatStore.isOpen`; a floating button appears when the panel is closed. |
+| Keyboard shortcut | `Cmd/Ctrl + .` toggles the panel. |
+| Layout | Uses `useResponsiveChat`: side-by-side on desktop, overlay on tablet, fullscreen on mobile. |
+| Tooltip provider | Wraps children in `@radix-ui/react-tooltip` provider. |
+
+## Composable chat components
+
+Use the lower-level components when the host wants its own shell, routing, or controls.
+
+| Component | Responsibility |
+| --- | --- |
+| `ChatPanel` | Full panel composition for a session. |
+| `ChatHeader` | Session header and panel controls. |
+| `ChatInput` | Text input composer for sending messages. |
+| `MessageBubble` | Renders user, assistant, status, error, thinking, tool, and tool result messages. |
+| `ToolUseCard` | Displays tool input/output metadata. |
+| `ThinkingCard` | Displays thinking blocks. |
+| `ResizeHandle` | Resizes the side-by-side panel. |
+| `Tooltip` | Lightweight wrapper around the tooltip primitive used by the chat UI. |
+
+## `useChatStore`
+
+The chat store owns UI state and a per-session message cache.
+
+| State/action | Description |
+| --- | --- |
+| `isOpen`, `setOpen`, `toggle` | Panel open state. |
+| `width`, `setWidth` | Desktop panel width, clamped between `320` and `520`. |
+| `activeSessionId`, `setActiveSession` | Current chat session. Switching sessions lazy-loads messages. |
+| `sessions` | Per-session messages and processed event IDs. |
+| `initSession`, `removeSession` | Creates local store state and mirrors chat session create/delete to the server. The `default` session cannot be removed. |
+| `addMessage`, `clearMessages` | Updates local messages; clearing also requests server-side message deletion. |
+| `markEventProcessed` | Deduplicates streamed events by cursor and trims the set when it grows large. |
+| `hydrate` | Fetches chat session metadata from `/chat/sessions`; messages are loaded lazily. |
+| `fetchSessionMessages` | Fetches `/chat/sessions/<id>/messages` once per session. |
+
+`SnaProvider` sets the store API URL and calls `hydrate()` by default. Pass `hydrate={false}` to `SnaProvider` when the app uses only hooks or custom UI and does not need the bundled chat store.

@@ -1,20 +1,23 @@
 ---
-title: 機能 × プロバイダマトリクス
-description: SNA の各機能が Claude Code、Codex、OpenCode、Grok Build、Cursor でどう動くか — 行ごとの注意点付き。
+title: 機能 × ランタイムマトリクス
+description: SNA の各機能が Claude Code、Codex、OpenCode、Grok Build、Cursor でどう動くかを比較します。
 icon: TableProperties
 ---
 
-SNA のすべての機能は同じ `AgentProvider` インタフェースを通りますが、
-各ランタイムは自前のネイティブ表面を持っているため、5 つのプロバイダ
-の能力が完全に揃うわけではありません。このページでは、どの機能が
-どこで実際に動くかを行ごとの注意点付きで列挙します。
+SNA のすべての機能は同じ `AgentProvider` インターフェースを通りますが、
+各ランタイムのネイティブ表面は異なります。そのため、5 つのランタイムの
+能力が完全に揃うわけではありません。このページでは、どの機能がどこで
+実際に動くかと、行ごとの注意点を整理します。
 
-行が **✗** のとき、SNA API レベルではフィールドを受け付けるものの、
-プロバイダは無視するか respawn にフォールバックするか、対応する
-ネイティブ表面そのものを持たないことを意味します。
+行が **✗** のとき、SNA API レベルではフィールドを受け付けられても、
+ランタイムが無視するか、respawn にフォールバックするか、対応する
+ネイティブ表面を持たないことを意味します。
 
-> 最終検証対象: Claude Code 1.x, Codex 0.x (`app-server`),
-> OpenCode 0.x (`serve`), Grok Build CLI 0.1.x, Cursor CLI 2026.05.
+> コード監査基準: 2026-05-21。`packages/core/src/core/providers/*`、
+> `core/providers/acp/base.ts`、runtime adapter テストスイートを基準にしています。
+> ランタイムメモは Claude Code 1.x、Codex 0.x (`app-server`)、
+> OpenCode 0.x (`serve`)、Grok Build CLI 0.1.x、Cursor CLI 2026.05 を
+> 前提にしています。
 
 ## ランタイム特性
 
@@ -26,11 +29,11 @@ SNA のすべての機能は同じ `AgentProvider` インタフェースを通�
 | 公開標準プロトコル | ✗ ベンダ | ✗ ベンダ | ✗ ベンダ | ✓ [ACP](https://agentclientprotocol.com) | ✓ [ACP](https://agentclientprotocol.com) |
 | Cold-start コスト | 呼び出しごとに約 1 秒 spawn | デーモン約 2 秒 spawn、再利用 | デーモン約 3 秒 spawn、再利用 | セッションごとに約 2 秒 spawn | セッションごとに約 2 秒 spawn |
 
-Claude Code、Grok Build、Cursor は呼び出し/セッション単位で stateless —
-spawn ごとに新しい子プロセス。Codex と OpenCode は `RuntimePool` を
-通じてデーモンを共有します。Codex のデーモンだけが `cwd`-非依存なの
-で、単一プールのデーモン上で異なる作業ディレクトリのセッションを
-ホストできる唯一のプロバイダです。2 つの ACP-スピーキングプロバイダ
+Claude Code、Grok Build、Cursor は呼び出しまたはセッション単位で stateless
+です。spawn ごとに新しい子プロセスが立ち上がります。Codex と OpenCode は
+`RuntimePool` を通じてデーモンを共有します。Codex のデーモンだけが
+`cwd` に依存しないため、単一プールのデーモン上で異なる作業ディレクトリの
+セッションをホストできる唯一のランタイムです。ACP を使う 2 つのランタイム
 (Grok Build, Cursor) は `core/providers/acp/base.ts` を共有します。
 
 ## セッションライフサイクル
@@ -42,43 +45,77 @@ spawn ごとに新しい子プロセス。Codex と OpenCode は `RuntimePool` �
 | turn 中の `interrupt()` | ✓ | ✓ | ✓ | ✓ (ACP `session/cancel`) | ✓ (ACP `session/cancel`) |
 | `kill()` / `closeThread()` | ✓ | ✓ (プール refcount 認識) | ✓ (プール refcount 認識) | ✓ | ✓ |
 | `complete(opts)` one-shot | ✓ | ✓ | ✓ | ✓ (`grok -p`) | ✓ (`agent -p`) |
-| `complete()` `onDelta` ストリーミング | ✓ stream-json | ✓ `item/agentMessage/delta` | ✗ 現状の SDK 呼び出しは single-shot | ✓ streaming-json text イベント | ✓ stream-json `assistant` チャンク (`model_call_id` なし) |
-| `listModels()` | ✓ static + oMLX API | ✓ static catalog | ✓ `opencode` CLI プローブ | ✓ static (単一: `grok-build`) | ✓ `agent models` テキストパース + static fallback |
+| `complete()` `onDelta` ストリーミング | ✓ stream-json | ✓ `item/agentMessage/delta` | ✓ `prompt_async` SSE テキスト delta | ✓ streaming-json text イベント | ✓ stream-json `assistant` チャンク (`model_call_id` なし) |
+| `listModels()` | ✓ static + oMLX API | ✓ `codex debug models` プローブ + static fallback | ✓ `opencode` CLI プローブ | ✓ static (単一: `grok-build`) | ✓ `agent models` テキストパース + static fallback |
 
-OpenCode はストリーミングで例外です。現在の SDK ヘルパが single-shot
-のため、`complete()` に `onDelta` を渡しても成功はしますがコール
-バックは発火しません。
+OpenCode の `complete()` には 2 つの経路があります。コールバックが
+ない場合はオーバーヘッドの小さい同期 SDK 呼び出しを使い、`onDelta`
+がある場合は `prompt_async` とイベントストリームに切り替えます。
+ストリーミング経路も最終テキスト part と assistant メッセージの
+メタデータから resolve するため、呼び出し側はリアルタイムのテキスト
+chunk と最終 usage の両方を受け取れます。
+
+## イベントの豊富さ
+
+すべてのランタイムは同じ `AgentEvent` union に正規化されますが、
+ネイティブストリームが出せる粒度は同じではありません。リッチな UI では
+この差がそのまま効きます。tool-call カード、ストリーミング JSON 引数、
+コマンド出力ペイン、token/cost 表示、reload 後の会話復元品質がここで
+変わります。
+
+| イベント項目 | Claude Code | Codex | OpenCode | Grok Build | Cursor |
+|---|---|---|---|---|---|
+| Assistant text delta | ✓ stream-json の `assistant_delta` | ✓ `item/agentMessage/delta` | ✓ `message.part.delta` | ✓ ACP `agent_message_chunk` | ✓ ACP `agent_message_chunk` |
+| 最終 assistant イベント | ✓ `assistant` / `result` | ✓ `item/completed` agent message | ✓ finalized text part | ✓ ACP chunk を `complete` 直前に合成 | ✓ ACP chunk を `complete` 直前に合成 |
+| Thinking delta | ✓ `thinking_delta` | ✓ `item/reasoning/summaryTextDelta` | ✓ reasoning `message.part.delta` | ✓ ACP `agent_thought_chunk` | ✓ ACP `agent_thought_chunk` |
+| 最終 thinking イベント | ✓ signed thinking block | ✓ completed reasoning item | ✓ finalized reasoning part | ✓ ACP thought chunk から合成 | ✓ ACP thought chunk から合成 |
+| Tool call 開始 | ✓ `streaming: true` 付き `tool_use` | ✓ typed item start (`shell`, `file_change`, MCP, hosted tools) | ✓ running/pending tool part | ✓ ACP `tool_call` | ✓ ACP `tool_call` |
+| Tool input delta | ✓ Anthropic `input_json_delta` → `tool_use_delta` | ✗ ネイティブ input delta なし | ✗ ネイティブ input delta なし | ⚠ ACP `tool_call_update` で input 更新は可能だが byte/token 単位の delta ではない | ⚠ ACP `tool_call_update` で input 更新は可能だが byte/token 単位の delta ではない |
+| Tool output streaming | ✗ 最終 `tool_result` のみ | ✓ shell `outputDelta` を `tool_use` update として渡す。file patch delta は捨てる | ✗ 最終 part status のみ | ✗ 最終/update payload のみ | ✗ 最終/update payload のみ |
+| Tool result payload | ✓ `toolUseId`, `isError`, text/JSON content | ✓ item 別の詳細 payload: `exitCode`, `status`, `durationMs`, MCP error, `web_search`, `image_generation.savedPath`, `revisedPrompt`, unknown-tool `raw` | ✓ `title`, `isError`, output/error | ✓ ACP `rawOutput`, `locations`, `status`, `kind`, Grok tool-name unwrap | ✓ ACP `rawOutput`, `locations`, `status`, `kind`, Cursor tool-kind unwrap |
+| セッション完了メタデータ | ✓ duration, API duration, cost, token/cache usage, model, context window | ✓ duration と token/cache usage。cost は報告しない | ⚠ session stream は `provider` フィールドのみ。one-shot `complete()` は OpenCode が返す usage/cost を返す | ✓ ACP `stopReason` のみ | ✓ ACP `stopReason` のみ |
+| 未知の新 tool の可視性 | ✓ native tool name はそのまま出る | ✓ generic `tool_use` / `tool_result` + `raw` payload で fail-open | ✓ tool らしい未知の SSE event は `tool_use`、`tool_use_delta`、`tool_result` と raw properties で fail-open | ✓ tool らしい未知の ACP update は `rawUpdate` 付きで fail-open | ✓ tool らしい未知の ACP update は `rawUpdate` 付きで fail-open |
+
+一番大きい非対称は `tool_use_delta` です。tool input の partial JSON を
+ストリーミングできるランタイムは、現時点では Claude Code だけです。
+Codex は item lifecycle metadata と live shell output は豊富ですが、
+partial tool argument は出ません。ACP ランタイムは `tool_call_update` と
+最終 raw output を出せますが、SNA では fine-grained delta ではなく
+イベント単位の update として扱います。
 
 ## インプレース変更 (`applyPatch`)
 
-各プロバイダは、どの `SessionPatch` フィールドを respawn なしで
+各ランタイムは、どの `SessionPatch` フィールドを respawn なしで
 インプレース適用できるかを宣言します。「leftover」として返された
 フィールドは、セッションマネージャが kill して history replay と
 ともに respawn する必要があります。
 
 | フィールド | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
-| `model` | ✓ control_request `set_model` | ✓ 次 turn override | ✓ per-session override | ✗ leftover (respawn) | ✗ leftover (respawn) |
-| `permissionMode` | ✓ control_request | ✓ 次 turn sandbox policy | ✓ per-session override | ✗ leftover (respawn) | ✗ leftover (respawn) |
-| `cwd` | ✗ leftover | ✓ 次 turn override (唯一可能なプロバイダ) | ✗ leftover | ✗ leftover | ✗ leftover |
+| `model` | ✓ control_request `set_model` | ✓ 次 turn override | ✓ 次 prompt override | ✗ leftover (respawn) | ✗ leftover (respawn) |
+| `permissionMode` | ✓ control_request | ✓ 次 turn sandbox policy | ✓ 次 prompt の agent override | ✓ SNA permission gate 更新 | ✓ SNA permission gate 更新 |
+| `cwd` | ✗ leftover | ✓ 次 turn override (唯一可能なランタイム) | ✗ leftover | ✗ leftover | ✗ leftover |
 
-2 つの ACP-スピーキングプロバイダはすべてのフィールドを leftover と
-して返します。ACP にランタイム変更メソッドがないためです。
-respawn-with-history-replay は変わらず動きます。
+ACP を使うランタイムは、引き続き `model` と `cwd` を leftover として
+返します。Grok Build / Cursor が使っている ACP バージョンには、この 2 つを
+同じセッション内で変更する mutator がありません。`permissionMode` は
+別です。ACP の permission gate は SNA アダプタが持っているため、
+`bypassPermissions` への切り替えや解除は、ネイティブプロセスを
+再起動せずにインプレース適用できます。
 
 ## 権限フロー
 
 | 能力 | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
-| `permission_needed` AgentEvent emit | ✓ hook ブリッジ経由 | ✓ JSON-RPC server-request 経由 | ✓ HTTP webhook 経由 | ✓ ACP `session/request_permission` 経由 | ✓ ACP `session/request_permission` 経由 |
+| `permission_needed` AgentEvent emit | ✓ hook ブリッジ経由 | ✓ JSON-RPC server-request 経由 | ✓ SSE `permission.updated` 経由 | ✓ ACP `session/request_permission` 経由 | ✓ ACP `session/request_permission` 経由 |
 | `respondToPermission(id, approved)` | ✗ 外部 hook スクリプトが承認処理 | ✓ JSON-RPC response | ✓ POST `/permissions/:id` | ✓ ACP `{outcome:{outcome:"selected",optionId}}` | ✓ ACP `{outcome:{outcome:"selected",optionId}}` |
-| 双方向 (プロバイダがこちらを待つ) | ✗ hook スクリプトが決定 | ✓ | ✓ | ✓ | ✓ |
-| `bypassPermissions` 自動承認 | ✓ hook スクリプトが常に許可 | ✓ 次 turn override | ✓ per-session override | ✓ ACP base が自動で `allow_*` を返す | ✓ ACP base が自動で `allow_*` を返す |
+| 双方向 (ランタイムがこちらを待つ) | ✗ hook スクリプトが決定 | ✓ | ✓ | ✓ | ✓ |
+| `bypassPermissions` 自動承認 | ✓ hook スクリプトが常に許可 | ✓ server-request に自動応答 | ✓ HTTP permission API で自動応答 | ✓ ACP base が自動で `allow_*` を返す | ✓ ACP base が自動で `allow_*` を返す |
 
-Claude Code の権限モデルは out-of-band です — SNA が hook スクリプトを
-書いておくと CLI がそれを呼び、スクリプトが (permissionMode と
-allow/deny ルールに基づいて) 自分で判断し、CLI は SNA プロセスを
-待ちません。他の 4 つは双方向です。
+Claude Code の権限モデルは out-of-band です。SNA が hook スクリプトを
+書いておくと CLI がそれを呼び、スクリプトが permissionMode と allow/deny
+ルールに基づいて判断します。CLI は SNA プロセスを待ちません。他の 4 つは
+双方向です。
 
 ## 設定ノブ (SpawnOptions)
 
@@ -86,70 +123,75 @@ allow/deny ルールに基づいて) 自分で判断し、CLI は SNA プロセ�
 |---|---|---|---|---|---|
 | `systemPrompt` | ✓ `--system-prompt` | ✓ `thread/start` の `baseInstructions` | ✓ `appendSystemPrompt` と結合 | ✓ ACP base 最初の turn の `resource` block (ヘッドレス `complete()` 経路は `--system-prompt-override` もサポート) | ✓ ACP base 最初の turn の `resource` block (CLI フラグ自体が無い。fold が共有 base に乗る) |
 | `appendSystemPrompt` | ✓ `--append-system-prompt` | ✓ `thread/start` の `developerInstructions` | ✓ `systemPrompt` と結合 | ✓ 同じ最初の turn の block で `systemPrompt` と結合 (complete 経路は `--rules` もサポート) | ✓ 同じ最初の turn の block で `systemPrompt` と結合 |
-| `allowedTools` | ✓ ネイティブ `--allowedTools` | ✓ PreToolUse hook (他を deny) | ⚠ best-effort (既知のツールのみトグル) | ✓ ACP base が `session/request_permission` 境界で非リストツールを自動 deny | ✓ ACP base が `session/request_permission` 境界で非リストツールを自動 deny |
+| `permissionMode: "plan"` | ✓ ネイティブ `--permission-mode plan` | ✗ plan 表面なし。read-only sandbox にマップ | ✓ OpenCode agent `plan` にマップ | ✗ 現在の adapter にマップなし | ✗ 現在の adapter にマップなし |
+| `allowedTools` | ✓ ネイティブ `--allowedTools` | ✓ PreToolUse hook (他を deny) | ⚠ 厳密な allowlist ではない。列挙ツールは有効化するが、それ以外は OpenCode の既定値のまま | ✓ ACP base が `session/request_permission` 境界で非リストツールを自動 deny | ✓ ACP base が `session/request_permission` 境界で非リストツールを自動 deny |
 | `disallowedTools` | ✓ ネイティブ `--disallowedTools` | ✓ PreToolUse hook | ✓ 列挙されたツールを無効化 | ✓ ACP base が permission 境界で列挙されたツールを自動 deny | ✓ ACP base が permission 境界で列挙されたツールを自動 deny |
-| `mcpServers` | ✓ `--mcp-config` JSON | ✓ `config.toml` `[mcp_servers.*]` に書き出し | ✓ SDK 経由 | ✓ stdio→HTTP bridge + `<cwd>/.grok/config.toml` | ✓ stdio→HTTP bridge + `<cwd>/.cursor/mcp.json` (既存 user entries とマージ、exit で復元) |
+| `mcpServers` | ✓ `--mcp-config` JSON | ✓ `config.toml` `[mcp_servers.*]` に書き出し | ✓ SDK 経由で daemon config に注入 | ✓ stdio→HTTP bridge + `<cwd>/.grok/config.toml` | ✓ stdio→HTTP bridge + `<cwd>/.cursor/mcp.json` (既存 user entries とマージ、exit で復元) |
 | `reasoningLevel` (0..5) | ✓ `toClaudeEffort` → `--effort` | ✓ `toCodexEffort` → `model_reasoning_effort` | ✗ 無視 | ✓ `toGrokEffort` → `--effort` | ✓ `applyCursorReasoning` → モデル ID サフィックス (`gpt-5.3-codex` → `gpt-5.3-codex-high`) |
 | `configDir` | ✓ `CLAUDE_CONFIG_DIR` | ✓ `CODEX_HOME` | ✗ 対応なし | ✗ 対応なし (Grok Build は `~/.grok` 固定) | ✗ 対応なし (Cursor は `~/.cursor` 固定; `CURSOR_CONFIG_DIR` は `cli-config.json` だけリルート、hook はリルートしない) |
-| `resumeSessionId` | ✓ JSONL replay ファイル経由 | ✓ `thread/resume` API | ✓ session id | ⚠ Grok Build chat id で resume は動くが、クロスプロバイダ history は下記 `resource` block 経路 | ⚠ Cursor `chatId` で resume 動作 (`--resume <id>` / `session/load`)、クロスプロバイダ history は同じ経路 |
+| `resumeSessionId` | ✓ ネイティブ `--resume <sessionId>` | ✓ `thread/resume` API | ✓ 既存 OpenCode session id | ✗ adapter に未接続 | ✗ adapter に未接続 |
 
-### `providerOptions` (プロバイダごとの escape hatch)
+### `providerOptions` (ランタイムごとの escape hatch)
 
 | キー | Claude Code | Codex | OpenCode | Grok Build | Cursor |
 |---|---|---|---|---|---|
-| `settings` | ✓ `--settings` JSON にマージ | ✓ 同じ hook shape | — | — | — |
+| `settings` | ✓ `--settings` JSON にマージ | ✓ `hooks.PreToolUse` のみ反映 | — | — | — |
 | `settingSources` | ✓ `--setting-sources` | — | — | — | — |
 | `strictMcpConfig` | ✓ `--strict-mcp-config` | — | — | — | — |
 | `maxTurns` | ✓ `--max-turns` | — | — | — | — |
+| `disableSlashCommands` | ✓ `--disable-slash-commands` | — | — | — | — |
 | `omlxBaseUrl` | ✓ `ANTHROPIC_BASE_URL` をルーティング | — | — | — | — |
 | `serviceTier` | ✗ 誤課金 (`/fast` はモデルであって tier ではない) | ✓ `priority` / `flex` / `batch` | — | — | — |
-| `profile` | — | ✓ `config.toml` プロファイル | — | — | — |
-| `config` (`-c key=value`) | — | ✓ `codex exec` オーバーライド | — | — | — |
+| `profile` | — | ✓ `codex app-server` と `codex exec` に `--profile` として渡す。runtime pool も分離 | — | — | — |
+| `config` (`-c key=value`) | — | ✓ `codex app-server` と `codex exec` に渡す。`config` object は pool key にも含まれる | — | — | — |
+| `hooksHash` / `configHash` | — | ✓ 生成された hooks/config 用の手動 runtime pool 分離 key | — | — | — |
 | `serverUrl` | — | — | ✓ spawn を飛ばして既存デーモンに attach | — | — |
 | `modelProviderId` | — | — | ✓ `{providerID, modelID}` の provider 半分 | — | — |
 | `agent` | — | — | ✓ build / plan / etc. | — | — |
-| `logLevel` | — | — | ✓ `opencode serve --log-level` | — | — |
+| `opencodeSessionId` | — | — | ✓ 新規作成前に既存 session を resume | — | — |
+| `logLevel` | — | — | ✓ SDK daemon config の `logLevel` | — | — |
+| `opencodeConfigHash` | — | — | ✓ runtime pool 分離 key | — | — |
 
-Cursor には現状 SNA-specific の `providerOptions` キーはありません —
-CLI が受け付けるすべてのつまみ (model、reasoning、mode) は型付きの
-`SpawnOptions` フィールドにマップされます。将来 Cursor に新しいフラグ
-が増えればここに登場します。
+Cursor には現状 SNA-specific の `providerOptions` キーはありません。
+CLI が受け付けるすべての設定 (model、reasoning、mode) は型付きの
+`SpawnOptions` フィールドにマップされます。将来 Cursor に新しいフラグが
+増えればここに登場します。
 
-## クロスプロバイダ history replay
+## クロスランタイム history replay
 
-各プロバイダは新しいセッションに過去の会話を seed するための独自
-機構を持っています。SNA の正規化 `CanonicalBlock[]` history は
-アダプタ層でネイティブな形に翻訳されます。
+各ランタイムは新しいセッションに過去の会話を入れるための独自機構を
+持っています。SNA の正規化 `CanonicalBlock[]` history はアダプタ層で
+ネイティブな形に翻訳されます。
 
-| プロバイダ | 機構 | アダプタ |
+| ランタイム | 機構 | アダプタ |
 |---|---|---|
 | Claude Code | Anthropic フォーマットの JSONL を書き出し、パスを `--resume <filepath>` に渡す | `history/claude-code.ts` |
 | Codex | `thread/resume(history=ResponseItems)` JSON-RPC | `history/codex.ts` |
-| OpenCode | SDK 経由の experimental `thread/resume(history=...)` | `history/opencode.ts` |
+| OpenCode | 最初の prompt に history prelude `TextPartInput` と embed 用 file part を prepend | `history/opencode.ts` |
 | Grok Build / Cursor | 最初の `session/prompt` で transcript を 1 個の ACP `resource` content block にシリアライズ | `core/providers/acp/base.ts` 共有 (`serializeHistoryForAcp` + `buildHistoryPromptBlock`) |
 
-ACP 経路はネイティブ resume 経路と意図的に異なります: ACP の
+ACP 経路はネイティブ resume 経路と意図的に異なります。ACP の
 `session/load` は UI イベントを replay するだけでモデルコンテキストを
-復元せず、その下の session storage はベンダ内部フォーマット (Grok は
-xAI 内部、Cursor は `~/.cursor/chats/` 下の SQLite) で session load 時
-に再生成されるため — ストレージ層には触れない方針です。代わりに最初
-の turn で過去の transcript をインラインで埋め込み、そのコンテキスト
-は同じセッションの後続 turn でも保持されるため、再注入は不要です。
+復元しません。下層の session storage はベンダ内部フォーマット (Grok は
+xAI 内部、Cursor は `~/.cursor/chats/` 下の SQLite) で、session load 時に
+再生成されます。そのため、SNA はストレージ層には触れません。代わりに最初の
+turn で過去の transcript をインラインで埋め込み、そのコンテキストは同じ
+セッションの後続 turn でも保持されるため、再注入は不要です。
 
-## まだマトリクスに無いもの
+## 既知の隙間と検証限界
 
-- **plan mode のランタイム切り替え** (Claude Code
-  `--permission-mode plan`、Grok Build `--permission-mode plan`、
-  Cursor `--mode plan`): CLI フラグは spawn 時に反映されますが、
-  インプレース切り替えは ACP がワイヤメソッドとして公開しません —
-  ACP applyPatch はすべてのフィールドを leftover として返し、セッション
-  マネージャが respawn-with-history-replay で処理します。
-- **ACP プロバイダの `allowedTools` / `disallowedTools` glob/パターン
+- **Plan mode はランタイムごとに違います**: Claude Code はネイティブの
+  plan mode をサポートし、OpenCode は `plan` agent にマップします。
+  Codex は `plan` を既定の read-only sandbox と同じように扱い、
+  Grok Build / Cursor アダプタはまだ plan-mode flag を接続していません。
+  ACP ランタイムは SNA 側の permission gate 動作をインプレースで
+  変えられますが、それはネイティブの plan mode とは別物です。
+- **ACP ランタイムの `allowedTools` / `disallowedTools` glob/パターン
   マッチ**: 現在の auto-deny intercept はツール名を文字列完全一致のみ
-  比較。実ワークロードで必要になれば glob パターン (例: `"shell.*"`)
-  が自然な後続。
+  比較します。実ワークロードで必要になれば glob パターン (例: `"shell.*"`)
+  を追加するのが自然です。
 - **画像入力の最小サイズ**: Grok Build は 8×8 未満、合計 512px 未満
   の画像を拒否 (正方形なら 23×23 以上が必要); Cursor は 16×16 から
   受け付けます。両方ともサーバサイドで検証するため、SNA は image
-  block をそのまま渡します。サムネイル等を扱うコンシューマは
-  Grok 互換のため 32×32 以上にアップスケールが必要。
+  block をそのまま渡します。サムネイル等を扱うアプリは、Grok 互換のため
+  32×32 以上にアップスケールする必要があります。

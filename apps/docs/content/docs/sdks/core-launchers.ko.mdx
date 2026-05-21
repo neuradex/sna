@@ -4,28 +4,127 @@ description: "SNA 서버를 시작하기 위한 Node 및 Electron 실행 표면�
 ---
 # Core 런처
 
-런처는 host application의 생명주기 안에서 SNA를 함께 시작해야 할 때 사용합니다. port 선택, process 처리, Electron packaging 세부 사항을 감춥니다.
+런처는 호스트 애플리케이션의 생명주기 안에서 SNA를 함께 시작해야 할 때 사용합니다. 포트 선택, 프로세스 처리, Electron 패키징 세부 사항을 숨기고, client나 React integration이 사용할 server URL을 만들 수 있게 해줍니다.
+
 | import path | 표면 | 목적 |
 | --- | --- | --- |
-| `@sna-sdk/core/node` | `startSnaServer(options?)` | Node host에서 SNA를 시작합니다. |
-| `@sna-sdk/core/electron` | `startSnaServer(options?)` | Electron host에서 SNA를 시작합니다. |
-| `@sna-sdk/core/electron` | `startSnaServerInProcess(options?)` | 더 긴밀한 통합을 위해 현재 process 안에서 SNA를 실행합니다. |
+| `@sna-sdk/core/node` | `startSnaServer(options)` | Node host에서 SNA를 시작합니다. |
+| `@sna-sdk/core/electron` | `startSnaServer(options)` | Electron host에서 SNA를 forked child process로 시작합니다. |
+| `@sna-sdk/core/electron` | `startSnaServerInProcess(options)` | 현재 Electron main process 안에서 SNA를 실행합니다. |
 | `@sna-sdk/core/electron` | `resolveClaudeCli`, `validateClaudePath`, `cacheClaudePath` | Claude Code CLI 설치를 찾고 검증합니다. |
+
 Launcher handle은 서버를 중지하고 발견된 URL을 `@sna-sdk/client` 또는 `@sna-sdk/react`에 전달하기에 충분한 정보를 노출합니다.
+
+## Options
+
+`dbPath`는 필수입니다. 나머지 field는 optional입니다.
+
+```ts
+type SnaServerOptions = {
+  port?: number;
+  dbPath: string;
+  cwd?: string;
+  maxSessions?: number;
+  permissionMode?: "acceptEdits" | "bypassPermissions" | "default";
+  model?: string;
+  permissionTimeoutMs?: number;
+  nativeBinding?: string;
+  env?: Record<string, string>;
+  readyTimeout?: number;
+  onLog?: (line: string) => void;
+  dataDir?: string;
+  logLevel?: "info" | "warn" | "error" | "silent";
+  langfuse?: { publicKey: string; secretKey: string; baseUrl?: string };
+  omlxBaseUrl?: string;
+};
+```
+
+| Field | Default | 설명 |
+| --- | --- | --- |
+| `port` | `3099` | Server에 전달할 API port. |
+| `dbPath` | required | Absolute SQLite path. `cwd`가 없으면 launcher가 이 path에서 `cwd`를 계산합니다. |
+| `cwd` | `dirname(dbPath)` | Server process와 runtime session의 working directory. |
+| `maxSessions` | `5` | 동시에 유지할 수 있는 agent session 수. |
+| `permissionMode` | SDK default | 새 agent session의 기본 permission mode. |
+| `model` | SDK default | Runtime call의 기본 model. |
+| `permissionTimeoutMs` | `0` | `0`이면 permission prompt 응답을 host가 직접 관리합니다. 양수면 timeout 뒤 자동 deny됩니다. |
+| `nativeBinding` | auto-detected | 명시적인 `better-sqlite3` native binding path. Custom Electron build에서 사용합니다. |
+| `env` | `{}` | 추가 environment variable. Launcher가 만든 값을 override합니다. |
+| `readyTimeout` | `15000` | Standalone process가 ready line을 출력할 때까지 기다리는 시간(ms). |
+| `onLog` | none | Child process의 stdout/stderr line, 또는 in-process mode의 SDK logger line을 받습니다. |
+| `dataDir` | `dbPath`에서 계산 | Image와 asset storage의 base directory. |
+| `logLevel` | `info` | In-process logger output을 filter합니다. Forked server의 file log는 모든 level을 계속 기록합니다. |
+| `langfuse` | none | Metadata로 tracing을 opt-in한 session에서 Langfuse tracing을 켭니다. |
+| `omlxBaseUrl` | none | Claude-compatible call을 oMLX endpoint로 route합니다. |
+
+## Forked vs in-process
+
+| Mode | 사용 시점 | Tradeoff |
+| --- | --- | --- |
+| Forked `startSnaServer` | 프로세스 격리가 필요하고 standalone child server를 두고 싶을 때. | Packaged Electron app은 `@sna-sdk/core`를 unpack해야 하며, child process가 정상적으로 시작되어야 ready가 됩니다. |
+| `startSnaServerInProcess` | asar path, environment propagation, orphaned child 문제 때문에 Electron `fork()`가 불안정할 때. | Caller의 Node event loop을 공유합니다. Host가 shutdown 시점에 `stop()`을 호출해야 합니다. |
+
+In-process mode는 default agent를 자동으로 spawn하지 않습니다. Host가 HTTP, WebSocket 또는 반환된 `sessionManager`로 session을 시작합니다.
 
 ## 함수 레퍼런스
 
-### `@sna-sdk/core/node`의 `startSnaServer(options?)`
+### `@sna-sdk/core/node`의 `startSnaServer(options)`
 
-일반 Node host에서 SNA를 시작하고 connection information과 shutdown behavior를 가진 handle을 반환합니다. CLI, desktop host, local development process에 사용합니다.
+일반 Node host에서 SNA를 시작하고 연결 정보와 종료 동작을 가진 handle을 반환합니다. CLI, desktop host, local development process에 사용합니다.
 
-### `@sna-sdk/core/electron`의 `startSnaServer(options?)`
+```ts
+const handle = await startSnaServer({
+  dbPath: "/Users/me/Library/Application Support/MyApp/sna.db",
+  port: 3099,
+});
+
+handle.stop();
+```
+
+Node launcher는 Electron launcher와 같은 standalone server implementation을 사용합니다. Host가 HTTP app을 직접 import하지 않고 SNA를 sibling process로 두고 싶을 때 적합합니다.
+
+### `@sna-sdk/core/electron`의 `startSnaServer(options)`
 
 Electron host에서 SNA를 시작합니다. Packaged application 제약을 고려하므로 Electron main process 안에서는 Node launcher보다 이 launcher를 우선 사용하십시오.
 
-### `startSnaServerInProcess(options?)`
+Forked mode에서 packaged app을 만들 때는 Node가 실행해야 하는 SDK file을 asar 밖으로 빼야 합니다.
 
-현재 Electron process 안에서 SNA를 실행합니다. Process isolation보다 더 긴밀한 lifecycle integration이 중요할 때만 사용하십시오.
+```js
+// electron-builder example
+asarUnpack: ["node_modules/@sna-sdk/core/**"]
+```
+
+Launcher는 `.asar` path를 `.asar.unpacked`로 remap하고, `NODE_PATH`를 구성하고, `better-sqlite3`를 찾고, log를 forward한 뒤 server가 `API server ready`를 출력할 때까지 기다립니다.
+
+Returns:
+
+```ts
+type SnaServerHandle = {
+  process: ChildProcess;
+  port: number;
+  stop(): void;
+};
+```
+
+### `startSnaServerInProcess(options)`
+
+현재 Electron process 안에서 SNA를 실행합니다. 프로세스 격리보다 더 긴밀한 생명주기 통합이 중요할 때만 사용하십시오.
+
+Returns:
+
+```ts
+type InProcessSnaServerHandle = {
+  process: null;
+  port: number;
+  sessionManager: SessionManager;
+  httpServer: http.Server;
+  initLangfuse(config: { publicKey: string; secretKey: string; baseUrl?: string }): Promise<void>;
+  setTracerUser(userId?: string, userEmail?: string): void;
+  stop(): Promise<void>;
+};
+```
+
+`stop()`은 session을 종료하고, runtime을 dispose하고, tracing을 flush하고, logger callback을 정리한 뒤 HTTP server를 닫습니다. Host shutdown path에서 호출하십시오.
 
 ### `resolveClaudeCli(options?)`
 

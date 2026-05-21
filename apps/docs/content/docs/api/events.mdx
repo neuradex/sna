@@ -4,7 +4,7 @@ description: The 15-type AgentEvent protocol. What flows over WS and SSE.
 icon: Activity
 ---
 
-Every provider emits a normalized `AgentEvent` stream. Consumers
+Every runtime emits a normalized `AgentEvent` stream. Consumers
 subscribe through `WebSocket` (push) or `GET /agent/events` (SSE),
 both of which carry the same wire shape.
 
@@ -22,10 +22,10 @@ both of which carry the same wire shape.
 | `tool_use_delta` | streaming tool input (JSON) | partial input |
 | `tool_result` | tool response | result, isError, durationMs |
 | `permission_needed` | tool requires approval | tool name, input, decisionId |
-| `milestone` | provider-defined marker | label |
+| `milestone` | runtime-defined marker | label |
 | `user_message` | user-side echo (after canonicalization) | content |
 | `interrupted` | turn cancelled | reason |
-| `error` | provider error | message |
+| `error` | runtime error | message |
 | `complete` | turn done | usage, costUsd, durationMs |
 
 ## Deltas vs finals

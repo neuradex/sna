@@ -31,7 +31,12 @@ You start one server. You open one or more **sessions**. Each session
 spawns a real CLI binary (`claude`, `codex`, or `opencode`) as a
 managed subprocess. SNA normalizes every runtime's events, history,
 and permission model into one shape so the consumer app doesn't have
-to fork by provider.
+to fork by runtime.
+
+Terminology note: the public docs call Claude Code, Codex, and OpenCode
+**runtimes**. The API still uses field names such as `provider`,
+`providerOptions`, and `modelProvider` for compatibility with existing
+SDK callers.
 
 ## What problem this solves
 
@@ -44,7 +49,7 @@ moment your product needs:
   Codex for image generation, OpenCode for cost): every switch is a
   rewrite of the integration.
 - **Conversation history that survives runtime swaps**: the native
-  formats don't interoperate, so you either pick one provider for life
+  formats don't interoperate, so you either pick one runtime for life
   or lose context on every switch.
 - **Permission flows that look the same to your users**: Claude's
   PreToolUse hook and Codex's JSON-RPC approval speak different
@@ -55,12 +60,39 @@ The CLIs already do the hard parts (tool dispatch, sandboxing,
 permission gating, history). SNA wraps them so a single consumer-side
 codebase works across all three.
 
+## Why not build it directly with model APIs?
+
+Direct model APIs and vendor SDKs are the right layer for stateless
+model calls. They are not the same thing as an agent runtime. If you
+build directly on those APIs, your product owns the API keys, tool
+orchestration loop, approval UX, file-edit handling, streaming event
+shape, retries, and history format.
+
+SNA takes a different route: it orchestrates the **agentic CLI harness**
+provided by each runtime. Those harnesses are already tuned by the
+companies building the models: how context is prepared, how tools are
+called, how permissions are requested, how sandbox boundaries are
+enforced, and how long-running work recovers. SNA keeps that harness in
+place and normalizes the app-facing API around it.
+
+| Direct API / SDK integration | SNA |
+| --- | --- |
+| Your app usually needs to collect, store, or proxy model API keys. | The host runs an authenticated CLI; SNA drives that local runtime. |
+| You build the agent loop yourself. | The runtime's CLI harness owns the model-specific loop. |
+| Tool calls, approvals, file edits, and streaming events are per-runtime work. | SNA exposes one normalized session, event, and permission protocol. |
+| Switching runtimes means rewriting integration code or losing history. | SNA rebuilds runtime-native history from canonical session blocks. |
+
+SNA still needs the underlying CLI to be installed and authenticated on
+the machine where it runs. The difference is that your product does not
+need to recreate every model vendor's agent harness from raw
+completion APIs.
+
 ## What you get
 
 - **One canonical conversation model.** Messages live as flat blocks
   with two orthogonal axes: `actor` (`user`/`assistant`/`system`) and
   `kind` (`text`/`thinking`/`tool_use`/`tool_result`/`status`/`error`).
-  Provider-native shapes are derived from this on demand. See
+  Runtime-native shapes are derived from this on demand. See
   **[Actor and kind](/docs/introduction/philosophy/actor-kind)** for the
   design rationale.
 - **3-layer attribution.** Every block records `provider` (runtime),
@@ -71,10 +103,10 @@ codebase works across all three.
   `complete`, and friends.
 - **Unified permission flow.** One API surfaces both Claude's
   PreToolUse hook and Codex's JSON-RPC approval. The consumer app's
-  approval dialog doesn't change per provider.
+  approval dialog doesn't change per runtime.
 - **Runtime control without restart.** Change model, permission mode,
   or working directory mid-thread. Restart and resume rebuild
-  provider-native history from canonical blocks.
+  runtime-native history from canonical blocks.
 - **First-class one-shot APIs.** `completion()` and `runOnce()` skip
   the session machinery for short single-prompt jobs (autocomplete,
   chat naming) with optional streaming callbacks.
@@ -86,7 +118,7 @@ codebase works across all three.
   SNA does the runtime plumbing.
 - **Multi-runtime apps** that want users to pick (or auto-route)
   between Claude Code, Codex, and OpenCode without forking the
-  integration per provider.
+  integration per runtime.
 - **Electron / desktop apps** embedding an agent locally. The launcher
   forks the server as a managed child process, handles asar-unpacked
   paths, and locates native bindings.
@@ -111,5 +143,5 @@ If you are comparing SNA with Zed's Agent Client Protocol, see
 Read the **[Quick Start](/docs/introduction)** for the 5-minute hands-on
 walkthrough (boot the server, open a session, send a prompt, watch
 events). After that, the **[Concepts](/docs/introduction/concepts)** tab covers the
-session model, canonical history, and providers in depth; **[API
+session model, canonical history, and runtimes in depth; **[API
 Spec](/docs/api)** is the on-the-wire reference.

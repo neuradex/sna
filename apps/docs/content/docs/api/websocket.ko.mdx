@@ -1,10 +1,10 @@
 ---
 title: WebSocket 프로토콜
-description: Request/response op, 푸시 채널, 재연결 의미론을 설명합니다.
+description: Request/response op, 푸시 채널, 재연결 규칙을 정리합니다.
 icon: Cable
 ---
 
-WebSocket이 라이브 채널입니다. 푸시 이벤트(assistant delta, 툴 호출,
+WebSocket은 라이브 채널입니다. 푸시 이벤트(assistant delta, 툴 호출,
 권한 요청)와, HTTP API가 노출하는 같은 제어 op들을 호출 단위 HTTP
 오버헤드 없이 운반합니다.
 
@@ -31,8 +31,8 @@ ws://<host>:<port>/ws
 { "type": "agent.event", "data": { "session": "abc", "event": { "type": "assistant_delta", "delta": "Hello" } } }
 ```
 
-`id` 필드는 클라이언트가 선택한 상관 토큰: request/response 페어에는
-있고, 푸시 메시지에는 없습니다.
+`id` 필드는 클라이언트가 선택한 상관 토큰입니다. request/response 쌍에는
+들어가고, 푸시 메시지에는 들어가지 않습니다.
 
 ## 제어 op
 
@@ -62,10 +62,10 @@ ws://<host>:<port>/ws
 
 두 채널은 푸시 전용:
 
-- `agent.event`: 구독된 모든 세션의 모든 `AgentEvent`마다 발화합니다.
+- `agent.event`: 구독된 모든 세션의 모든 `AgentEvent`마다 발생합니다.
   `agent.subscribe`로 구독하고, `agent.unsubscribe`로 구독을 해제합니다.
 - `permission.request`: 어떤 세션이든 `permission_needed`를 emit하면
-  발화합니다. `permission.subscribe`로 구독합니다.
+  발생합니다. `permission.subscribe`로 구독합니다.
 
 ## 재연결
 
@@ -83,4 +83,4 @@ ws://<host>:<port>/ws
 TypeScript 클라이언트는 모든 뮤테이션에 HTTP, 푸시 채널에 WS를
 씁니다. 둘 중 하나만으로도 동작합니다 (`http: true, ws: false`는
 단명 스크립트용; `ws: true, http: false`는 HTTP를 못 쓰는 클라이언트용).
-하지만 둘을 함께 사용하는 구성이 가장 매끄럽습니다.
+실제 앱에서는 둘을 함께 쓰는 구성이 가장 자연스럽습니다.

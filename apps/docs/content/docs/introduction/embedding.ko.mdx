@@ -5,14 +5,14 @@ icon: Box
 ---
 
 `startSnaServer()`는 standalone 서버를 관리되는 자식 프로세스로
-fork합니다. 호스트에 따라 두 가지 진입점을 사용할 수 있습니다.
+fork합니다. 호스트에 따라 두 진입점 중 하나를 사용합니다.
 
 ```ts
 import { startSnaServer } from "@sna-sdk/core/node";      // 일반 Node
 import { startSnaServer } from "@sna-sdk/core/electron";  // Electron
 ```
 
-Electron용 진입점은 asar-unpacked 경로를 해석하고, 컨슈머 앱이
+Electron용 진입점은 asar-unpacked 경로를 해석하고, 앱이
 Electron 런타임에 맞게 리빌드한 `better-sqlite3` 바이너리를 찾습니다.
 
 ## 라이프사이클
@@ -34,7 +34,7 @@ const sna = await startSnaServer({
 ## Electron 체크리스트
 
 - `node_modules/@sna-sdk/core/**`를 electron-builder의 `asarUnpack`에
-  추가합니다. 서버의 `dist/`가 런타임에 도달 가능해야 합니다.
+  추가합니다. 런타임에서 서버의 `dist/`를 읽을 수 있어야 합니다.
 - Electron 런타임용 네이티브 의존성 리빌드:
   ```bash
   npx electron-rebuild -f -w better-sqlite3
@@ -46,7 +46,7 @@ const sna = await startSnaServer({
 
 ## Renderer에서 연결
 
-Renderer 프로세스는 임베드된 서버를 일반 HTTP/WS 호스트처럼 다룹니다.
+Renderer 프로세스는 임베드된 서버를 일반 HTTP/WS 호스트처럼 사용합니다.
 
 ```ts
 import { SnaClient } from "@sna-sdk/client";
@@ -59,5 +59,5 @@ const client = new SnaClient({
 ```
 
 `<SnaProvider>`는 `GET /api/sna-port` 헬퍼를 자동으로 사용합니다.
-따라서 React 앱에서는 IPC 없이도 renderer가 포트를 자동으로 발견할 수
+따라서 React 앱에서는 IPC 없이도 renderer가 포트를 찾을 수
 있습니다.

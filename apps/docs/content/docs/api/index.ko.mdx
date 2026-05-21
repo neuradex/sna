@@ -1,28 +1,28 @@
 ---
-title: 개요
-description: HTTP 라우트, WebSocket 프로토콜, 이벤트 타입을 정리합니다.
+title: API 개요
+description: HTTP 라우트, WebSocket 프로토콜, 이벤트 타입을 한곳에서 봅니다.
 icon: LayoutGrid
 ---
 
-이 섹션은 와이어 레퍼런스입니다. 각 형태가 왜 이렇게 설계되었는지
-궁금하다면 [Concepts](/ko/docs/introduction/concepts)를 참고하세요.
+이 섹션은 와이어 레퍼런스입니다. 각 형태가 왜 이렇게 설계되었는지는
+[핵심 모델](/ko/docs/introduction/concepts)에서 다룹니다.
 SNA의 HTTP/WebSocket API와 ACP를 비교하고 있다면
-**[SNA와 ACP](/ko/docs/introduction/philosophy/acp)** 를 참고하세요.
+**[SNA와 ACP](/ko/docs/introduction/philosophy/acp)** 도 같이 보세요.
 
 <Cards>
   <Card title="엔드포인트 레퍼런스" href="/ko/docs/api/endpoints" description="모든 HTTP 엔드포인트의 요청 필드, 응답, 비고." />
-  <Card title="HTTP 라우트" href="/ko/docs/api/http" description="모든 서버 엔드포인트, 표면별로 그룹화." />
-  <Card title="WebSocket 프로토콜" href="/ko/docs/api/websocket" description="Request/response op, 푸시 채널, 재연결 의미론." />
-  <Card title="이벤트" href="/ko/docs/api/events" description="15가지 AgentEvent enum, 델타, 파이널." />
-  <Card title="OpenAPI 스펙" href="/ko/docs/api/openapi" description="구동 중인 서버가 직접 제공하는 라이브 스펙." />
+  <Card title="HTTP 라우트" href="/ko/docs/api/http" description="서버 엔드포인트를 표면별로 묶은 목록." />
+  <Card title="WebSocket 프로토콜" href="/ko/docs/api/websocket" description="Request/response op, 푸시 채널, 재연결 규칙." />
+  <Card title="이벤트" href="/ko/docs/api/events" description="15가지 AgentEvent 타입, 델타, 최종 이벤트." />
+  <Card title="OpenAPI 스펙" href="/ko/docs/api/openapi" description="실행 중인 서버가 직접 제공하는 라이브 스펙." />
 </Cards>
 
-## 진실의 원천
+## 계약의 기준
 
-서버의 Hono 앱은 `@hono/zod-openapi` 라우트 정의로 빌드됩니다. 구동 중인
-서버는 같은 Zod 스키마에서 생성한 OpenAPI 3.1 스펙을 자체적으로
-제공합니다. 따라서 여기 보이는 와이어 모양, SDK 타입, 라이브 스펙은
-서로 드리프트할 수 없습니다.
+서버의 Hono 앱은 `@hono/zod-openapi` 라우트 정의로 빌드됩니다. 실행 중인
+서버는 같은 Zod 스키마에서 생성한 OpenAPI 3.1 스펙을 직접 제공합니다.
+따라서 이 문서의 와이어 형태, SDK 타입, 라이브 스펙은 같은 소스에서
+파생됩니다.
 
 | URL | 용도 |
 |-----|------|
@@ -30,5 +30,5 @@ SNA의 HTTP/WebSocket API와 ACP를 비교하고 있다면
 | `GET /docs` | Swagger UI |
 | `GET /spec` | 평문 스펙 |
 
-확인이 필요할 때는 라이브 서버의 스펙을 직접 조회하세요. 라이브 스펙이
-항상 이 문서보다 더 권위 있는 기준입니다.
+정확한 계약을 확인해야 할 때는 라이브 서버의 스펙을 직접 조회하세요.
+라이브 스펙이 항상 최종 기준입니다.

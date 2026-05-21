@@ -1,6 +1,6 @@
 # @sna-sdk/testing
 
-Testing utilities for [SNA](https://github.com/neuradex/sna) — a mock Anthropic Messages API and the `sna-test` CLI for running Claude Code in an isolated environment.
+Testing utilities for [SNA](https://github.com/neuradex/sna) — mock Anthropic and OpenAI-compatible APIs plus the `sna-test` CLI for running Claude Code in an isolated environment.
 
 ## Install
 
@@ -10,7 +10,9 @@ npm install --save-dev @sna-sdk/testing
 
 ## Why
 
-Real LLM calls in CI burn budget. The mock implements the Anthropic Messages API streaming SSE format, so Claude Code can't tell it apart from production. Set `ANTHROPIC_BASE_URL` to the mock and you get deterministic, fast, cheap test runs.
+Real LLM calls in CI burn budget. The mocks implement the Anthropic Messages API and common OpenAI-compatible endpoints, so runtime integration tests can run deterministically without live model calls.
+
+Set `ANTHROPIC_BASE_URL` to the Anthropic mock for Claude Code tests. Use the OpenAI mock for Codex-style Responses API paths, OpenAI-compatible chat completion paths, model catalog tests, or adapter tests that only need stable request/response behavior.
 
 The mock echoes user text **reversed**:
 
@@ -63,13 +65,43 @@ mock.close();
 
 `runOneshot()` is a convenience wrapper that boots a mock, runs `claude -p`, captures the response, and tears down.
 
+### OpenAI-compatible mock
+
+```ts
+import { startMockOpenAIServer } from "@sna-sdk/testing";
+
+const mock = await startMockOpenAIServer({
+  models: [{ id: "gpt-5.4", owned_by: "openai" }],
+  responseText: ({ endpoint, userText }) => `${endpoint}: ${userText}`,
+});
+
+const res = await fetch(`${mock.url}/v1/responses`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", Authorization: "Bearer sk-test" },
+  body: JSON.stringify({ model: "gpt-5.4", input: "hello" }),
+});
+
+console.log(await res.json());
+console.log(mock.requests[0]);
+await mock.close();
+```
+
+Supported routes:
+
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+- `POST /v1/responses`
+
+Both chat completions and responses support non-streaming JSON and streaming SSE. By default the mock replies with the last user text reversed.
+
 ## Exports
 
 | Name | Role |
 |------|------|
 | `startMockAnthropicServer()` | Boot a mock Anthropic Messages API on a random port |
+| `startMockOpenAIServer()` | Boot a mock OpenAI-compatible API on a random port |
 | `runOneshot(opts)` | Boot mock → run `claude -p` → capture → teardown |
-| `MockServer`, `MockLogEntry` | Types |
+| `MockServer`, `MockLogEntry`, `MockOpenAIServer`, `MockOpenAIRequest`, `MockOpenAILogEntry` | Types |
 | `generateInstanceName`, `getInstanceDir`, `listInstances`, `readInstanceMeta`, `writeInstanceMeta`, `removeInstance` | Instance helpers used by the CLI |
 
 ## License

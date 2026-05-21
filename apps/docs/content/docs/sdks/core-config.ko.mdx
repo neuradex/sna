@@ -5,26 +5,58 @@ description: "`@sna-sdk/core`가 노출하는 설정 헬퍼와 환경 변수입�
 # Core 설정
 
 `getConfig`, `setConfig`, `resetConfig`는 애플리케이션이 runtime configuration을 조회하거나 덮어쓸 때 사용합니다. 호스팅된 process에서는 환경 변수가 가장 단순한 설정 방식입니다.
+
+Configuration은 다음 순서로 결정됩니다.
+
+| 우선순위 | source | 설명 |
+| --- | --- | --- |
+| 1 | SDK default | `packages/core/src/config.ts`에 정의되어 있습니다. |
+| 2 | `SNA_*` environment variable | Standalone server process와 Electron launcher에 적합합니다. |
+| 3 | `setConfig(partial)` | 현재 Node process에 적용됩니다. In-process launcher도 이 경로를 사용합니다. |
+| 4 | per-call parameter | Route handler와 runtime call에서 필요한 field만 다시 override할 수 있습니다. |
+
 | 변수 | 의미 |
 | --- | --- |
-| `SNA_PORT` | 선호하는 서버 port입니다. |
-| `SNA_MODEL` | 기본 model 이름입니다. |
-| `SNA_PERMISSION_MODE` | 기본 permission mode입니다. |
-| `SNA_MAX_SESSIONS` | 동시 session 최대 수입니다. |
-| `SNA_DB_PATH` | 명시적인 database path입니다. |
-| `SNA_DATA_DIR` | DB path가 없을 때 사용할 SNA data directory입니다. |
-| `SNA_PERMISSION_TIMEOUT_MS` | permission prompt timeout입니다. |
-| `SNA_OMLX_BASE_URL` | OMLX 호환 base URL입니다. |
+| `SNA_PORT` | 선호 server port. 기본값은 `3099`입니다. |
+| `SNA_MODEL` | 기본 model name. 기본값은 `claude-sonnet-4-6`입니다. |
+| `SNA_PERMISSION_MODE` | 기본 permission mode. `default`, `acceptEdits`, `bypassPermissions`, `plan`을 지원합니다. |
+| `SNA_MAX_SESSIONS` | 동시에 유지할 수 있는 session 수. 기본값은 `5`입니다. |
+| `SNA_DB_PATH` | 명시적인 SQLite database path. 기본값은 `data/sna.db`입니다. |
+| `SNA_DATA_DIR` | image 같은 SNA data를 저장할 directory. 기본값은 `<cwd>/data`입니다. |
+| `SNA_PERMISSION_TIMEOUT_MS` | Permission prompt timeout(ms). `0`이면 host app이 응답을 책임집니다. |
+| `SNA_OMLX_BASE_URL` | local model inference에 사용할 oMLX-compatible base URL. |
+
+## 기본값
+
+| Field | Default | 설명 |
+| --- | --- | --- |
+| `port` | `3099` | Standalone server와 browser discovery가 사용하는 HTTP server port. |
+| `model` | `claude-sonnet-4-6` | call에서 model을 지정하지 않았을 때 runtime adapter에 전달되는 기본 model. |
+| `defaultProvider` | `claude-code` | 별도 override가 없을 때 route와 helper가 사용하는 기본 runtime id. |
+| `defaultPermissionMode` | `default` | Agent operation의 기본 permission policy. |
+| `maxSessions` | `5` | 동시에 유지할 수 있는 server-side session 수. |
+| `maxEventBuffer` | `500` | Session별 in-memory event buffer 크기. |
+| `permissionTimeoutMs` | `0` | Host가 명시하지 않으면 permission prompt를 자동 deny하지 않습니다. |
+| `runOnceTimeoutMs` | `120000` | 기본 one-shot execution timeout. |
+| `pollIntervalMs` | `500` | Agent event용 SSE polling interval. |
+| `keepaliveIntervalMs` | `15000` | SSE keepalive interval. |
+| `skillPollMs` | `2000` | WebSocket skill event polling interval. |
+| `dbPath` | `data/sna.db` | environment override가 없을 때의 SQLite database path. |
+| `dataDir` | `<cwd>/data` | row 밖의 asset을 저장할 base directory. |
 
 ## 함수 레퍼런스
 
 ### `getConfig()`
 
-default, environment variable, runtime override가 적용된 effective SNA configuration을 반환합니다. Diagnostics와 server startup logging에 사용합니다.
+Defaults, environment variable, runtime override가 적용된 effective SNA configuration을 반환합니다.
+
+Diagnostics, server startup logging, 실제 적용 값을 보여줘야 하는 host settings screen에서 사용합니다.
 
 ### `setConfig(partial)`
 
-현재 process에 runtime override를 적용합니다. Application preferences 화면에서 설정을 받아 embedded host가 반영해야 할 때 사용합니다.
+현재 process에 runtime override를 적용합니다. Application preferences screen, IPC message, test fixture에서 settings를 받는 embedded host에 적합합니다.
+
+`setConfig`는 전달한 field를 현재 config에 merge합니다. 이전 override를 지우지는 않으므로 깨끗한 기준점이 필요하면 먼저 `resetConfig()`를 호출하십시오.
 
 ### `resetConfig()`
 
@@ -33,3 +65,5 @@ runtime override를 지우고 configuration resolution을 default plus environme
 ### `SnaConfig`
 
 SNA configuration의 typed shape입니다. Host-level settings UI를 만들거나 configuration object를 검증할 때 이 타입을 우선 사용하십시오.
+
+`langfuse`, `apiProxyPort`, `omlxBaseUrl`은 optional입니다. Host가 tracing 또는 local inference를 명시적으로 설정할 때만 활성화됩니다.

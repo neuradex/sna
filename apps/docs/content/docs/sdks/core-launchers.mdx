@@ -5,31 +5,130 @@ description: "Node and Electron launch surfaces for starting an SNA server."
 # Core Launchers
 
 Launchers are for host applications that need to start SNA as part of their own lifecycle. They hide port selection, process handling, and Electron packaging details.
+
 | Import path | Surface | Purpose |
 | --- | --- | --- |
-| `@sna-sdk/core/node` | `startSnaServer(options?)` | Starts SNA from a Node host. |
-| `@sna-sdk/core/electron` | `startSnaServer(options?)` | Starts SNA from an Electron host. |
-| `@sna-sdk/core/electron` | `startSnaServerInProcess(options?)` | Runs SNA in the current process for tighter integration. |
+| `@sna-sdk/core/node` | `startSnaServer(options)` | Starts SNA from a Node host. |
+| `@sna-sdk/core/electron` | `startSnaServer(options)` | Starts SNA from an Electron host as a forked child process. |
+| `@sna-sdk/core/electron` | `startSnaServerInProcess(options)` | Runs SNA in the current Electron main process. |
 | `@sna-sdk/core/electron` | `resolveClaudeCli`, `validateClaudePath`, `cacheClaudePath` | Finds and validates Claude Code CLI installations. |
+
 Launcher handles expose enough information to stop the server and pass the discovered URL to `@sna-sdk/client` or `@sna-sdk/react`.
+
+## Options
+
+`dbPath` is required. Other fields are optional.
+
+```ts
+type SnaServerOptions = {
+  port?: number;
+  dbPath: string;
+  cwd?: string;
+  maxSessions?: number;
+  permissionMode?: "acceptEdits" | "bypassPermissions" | "default";
+  model?: string;
+  permissionTimeoutMs?: number;
+  nativeBinding?: string;
+  env?: Record<string, string>;
+  readyTimeout?: number;
+  onLog?: (line: string) => void;
+  dataDir?: string;
+  logLevel?: "info" | "warn" | "error" | "silent";
+  langfuse?: { publicKey: string; secretKey: string; baseUrl?: string };
+  omlxBaseUrl?: string;
+};
+```
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `port` | `3099` | API port passed to the server. |
+| `dbPath` | required | Absolute SQLite path. The launcher also derives `cwd` from this path when `cwd` is omitted. |
+| `cwd` | `dirname(dbPath)` | Working directory for the server process and runtime sessions. |
+| `maxSessions` | `5` | Maximum concurrent agent sessions. |
+| `permissionMode` | SDK default | Default permission mode for new agent sessions. |
+| `model` | SDK default | Default model for runtime calls. |
+| `permissionTimeoutMs` | `0` | `0` leaves permission prompts under host control; positive values auto-deny after the timeout. |
+| `nativeBinding` | auto-detected | Explicit `better-sqlite3` native binding path. Use this for custom Electron builds. |
+| `env` | `{}` | Extra environment variables. These override launcher-generated values. |
+| `readyTimeout` | `15000` | Milliseconds to wait for the standalone process to print the ready line. |
+| `onLog` | none | Receives stdout/stderr lines from the child process or SDK logger lines in in-process mode. |
+| `dataDir` | derived from `dbPath` | Base directory for image and asset storage. |
+| `logLevel` | `info` | Filters in-process logger output. Forked server file logs still record all levels. |
+| `langfuse` | none | Enables tracing for sessions whose metadata opts in. |
+| `omlxBaseUrl` | none | Routes Claude-compatible calls to an oMLX endpoint. |
+
+## Forked vs in-process
+
+| Mode | Use it when | Tradeoff |
+| --- | --- | --- |
+| Forked `startSnaServer` | You want process isolation and a standalone child server. | Requires packaged Electron apps to unpack `@sna-sdk/core`; readiness depends on the child process starting cleanly. |
+| `startSnaServerInProcess` | Electron `fork()` is unreliable because of asar paths, environment propagation, or orphaned children. | Shares the caller's Node event loop; the host must call `stop()` during shutdown. |
+
+In-process mode does not spawn a default agent. The host starts sessions through HTTP, WebSocket, or the returned `sessionManager`.
 
 ## Function reference
 
-### `startSnaServer(options?)` from `@sna-sdk/core/node`
+### `startSnaServer(options)` from `@sna-sdk/core/node`
 
 Starts SNA from a plain Node host and returns a handle with connection information and shutdown behavior. Use this for CLIs, desktop hosts, and local development processes.
 
-### `startSnaServer(options?)` from `@sna-sdk/core/electron`
+```ts
+const handle = await startSnaServer({
+  dbPath: "/Users/me/Library/Application Support/MyApp/sna.db",
+  port: 3099,
+});
+
+handle.stop();
+```
+
+The Node launcher reuses the same standalone server implementation as Electron. It is useful when the host wants SNA as a sibling process instead of importing the HTTP app directly.
+
+### `startSnaServer(options)` from `@sna-sdk/core/electron`
 
 Starts SNA from an Electron host. It accounts for packaged application constraints and should be preferred over the Node launcher inside Electron main processes.
 
-### `startSnaServerInProcess(options?)`
+In forked mode, packaged apps should unpack the SDK files that need to be executed by Node:
+
+```js
+// electron-builder example
+asarUnpack: ["node_modules/@sna-sdk/core/**"]
+```
+
+The launcher remaps `.asar` paths to `.asar.unpacked`, constructs `NODE_PATH`, resolves `better-sqlite3`, forwards logs, and waits until the server prints `API server ready`.
+
+Returns:
+
+```ts
+type SnaServerHandle = {
+  process: ChildProcess;
+  port: number;
+  stop(): void;
+};
+```
+
+### `startSnaServerInProcess(options)`
 
 Runs SNA in the current Electron process. Use it only when tighter lifecycle integration is more important than process isolation.
 
+Returns:
+
+```ts
+type InProcessSnaServerHandle = {
+  process: null;
+  port: number;
+  sessionManager: SessionManager;
+  httpServer: http.Server;
+  initLangfuse(config: { publicKey: string; secretKey: string; baseUrl?: string }): Promise<void>;
+  setTracerUser(userId?: string, userEmail?: string): void;
+  stop(): Promise<void>;
+};
+```
+
+`stop()` kills sessions, disposes runtimes, flushes tracing, clears the logger callback, and closes the HTTP server. Call it from the host shutdown path.
+
 ### `resolveClaudeCli(options?)`
 
-Finds a usable Claude Code CLI path. Use it during setup or diagnostics to explain why a provider cannot start.
+Finds a usable Claude Code CLI path. Use it during setup or diagnostics to explain why a runtime cannot start.
 
 ### `validateClaudePath(path)`
 

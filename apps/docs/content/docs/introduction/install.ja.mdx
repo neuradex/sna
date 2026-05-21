@@ -1,6 +1,6 @@
 ---
 title: インストール
-description: アプリに SNA を追加し、ランタイム CLI の前提を確認します。
+description: アプリに SNA を追加し、必要なランタイム CLI を確認します。
 icon: Wrench
 ---
 
@@ -9,14 +9,14 @@ SNA は 3 つの公開パッケージと 1 つのテストヘルパーパッケ�
 
 | パッケージ | 役割 |
 |------------|------|
-| `@sna-sdk/core` | HTTP/WS サーバ、session manager、providers、正規化履歴 |
+| `@sna-sdk/core` | HTTP/WS サーバ、session manager、runtime adapter、正規化履歴 |
 | `@sna-sdk/client` | フレームワーク非依存の TypeScript クライアント (HTTP + WS) |
 | `@sna-sdk/react` | React バインディング (フック、ドロップイン chat UI) |
 | `@sna-sdk/testing` | Mock Anthropic API + 隔離された Claude Code テスト環境 |
 
-パッケージ全体のサーフェスは [SDK リファレンス](/ja/docs/sdks) で確認できます。
+各パッケージの公開 API は [SDK リファレンス](/ja/docs/sdks) にまとめています。
 
-## コンシューマアプリへ追加する
+## アプリへ追加する
 
 ```bash
 pnpm add @sna-sdk/core @sna-sdk/client
@@ -43,7 +43,7 @@ standalone サーバを起動したりできます。
 ## ランタイム CLI を確認
 
 SNA はエージェントバイナリが `PATH` にあることを前提にします。次の
-コマンドで簡単に確認できます。
+コマンドで確認します。
 
 ```bash
 claude --version

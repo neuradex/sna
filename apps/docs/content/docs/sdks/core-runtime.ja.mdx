@@ -4,44 +4,90 @@ description: "`@sna-sdk/core` から直接 export されるランタイムヘル
 ---
 # Core ランタイムヘルパー
 
-HTTP サーバーを経由せずに agent runtime を呼び出したい場合に使います。同じ Node プロセス内で動くローカル orchestration、テスト、ツールに適しています。
+HTTP server を経由せずに agent runtime を呼び出したい場合に使う API です。同じ Node process 内で動く local orchestration、test、tool に適しています。
+
 | サーフェス | 目的 |
 | --- | --- |
-| `completion(input)` | completion 形式の provider 呼び出しを 1 回実行します。 |
-| `runOnce(input)` | agent タスクを 1 回実行し、最終結果を返します。 |
-| `getRuntimePool()` | provider プロセスを管理する共有 runtime pool を返します。 |
-| `RuntimePool` | 高度なライフサイクル制御に使う runtime pool クラスです。 |
-| `toClaudeEffort(level)` | SNA reasoning level を Claude 系の effort 値へ変換します。 |
-| `toCodexEffort(level)` | SNA reasoning level を Codex 系の effort 値へ変換します。 |
-| `buildCanonicalFromDb(...)` | DB に保存された row から canonical history を再構築します。 |
-HTTP 対応サーフェスは [agent completion](/ja/docs/api/endpoints/agent/completion/post)、[run once](/ja/docs/api/endpoints/agent/run-once/post)、[run once stream](/ja/docs/api/endpoints/agent/run-once/stream/post) に記載されています。
+| `completion(input)` | completion 形式の runtime call を 1 回実行します。 |
+| `runOnce(input)` | agent task を 1 つ実行し、最終結果を返します。 |
+| `getRuntimePool()` | runtime process を管理する shared runtime pool を返します。 |
+| `RuntimePool` | 高度な lifecycle control に使う runtime pool class です。 |
+| `toClaudeEffort(level)` | SNA reasoning level を Claude 系 effort value へ mapping します。 |
+| `toCodexEffort(level)` | SNA reasoning level を Codex 系 effort value へ mapping します。 |
+| `toGrokEffort(level)` | SNA reasoning level を Grok-compatible effort value へ mapping します。 |
+| `toCursorEffortSuffix(level)` / `applyCursorReasoning(...)` | Reasoning level を Cursor CLI argument へ mapping します。 |
+| `buildCanonicalFromDb(...)` | DB に保存された row から canonical history を再構成します。 |
+
+HTTP 側の対応 API は [agent completion](/ja/docs/api/endpoints/agent/completion/post)、[run once](/ja/docs/api/endpoints/agent/run-once/post)、[run once stream](/ja/docs/api/endpoints/agent/run-once/stream/post) にまとまっています。
+
+## Helper の選び方
+
+| 必要なこと | 使う API |
+| --- | --- |
+| Tool や persistent session が不要な text generation | `completion` |
+| Tool を使い、完了して終了できる self-contained agent task | `runOnce` |
+| 長く続く interactive session | `createSnaApp` または `SnaClient.agent.start/send` |
+| 複数の direct call 間で runtime process を reuse する | `getRuntimePool()` |
 
 ## 関数リファレンス
 
 ### `completion(input)`
 
-設定済み provider を通じて completion-style call を 1 回実行します。長期的な coding session より text generation や summarization に近い作業に使います。Provider 応答が完了すると返ります。
+設定された runtime 経由で completion-style call を 1 回実行します。長期の coding session よりも text generation、summarization、classification、lightweight transformation に近い作業に使います。Runtime response が完了すると返ります。
+
+主な option は `prompt`、`model`、`systemPrompt`、`appendSystemPrompt`、`label`、`timeout`、`env`、`reasoningLevel`、`providerOptions` です。
 
 ### `runOnce(input)`
 
-runtime を通じて 1 つの agent task を最後まで実行し、最終結果を返します。Agent が plan、tool call、finish を 1 つの流れで処理できる automation に使ってください。
+runtime 経由で 1 つの agent task を最後まで実行し、最終結果を返します。Agent が plan、tool call、finish を 1 回の流れで処理できる automation に使います。
+
+主な option は `message`、`provider`、`model`、`permissionMode`、`cwd`、`timeout`、`systemPrompt`、`appendSystemPrompt`、`reasoningLevel`、`providerOptions` です。
+
+#### Codex `providerOptions`
+
+`provider: "codex"` を選ぶと、`providerOptions.profile` は `codex app-server` と `codex exec` の両方に `--profile <name>` として渡されます。`providerOptions.config` は Codex の `-c key=value` override 一覧です。SNA はこの override を両方の実行経路に渡し、runtime pool key にも含めるため、Codex 設定が異なるセッションが同じデーモンを共有しません。`providerOptions.serviceTier` は従来通り、リクエスト優先度レーン (`"priority"`, `"flex"`, `"batch"`) を指定します。
 
 ### `getRuntimePool()`
 
-現在の process が使う shared runtime pool を返します。複数の call site が独立 pool を作らず、同じ provider process management を再利用する場合に使います。
+現在の process が使う shared runtime pool を返します。複数の call site が独立 pool を作らず、同じ runtime process management を再利用したい場合に使います。
 
 ### `RuntimePool`
 
-provider runtime lifecycle を所有します。ほとんどのアプリケーションでは `getRuntimePool` で十分です。Test や embedded host で隔離が必要な場合のみ直接作成してください。
+runtime lifecycle を所有します。ほとんどの application では `getRuntimePool` で十分です。Test や embedded host で隔離が必要な場合だけ直接作成してください。
 
 ### `toClaudeEffort(level)`
 
-SNA reasoning level を Claude 互換 effort 値へ変換します。Application code の各所に provider-specific string を散らさず、provider adapter で使ってください。
+SNA reasoning level を Claude-compatible effort value へ mapping します。Application code に runtime-specific string を散らさず、runtime adapter で使ってください。
 
 ### `toCodexEffort(level)`
 
-SNA reasoning level を Codex 互換 effort 値へ変換します。UI-level reasoning choice を provider-neutral に保ちます。
+SNA reasoning level を Codex-compatible effort value へ mapping します。UI-level reasoning choice を runtime-neutral に保ちます。
+
+### `toGrokEffort(level)`
+
+Grok runtime adapter が使えるように、SNA reasoning level を Grok-compatible effort value へ mapping します。
+
+### `toCursorEffortSuffix(level)` / `applyCursorReasoning(...)`
+
+Runtime-neutral reasoning level から Cursor CLI reasoning argument を作ります。Runtime adapter または Cursor を直接起動する host code だけで使ってください。
+
+## Reasoning level
+
+SNA は、UI や SDK caller が runtime-specific effort string を知らなくて済むよう、単一の `reasoningLevel` scale を提供します。
+
+| Level | 意味 | Claude mapping | Codex mapping |
+| --- | --- | --- | --- |
+| `0` | 最小または disabled reasoning | `low` | `none` |
+| `1` | とても軽い reasoning | `low` | `minimal` |
+| `2` | 軽い reasoning | `medium` | `low` |
+| `3` | バランス型 reasoning | `high` | `medium` |
+| `4` | 強い reasoning | `xhigh` | `high` |
+| `5` | 最大 reasoning | `max` | `xhigh` |
+
+Runtime adapter は、未対応の level を無視する場合があります。Codex `minimal` は一部の built-in tool と相性が悪いことがあるため、production UI では allowed tool set まで制御できる場合にだけ level `1` を出すのが安全です。
 
 ### `buildCanonicalFromDb(...)`
 
-database row から canonical history を再構築します。Server process が保存済み history を provider-neutral な actor/kind 形式で replay する場合に使います。
+database row から canonical history を再構成します。Server process が保存済み history を runtime-neutral な actor/kind 形式で replay する必要がある場合に使います。
+
+Canonical history は runtime-specific message name ではなく `actor` と `kind` を使います。そのため、同じ stored session を Claude Code、Codex、OpenCode、その他 adapter へ replay するときに database row を書き換える必要がありません。

@@ -1,11 +1,11 @@
 ---
 title: 権限
-description: Claude Code と Codex を横断する統一権限フロー。
+description: Claude Code と Codex の権限要求を同じ流れで扱います。
 icon: Lock
 ---
 
 Claude Code と Codex はどちらもツール単位の権限ゲートをサポートしますが、
-プロトコルは異なります。SNA は両方を 1 つの API の背後に抽象化します。
+プロトコルは異なります。SNA は両方を 1 つの API にそろえます。
 
 ## フロー
 
@@ -13,7 +13,7 @@ Claude Code と Codex はどちらもツール単位の権限ゲートをサポ�
 エージェントがツールを呼び出す
    │
    ▼
-プロバイダが権限要求を出す
+ランタイムが権限要求を生成
    │
    ▼
 SessionManager が `permission_needed` イベントを emit  ──► UI がプロンプトを表示
@@ -25,19 +25,19 @@ UI が POST /agent/permission-respond { approved: bool } を呼ぶ
 SessionManager が pending 要求を解決
    │
    ▼
-プロバイダが評決を受け取り、ツールが実行される (または拒否)
+ランタイムが決定を受け取り、ツールを実行 (または拒否)
 ```
 
-## プロバイダごとの配線
+## ランタイムごとの配線
 
-- **Claude Code** は `PreToolUse` フックを使います。CLI は各ツール呼び出
-  しを評価するために別の Node プロセスを spawn します。SNA は
+- **Claude Code** は `PreToolUse` フックを使います。CLI は各ツール呼び出しを
+  評価するために別の Node プロセスを spawn します。SNA は
   `packages/core/dist/scripts/hook.js` を同梱しており、このスクリプトが
   サーバに blocking な `permission-request` を POST して応答を待ちます。
 - **Codex** は stdio 上の JSON-RPC で話し、`approval/request` 通知
   を emit します。SNA は `approval/respond` で応答します。
 
-コンシューマアプリはこのプロトコル差を直接見る必要がありません。両方とも同じ
+アプリはこのプロトコル差を直接見る必要がありません。両方とも同じ
 `permission_needed` イベントとして表面化し、同じ
 `POST /agent/permission-respond` エンドポイントで応答します。
 
@@ -58,5 +58,5 @@ SessionManager が pending 要求を解決
 
 設定された allowlist にマッチするツール (Read、Glob、Grep、ListFiles
 など) は権限ゲートを完全にスキップします。イベントもラウンドトリップ
-も発生しません。allowlist はプロバイダごとに異なりますが正規化されて
-いるため、コンシューマ設定では 1 つのリストだけを管理すれば十分です。
+も発生しません。allowlist はランタイムごとに異なりますが正規化されて
+いるため、アプリ設定では 1 つのリストだけを管理すれば十分です。

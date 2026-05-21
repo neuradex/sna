@@ -26,31 +26,33 @@ await client.agent.start(session: string, config?: AgentStartConfig): Promise<{
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `session` | `string` | yes | Target SNA session ID. The server auto-creates it if it does not exist. |
-| `config.provider` | `string` | no | Runtime provider such as `claude-code`, `codex`, `opencode`, or `omlx`. |
+| `config.provider` | `string` | no | Runtime id such as `claude-code`, `codex`, `opencode`, or `omlx`. |
 | `config.modelProvider` | `string` | no | Attribution metadata for the model vendor. Stored on assistant-authored canonical rows. |
 | `config.prompt` | `string` | no | Initial prompt sent immediately after startup. |
-| `config.model` | `string` | no | Provider model slug. |
+| `config.model` | `string` | no | Runtime model slug. |
 | `config.permissionMode` | `string` | no | Permission behavior, for example `acceptEdits` or `bypassPermissions`. |
-| `config.configDir` | `string` | no | Provider config directory override. Claude uses `CLAUDE_CONFIG_DIR`; Codex uses `CODEX_HOME`. |
+| `config.configDir` | `string` | no | Runtime config directory override. Claude uses `CLAUDE_CONFIG_DIR`; Codex uses `CODEX_HOME`. |
 | `config.force` | `boolean` | no | Kill an existing runtime and start fresh. |
 | `config.cwd` | `string` | no | Working directory for this runtime. |
-| `config.history` | `unknown[]` | no | Provider-neutral history to resume from. |
+| `config.history` | `unknown[]` | no | Runtime-neutral history to resume from. |
 | `config.systemPrompt` | `string` | no | Replaces the base system prompt. |
 | `config.appendSystemPrompt` | `string` | no | Appends text to the system prompt. |
 | `config.allowedTools` | `string[]` | no | Restricts the agent to these tools. |
 | `config.disallowedTools` | `string[]` | no | Blocks specific tools. |
 | `config.mcpServers` | `Record<string, unknown>` | no | MCP servers made available to the agent. |
-| `config.reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Provider-neutral reasoning effort. |
-| `config.providerOptions` | `Record<string, unknown>` | no | Provider-specific options, such as Codex `serviceTier`. |
+| `config.reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Runtime-neutral reasoning effort. |
+| `config.providerOptions` | `Record<string, unknown>` | no | Runtime-specific options, such as Codex `serviceTier`, `profile`, and `config`. |
 | `config.extraArgs` | `string[]` | no | Deprecated raw CLI flags. Prefer typed fields. |
+
+For Codex, `providerOptions` can include `serviceTier`, `profile`, and `config`. `profile` maps to `--profile <name>`, while `config` is passed as repeatable `-c key=value` overrides on both `codex app-server` and `codex exec`.
 
 **Returns**
 
 | Field | Description |
 | --- | --- |
 | `status` | `started` when a process was spawned, `already_running` when the session already had a runtime. |
-| `provider` | Provider used for the runtime. |
-| `sessionId` | Provider runtime session ID. |
+| `provider` | Runtime used. |
+| `sessionId` | Runtime session ID. |
 
 **Example**
 
@@ -67,7 +69,7 @@ const started = await client.agent.start("default", {
 **Notes**
 
 - With HTTP enabled, the promise resolves after the process has been spawned.
-- It does not guarantee the provider init handshake has reached an idle state. If the UI must wait for readiness, call `getStatus` until `agentStatus === "idle"`.
+- It does not guarantee the runtime init handshake has reached an idle state. If the UI must wait for readiness, call `getStatus` until `agentStatus === "idle"`.
 - Calling `send` immediately after `start` is safe in normal usage because stdin queues the message.
 
 ### `agent.send(session, message, opts?)`
@@ -88,7 +90,7 @@ await client.agent.send(
 | --- | --- | --- | --- |
 | `session` | `string` | yes | Running session ID. |
 | `message` | `string` | yes | User message to send to the agent. |
-| `opts.images` | `{ base64: string; mimeType: string }[]` | no | Image attachments for providers that support multimodal input. |
+| `opts.images` | `{ base64: string; mimeType: string }[]` | no | Image attachments for runtimes that support multimodal input. |
 | `opts.meta` | `Record<string, unknown>` | no | Extra metadata stored with the user message. |
 
 **Returns**
@@ -143,7 +145,7 @@ await client.agent.restart(session: string, config?: Partial<AgentStartConfig>):
 
 **Input**: same config shape as `start`, but every field is optional.
 
-**Returns**: provider and new runtime session ID after restart.
+**Returns**: runtime id and new runtime session ID after restart.
 
 **Example**
 
@@ -151,7 +153,7 @@ await client.agent.restart(session: string, config?: Partial<AgentStartConfig>):
 await client.agent.restart("default", { model: "claude-opus-4-6" });
 ```
 
-**Notes**: Use this after changing provider-level settings or when the CLI process becomes unhealthy.
+**Notes**: Use this after changing runtime-level settings or when the CLI process becomes unhealthy.
 
 ### `agent.interrupt(session)`
 
@@ -196,19 +198,19 @@ await client.agent.resume(session: string, opts?: {
 | Field | Description |
 | --- | --- |
 | `session` | Session to resume from stored history. |
-| `opts.provider` | Provider override. |
+| `opts.provider` | Runtime override. |
 | `opts.model` | Model override. |
 | `opts.permissionMode` | Permission mode override. |
-| `opts.configDir` | Provider config directory override. |
+| `opts.configDir` | Runtime config directory override. |
 | `opts.prompt` | Optional prompt sent during resume. |
-| `opts.providerOptions` | Provider-specific options. |
+| `opts.providerOptions` | Runtime-specific options. |
 
 **Returns**
 
 | Field | Description |
 | --- | --- |
 | `status` | Always `resumed` on success. |
-| `provider` | Provider used for the resumed runtime. |
+| `provider` | Runtime used for the resumed session. |
 | `sessionId` | Runtime session ID. |
 | `historyCount` | Number of persisted messages loaded. |
 
@@ -269,8 +271,8 @@ await client.agent.completion(opts: CompletionOptions): Promise<CompletionResult
 | `timeout` | `number` | no | Timeout in milliseconds. |
 | `extraArgs` | `string[]` | no | Deprecated raw CLI flags. |
 | `env` | `Record<string, string>` | no | Environment overrides. |
-| `reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Provider-neutral reasoning effort. |
-| `providerOptions` | `Record<string, unknown>` | no | Provider-specific options. |
+| `reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Runtime-neutral reasoning effort. |
+| `providerOptions` | `Record<string, unknown>` | no | Runtime-specific options. |
 
 **Returns**
 
@@ -283,7 +285,7 @@ await client.agent.completion(opts: CompletionOptions): Promise<CompletionResult
 | `usage.cacheCreationTokens` | `number` | Cache creation token count. |
 | `costUsd` | `number` | Estimated cost in USD. |
 | `durationMs` | `number` | Total duration. |
-| `durationApiMs` | `number` | Provider API duration. |
+| `durationApiMs` | `number` | Runtime API duration. |
 | `model` | `string` | Model used. |
 
 **Example**
@@ -321,10 +323,10 @@ await client.agent.runOnce(opts: RunOnceOptions): Promise<{
 | `permissionMode` | `string` | no | Permission behavior. |
 | `cwd` | `string` | no | Working directory. |
 | `timeout` | `number` | no | Timeout in milliseconds. |
-| `provider` | `string` | no | Runtime provider. |
+| `provider` | `string` | no | Runtime id. |
 | `extraArgs` | `string[]` | no | Deprecated raw CLI flags. |
-| `reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Provider-neutral reasoning effort. |
-| `providerOptions` | `Record<string, unknown>` | no | Provider-specific options. |
+| `reasoningLevel` | `0 | 1 | 2 | 3 | 4 | 5` | no | Runtime-neutral reasoning effort. |
+| `providerOptions` | `Record<string, unknown>` | no | Runtime-specific options. |
 
 **Example**
 
@@ -471,7 +473,7 @@ const updated = await client.agent.update("default", {
 console.log(updated.applied); // "in-place" or "respawn"
 ```
 
-**Notes**: Some providers can apply changes in place. Others require a respawn with DB-backed history replay.
+**Notes**: Some runtimes can apply changes in place. Others require a respawn with DB-backed history replay.
 
 ## Event streaming methods
 
@@ -566,7 +568,7 @@ const unsubscribe = client.agent.onEvent((event: {
 | `tool_use` | Agent is calling a tool. |
 | `tool_result` | Tool execution result. |
 | `complete` | Turn completed. |
-| `error` | Runtime or provider error. |
+| `error` | Runtime error. |
 | `user_message` | Echoed user message for multi-client sync. |
 
 ## Permission methods

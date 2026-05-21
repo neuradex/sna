@@ -1,6 +1,6 @@
 {
   "title": "SDK",
-  "description": "Core, client, React, testing 패키지 레퍼런스.",
+  "description": "Core, client, React, testing 패키지의 공개 API.",
   "icon": "Package",
   "root": true,
   "pages": [

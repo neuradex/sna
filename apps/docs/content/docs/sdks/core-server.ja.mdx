@@ -4,52 +4,94 @@ description: "`@sna-sdk/core/server` から export されるサーバー側エ�
 ---
 # Core サーバー API
 
-独自サーバープロセス内で SNA をホストする場合に使います。server パッケージは HTTP app、WebSocket 接続、session manager、ローカルポート検出 route を公開します。
+独自サーバープロセス内で SNA をホストする場合に使います。Server package は HTTP app、WebSocket attachment、session manager、local port discovery route、direct one-shot/completion helper を公開します。
+
 | サーフェス | 目的 |
 | --- | --- |
-| `createSnaApp(options?)` | SNA HTTP アプリケーションを作成します。 |
-| `attachWebSocket(server, options?)` | 既存サーバーに SNA WebSocket プロトコルを接続します。 |
-| `SessionManager` | サーバー側 agent session を管理します。 |
-| `snaPortRoute` | ブラウザ自動検出のために現在の SNA port を公開します。 |
+| `createSnaApp(options?)` | SNA HTTP application を作成します。 |
+| `attachWebSocket(server, sessionManager)` | 既存 HTTP server に SNA WebSocket protocol を接続します。 |
+| `SessionManager` | Server-side agent session と lifecycle event を管理します。 |
+| `snaPortRoute` | ブラウザ自動検出のため現在の SNA port を公開します。 |
+| `runOnce`, `completion` | この entry point からも re-export される direct server-side helper です。 |
+
 `@sna-sdk/core/server/routes/*` 配下の deprecated compatibility route module は引き続き export されますが、新しい統合では server entry point と生成済みの [API リファレンス](/ja/docs/api/endpoints) を優先してください。
 
 ## 最小 host 例
 
 ~~~ts
-import { createServer } from "node:http";
-import { createSnaApp, attachWebSocket } from "@sna-sdk/core/server";
+import { serve } from "@hono/node-server";
+import { createSnaApp, attachWebSocket, SessionManager } from "@sna-sdk/core/server";
 
-const app = createSnaApp();
-const server = createServer(async (req, res) => {
-  const response = await app.fetch(new Request(`http://localhost${req.url}`));
-  res.writeHead(response.status, Object.fromEntries(response.headers));
-  res.end(await response.text());
-});
+const sessionManager = new SessionManager({ maxSessions: 10 });
+const app = await createSnaApp({ sessionManager });
 
-attachWebSocket(server);
-server.listen(3099);
+const server = serve({ fetch: app.fetch, port: 3099 }) as unknown as import("node:http").Server;
+attachWebSocket(server, sessionManager);
 ~~~
 
 サーバー entry point は agent lifecycle を所有する process の近くに置いてください。Browser client は server module を直接 import せず、`@sna-sdk/client` または `@sna-sdk/react` 経由で接続する方が安全です。
 
-## メソッドリファレンス
+## `createSnaApp(options?)`
 
-### `createSnaApp(options?)`
+```ts
+declare function createSnaApp(options?: {
+  sessionManager?: SessionManager;
+}): Promise<Hono>;
+```
 
-SNA route を公開する HTTP application を作成します。Custom server に SNA を embed する場合に使います。返された app は route registration、request validation、API response envelope を担当します。
+SNA route を公開する Hono HTTP application を作成します。OpenAPI app factory へ委譲するため、返された app には generated OpenAPI metadata と `/docs` の Swagger UI が含まれます。
 
-### `attachWebSocket(server, options?)`
+`sessionManager` を省略すると server が 1 つ作成します。HTTP route と WebSocket client が同じ session state を共有する必要がある場合、または host が lifecycle event に直接アクセスする必要がある場合は、manager を作成して渡してください。
 
-既存 Node server に WebSocket protocol を接続します。HTTP と WebSocket client が同じ session state を共有する必要があるため、`createSnaApp` を serve する server と同じ server に呼び出してください。
+## `attachWebSocket(server, sessionManager)`
 
-### `SessionManager`
+```ts
+const wss = attachWebSocket(httpServer, sessionManager);
+```
 
-server-side agent session lifecycle を調整します。ほとんどの host では `createSnaApp` に管理させれば十分です。高度な host が custom lifecycle policy を統合する場合に直接使えます。
+既存 Node HTTP server の `/ws` upgrade path に WebSocket server を接続します。`createSnaApp` に渡したものと同じ `SessionManager` を使ってください。そうしないと、HTTP command と WebSocket subscription が別々の session state を見ることになります。
 
-### `snaPortRoute`
+WebSocket server が push する message:
 
-browser-side discovery のため local SNA server port を公開します。`SnaProvider` が明示的な `snaUrl` なしで mount された場合、React integration がこの route を使います。
+| Push | 送信タイミング |
+| --- | --- |
+| `sessions.snapshot` | 接続直後、lifecycle/state/metadata 変更後。 |
+| `session.lifecycle` | Agent が開始、終了、crash、kill されたとき。 |
+| `session.state-changed` | Session が idle、busy、waiting、permission state の間を移動したとき。 |
+| `session.config-changed` | Model、permission mode、関連 runtime config が変わったとき。 |
+| `agent.event` | Client が session を subscribe したあと。 |
+| `permission.request` | Client が permission prompt を subscribe したあと。 |
 
-### Deprecated route modules
+## `SessionManager`
 
-`@sna-sdk/core/server/routes/agent` と `@sna-sdk/core/server/routes/chat` は compatibility のため残っています。新しい code では `createSnaApp` と生成済み OpenAPI 文書を優先してください。
+`SessionManager` は server-side session record、runtime、event buffer、persisted history、lifecycle callback を調整します。
+
+```ts
+const sessionManager = new SessionManager({ maxSessions: 10 });
+```
+
+重要な概念:
+
+| Concept | 意味 |
+| --- | --- |
+| Session record | Durable SNA session metadata: id、label、cwd、meta、config、message count、timestamp。 |
+| Runtime session | Session に現在接続されている runtime process または runtime handle。Config 変更で respawn が必要な場合は runtime chain ができます。 |
+| `SessionInfo` | Client に返される public snapshot shape。`alive`、`state`、`agentStatus`、`cwd`、`config`、count、last message、optional runtime chain を含みます。 |
+| `SessionState` | `idle`、`processing`、`waiting`、`permission` などの server state。 |
+| `AgentStatus` | UI-oriented state: `idle`、`busy`、`disconnected`。 |
+
+ほとんどの host では `createSnaApp` と `attachWebSocket` が manager を使う形で十分です。Custom lifecycle policy、diagnostics、`killAll()` による coordinated shutdown が必要な場合に直接扱ってください。
+
+## `snaPortRoute`
+
+`snaPortRoute` はブラウザ側の自動検出用の小さな handler です。
+
+```ts
+import { snaPortRoute } from "@sna-sdk/core/server";
+
+app.get("/api/sna-port", snaPortRoute);
+```
+
+現在の working directory の `.sna/sna-api.port` を読み、`{ port }` を返します。File がない場合は HTTP `503` と `{ port: null, error: "SNA API not running" }` を返します。
+
+`SnaProvider` が明示的な `snaUrl` なしで mount された場合、React integration がこの route を使います。

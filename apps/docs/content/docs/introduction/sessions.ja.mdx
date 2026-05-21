@@ -1,23 +1,23 @@
 ---
 title: セッション
-description: SnaSession と RuntimeSession チェーンによる 2 層のセッションモデルです。
+description: SnaSession と RuntimeSession に分かれる 2 層のセッションモデル。
 icon: Users
 ---
 
-**SnaSession** はコンシューマアプリが知っている永続的なもの (安定
-した id、ラベル、cwd、meta)。**RuntimeSession** はそのセッションに
-マウントされた具体的なランタイム設定 1 つ: provider、model、
-permission mode、MCP サーバ、hooks。SnaSession 1 つは寿命の中で複数
-の RuntimeSession をマウントでき、**runtime chain** はそのセッション
-が持ってきたすべての設定の順序付き履歴です。
+**SnaSession** はアプリが扱う永続セッションです。安定した id、ラベル、
+cwd、meta を持ちます。**RuntimeSession** はそのセッションにマウントされる
+具体的なランタイム設定です: provider、model、permission mode、MCP サーバ、
+hooks。SnaSession 1 つは生涯の中で複数の RuntimeSession を持てます。
+**runtime chain** は、そのセッションに適用されたランタイム設定の順序付き
+記録です。
 
 ## なぜ 2 層か
 
-ユーザが Claude Code でチャットを始め、スレッド途中で Codex に切り
-替え、それから reasoning レベルを上げたら、それは SnaSession 1 つに
-対する 3 つの異なる RuntimeSession になります。アトリビューションは行
-ごとに正確に維持され、replay 時に各ランタイムのネイティブ履歴
-を以前のターンを失わずに再構築できます。
+ユーザーが Claude Code でチャットを始め、スレッド途中で Codex に切り替え、
+その後 reasoning レベルを上げた場合、SnaSession は 1 つですが
+RuntimeSession は 3 つになります。各ブロックのアトリビューションは正確に
+保たれ、replay 時には各ランタイムのネイティブ履歴を過去ターンを失わずに
+再構築できます。
 
 ## ライフサイクル
 
@@ -27,7 +27,7 @@ POST /agent/start         → 初期 RuntimeSession マウント、プロセス 
 POST /agent/send          → メッセージ送信、イベントストリーム
 POST /agent/set-model     → インプレース上書き または 新 RuntimeSession
 PATCH /agent/session      → {cwd, model, permissionMode} 統一 mutator
-POST /agent/resume        → プロバイダネイティブ履歴を再構築、respawn
+POST /agent/resume        → ランタイムネイティブ履歴を再構築、respawn
 POST /agent/restart       → 同じ設定で respawn (そのまま保持)
 POST /agent/kill          → プロセスを止める (セッションレコードは残る)
 DELETE /agent/sessions/:id → セッション + 履歴を削除
@@ -36,22 +36,21 @@ DELETE /agent/sessions/:id → セッション + 履歴を削除
 ## PATCH 意味論
 
 `PATCH /agent/session` は統一 mutator。サーバはアクティブな
-プロバイダの `applyPatch()` フック経由で各フィールドを適用します。
+ランタイムアダプタの `applyPatch()` フック経由で各フィールドを適用します。
 このフックがインプレース適用と respawn-with-history-replay のどちら
 を取るかを決めます。
 
-| フィールド | claude-code | codex | opencode |
-|------------|-------------|-------|----------|
-| `model` | インプレース | per-turn 上書き | インプレース |
-| `permissionMode` | インプレース | per-turn 上書き | インプレース |
-| `cwd` | respawn + replay | インプレース (per-thread cwd) | respawn |
+| フィールド | claude-code | codex | opencode | grok / cursor |
+|------------|-------------|-------|----------|---------------|
+| `model` | インプレース | per-turn 上書き | インプレース | respawn + replay |
+| `permissionMode` | インプレース | per-turn 上書き | インプレース | インプレース (SNA gate) |
+| `cwd` | respawn + replay | インプレース (per-thread cwd) | respawn | respawn + replay |
 
 レスポンスの `applied` フィールドでどの経路を通ったか分かるため、
 クライアントは必要な時だけ "reloading…" のような表示を出せます。
 
 ## なぜ重要か
 
-ほとんどの「エージェントプラットフォーム」抽象は、何かを変えるには
-セッションを破壊することを強制します。SNA は設定をセッションレコードの
-一級の軸として扱うので、下層のランタイム設定が変わっても UX を
-切れ目なく続けられる。
+ほとんどの「エージェントプラットフォーム」抽象では、設定を変えるたびに
+セッションを作り直すことになります。SNA は設定をセッションレコードの
+一級の軸として扱うため、下層のランタイム設定が変わっても UX は続きます。

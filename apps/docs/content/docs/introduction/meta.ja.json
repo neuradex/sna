@@ -1,6 +1,6 @@
 {
   "title": "Introduction",
-  "description": "概要、インストール、組み込み、核心概念、設計哲学を最初に読む順序で整理します。",
+  "description": "概要、インストール、組み込み、中心モデル、設計哲学を最初に読む順序で整理します。",
   "icon": "Rocket",
   "root": true,
   "pages": [
@@ -9,7 +9,7 @@
     "what-is-sna",
     "install",
     "embedding",
-    "---核心概念---",
+    "---中心モデル---",
     "concepts",
     "sessions",
     "history",

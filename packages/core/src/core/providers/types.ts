@@ -37,11 +37,13 @@ export interface AgentEvent {
 /**
  * Mutable subset of SessionConfig that can be PATCH-applied to an alive agent.
  *
- * Each field has a per-provider dispatch strategy: codex applies model /
+ * Each field has a per-provider dispatch strategy: Codex applies model /
  * permissionMode / cwd via per-turn overrides on the next `turn/start`;
- * claude-code applies model / permissionMode via control_request but cannot
- * change cwd in-place — `applyPatch` returns those as leftover so the caller
- * can drive a respawn. opencode currently leaves all fields as leftover.
+ * Claude Code applies model / permissionMode via control_request but cannot
+ * change cwd in-place; OpenCode applies model / permissionMode on the next
+ * prompt; ACP applies SNA-side permission gate changes in-place. Fields that
+ * cannot be handled in-place are returned as leftover so the caller can drive
+ * a respawn.
  *
  * Defined here (and not anchored on `SessionConfig` directly) to keep the
  * providers layer independent of session-manager.
@@ -71,10 +73,11 @@ export interface AgentProcess {
    * caller is expected to merge those into the next spawn config (with
    * history replay) to complete the patch.
    *
-   * Implementations: codex applies all currently-defined fields in-place via
-   * the next turn/start override mechanism. claude-code applies model /
-   * permissionMode via control_request but returns `cwd` (and any other
-   * unsupported field) as leftover. opencode leaves all fields as leftover.
+   * Implementations: Codex applies all currently-defined fields in-place via
+   * next turn/start overrides. Claude Code applies model / permissionMode via
+   * control_request but returns `cwd`. OpenCode applies model /
+   * permissionMode as next-prompt overrides and returns `cwd`. ACP runtimes
+   * apply SNA-side permissionMode gates in-place and return model / cwd.
    */
   applyPatch(patch: SessionPatch): SessionPatch;
   /**
@@ -198,8 +201,10 @@ export interface SpawnOptions {
    *   disableSlashCommands?: boolean — --disable-slash-commands
    *   omlxBaseUrl?: string           — route ANTHROPIC_BASE_URL to oMLX local LLM
    * Codex:
-   *   config?: Record<string, string> — extra `-c key=value` config overrides for `codex exec`
-   *   profile?: string                — config.toml profile name to activate (pool key)
+   *   config?: Record<string, string> — extra `-c key=value` config overrides for `codex app-server`
+   *                                     and `codex exec`; the object contributes to the runtime pool key
+   *   profile?: string                — config.toml profile name passed as `--profile` to app-server
+   *                                     and exec; also contributes to the runtime pool key
    *   serviceTier?: string            — OpenAI request-priority tier (Codex `/fast` slash command
    *                                     equivalent). Common values: "priority" (fastest, premium
    *                                     billing — mirrors `/fast`), "flex" (cheaper, slower),
@@ -399,8 +404,8 @@ export interface CompleteOptions {
    *   - claude-code: streamed via `--include-partial-messages` + JSONL parse
    *   - codex (pool): forwarded from `item/agentMessage/delta` notifications
    *   - codex (ephemeral): parsed from `codex exec --json` stdout stream
-   *   - opencode: not yet wired (the SDK call is single-shot today);
-   *               the callback is silently a no-op there.
+   *   - opencode: streamed through `session.promptAsync` + SSE events when
+   *               the callback is present; otherwise uses the sync SDK call
    *
    * Callbacks fire from the same Node.js microtask as the underlying
    * stream — keep them cheap. Throwing inside the callback aborts the

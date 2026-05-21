@@ -1,12 +1,12 @@
 ---
-title: プロバイダ
-description: AgentProvider インタフェース、runtime pool、プロバイダごとの差異を説明します。
+title: ランタイム
+description: ランタイムアダプタ、AgentProvider 内部構造、ランタイムごとの差分を整理します。
 icon: Boxes
 ---
 
-各ランタイムは共通の `AgentProvider` インタフェースの背後にクラスと
-して実装されています。アダプタは `core/providers/{claude-code,codex,opencode,grok,cursor}.ts`、
-ACP を話すプロバイダ (Grok Build と Cursor) は `core/providers/acp/base.ts`
+各ランタイムは共通の `AgentProvider` インタフェースを実装するクラスとして
+接続されます。アダプタは `core/providers/{claude-code,codex,opencode,grok,cursor}.ts`、
+ACP を話すランタイム (Grok Build と Cursor) は `core/providers/acp/base.ts`
 を共有します。
 
 ## AgentProvider
@@ -33,10 +33,10 @@ interface AgentProcess {
 ```
 
 `applyPatch()` は `PATCH /agent/session` が使うフィールドごとの
-ディスパッチフック。各プロバイダがどのフィールドをインプレースで
+ディスパッチフックです。各ランタイムアダプタがどのフィールドをインプレースで
 適用でき、どれが respawn-with-history-replay を要するかを決めます。
 
-## プロバイダごとの戦略
+## ランタイムごとの戦略
 
 | ランタイム | 転送 | 状態 | プール? |
 |------------|------|------|---------|
@@ -46,34 +46,34 @@ interface AgentProcess {
 | **grok** | `grok agent stdio` (stdio 上の Agent Client Protocol — Grok Build CLI) | セッションごとに stateless | いいえ |
 | **cursor** | `agent acp` (stdio 上の Agent Client Protocol — Cursor CLI) | セッションごとに stateless | いいえ |
 
-Codex と OpenCode プロバイダは `RuntimePool` 経由でデーモンを共有
+Codex と OpenCode ランタイムアダプタは `RuntimePool` 経由でデーモンを共有
 します。セッションを開くとき、プールが `(provider, cwd, config)` で
 照会され、互換のデーモンがあれば再利用してコールドスタートコスト
 を節約します(Codex 約 2 秒、OpenCode 約 3 秒)。
 
-Grok Build が SNA で初めてワイヤプロトコルに公開標準
-([ACP](https://agentclientprotocol.com))を採用したプロバイダでした。
-2 番目の ACP-スピーキングプロバイダとして Cursor が加わったことで、
+Grok Build は、SNA で初めてワイヤプロトコルに公開標準
+([ACP](https://agentclientprotocol.com))を採用したランタイムでした。
+2 番目の ACP-speaking ランタイムとして Cursor が加わったことで、
 共有ロジックは `core/providers/acp/base.ts` に抽出されました — JSON-RPC
 pump、`initialize`/`session/new` ハンドシェイク、`session/update` →
 `AgentEvent` 変換、双方向 `session/request_permission`
-(+`bypassPermissions` 自動承認)、プロバイダ間 `resource` block history
-インジェクションまで。各サブクラスは本当に違う部分だけを保持します:
+(+`bypassPermissions` 自動承認)、ランタイム間 `resource` block history
+インジェクションまで。各サブクラスには実際に異なる部分だけを残します:
 CLI パス探索、spawn 引数、任意の認証ステップ (Cursor の
 `authenticate({methodId:"cursor_login"})`)、ベンダ拡張通知の prefix
-(`_x.ai/*` Grok、`cursor/*` Cursor)、プロバイダ固有の tool-call unwrap。
+(`_x.ai/*` Grok、`cursor/*` Cursor)、ランタイム固有の tool-call unwrap。
 
-プロバイダ間の history replay は、ACP セッションの最初の
+ランタイム間の history replay は、ACP セッションの最初の
 `session/prompt` に正規化された会話履歴を 1 個の ACP `resource`
 content block として埋め込む方式で扱います — 機能マトリクスページの
-[プロバイダ間 history replay](/ja/docs/introduction/feature-matrix#cross-provider-history-replay)
-を参照してください。
+[ランタイム間 history replay](/ja/docs/introduction/feature-matrix)
+にまとめています。
 
-Cursor はユーザがすでに済ませた `agent login` をそのまま使います
+Cursor はユーザーがすでに済ませた `agent login` をそのまま使います
 (macOS Keychain の `cursor-access-token` / `cursor-refresh-token` →
 Cursor サブスクリプションを利用)。`CURSOR_API_KEY` を別途発行する必要は
-ありません。SNA は spawn の環境変数をそのまま通過させ、子プロセスは
-ユーザがインタラクティブに使うときと同じ資格情報を拾います。Reasoning
+ありません。SNA は spawn の環境変数をそのまま渡し、子プロセスは
+ユーザーがインタラクティブに使うときと同じ資格情報を使います。Reasoning
 level はモデル ID 自体にエンコードされます (`gpt-5.3-codex` →
 level 4 なら `gpt-5.3-codex-high` に変換)。`reasoning-level.ts` の
 `applyCursorReasoning` がその変換を行い、effort family に属さないモデル
@@ -94,14 +94,14 @@ Claude Code はプーリングしません。CLI 自体が stateless なので�
 なセッション粒度では呼び出しごとの spawn がデーモン resume と
 十分に競争力を持ちます。
 
-SNA が ACP だけをプロバイダ層にせず、高忠実度のネイティブプロバイダを
-維持する理由は **[SNA と ACP](/ja/docs/introduction/philosophy/acp)** を参照してください。
+SNA が ACP だけをランタイム層にせず、高忠実度のネイティブランタイムアダプタを
+維持する理由は **[SNA と ACP](/ja/docs/introduction/philosophy/acp)** で扱います。
 
-## クロスプロバイダのつまみ
+## クロスランタイム設定
 
-すべてのプロバイダを貫く 2 つのレイテンシつまみ:
+すべてのランタイムで使える 2 つのレイテンシ設定:
 
-- **`reasoningLevel: 0..5`**: プロバイダ非依存、最軽量から最重量
+- **`reasoningLevel: 0..5`**: ランタイム非依存、最軽量から最重量
   まで。[reasoning-level.ts](https://github.com/neuradex/sna/blob/main/packages/core/src/core/providers/reasoning-level.ts)
   が Claude Code の `--effort`、Codex の `model_reasoning_effort`、
   Grok Build の `--effort`、Cursor のモデル ID サフィックス
@@ -114,5 +114,5 @@ SNA が ACP だけをプロバイダ層にせず、高忠実度のネイティ�
   だからです。
 
 全ランタイムにわたる機能ごとの互換性については
-**[機能 × プロバイダマトリクス](/ja/docs/introduction/feature-matrix)**
-を参照してください。
+**[機能 × ランタイムマトリクス](/ja/docs/introduction/feature-matrix)**
+で確認できます。

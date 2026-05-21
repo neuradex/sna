@@ -1,12 +1,12 @@
 ---
 title: "Testing SDK"
-description: "Mock provider server and CLI harness for deterministic SNA integration tests."
+description: "Mock runtime server and CLI harness for deterministic SNA integration tests."
 ---
 # Testing SDK
 
-`@sna-sdk/testing` exists so tests do not need a real Anthropic or Claude account. It provides a local Anthropic-compatible API server and a CLI wrapper that isolates configuration and logs per instance.
+`@sna-sdk/testing` exists so tests do not need real Anthropic, OpenAI, or Claude accounts. It provides local Anthropic-compatible and OpenAI-compatible API servers plus a CLI wrapper that isolates configuration and logs per instance.
 
-Use it for smoke tests, provider-adapter tests, and UI flows that need predictable agent output.
+Use it for smoke tests, runtime-adapter tests, and UI flows that need predictable agent output.
 
 ## Install
 

@@ -1,11 +1,11 @@
 ---
 title: ストリーミング completion
-description: 単発プロンプトからテキストをストリーミングする 3 つの方法。
+description: 単発プロンプトのテキストをストリーミングする 3 つの方法。
 icon: WavesHorizontal
 ---
 
-SNA は単発呼び出し向けのストリーミングを 3 つの形で公開します。ホスト
-(インプロセス vs ネットワーク) と形 (テキストのみ vs フルイベント)
+SNA は単発呼び出しのストリーミングを 3 つの形で提供します。ホスト
+(インプロセス vs ネットワーク) と出力形式 (テキストのみ vs フルイベント)
 に応じて選択してください。
 
 ## 1. インプロセス、テキストのみ: `completion({ onDelta })`
@@ -24,12 +24,12 @@ await completion({
 });
 ```
 
-Promise はやはり最終的に結合されたテキストと使用量で resolve します。
-`onDelta` は side channel であり、最終結果の置き換えではありません。
+Promise は最終テキストと使用量で resolve します。`onDelta` は side channel であり、
+最終結果の置き換えではありません。
 
-`claude-code` と `codex` (プールと ephemeral の両方) で配線済みです。
-OpenCode の SDK 呼び出しは現状 single-shot なので、コールバックは
-そこでは文書化されている no-op です。
+`claude-code`, `codex`, `opencode`, `grok-build`, `cursor` で配線済みです。
+OpenCode は `onDelta` がある場合に `prompt_async` とイベントストリーム
+へ切り替え、ない場合はオーバーヘッドの小さい同期 SDK 経路を維持します。
 
 ## 2. インプロセス、フルイベントストリーム: `runOnce({ onEvent })`
 
@@ -49,7 +49,7 @@ await runOnce(sessionManager, {
 });
 ```
 
-非テキストイベントが不要な場合は、`onDelta` 専用の変種も使えます。
+非テキストイベントが不要な場合は、`onDelta` 専用の変種を使います。
 
 ## 3. ネットワーク: SSE 上の `runOnceStream`
 
@@ -65,7 +65,7 @@ for await (const event of client.agent.runOnceStream({
 }
 ```
 
-`POST /agent/run-once/stream` (Server-Sent Events) で実装されています。
+`POST /agent/run-once/stream` (Server-Sent Events) の上に実装されています。
 ストリームは実行の最終 `complete` / `error` イベントの後に閉じます。
 
 ## どれを使うべきか
