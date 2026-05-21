@@ -236,6 +236,39 @@ describe("SessionManager", () => {
     });
   });
 
+  it("removeSession deletes persisted session, history, and runtime chain", async () => {
+    await runTest(async (cwd) => {
+      const { getDb, SessionManager } = await loadModules(cwd);
+      const sm = new SessionManager();
+      const db = getDb();
+
+      sm.createSession({ id: "delete-persisted", label: "Delete Persisted" });
+      sm.saveStartConfig("delete-persisted", {
+        provider: "codex",
+        model: "gpt-5.4",
+        cwd,
+        permissionMode: "bypassPermissions",
+      });
+      db.prepare("INSERT INTO chat_messages (session_id, actor, kind, content) VALUES (?, 'user', 'text', ?)")
+        .run("delete-persisted", "hello");
+
+      assert.equal(sm.removeSession("delete-persisted"), true);
+      assert.equal(sm.getSession("delete-persisted"), undefined);
+
+      const sessionRow = db.prepare("SELECT id FROM chat_sessions WHERE id = ?").get("delete-persisted");
+      const messageCount = db.prepare("SELECT COUNT(*) as count FROM chat_messages WHERE session_id = ?")
+        .get("delete-persisted") as any;
+      const runtimeCount = db.prepare("SELECT COUNT(*) as count FROM runtime_sessions WHERE sna_session_id = ?")
+        .get("delete-persisted") as any;
+      assert.equal(sessionRow, undefined);
+      assert.equal(messageCount.count, 0);
+      assert.equal(runtimeCount.count, 0);
+
+      const restored = new SessionManager();
+      assert.equal(restored.getSession("delete-persisted"), undefined);
+    });
+  });
+
   it("saveStartConfig persists and restores", async () => {
     await runTest(async (cwd) => {
       const { SessionManager } = await loadModules(cwd);

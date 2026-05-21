@@ -28,6 +28,9 @@ SessionManager가 pending 요청을 resolve
 런타임이 결정을 받아 툴 실행 (또는 거부)
 ```
 
+권한 요청이 대기 상태일 때 세션이 삭제되면, SNA는 그 요청을 거부로 처리한 뒤
+세션을 삭제합니다.
+
 ## 런타임별 배선
 
 - **Claude Code**는 `PreToolUse` 훅을 씁니다. CLI가 각 툴 호출을

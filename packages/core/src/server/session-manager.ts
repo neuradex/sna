@@ -963,6 +963,9 @@ export class SessionManager {
     // Cleanup listeners
     this.eventListeners.delete(id);
     this.sessions.delete(id);
+    try {
+      getDb().prepare("DELETE FROM chat_sessions WHERE id = ?").run(id);
+    } catch { /* DB not ready - memory removal still succeeds */ }
     return true;
   }
 

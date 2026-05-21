@@ -504,7 +504,7 @@
     "/agent/sessions/{id}": {
       "delete": {
         "summary": "세션 삭제",
-        "description": "에이전트 세션과 히스토리를 삭제합니다.",
+        "description": "에이전트 세션, 히스토리, runtime chain, 대기 중인 권한 요청을 삭제합니다.",
         "parameters": [
           {
             "schema": {

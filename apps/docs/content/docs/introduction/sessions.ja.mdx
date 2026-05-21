@@ -30,8 +30,12 @@ PATCH /agent/session      → {cwd, model, permissionMode} 統一 mutator
 POST /agent/resume        → ランタイムネイティブ履歴を再構築、respawn
 POST /agent/restart       → 同じ設定で respawn (そのまま保持)
 POST /agent/kill          → プロセスを止める (セッションレコードは残る)
-DELETE /agent/sessions/:id → セッション + 履歴を削除
+DELETE /agent/sessions/:id → セッション、履歴、runtime chain、保留中の権限を削除
 ```
+
+削除は取り消せません。実行中のプロセスがあれば先に停止し、保留中の権限要求は
+拒否として処理します。保存済みのチャット/ランタイムレコードも削除され、その後同じ
+セッションへの呼び出しは no-session または no-active-session エラーを返します。
 
 ## PATCH 意味論
 

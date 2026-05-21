@@ -193,7 +193,7 @@ const removeSessionRoute = createRoute({
   method: "delete",
   path: "/agent/sessions/{id}",
   summary: "Remove a session",
-  description: "Remove an agent session. Cannot remove 'default'.",
+  description: "Remove an agent session, its persisted history, its runtime chain, and any pending permission request. Cannot remove 'default'.",
   request: {
     params: z.object({ id: z.string() }),
   },

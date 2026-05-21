@@ -504,7 +504,7 @@
     "/agent/sessions/{id}": {
       "delete": {
         "summary": "Remove a session",
-        "description": "Remove an agent session and its history.",
+        "description": "Remove an agent session, its history, runtime chain, and pending permission request.",
         "parameters": [
           {
             "schema": {

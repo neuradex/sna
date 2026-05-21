@@ -28,6 +28,9 @@ SessionManager resolves the pending request
 runtime receives the verdict, tool executes (or is denied)
 ```
 
+If the session is removed while a request is pending, SNA resolves the request
+as denied before deleting the session.
+
 ## Per-runtime wiring
 
 - **Claude Code** uses a `PreToolUse` hook, a separate Node process
