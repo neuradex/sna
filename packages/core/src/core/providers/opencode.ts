@@ -84,6 +84,8 @@ function requireLoadedSdk(): typeof import("@opencode-ai/sdk") {
   return _sdkCache;
 }
 
+type OpenCodeSdk = typeof import("@opencode-ai/sdk");
+
 // ── Binary resolution ──────────────────────────────────────────────────────
 
 export function validateOpenCodePath(opencodePath: string): { ok: boolean; version?: string } {
@@ -160,6 +162,37 @@ export function resolveOpenCodeCli(opts?: { cacheDir?: string }): OpenCodeResolv
   } catch { /* shell detection failed */ }
 
   return { path: "opencode", source: "fallback" };
+}
+
+function withOpenCodeCommandOnPath<T>(fn: () => Promise<T>): Promise<T> {
+  let restorePath: string | undefined | null = null;
+  try {
+    const resolved = resolveOpenCodeCli();
+    if (resolved.source !== "fallback" && path.isAbsolute(resolved.path)) {
+      const dir = path.dirname(resolved.path);
+      const currentPath = process.env.PATH ?? "";
+      if (!currentPath.split(":").includes(dir)) {
+        restorePath = process.env.PATH;
+        process.env.PATH = currentPath ? `${dir}:${currentPath}` : dir;
+      }
+    }
+  } catch {
+    // SDK launch will surface the executable resolution error.
+  }
+
+  return fn().finally(() => {
+    if (restorePath !== null) {
+      if (restorePath === undefined) delete process.env.PATH;
+      else process.env.PATH = restorePath;
+    }
+  });
+}
+
+function createResolvedOpenCodeServer(
+  sdk: OpenCodeSdk,
+  options: Parameters<OpenCodeSdk["createOpencodeServer"]>[0],
+) {
+  return withOpenCodeCommandOnPath(() => sdk.createOpencodeServer(options));
 }
 
 // ── Permission mode → OpenCode agent ───────────────────────────────────────
@@ -1249,10 +1282,11 @@ export class OpenCodeProvider implements AgentProvider {
         logger.log("agent", `opencode complete: reusing pooled daemon ${serverUrl}`);
       } else {
         const port = await allocateFreePort();
-        const server = await sdk.createOpencodeServer({
+        const server = await createResolvedOpenCodeServer(sdk, {
           hostname: "127.0.0.1",
           port,
           timeout: options.timeout ?? 15_000,
+          config: buildOpenCodeConfig(options.providerOptions) as any,
         });
         serverUrl = server.url;
         cleanup = () => { try { server.close(); } catch { /* already gone */ } };
@@ -1389,19 +1423,16 @@ export class OpenCodeProvider implements AgentProvider {
     // Allocate a free port. opencode 1.14.33 was reported to mishandle
     // `--port 0`, so we pick the port in Node and pass it explicitly.
     const port = await allocateFreePort();
-    const logLevel = (config.providerOptions?.logLevel as string | undefined);
-    const opencodeConfig: Record<string, unknown> = {};
-    if (logLevel) opencodeConfig.logLevel = logLevel;
 
     const mcpServers = config.mcp as Record<string, McpServerConfig> | undefined;
     const mcp = mcpServers ? snaMcpToOpenCode(mcpServers) : undefined;
     if (mcp) {
-      opencodeConfig.mcp = mcp;
       logger.log("agent", `opencode: registering ${Object.keys(mcp).length} MCP server(s) with daemon`);
     }
+    const opencodeConfig = buildOpenCodeConfig(config.providerOptions, mcp);
 
     const sdk = await loadOpenCodeSdk();
-    const server = await sdk.createOpencodeServer({
+    const server = await createResolvedOpenCodeServer(sdk, {
       hostname: "127.0.0.1",
       port,
       timeout: 15_000,
@@ -1556,6 +1587,30 @@ export function parseOpenCodeModelsOutput(stdout: string): RuntimeModelInfo[] {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+
+function plainRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function cloneJsonRecord(value: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function buildOpenCodeConfig(
+  providerOptions: Record<string, unknown> | undefined,
+  mcp?: Record<string, unknown>,
+): Record<string, unknown> {
+  const raw = plainRecord(providerOptions?.opencodeConfig);
+  const config = raw ? cloneJsonRecord(raw) : {};
+  const logLevel = providerOptions?.logLevel as string | undefined;
+  if (logLevel) config.logLevel = logLevel;
+  if (mcp) {
+    const existing = plainRecord(config.mcp) ?? {};
+    config.mcp = { ...existing, ...mcp };
+  }
+  return config;
+}
 
 /**
  * Translate SNA's McpServerConfig record into opencode's Config.mcp shape.

@@ -22,12 +22,15 @@ import {
   type InstanceMeta,
 } from "./instance.js";
 import { startMockAnthropicServer, type MockLogEntry } from "./mock-api.js";
+import { createClaudeMockEnv } from "./claude-env.js";
 
 const SHELL = process.env.SHELL || "/bin/zsh";
 
 // ── Helpers ──────────────────────────────────────────────────────
 
 function resolveClaudePath(): string {
+  if (process.env.SNA_CLAUDE_COMMAND) return process.env.SNA_CLAUDE_COMMAND;
+
   const stateDir = path.join(process.cwd(), ".sna");
   const cached = path.join(stateDir, "claude-path");
   if (fs.existsSync(cached)) {
@@ -55,37 +58,6 @@ function printInstanceInfo(name: string) {
   console.log(`  ${chalk.dim("api logs:")}   sna-test logs ${name} --api`);
   console.log(`  ${chalk.dim("cleanup:")}    sna-test rm ${name}`);
   console.log();
-}
-
-function buildClaudeEnv(mockPort: number, instanceDir: string): Record<string, string> {
-  const configDir = path.join(instanceDir, "claude-config");
-  fs.mkdirSync(configDir, { recursive: true });
-
-  const apiKey = "sk-test-mock-sna";
-  const keyTruncated = apiKey.slice(-20);
-
-  const configFile = path.join(configDir, ".claude.json");
-  if (!fs.existsSync(configFile)) {
-    const cwd = process.cwd();
-    fs.writeFileSync(configFile, JSON.stringify({
-      theme: "dark",
-      hasCompletedOnboarding: true,
-      customApiKeyResponses: {
-        approved: [keyTruncated],
-        rejected: [],
-      },
-      projects: {
-        [cwd]: { hasTrustDialogAccepted: true },
-      },
-    }, null, 2));
-  }
-
-  return {
-    ...process.env as Record<string, string>,
-    ANTHROPIC_BASE_URL: `http://localhost:${mockPort}`,
-    ANTHROPIC_API_KEY: apiKey,
-    CLAUDE_CONFIG_DIR: configDir,
-  };
 }
 
 function wireApiLog(mock: ReturnType<typeof startMockAnthropicServer> extends Promise<infer T> ? T : never, dir: string) {
@@ -142,7 +114,12 @@ async function cmdClaude(args: string[]) {
   console.log();
 
   const claudePath = resolveClaudePath();
-  const env = buildClaudeEnv(mock.port, dir);
+  const { env } = createClaudeMockEnv({
+    cwd: process.cwd(),
+    configDir: path.join(dir, "claude-config"),
+    anthropicBaseUrl: `http://localhost:${mock.port}`,
+    apiKey: "sk-test-mock-sna",
+  });
 
   // All args passed straight through to Claude Code.
   // stdio: "inherit" — Claude gets the real TTY.

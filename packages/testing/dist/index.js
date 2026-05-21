@@ -29,8 +29,6 @@ async function startMockAnthropicServer() {
         res.end(JSON.stringify({ error: "invalid JSON" }));
         return;
       }
-      const entry = { model: body.model, messages: body.messages, stream: body.stream, timestamp: now() };
-      requests.push(entry);
       const lastUser = body.messages?.filter((m) => m.role === "user").pop();
       let userText = "(no text)";
       if (typeof lastUser?.content === "string") {
@@ -41,6 +39,16 @@ async function startMockAnthropicServer() {
         userText = realText ?? textBlocks[textBlocks.length - 1] ?? "(no text)";
       }
       const sysText = typeof body.system === "string" ? body.system : body.system ? JSON.stringify(body.system) : "";
+      const entry = {
+        model: body.model,
+        messages: body.messages,
+        stream: body.stream,
+        timestamp: now(),
+        userText,
+        systemPromptLength: sysText.length || void 0,
+        requestBody: body
+      };
+      requests.push(entry);
       log({
         ts: now(),
         type: "request",
@@ -462,25 +470,38 @@ ${userText}`);
         });
         const responseId = `resp_mock_${Date.now()}`;
         const itemId = `msg_mock_${Date.now()}`;
+        const createdAt = Math.floor(Date.now() / 1e3);
+        let sequenceNumber = 0;
         writeSse(res, "response.created", {
           type: "response.created",
-          response: { id: responseId, object: "response", status: "in_progress", model }
+          sequence_number: sequenceNumber++,
+          response: {
+            id: responseId,
+            object: "response",
+            created_at: createdAt,
+            status: "in_progress",
+            model,
+            output: []
+          }
         });
         writeSse(res, "response.output_item.added", {
           type: "response.output_item.added",
+          sequence_number: sequenceNumber++,
           output_index: 0,
-          item: { id: itemId, type: "message", role: "assistant", content: [] }
+          item: { id: itemId, type: "message", status: "in_progress", role: "assistant", content: [] }
         });
         writeSse(res, "response.content_part.added", {
           type: "response.content_part.added",
+          sequence_number: sequenceNumber++,
           item_id: itemId,
           output_index: 0,
           content_index: 0,
-          part: { type: "output_text", text: "" }
+          part: { type: "output_text", text: "", annotations: [] }
         });
         for (const chunk of chunksFor(replyText, chunkSize)) {
           writeSse(res, "response.output_text.delta", {
             type: "response.output_text.delta",
+            sequence_number: sequenceNumber++,
             item_id: itemId,
             output_index: 0,
             content_index: 0,
@@ -489,6 +510,7 @@ ${userText}`);
         }
         writeSse(res, "response.output_text.done", {
           type: "response.output_text.done",
+          sequence_number: sequenceNumber++,
           item_id: itemId,
           output_index: 0,
           content_index: 0,
@@ -496,21 +518,32 @@ ${userText}`);
         });
         writeSse(res, "response.output_item.done", {
           type: "response.output_item.done",
+          sequence_number: sequenceNumber++,
           output_index: 0,
           item: {
             id: itemId,
             type: "message",
+            status: "completed",
             role: "assistant",
-            content: [{ type: "output_text", text: replyText }]
+            content: [{ type: "output_text", text: replyText, annotations: [] }]
           }
         });
         writeSse(res, "response.completed", {
           type: "response.completed",
+          sequence_number: sequenceNumber++,
           response: {
             id: responseId,
             object: "response",
+            created_at: createdAt,
             status: "completed",
             model,
+            output: [{
+              id: itemId,
+              type: "message",
+              status: "completed",
+              role: "assistant",
+              content: [{ type: "output_text", text: replyText, annotations: [] }]
+            }],
             output_text: replyText,
             usage
           }
@@ -592,22 +625,703 @@ ${userText}`);
   };
 }
 
-// src/oneshot.ts
-import { spawn } from "child_process";
+// src/claude-env.ts
 import fs from "fs";
 import path from "path";
+var SAFE_ENV_KEYS = ["PATH", "HOME", "SHELL", "TERM", "LANG", "TMPDIR"];
+function compactEnv(input) {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== void 0)
+  );
+}
+function baseEnv(options) {
+  const source = options.env ?? process.env;
+  if (options.inheritEnv !== false) {
+    return compactEnv(source);
+  }
+  const clean = {};
+  for (const key of SAFE_ENV_KEYS) clean[key] = source[key];
+  return compactEnv(clean);
+}
+function createClaudeMockEnv(options) {
+  const cwd = options.cwd ?? process.cwd();
+  const apiKey = options.apiKey ?? "sk-test-mock-sna";
+  const configDir = options.configDir ?? path.join(cwd, ".sna", "mock-claude");
+  const configFile = path.join(configDir, ".claude.json");
+  fs.mkdirSync(configDir, { recursive: true });
+  if (options.overwrite || !fs.existsSync(configFile)) {
+    const projects = {};
+    for (const projectPath of [cwd, ...options.trustedProjectPaths ?? []]) {
+      projects[projectPath] = { hasTrustDialogAccepted: true };
+    }
+    fs.writeFileSync(configFile, JSON.stringify({
+      theme: "dark",
+      hasCompletedOnboarding: true,
+      customApiKeyResponses: {
+        approved: [apiKey.slice(-20)],
+        rejected: []
+      },
+      projects
+    }, null, 2));
+  }
+  const env = {
+    ...baseEnv(options),
+    ANTHROPIC_BASE_URL: options.anthropicBaseUrl,
+    ANTHROPIC_API_KEY: apiKey,
+    CLAUDE_CONFIG_DIR: configDir,
+    ...compactEnv(options.extraEnv ?? {})
+  };
+  return {
+    env,
+    cwd,
+    configDir,
+    configFile,
+    apiKey,
+    anthropicBaseUrl: options.anthropicBaseUrl
+  };
+}
+
+// src/codex-env.ts
+import fs2 from "fs";
+import path2 from "path";
+var SAFE_ENV_KEYS2 = ["PATH", "HOME", "SHELL", "TERM", "LANG", "TMPDIR"];
+function compactEnv2(input) {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== void 0)
+  );
+}
+function baseEnv2(options) {
+  const source = options.env ?? process.env;
+  if (options.inheritEnv !== false) {
+    return compactEnv2(source);
+  }
+  const clean = {};
+  for (const key of SAFE_ENV_KEYS2) clean[key] = source[key];
+  return compactEnv2(clean);
+}
+function quoteToml(value) {
+  return JSON.stringify(value);
+}
+function createCodexMockEnv(options) {
+  const cwd = options.cwd ?? process.cwd();
+  const apiKey = options.apiKey ?? "sk-test-mock-sna";
+  const codexHome = options.codexHome ?? path2.join(cwd, ".sna", "mock-codex");
+  const configFile = path2.join(codexHome, "config.toml");
+  const providerId = options.providerId ?? "mock-openai";
+  const model = options.model ?? "gpt-5.4";
+  const baseUrl = options.openAIBaseUrl.replace(/\/+$/, "");
+  fs2.mkdirSync(codexHome, { recursive: true });
+  if (options.overwrite || !fs2.existsSync(configFile)) {
+    const projects = [cwd, ...options.trustedProjectPaths ?? []].map((projectPath) => `[projects.${quoteToml(projectPath)}]
+trust_level = "trusted"`).join("\n\n");
+    fs2.writeFileSync(configFile, [
+      `model_provider = ${quoteToml(providerId)}`,
+      `model = ${quoteToml(model)}`,
+      `approval_policy = "never"`,
+      `sandbox_mode = "danger-full-access"`,
+      ``,
+      `[model_providers.${providerId}]`,
+      `name = ${quoteToml(providerId)}`,
+      `base_url = ${quoteToml(`${baseUrl}/v1`)}`,
+      `env_key = "OPENAI_API_KEY"`,
+      `wire_api = "responses"`,
+      ``,
+      projects,
+      ``
+    ].join("\n"));
+  }
+  const env = {
+    ...baseEnv2(options),
+    CODEX_HOME: codexHome,
+    OPENAI_API_KEY: apiKey,
+    ...compactEnv2(options.extraEnv ?? {})
+  };
+  return {
+    env,
+    cwd,
+    codexHome,
+    configFile,
+    apiKey,
+    openAIBaseUrl: baseUrl,
+    providerId,
+    model
+  };
+}
+
+// src/opencode-config.ts
+import crypto from "crypto";
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`);
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+function hashConfig(config) {
+  return crypto.createHash("sha256").update(stableJson(config)).digest("hex").slice(0, 16);
+}
+function createOpenCodeMockConfig(options) {
+  const providerId = options.providerId ?? "sna-mock";
+  const modelId = options.modelId ?? "sna-model";
+  const model = `${providerId}/${modelId}`;
+  const apiKey = options.apiKey ?? "sk-test-mock-sna";
+  const baseUrl = options.openAIBaseUrl.replace(/\/+$/, "");
+  const agent = options.agent ?? "build";
+  const maxSteps = options.maxSteps ?? 1;
+  const contextWindow = options.contextWindow ?? 8192;
+  const outputLimit = options.outputLimit ?? 4096;
+  const agentConfig = {
+    model,
+    maxSteps,
+    tools: {}
+  };
+  const config = {
+    enabled_providers: [providerId],
+    model,
+    small_model: model,
+    plugin: [],
+    agent: {
+      build: agentConfig,
+      [agent]: agentConfig
+    },
+    provider: {
+      [providerId]: {
+        npm: "@ai-sdk/openai-compatible",
+        name: "SNA Mock OpenAI",
+        options: {
+          baseURL: `${baseUrl}/v1`,
+          apiKey
+        },
+        models: {
+          [modelId]: {
+            name: options.modelName ?? "SNA Mock Model",
+            tool_call: false,
+            attachment: false,
+            reasoning: false,
+            temperature: true,
+            cost: { input: 0, output: 0 },
+            limit: { context: contextWindow, output: outputLimit }
+          }
+        }
+      }
+    },
+    ...options.extraConfig ?? {}
+  };
+  return {
+    config,
+    providerOptions: {
+      modelProviderId: providerId,
+      opencodeConfig: config,
+      opencodeConfigHash: hashConfig(config),
+      agent
+    },
+    model,
+    providerId,
+    modelId,
+    apiKey,
+    openAIBaseUrl: baseUrl
+  };
+}
+
+// src/grok-env.ts
+import fs3 from "fs";
+import path3 from "path";
+var SAFE_ENV_KEYS3 = ["PATH", "SHELL", "TERM", "LANG", "TMPDIR"];
+function compactEnv3(input) {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== void 0)
+  );
+}
+function baseEnv3(options) {
+  const source = options.env ?? process.env;
+  if (options.inheritEnv !== false) {
+    return compactEnv3(source);
+  }
+  const clean = {};
+  for (const key of SAFE_ENV_KEYS3) clean[key] = source[key];
+  return compactEnv3(clean);
+}
+function quoteToml2(value) {
+  return typeof value === "boolean" ? String(value) : JSON.stringify(value);
+}
+function createGrokMockEnv(options) {
+  const cwd = options.cwd ?? process.cwd();
+  const apiKey = options.apiKey ?? "sk-test-mock-sna";
+  const model = options.model ?? "grok-build";
+  const openAIBaseUrl = options.openAIBaseUrl.replace(/\/+$/, "");
+  const xaiApiBaseUrl = `${openAIBaseUrl}/v1`;
+  const grokHome = options.grokHome ?? path3.join(cwd, ".sna", "mock-grok-home");
+  const configDir = path3.join(grokHome, ".grok");
+  const configFile = path3.join(configDir, "config.toml");
+  fs3.mkdirSync(configDir, { recursive: true });
+  if (options.overwrite || !fs3.existsSync(configFile)) {
+    fs3.writeFileSync(configFile, [
+      `[cli]`,
+      `auto_update = ${quoteToml2(false)}`,
+      `use_leader = ${quoteToml2(false)}`,
+      ``
+    ].join("\n"));
+  }
+  const providerOptions = {
+    xaiApiBaseUrl,
+    noLeader: true
+  };
+  const env = {
+    ...baseEnv3(options),
+    HOME: grokHome,
+    XAI_API_KEY: apiKey,
+    ...compactEnv3(options.extraEnv ?? {})
+  };
+  return {
+    env,
+    cwd,
+    grokHome,
+    configDir,
+    configFile,
+    apiKey,
+    openAIBaseUrl,
+    xaiApiBaseUrl,
+    model,
+    providerOptions
+  };
+}
+
+// src/mock-cli.ts
+import fs4 from "fs";
+import os from "os";
+import path4 from "path";
+function executableScript(dir, name, body) {
+  const script = path4.join(dir, `${name}.js`);
+  fs4.writeFileSync(script, body);
+  fs4.chmodSync(script, 493);
+  return script;
+}
+function createCliHandle(dir, command, invocationsFile) {
+  return {
+    command,
+    dir,
+    invocationsFile,
+    readInvocations() {
+      if (!fs4.existsSync(invocationsFile)) return [];
+      return fs4.readFileSync(invocationsFile, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    },
+    close() {
+      fs4.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+}
+function openAIUrl(input) {
+  return typeof input === "string" ? input : input.url;
+}
+function anthropicUrl(input) {
+  return typeof input === "string" ? input : `http://127.0.0.1:${input.port}`;
+}
+function createMockCodexExecCli(input, options = {}) {
+  const dir = fs4.mkdtempSync(path4.join(os.tmpdir(), "sna-mock-codex-"));
+  const invocationsFile = path4.join(dir, "invocations.jsonl");
+  const endpoint = openAIUrl(input);
+  const apiKey = options.apiKey ?? "sk-codex-test";
+  const command = executableScript(dir, "codex", `#!/usr/bin/env node
+const fs = require("node:fs");
+const endpoint = ${JSON.stringify(endpoint)};
+const apiKey = ${JSON.stringify(apiKey)};
+const invocationsFile = ${JSON.stringify(invocationsFile)};
+const args = process.argv.slice(2);
+
+function record() {
+  const env = {};
+  for (const key of ["SNA_SESSION_ID", "LOOM_SESSION_ID", "LOOM_API_URL", "MOCK_OPENAI_URL", "OPENAI_API_KEY"]) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  fs.appendFileSync(invocationsFile, JSON.stringify({ argv: args, cwd: process.cwd(), env, timestamp: new Date().toISOString() }) + "\\n");
+}
+
+function configValue(raw) {
+  const idx = raw.indexOf("=");
+  if (idx === -1) return [raw, ""];
+  return [raw.slice(0, idx), raw.slice(idx + 1)];
+}
+
+function decodeConfigValue(value) {
+  try { return JSON.parse(value); } catch { return value; }
+}
+
+async function main() {
+  record();
+  if (args[0] === "--version") {
+    console.log("codex-cli mock-openai 0.0.0");
+    return;
+  }
+  if (args[0] === "debug" && args[1] === "models") {
+    const res = await fetch(endpoint + "/v1/models", {
+      headers: { Authorization: "Bearer " + apiKey },
+    });
+    const body = await res.json();
+    console.log(JSON.stringify({
+      models: body.data.map((m) => ({
+        slug: m.id,
+        display_name: String(m.id).toUpperCase(),
+        visibility: "list",
+        supported_in_api: true,
+      })),
+    }));
+    return;
+  }
+  if (args[0] !== "exec") {
+    console.error("unsupported codex mock args: " + args.join(" "));
+    process.exit(2);
+  }
+
+  let model = "codex-default";
+  let prompt = args[args.length - 1] ?? "";
+  let instructions;
+  let effort;
+  let serviceTier;
+
+  for (let i = 1; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--model") {
+      model = args[++i] ?? model;
+      continue;
+    }
+    if (arg === "-c") {
+      const [key, value] = configValue(args[++i] ?? "");
+      if (key === "developer_instructions") instructions = decodeConfigValue(value);
+      if (key === "model_reasoning_effort") effort = value;
+      if (key === "service_tier") serviceTier = value;
+    }
+  }
+
+  const request = {
+    model,
+    input: prompt,
+    ...(instructions ? { instructions } : {}),
+    ...(effort ? { reasoning: { effort } } : {}),
+    ...(serviceTier ? { service_tier: serviceTier } : {}),
+  };
+  const res = await fetch(endpoint + "/v1/responses", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey },
+    body: JSON.stringify(request),
+  });
+  if (!res.ok) {
+    console.log(JSON.stringify({ type: "turn.failed", error: { message: await res.text() } }));
+    process.exit(1);
+  }
+  const body = await res.json();
+  const text = body.output_text
+    ?? body.output?.flatMap((item) => item.content ?? []).map((part) => part.text ?? "").join("")
+    ?? "";
+
+  const midpoint = Math.max(1, Math.floor(text.length / 2));
+  console.log(JSON.stringify({ type: "agent_message.delta", delta: text.slice(0, midpoint) }));
+  console.log(JSON.stringify({ type: "agent_message.delta", delta: text.slice(midpoint) }));
+  console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text } }));
+  console.log(JSON.stringify({
+    type: "turn.completed",
+    usage: {
+      input_tokens: body.usage?.input_tokens ?? 0,
+      cached_input_tokens: body.usage?.input_tokens_details?.cached_tokens ?? 0,
+      output_tokens: body.usage?.output_tokens ?? 0,
+    },
+  }));
+}
+
+main().catch((err) => {
+  console.error(err?.stack ?? String(err));
+  process.exit(1);
+});
+`);
+  return createCliHandle(dir, command, invocationsFile);
+}
+function createMockClaudeCli(input, options = {}) {
+  const dir = fs4.mkdtempSync(path4.join(os.tmpdir(), "sna-mock-claude-"));
+  const invocationsFile = path4.join(dir, "invocations.jsonl");
+  const endpoint = anthropicUrl(input);
+  const apiKey = options.apiKey ?? "sk-test-mock-sna";
+  const defaultModel = options.defaultModel ?? "claude-mock";
+  const command = executableScript(dir, "claude", `#!/usr/bin/env node
+const fs = require("node:fs");
+const endpoint = ${JSON.stringify(endpoint)};
+const apiKey = ${JSON.stringify(apiKey)};
+const defaultModel = ${JSON.stringify(defaultModel)};
+const invocationsFile = ${JSON.stringify(invocationsFile)};
+const args = process.argv.slice(2);
+
+function record() {
+  const env = {};
+  for (const key of ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "CLAUDE_CONFIG_DIR", "SNA_SESSION_ID", "LOOM_SESSION_ID", "LOOM_API_URL"]) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  fs.appendFileSync(invocationsFile, JSON.stringify({ argv: args, cwd: process.cwd(), env, timestamp: new Date().toISOString() }) + "\\n");
+}
+
+function textFromAnthropicContent(content) {
+  if (!Array.isArray(content)) return "";
+  return content.filter((part) => part.type === "text").map((part) => part.text ?? "").join("");
+}
+
+function usageFor(text) {
+  const tokens = Math.max(1, Math.ceil(String(text).length / 4));
+  return {
+    input_tokens: tokens,
+    output_tokens: tokens,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+  };
+}
+
+function emitJsonLine(value) {
+  console.log(JSON.stringify(value));
+}
+
+function parseArgs() {
+  let outputFormat = "text";
+  let inputFormat = "text";
+  let printMode = false;
+  let model = defaultModel;
+  let systemPrompt = "";
+  let appendSystemPrompt = "";
+  let prompt = "";
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--version") return { version: true };
+    if (arg === "-p" || arg === "--print") {
+      printMode = true;
+      continue;
+    }
+    if (arg === "--verbose" || arg === "--include-partial-messages" || arg === "--no-session-persistence") continue;
+    if (arg === "--output-format") {
+      outputFormat = args[++i] ?? outputFormat;
+      continue;
+    }
+    if (arg === "--input-format") {
+      inputFormat = args[++i] ?? inputFormat;
+      continue;
+    }
+    if (arg === "--model") {
+      model = args[++i] ?? model;
+      continue;
+    }
+    if (arg === "--system-prompt") {
+      systemPrompt = args[++i] ?? "";
+      continue;
+    }
+    if (arg === "--append-system-prompt") {
+      appendSystemPrompt = args[++i] ?? "";
+      continue;
+    }
+    if (arg === "--permission-mode" || arg === "--effort") {
+      i++;
+      continue;
+    }
+    prompt = arg;
+  }
+  return {
+    outputFormat,
+    inputFormat,
+    printMode,
+    model,
+    system: [systemPrompt, appendSystemPrompt].filter(Boolean).join("\\n\\n"),
+    prompt,
+  };
+}
+
+async function completeAnthropic(parsed, prompt) {
+  const res = await fetch(endpoint + "/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+    body: JSON.stringify({
+      model: parsed.model,
+      system: parsed.system || undefined,
+      stream: false,
+      max_tokens: 4096,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    const error = await res.text();
+    console.error(error);
+    process.exit(1);
+  }
+  const body = await res.json();
+  return textFromAnthropicContent(body.content);
+}
+
+function resultPayload(parsed, text, usage, modelUsage) {
+  return {
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    result: text,
+    session_id: "mock-claude-session",
+    duration_ms: 1,
+    duration_api_ms: 1,
+    total_cost_usd: 0,
+    usage,
+    modelUsage,
+  };
+}
+
+function emitStream(parsed, text) {
+  const usage = usageFor(text);
+  const modelUsage = {
+    [parsed.model]: {
+      inputTokens: usage.input_tokens,
+      outputTokens: usage.output_tokens,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      costUSD: 0,
+    },
+  };
+
+  const messageId = "msg_mock_cli_" + Date.now();
+  emitJsonLine({ type: "stream_event", event: { type: "message_start", message: { id: messageId, type: "message", role: "assistant", model: parsed.model, content: [] } } });
+  emitJsonLine({ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } } });
+  let streamed = "";
+  for (const word of text.split(" ")) {
+    const delta = word + " ";
+    streamed += delta;
+    emitJsonLine({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: delta } } });
+  }
+  emitJsonLine({ type: "stream_event", event: { type: "content_block_stop", index: 0 } });
+  emitJsonLine({ type: "stream_event", event: { type: "message_stop" } });
+  emitJsonLine(resultPayload(parsed, streamed, usage, modelUsage));
+}
+
+function userTextFromStreamJson(line) {
+  const msg = JSON.parse(line);
+  if (msg.type !== "user") return null;
+  const content = msg.message?.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => typeof part === "string" ? part : (typeof part?.text === "string" ? part.text : ""))
+    .join("");
+}
+
+async function runPersistent(parsed) {
+  emitJsonLine({ type: "system", subtype: "init", session_id: "mock-claude-session", model: parsed.model, apiKeySource: "ANTHROPIC_API_KEY" });
+  process.stdin.setEncoding("utf8");
+  let buffer = "";
+  for await (const chunk of process.stdin) {
+    buffer += chunk;
+    const lines = buffer.split("\\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const text = userTextFromStreamJson(line);
+      if (text == null) continue;
+      emitStream(parsed, await completeAnthropic(parsed, text));
+    }
+  }
+}
+
+async function main() {
+  record();
+  const parsed = parseArgs();
+  if (parsed.version) {
+    console.log("Claude Code mock-anthropic 0.0.0");
+    return;
+  }
+
+  if (parsed.inputFormat === "stream-json" && !parsed.printMode) {
+    await runPersistent(parsed);
+    return;
+  }
+
+  const text = await completeAnthropic(parsed, parsed.prompt);
+
+  if (parsed.outputFormat === "json") {
+    const usage = usageFor(text);
+    const modelUsage = {
+      [parsed.model]: {
+        inputTokens: usage.input_tokens,
+        outputTokens: usage.output_tokens,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        costUSD: 0,
+      },
+    };
+    console.log(JSON.stringify(resultPayload(parsed, text, usage, modelUsage)));
+    return;
+  }
+
+  if (parsed.outputFormat === "stream-json") {
+    emitJsonLine({ type: "system", subtype: "init", session_id: "mock-claude-session", model: parsed.model, apiKeySource: "ANTHROPIC_API_KEY" });
+    emitStream(parsed, text);
+    return;
+  }
+
+  console.log(text);
+}
+
+main().catch((err) => {
+  console.error(err?.stack ?? String(err));
+  process.exit(1);
+});
+`);
+  return createCliHandle(dir, command, invocationsFile);
+}
+
+// src/harness.ts
+async function readSseData(res) {
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.startsWith("text/event-stream")) {
+    throw new Error(`Expected text/event-stream response, got ${contentType || "(missing content-type)"}`);
+  }
+  const raw = await res.text();
+  return raw.split("\n\n").flatMap((chunk) => chunk.split("\n")).filter((line) => line.startsWith("data: ")).map((line) => line.slice("data: ".length));
+}
+async function waitForRequest(source, predicate = () => true, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 1e3;
+  const intervalMs = options.intervalMs ?? 10;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    const found = source.requests.find(predicate);
+    if (found) return found;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`Timed out waiting for mock request after ${timeoutMs}ms`);
+}
+async function withMockAnthropicServer(fn) {
+  const mock = await startMockAnthropicServer();
+  try {
+    return await fn(mock);
+  } finally {
+    mock.close();
+  }
+}
+async function withMockOpenAIServer(optionsOrFn, maybeFn) {
+  const options = typeof optionsOrFn === "function" ? {} : optionsOrFn;
+  const fn = typeof optionsOrFn === "function" ? optionsOrFn : maybeFn;
+  if (!fn) throw new Error("withMockOpenAIServer requires a callback");
+  const mock = await startMockOpenAIServer(options);
+  try {
+    return await fn(mock);
+  } finally {
+    await mock.close();
+  }
+}
+
+// src/oneshot.ts
+import { spawn } from "child_process";
+import fs5 from "fs";
+import path5 from "path";
 async function runOneshot(cliArgs) {
   const ROOT = process.cwd();
-  const STATE_DIR = path.join(ROOT, ".sna");
+  const STATE_DIR = path5.join(ROOT, ".sna");
   const args = cliArgs ?? process.argv.slice(2);
   let claudePath = "claude";
-  const cachedPath = path.join(STATE_DIR, "claude-path");
-  if (fs.existsSync(cachedPath)) {
-    claudePath = fs.readFileSync(cachedPath, "utf8").trim() || claudePath;
+  const cachedPath = path5.join(STATE_DIR, "claude-path");
+  if (fs5.existsSync(cachedPath)) {
+    claudePath = fs5.readFileSync(cachedPath, "utf8").trim() || claudePath;
   }
   const mock = await startMockAnthropicServer();
-  const mockConfigDir = path.join(STATE_DIR, "mock-claude-oneshot");
-  fs.mkdirSync(mockConfigDir, { recursive: true });
+  const mockConfigDir = path5.join(STATE_DIR, "mock-claude-oneshot");
+  fs5.mkdirSync(mockConfigDir, { recursive: true });
   const env = {
     PATH: process.env.PATH ?? "",
     HOME: process.env.HOME ?? "",
@@ -618,8 +1332,8 @@ async function runOneshot(cliArgs) {
     ANTHROPIC_API_KEY: "sk-test-mock-oneshot",
     CLAUDE_CONFIG_DIR: mockConfigDir
   };
-  const stdoutPath = path.join(STATE_DIR, "mock-claude-stdout.log");
-  const stderrPath = path.join(STATE_DIR, "mock-claude-stderr.log");
+  const stdoutPath = path5.join(STATE_DIR, "mock-claude-stdout.log");
+  const stderrPath = path5.join(STATE_DIR, "mock-claude-stderr.log");
   const proc = spawn(claudePath, args, {
     env,
     cwd: ROOT,
@@ -635,8 +1349,8 @@ async function runOneshot(cliArgs) {
   });
   proc.stdout.pipe(process.stdout);
   proc.on("exit", (code) => {
-    fs.writeFileSync(stdoutPath, stdout);
-    fs.writeFileSync(stderrPath, stderr);
+    fs5.writeFileSync(stdoutPath, stdout);
+    fs5.writeFileSync(stderrPath, stderr);
     console.log(`
 ${"\u2500".repeat(60)}`);
     console.log(`Mock API: ${mock.requests.length} request(s)`);
@@ -647,7 +1361,7 @@ ${"\u2500".repeat(60)}`);
 Log files:`);
     console.log(`  stdout:   ${stdoutPath}`);
     console.log(`  stderr:   ${stderrPath}`);
-    console.log(`  api log:  ${path.join(STATE_DIR, "mock-api-last-request.json")}`);
+    console.log(`  api log:  ${path5.join(STATE_DIR, "mock-api-last-request.json")}`);
     console.log(`  config:   ${mockConfigDir}`);
     console.log(`  exit:     ${code}`);
     mock.close();
@@ -659,9 +1373,9 @@ Log files:`);
 }
 
 // src/instance.ts
-import fs2 from "fs";
-import path2 from "path";
-import crypto from "crypto";
+import fs6 from "fs";
+import path6 from "path";
+import crypto2 from "crypto";
 var ADJECTIVES = [
   "happy",
   "calm",
@@ -715,25 +1429,25 @@ var NOUNS = [
   "puma"
 ];
 function randomPick(arr) {
-  return arr[crypto.randomInt(arr.length)];
+  return arr[crypto2.randomInt(arr.length)];
 }
 function generateInstanceName() {
   return `${randomPick(ADJECTIVES)}-${randomPick(NOUNS)}`;
 }
 function getInstancesDir() {
-  return path2.join(process.cwd(), ".sna/instances");
+  return path6.join(process.cwd(), ".sna/instances");
 }
 function getInstanceDir(name) {
-  return path2.join(getInstancesDir(), name);
+  return path6.join(getInstancesDir(), name);
 }
 function writeInstanceMeta(name, meta) {
   const dir = getInstanceDir(name);
-  fs2.mkdirSync(dir, { recursive: true });
-  fs2.writeFileSync(path2.join(dir, "meta.json"), JSON.stringify(meta, null, 2));
+  fs6.mkdirSync(dir, { recursive: true });
+  fs6.writeFileSync(path6.join(dir, "meta.json"), JSON.stringify(meta, null, 2));
 }
 function readInstanceMeta(name) {
   try {
-    const raw = fs2.readFileSync(path2.join(getInstanceDir(name), "meta.json"), "utf8");
+    const raw = fs6.readFileSync(path6.join(getInstanceDir(name), "meta.json"), "utf8");
     return JSON.parse(raw);
   } catch {
     return null;
@@ -741,8 +1455,8 @@ function readInstanceMeta(name) {
 }
 function listInstances() {
   const dir = getInstancesDir();
-  if (!fs2.existsSync(dir)) return [];
-  const entries = fs2.readdirSync(dir, { withFileTypes: true });
+  if (!fs6.existsSync(dir)) return [];
+  const entries = fs6.readdirSync(dir, { withFileTypes: true });
   const instances = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
@@ -763,7 +1477,7 @@ function listInstances() {
 }
 function removeInstance(name) {
   const dir = getInstanceDir(name);
-  if (!fs2.existsSync(dir)) return false;
+  if (!fs6.existsSync(dir)) return false;
   const meta = readInstanceMeta(name);
   if (meta?.pid && meta.status === "running") {
     try {
@@ -771,18 +1485,28 @@ function removeInstance(name) {
     } catch {
     }
   }
-  fs2.rmSync(dir, { recursive: true, force: true });
+  fs6.rmSync(dir, { recursive: true, force: true });
   return true;
 }
 export {
+  createClaudeMockEnv,
+  createCodexMockEnv,
+  createGrokMockEnv,
+  createMockClaudeCli,
+  createMockCodexExecCli,
+  createOpenCodeMockConfig,
   generateInstanceName,
   getInstanceDir,
   getInstancesDir,
   listInstances,
   readInstanceMeta,
+  readSseData,
   removeInstance,
   runOneshot,
   startMockAnthropicServer,
   startMockOpenAIServer,
+  waitForRequest,
+  withMockAnthropicServer,
+  withMockOpenAIServer,
   writeInstanceMeta
 };

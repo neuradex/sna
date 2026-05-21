@@ -106,12 +106,22 @@ export class GrokProcess extends AcpStdioProcess {
   protected get vendorNotificationPrefix(): string { return "_x.ai/"; }
 
   protected resolveSpawn(options: SpawnOptions): AcpSpawnDescriptor {
-    // grok's top-level flags (`--model`, `--effort`, `--always-approve`) must
-    // come BEFORE the `agent stdio` subcommand — the subcommand itself takes
-    // no options other than `--help`. Putting them after silently fails with
-    // "error: unexpected argument" and the process exits with code 2 before
-    // the ACP handshake even starts.
-    const args: string[] = [];
+    // `grok agent stdio` accepts provider/runtime flags on the `agent`
+    // command, before the terminal `stdio` subcommand. The `stdio`
+    // subcommand itself takes no options.
+    const args: string[] = ["agent"];
+    const providerOptions = options.providerOptions ?? {};
+    const xaiApiBaseUrl = providerOptions.xaiApiBaseUrl;
+    const cliChatProxyBaseUrl = providerOptions.cliChatProxyBaseUrl;
+    if (providerOptions.noLeader === true) {
+      args.push("--no-leader");
+    }
+    if (typeof xaiApiBaseUrl === "string" && xaiApiBaseUrl.trim()) {
+      args.push("--xai-api-base-url", xaiApiBaseUrl);
+    }
+    if (typeof cliChatProxyBaseUrl === "string" && cliChatProxyBaseUrl.trim()) {
+      args.push("--cli-chat-proxy-base-url", cliChatProxyBaseUrl);
+    }
     if (options.model) {
       args.push("--model", options.model);
     }
@@ -121,7 +131,7 @@ export class GrokProcess extends AcpStdioProcess {
     if (options.permissionMode === "bypassPermissions") {
       args.push("--always-approve");
     }
-    args.push("agent", "stdio");
+    args.push("stdio");
     return { command: resolveGrokPath(options.cwd), args };
   }
 
