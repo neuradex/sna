@@ -1,0 +1,267 @@
+---
+title: "Mock-Attached Runtime Tests"
+description: "実際の Claude Code、Codex、OpenCode、Grok Build CLI を起動し、model API call だけを local mock に向ける方法。"
+---
+
+# Mock-Attached Runtime Tests
+
+Mock-attached test は、実際の runtime CLI を起動し、model API endpoint だけを local mock server に差し替えます。純粋な fake より強い test です。Provider の実際の spawn argument、config file、environment variable、stream parser、request shape をそのまま通すためです。
+
+SNA が prompt、model、auth、streaming flag、reasoning 設定、provider 固有 config を runtime に正しく渡しているかを確認したい場合に使ってください。
+
+## 検証範囲
+
+| Runtime | 実 process | Mock API route | Main helper |
+| --- | --- | --- | --- |
+| Claude Code | `claude` | Anthropic `POST /v1/messages` | `createClaudeMockEnv()` |
+| Codex | `codex` | OpenAI Responses `POST /v1/responses` | `createCodexMockEnv()` |
+| OpenCode | `opencode serve` | OpenAI Chat Completions `POST /v1/chat/completions` | `createOpenCodeMockConfig()` |
+| Grok Build | `grok agent ... stdio` | OpenAI Responses `POST /v1/responses` | `createGrokMockEnv()` |
+
+Captured request には `authorization`、`model`、`stream`、`userText`、`systemPromptLength`、`requestBody` が含まれます。Prompt の配置や provider 固有 field を正確に検証する場合は raw body に対して assertion を書いてください。
+
+Cursor はまだ mock-attached helper の対象外です。現在サポートされている CLI 経路では、他の runtime と同等に安定した API-base override が確認できていないためです。
+
+## Binary の場所
+
+Test は provider が production で使うものと同じ command override 環境変数を使います。Developer ごとに runtime binary の場所が違っても、同じ test を実行できます。
+
+```bash
+SNA_CLAUDE_COMMAND=/absolute/path/to/claude \
+SNA_CODEX_COMMAND=/absolute/path/to/codex \
+SNA_GROK_COMMAND=/absolute/path/to/grok \
+SNA_OPENCODE_COMMAND=/absolute/path/to/opencode \
+pnpm --filter @sna-sdk/core exec tsx --test test/runtime-mock-attached.test.ts
+```
+
+Override がない場合は各 provider の通常の path lookup が使われます。必要な binary がない場合、test は fake に差し替えるのではなく skip されるべきです。
+
+## Request assertion
+
+Sleep ではなく `waitForRequest()` を使います。Mock server の captured request list を polling し、predicate が match したら返し、timeout したら失敗します。
+
+```ts
+import { startMockOpenAIServer, waitForRequest } from "@sna-sdk/testing";
+
+const openai = await startMockOpenAIServer({ responseText: "OK" });
+
+const request = await waitForRequest(
+  openai,
+  (entry) =>
+    entry.endpoint === "responses" &&
+    entry.userText?.includes("mock attached") &&
+    JSON.stringify(entry.requestBody).includes("SNA system prompt"),
+  { timeoutMs: 15_000 },
+);
+
+expect(request.url).toBe("/v1/responses");
+expect(request.stream).toBe(true);
+expect(request.authorization).toBe("Bearer sk-test");
+```
+
+## Claude Code
+
+`createClaudeMockEnv()` は隔離された Claude config directory を書き、Claude Code を `startMockAnthropicServer()` に向ける environment variable を返します。
+
+```ts
+import { ClaudeCodeProvider } from "@sna-sdk/core/providers";
+import {
+  createClaudeMockEnv,
+  startMockAnthropicServer,
+  waitForRequest,
+} from "@sna-sdk/testing";
+
+const anthropic = await startMockAnthropicServer();
+const mockEnv = createClaudeMockEnv({
+  cwd,
+  anthropicBaseUrl: `http://127.0.0.1:${anthropic.port}`,
+  apiKey: "sk-claude-mock",
+});
+
+try {
+  const deltas: string[] = [];
+  const result = await new ClaudeCodeProvider().complete({
+    cwd,
+    prompt: "mock attached claude",
+    model: "claude-sonnet-4-6",
+    systemPrompt: "SNA mock-attached Claude system prompt",
+    extraArgs: ["--bare", "--permission-mode", "bypassPermissions", "--setting-sources", ""],
+    env: mockEnv.env,
+    onDelta: (delta) => deltas.push(delta),
+  });
+
+  const request = await waitForRequest(
+    anthropic,
+    (entry) => JSON.stringify(entry.requestBody).includes("SNA mock-attached Claude system prompt"),
+  );
+
+  expect(request.stream).toBe(true);
+  expect(result.text).toContain("edualc");
+  expect(deltas.join("")).toContain("edualc");
+} finally {
+  anthropic.close();
+}
+```
+
+Helper は `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_KEY`、`CLAUDE_CONFIG_DIR` を設定します。`inheritEnv: false` を使うと、小さな shell allowlist だけを継承してから mock 固有の値を追加します。
+
+## Codex
+
+`createCodexMockEnv()` は、mock server を指す OpenAI Responses provider を含む隔離 `CODEX_HOME/config.toml` を書きます。
+
+```ts
+import { CodexProvider } from "@sna-sdk/core/providers";
+import {
+  createCodexMockEnv,
+  startMockOpenAIServer,
+  waitForRequest,
+} from "@sna-sdk/testing";
+
+const openai = await startMockOpenAIServer({ responseText: "codex mock response" });
+const mockEnv = createCodexMockEnv({
+  cwd,
+  openAIBaseUrl: openai.url,
+  apiKey: "sk-codex-mock",
+  model: "gpt-5.4",
+});
+
+try {
+  const result = await new CodexProvider().complete({
+    cwd,
+    prompt: "mock attached codex",
+    model: mockEnv.model,
+    systemPrompt: "SNA mock-attached Codex system prompt",
+    reasoningLevel: 4,
+    providerOptions: { serviceTier: "priority" },
+    env: mockEnv.env,
+  });
+
+  const request = await waitForRequest(openai, (entry) => entry.endpoint === "responses");
+
+  expect(result.text).toBe("codex mock response");
+  expect(request.url).toBe("/v1/responses");
+  expect(request.requestBody.reasoning).toEqual({ effort: "high" });
+  expect(request.requestBody.service_tier).toBe("priority");
+} finally {
+  await openai.close();
+}
+```
+
+Helper は `CODEX_HOME` と `OPENAI_API_KEY` を設定します。生成される config は `wire_api = "responses"` と `base_url = "<mock>/v1"` を使います。
+
+## OpenCode
+
+OpenCode は process environment ではなく SNA provider option で設定します。`createOpenCodeMockConfig()` は、SNA が実際の `opencode serve` runtime に渡す provider config を返します。
+
+```ts
+import { OpenCodeProvider } from "@sna-sdk/core/providers";
+import {
+  createOpenCodeMockConfig,
+  startMockOpenAIServer,
+  waitForRequest,
+} from "@sna-sdk/testing";
+
+const openai = await startMockOpenAIServer({ responseText: "Done." });
+const mockConfig = createOpenCodeMockConfig({
+  openAIBaseUrl: openai.url,
+  apiKey: "sk-opencode-mock",
+  providerId: "sna-mock",
+  modelId: "sna-model",
+});
+
+const provider = new OpenCodeProvider();
+const runtime = await provider.prepareRuntime({
+  cwd,
+  model: mockConfig.model,
+  providerOptions: mockConfig.providerOptions,
+});
+
+try {
+  const agent = provider.spawn({
+    cwd,
+    prompt: "mock attached opencode",
+    model: mockConfig.model,
+    systemPrompt: "SNA mock-attached OpenCode system prompt",
+    providerOptions: mockConfig.providerOptions,
+  }, runtime);
+
+  const request = await waitForRequest(
+    openai,
+    (entry) => entry.endpoint === "chat.completions" &&
+      entry.userText === "mock attached opencode",
+    { timeoutMs: 15_000 },
+  );
+
+  expect(request.url).toBe("/v1/chat/completions");
+  expect(request.model).toBe("sna-model");
+  expect(request.stream).toBe(true);
+  agent.kill();
+} finally {
+  await runtime.dispose();
+  await openai.close();
+}
+```
+
+`SNA_OPENCODE_COMMAND` が custom binary を指す場合、provider はその binary の directory を `PATH` の先頭に追加します。SDK 内部の `opencode serve` launch が同じ executable を使うようにするためです。
+
+## Grok Build
+
+`createGrokMockEnv()` は Grok の `HOME` を隔離し、`~/.grok/config.toml` を書き、`XAI_API_KEY` を設定し、SNA Grok provider に渡す provider option を返します。Provider は `grok agent --no-leader --xai-api-base-url <mock>/v1 ... stdio` を起動します。
+
+```ts
+import { GrokProvider } from "@sna-sdk/core/providers";
+import {
+  createGrokMockEnv,
+  startMockOpenAIServer,
+  waitForRequest,
+} from "@sna-sdk/testing";
+
+const openai = await startMockOpenAIServer({
+  models: [{ id: "grok-build", owned_by: "xai" }],
+  responseText: "OK",
+});
+const mockEnv = createGrokMockEnv({
+  cwd,
+  openAIBaseUrl: openai.url,
+  apiKey: "sk-grok-mock",
+  model: "grok-build",
+});
+
+try {
+  const events: any[] = [];
+  const agent = new GrokProvider().spawn({
+    cwd,
+    prompt: "Reply with exactly OK for mock attached grok.",
+    model: mockEnv.model,
+    permissionMode: "bypassPermissions",
+    systemPrompt: "SNA mock-attached Grok system prompt",
+    env: mockEnv.env,
+    providerOptions: mockEnv.providerOptions,
+  });
+  agent.on("event", (event) => events.push(event));
+
+  const request = await waitForRequest(
+    openai,
+    (entry) => entry.endpoint === "responses" &&
+      JSON.stringify(entry.requestBody).includes("SNA mock-attached Grok system prompt"),
+    { timeoutMs: 20_000 },
+  );
+
+  expect(request.authorization).toBe("Bearer sk-grok-mock");
+  expect(request.stream).toBe(true);
+  expect(request.model).toBe("grok-build");
+  agent.kill();
+} finally {
+  await openai.close();
+}
+```
+
+Helper は `{ xaiApiBaseUrl: "<mock>/v1", noLeader: true }` 形式の `providerOptions` を返します。追加の process variable は `extraEnv` で渡し、local auth state の継承を避ける test では `inheritEnv: false` を使ってください。
+
+## Cleanup checklist
+
+- Mock server を `mock.close()` または `await mock.close()` で閉じます。
+- Spawn した `AgentProcess` を kill します。
+- OpenCode の `RuntimeHandle` のような準備済み runtime handle を dispose します。
+- Test が作成した temporary cwd/config directory を削除します。
+- `sk-test-mock-sna` のような fake API key を使い、developer-local real token に依存しないでください。
