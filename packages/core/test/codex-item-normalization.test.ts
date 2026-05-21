@@ -47,6 +47,81 @@ describe("CodexProcess — item normalization", () => {
     delete process.env.CODEX_MOCK_TURN_NOTIFICATIONS;
   });
 
+  it("does not treat agentMessage starts as tool_use while preserving assistant deltas and completion", async () => {
+    process.env.CODEX_MOCK_TURN_NOTIFICATIONS = JSON.stringify([
+      {
+        jsonrpc: "2.0",
+        method: "item/started",
+        params: {
+          item: {
+            type: "agentMessage",
+            id: "msg_1",
+            status: "in_progress",
+          },
+        },
+      },
+      {
+        jsonrpc: "2.0",
+        method: "item/agentMessage/delta",
+        params: {
+          itemId: "msg_1",
+          delta: "Hello ",
+        },
+      },
+      {
+        jsonrpc: "2.0",
+        method: "item/agentMessage/delta",
+        params: {
+          itemId: "msg_1",
+          delta: "world",
+        },
+      },
+      {
+        jsonrpc: "2.0",
+        method: "item/completed",
+        params: {
+          item: {
+            type: "agentMessage",
+            id: "msg_1",
+            status: "completed",
+            text: "Hello world",
+          },
+        },
+      },
+      {
+        jsonrpc: "2.0",
+        method: "thread/status/changed",
+        params: { status: "idle" },
+      },
+    ]);
+
+    const provider = new CodexProvider();
+    const proc = provider.spawn({ cwd: process.cwd(), prompt: "say hello" });
+    const events: AgentEvent[] = [];
+    proc.on("event", (e) => events.push(e));
+
+    await waitFor(() => events.some((e) => e.type === "complete"));
+    proc.kill();
+
+    assert.equal(
+      events.some((e) => e.type === "tool_use" && (e.data as any)?.toolName === "agentMessage"),
+      false,
+      "agentMessage item/started must not surface as a fake tool_use",
+    );
+    assert.equal(
+      events.some((e) => e.type === "tool_result" && (e.data as any)?.toolName === "agentMessage"),
+      false,
+      "assistant messages should not require a matching tool_result",
+    );
+
+    const deltas = events.filter((e) => e.type === "assistant_delta").map((e) => e.delta).join("");
+    assert.equal(deltas, "Hello world");
+
+    const assistant = events.find((e) => e.type === "assistant");
+    assert.equal(assistant?.message, "Hello world");
+    assert.ok(events.some((e) => e.type === "complete"), "turn should still complete");
+  });
+
   it("forwards image_generation lifecycle as tool_use (start) + tool_result (savedPath + revisedPrompt + duration)", async () => {
     process.env.CODEX_MOCK_TURN_NOTIFICATIONS = JSON.stringify([
       {
