@@ -1382,6 +1382,7 @@ class CodexProcess implements AgentProcess {
 
       case "agent_message":
       case "agentMessage":
+      case "reasoning":
         return null;
 
       case "userMessage":
