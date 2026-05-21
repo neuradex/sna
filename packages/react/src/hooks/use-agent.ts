@@ -23,7 +23,7 @@ interface UseAgentOptions {
    */
   reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
   /**
-   * Provider-specific options (e.g. `{ omlxBaseUrl: "http://..." }`).
+   * Provider-specific options passed through to the selected runtime.
    * Codex-only knobs include `serviceTier` ("priority" / "flex" / "batch" —
    * the `/fast` slash-command equivalent).
    */

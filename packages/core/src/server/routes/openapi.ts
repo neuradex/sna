@@ -786,8 +786,6 @@ const listModelsRoute = createRoute({
               config: z
                 .object({
                   cliPath: z.string().optional(),
-                  baseUrl: z.string().optional(),
-                  apiKey: z.string().optional(),
                   refresh: z.boolean().optional(),
                 })
                 .optional(),

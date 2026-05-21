@@ -147,14 +147,6 @@ export interface SnaServerOptions {
     baseUrl?: string;
   };
 
-  /**
-   * oMLX base URL for local LLM inference.
-   * When set, routes Claude Code's API calls to the oMLX endpoint
-   * instead of Anthropic's cloud API.
-   *
-   * @example "http://localhost:8000/v1"
-   */
-  omlxBaseUrl?: string;
 }
 
 export interface SnaServerHandle {
@@ -248,7 +240,6 @@ export async function startSnaServer(options: SnaServerOptions): Promise<SnaServ
     ...(options.model ? { SNA_MODEL: options.model } : {}),
     ...(options.permissionTimeoutMs != null ? { SNA_PERMISSION_TIMEOUT_MS: String(options.permissionTimeoutMs) } : {}),
     ...(options.dataDir ? { SNA_DATA_DIR: options.dataDir } : {}),
-    ...(options.omlxBaseUrl ? { SNA_OMLX_BASE_URL: options.omlxBaseUrl } : {}),
     ...(options.nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: options.nativeBinding } : {}),
     ...(consumerModules ? { SNA_MODULES_PATH: consumerModules } : {}),
     ...(nodePath ? { NODE_PATH: nodePath } : {}),
@@ -388,7 +379,6 @@ export async function startSnaServerInProcess(
     ...(options.permissionMode ? { defaultPermissionMode: options.permissionMode } : {}),
     ...(options.model ? { model: options.model } : {}),
     ...(options.permissionTimeoutMs != null ? { permissionTimeoutMs: options.permissionTimeoutMs } : {}),
-    ...(options.omlxBaseUrl ? { omlxBaseUrl: options.omlxBaseUrl } : {}),
   });
 
   // Also set env vars so any module reading process.env directly works
@@ -399,7 +389,6 @@ export async function startSnaServerInProcess(
   if (options.model) process.env.SNA_MODEL = options.model;
   if (options.permissionTimeoutMs != null) process.env.SNA_PERMISSION_TIMEOUT_MS = String(options.permissionTimeoutMs);
   if (options.dataDir) process.env.SNA_DATA_DIR = options.dataDir;
-  if (options.omlxBaseUrl) process.env.SNA_OMLX_BASE_URL = options.omlxBaseUrl;
   if (options.nativeBinding) process.env.SNA_SQLITE_NATIVE_BINDING = options.nativeBinding;
 
   // Resolve consumer's node_modules for better-sqlite3.
