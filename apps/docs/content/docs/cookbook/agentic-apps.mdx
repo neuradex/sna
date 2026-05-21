@@ -1,0 +1,326 @@
+---
+title: Agentic app hosting
+description: Product integration patterns from Loom for embedding SNA inside a real app.
+icon: AppWindow
+---
+
+Loom embeds SNA as a local and cloud-capable agent runtime rather than treating it as a throwaway chat endpoint. These patterns are useful when a product owns projects, tabs, documents, permissions, and background workflows around an agent.
+
+## 1. Keep app sessions separate from SNA sessions
+
+Your product likely has its own session or project row. Keep that row as the user-facing object, then store the active SNA session id on it.
+
+```ts
+type AppSession = {
+  // App-owned identity. Rename/archive/fork should target this id.
+  id: string;
+
+  // User-facing label, separate from any runtime process label.
+  name: string;
+
+  // Some sessions may not be attached to a local project yet.
+  projectPath: string | null;
+
+  // Active SNA head. This can change after runtime switch, fold, or fork.
+  snaSessionId: string | null;
+
+  // Lets the same app model point at local SNA or a cloud SNA instance.
+  snaInstanceId: "local" | string;
+};
+```
+
+This separation lets the app rename, archive, move, or fork its own session without pretending the runtime process is the product object. It also lets one app session migrate from local SNA to a cloud SNA instance while preserving the app-level identity.
+
+Keep a link table if a single app session can produce multiple SNA session heads over time:
+
+```sql
+CREATE TABLE session_sna_links (
+  session_id TEXT NOT NULL,
+  sna_session_id TEXT NOT NULL,
+  instance_id TEXT NOT NULL DEFAULT 'local',
+  source TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (session_id, sna_session_id)
+);
+```
+
+## 2. Use one `SnaClient` per SNA instance
+
+WebSocket state belongs to a connection. If your app can talk to local SNA and cloud SNA instances at the same time, cache a client per instance and fan events into one listener set.
+
+```ts
+import { SnaClient } from "@sna-sdk/client";
+
+// One client per instance prevents duplicate WebSocket connections.
+const clients = new Map<string, SnaClient>();
+
+// UI subscribes to the app-level listener set, not to a specific client.
+const eventListeners = new Set<(event: unknown) => void>();
+const permissionListeners = new Set<(event: unknown) => void>();
+
+function installAggregator(client: SnaClient) {
+  // Fan runtime events into one product event bus.
+  client.agent.onEvent((event) => {
+    for (const listener of eventListeners) listener(event);
+  });
+
+  // Permission requests are also connection-scoped, so fan them in too.
+  client.agent.onPermissionRequest((event) => {
+    for (const listener of permissionListeners) listener(event);
+  });
+}
+
+export function snaFor(instanceId: string, baseUrl?: string): SnaClient {
+  // Reuse the existing client if this instance is already connected.
+  const existing = clients.get(instanceId);
+  if (existing) return existing;
+  if (!baseUrl) throw new Error(`baseUrl required for ${instanceId}`);
+
+  const client = new SnaClient({ baseUrl, ws: true, http: true });
+  clients.set(instanceId, client);
+  installAggregator(client);
+
+  // Connect and subscribe once, when the client is created.
+  client.connect();
+  client.agent.subscribePermissions().catch(() => {});
+  return client;
+}
+
+export function onAgentEventAll(listener: (event: unknown) => void) {
+  // Returning cleanup makes this easy to use from React effects.
+  eventListeners.add(listener);
+  return () => eventListeners.delete(listener);
+}
+```
+
+The important part is that UI components subscribe to the app-level aggregator, not to a specific WebSocket. When a cloud instance appears later, its client can join the aggregator without remounting the UI.
+
+## 3. Route commands through the host, events through SNA
+
+Loom uses a split path:
+
+| Path | Route | Why |
+| --- | --- | --- |
+| Lifecycle commands | renderer → app host HTTP → SNA HTTP | The host can build config from app DB, wake cloud instances, reconcile model selection, and inject product context. |
+| Event stream | renderer → SNA WebSocket | The UI receives low-latency runtime events without proxying every token through the app server. |
+
+In the renderer, expose a domain wrapper rather than raw SNA calls:
+
+```ts
+export async function ensureAgentAlive(snaSessionId: string, isNewSession = false) {
+  // The renderer may have an SNA id, but the host owns the app session row.
+  const appSession = sessionStore.findBySnaId(snaSessionId);
+
+  // The host can build cwd/model/context and wake cloud instances if needed.
+  await appFetch("/agent/ensure", {
+    method: "POST",
+    body: JSON.stringify({
+      appSessionId: appSession.id,
+      snaSessionId,
+      isNewSession,
+    }),
+  });
+}
+
+export async function sendMessage(snaSessionId: string, message: string) {
+  // Sending through the host lets pending model/runtime changes apply at the user-turn boundary.
+  return appFetch("/agent/send", {
+    method: "POST",
+    body: JSON.stringify({ snaSessionId, message }),
+  });
+}
+
+export function subscribeAgent(snaSessionId: string) {
+  // Events stay direct to SNA for low token latency.
+  return clientForSnaSession(snaSessionId).agent.subscribe(snaSessionId, { since: 0 });
+}
+```
+
+Components stay small because they talk to product verbs: `ensureAgentAlive`, `sendMessage`, `subscribeAgent`.
+
+## 4. Make `/agent/ensure` idempotent
+
+The host should own start-vs-resume. The UI should not decide whether a runtime has history, whether a cloud instance needs waking, or which cwd exists inside the remote container.
+
+```ts
+async function ensureAgent({ appSessionId, requestedSnaId, isNewSession }) {
+  // Pick local or cloud SNA from the product session, not from UI state.
+  const instance = snaForAppSession(appSessionId);
+  await wakeIfCloudInstance(instance);
+
+  // Reuse the stored SNA id when possible; create one only when needed.
+  const snaSessionId = requestedSnaId ?? await loadOrCreateSnaId(appSessionId);
+  if (await instance.isAlive(snaSessionId)) {
+    return { status: "already_alive", snaSessionId };
+  }
+
+  // The host assembles agent config so renderer code stays domain-level.
+  const { config, cwd } = await buildAgentConfig(appSessionId, snaSessionId);
+  await instance.createSession({
+    id: snaSessionId,
+    label: config.label ?? appSessionId,
+    cwd,
+    meta: debugMode ? { langfuseTrace: true } : undefined,
+  });
+
+  const hasHistory = await instance.getMessages(snaSessionId, { limit: 1 })
+    .then((res) => res.ok && res.data.messages.length > 0)
+    .catch(() => false);
+
+  // Start empty/new heads, resume heads that already have normalized history.
+  return isNewSession || !hasHistory
+    ? instance.startAgent(snaSessionId, { ...config, force: true, cwd })
+    : instance.resumeAgent(snaSessionId, config);
+}
+```
+
+This endpoint should be safe to call repeatedly from tab focus, reload recovery, or "send" preflight.
+
+## 5. Inject product context at the user-turn boundary
+
+Avoid sending metadata as its own model turn. Build the context right before forwarding the user's message, then prepend or append product-owned tags to that message.
+
+```ts
+async function sendAgentMessage({ snaSessionId, message }) {
+  let finalMessage = message;
+
+  // Apply pending model/runtime choices immediately before the real user turn.
+  await reconcileSelectedModel(snaSessionId);
+
+  // One-time system metadata rides with the user's turn instead of becoming its own model turn.
+  const pendingMeta = consumePendingSystemMeta(snaSessionId);
+  if (pendingMeta) finalMessage = `${pendingMeta}\n${finalMessage}`;
+
+  // Retrieval should be calculated from the current user text to avoid stale context.
+  const retrievalContext = await maybeBuildRetrievalContext(snaSessionId, finalMessage);
+  if (retrievalContext) finalMessage += `\n${retrievalContext}`;
+
+  // The agent receives one final user turn enriched with product context.
+  return snaForSnaSession(snaSessionId).sendMessage(snaSessionId, finalMessage);
+}
+```
+
+This keeps runtime history clean: the first thing the agent sees after start/resume is the user's actual turn, enriched with the app's current world.
+
+## 6. Defer expensive state changes until send
+
+If the app has pending operations such as context folding, model changes, or runtime switches, apply them at the next user-turn boundary. The user's natural pause before the model responds hides the cost of kill/resume/replay.
+
+The safe ordering is:
+
+1. Resolve the active SNA head.
+2. Apply pending fork or fold operations.
+3. Reconcile selected model/runtime.
+4. Build final message context.
+5. Call `sendMessage`.
+6. Broadcast session changes after the user message is persisted.
+
+Broadcasting a new SNA head before the user message lands can make the renderer resubscribe to a timeline that does not contain the optimistic user message yet.
+
+## 7. Subscribe permissions on every client
+
+Permission subscriptions are per WebSocket. If a cloud client is created after the permission dialog mounted, subscribe that new client too.
+
+```ts
+export async function subscribePermissions() {
+  await Promise.all(
+    [...clients.values()].map((client) =>
+      client.agent.subscribePermissions().catch(() => {}),
+    ),
+  );
+}
+
+export function respondPermission(snaSessionId: string, approved: boolean) {
+  return clientForSnaSession(snaSessionId)
+    .agent
+    .respondPermission(snaSessionId, approved);
+}
+```
+
+Without this, the agent can be waiting for a tool decision on a cloud instance while the UI only subscribed to the local SNA.
+
+## 8. Keep React subscriptions at the app root
+
+Mount the SNA event bridge above the chat surface. Chat panes, routes, and side panels can unmount while an agent is still streaming. A root-level hook keeps the WebSocket listener alive and routes events into a store.
+
+```tsx
+function AppShell() {
+  // Product session hydration belongs at app boot.
+  const hydrateSessions = useSessionStore((state) => state.hydrate);
+  const sessions = useSessionStore((state) => state.sessions);
+
+  // Permission UI needs every known session, not only the current route.
+  const sessionIds = useMemo(
+    () => sessions.flatMap((session) => session.snaSessionId ? [session.snaSessionId] : []),
+    [sessions],
+  );
+
+  // Keep the event bridge mounted above routes and chat panes.
+  useAgentEventStream();
+  const { pending, clearPending } = usePermissionRequests(sessionIds);
+
+  useEffect(() => {
+    // The root owns SNA connection lifecycle.
+    hydrateSessions();
+    connectSna();
+    return () => disconnectSna();
+  }, [hydrateSessions]);
+
+  return (
+    <>
+      <AppRoutes />
+      {pending[0] && (
+        <PermissionDialog
+          request={pending[0]}
+          onDone={() => clearPending(pending[0].sessionId)}
+        />
+      )}
+    </>
+  );
+}
+```
+
+The event hook should register once, then subscribe each visible or known SNA session as the session list changes.
+
+```ts
+function useAgentEventStream() {
+  const sessions = useSessionStore((state) => state.sessions);
+  const register = useMessageStore((state) => state.register);
+  const handleEvent = useMessageStore((state) => state.handleEvent);
+
+  useEffect(() => {
+    // Install the global event listener once and normalize events into the store.
+    return onAgentEvent(({ session, cursor, event, isHistory }) => {
+      handleEvent(session, { cursor, event, isHistory });
+    });
+  }, [handleEvent]);
+
+  useEffect(() => {
+    const cleanups = sessions
+      .filter((session) => session.snaSessionId)
+      .map((session) => {
+        // Tell the store how app sessions map to SNA sessions.
+        register(session.snaSessionId!, session.id);
+
+        // Recover recent events on mount, then continue streaming.
+        subscribeAgent(session.snaSessionId!, { since: 0, tail: 200 }).catch(() => {});
+
+        // Clean up old subscriptions when the session list changes.
+        return () => unsubscribeAgent(session.snaSessionId!).catch(() => {});
+      });
+
+    return () => cleanups.forEach((cleanup) => cleanup());
+  }, [sessions, register]);
+}
+```
+
+This is the same reason permission UI should be root-mounted. It is product state, not a child of the currently selected chat panel.
+
+## When this pattern fits
+
+| Situation | Use this pattern? |
+| --- | --- |
+| Single CLI wrapper with no product DB | Probably not. Call SNA directly. |
+| Electron app with local SNA and renderer UI | Yes. Split commands and events. |
+| App with local plus cloud SNA instances | Yes. Use a client registry and event aggregator. |
+| App that injects retrieval, project, or policy context | Yes. Centralize send-time context building in the host. |

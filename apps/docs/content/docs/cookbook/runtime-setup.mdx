@@ -1,0 +1,263 @@
+---
+title: Runtime setup
+description: Detect runtimes, persist CLI paths, register models, and test installs.
+icon: Settings2
+---
+
+Agentic products usually need a settings flow around runtimes. Loom treats runtime setup as two separate concerns:
+
+- **Path detection** finds the real CLI binary on the user's machine.
+- **Runtime registration** decides which runtimes and models the product exposes in its UI.
+
+Keeping those concerns separate makes settings screens easier to reason about. Auto-detection can prefill good defaults, while users still control the registered model list.
+
+## Detection is not registration
+
+A runtime can be detected without being enabled. A model can be listed without being registered. The product should keep both pieces of state.
+
+```ts
+type RuntimeId = "claude-code" | "codex" | "opencode" | "grok" | "cursor";
+
+type RegisteredModel = {
+  // Stable app-level id. A compound id keeps model selectors unambiguous.
+  id: `${RuntimeId}/${string}`;
+
+  // Runtime-native model slug passed back to SNA on startAgent/runOnce.
+  modelSlug: string;
+
+  // Human label shown in the settings UI and model picker.
+  label: string;
+
+  // Provider family is useful for grouping, attribution, and billing views.
+  provider: "anthropic" | "openai" | "oss" | string;
+};
+
+type RuntimeSlot = {
+  // The user can toggle a detected runtime off without losing its config.
+  enabled: boolean;
+
+  config: {
+    // CLI runtimes use cliPath. Hosted or local API runtimes may use baseUrl/apiKey.
+    cliPath?: string;
+    baseUrl?: string;
+    apiKey?: string;
+  };
+
+  // The app owns this curated list. It may be seeded from SNA's model catalog.
+  models: RegisteredModel[];
+};
+```
+
+## Resolve CLI paths in a predictable order
+
+Loom resolves CLI paths in this order:
+
+1. A user override saved from settings.
+2. A cache entry written by earlier detection.
+3. A fresh filesystem scan.
+
+That priority keeps user edits stable, but still gives first-run users a working default.
+
+```ts
+const RUNTIME_ENV: Record<RuntimeId, string> = {
+  "claude-code": "SNA_CLAUDE_COMMAND",
+  codex: "SNA_CODEX_COMMAND",
+  opencode: "SNA_OPENCODE_COMMAND",
+  grok: "SNA_GROK_COMMAND",
+  cursor: "SNA_CURSOR_COMMAND",
+};
+
+async function resolveRuntimePath(runtimeId: RuntimeId): Promise<string | null> {
+  // 1. A value typed by the user should win over every auto-detected path.
+  const override = await settingsDb.get(`runtime:${runtimeId}:path`);
+  if (override) return override;
+
+  // 2. Cache avoids shell probes on every app boot.
+  const cached = await pathCache.read(runtimeId);
+  if (cached) return cached;
+
+  // 3. Fresh detection can check static install locations and login-shell PATH.
+  const detected = await detectCliOnDisk(runtimeId);
+  if (detected) await pathCache.write(runtimeId, detected);
+  return detected;
+}
+
+async function setRuntimePath(runtimeId: RuntimeId, cliPath: string) {
+  // Validate before saving so a typo does not break future agent launches.
+  await validateExecutable(cliPath);
+
+  // Save the user's choice as an override, not as a cache entry.
+  await settingsDb.set(`runtime:${runtimeId}:path`, cliPath);
+
+  // If SNA is embedded in the same process, mirroring to process.env lets
+  // future provider spawns resolve the same path immediately.
+  process.env[RUNTIME_ENV[runtimeId]] = cliPath;
+}
+```
+
+## Pass runtime paths to the SNA launcher
+
+When launching SNA from Electron, pass the resolved runtime paths at startup. SNA maps these values to the provider environment variables used by runtime resolvers.
+
+```ts
+import { startSnaServerInProcess } from "@sna-sdk/core/electron";
+
+const runtimePaths = {
+  // Use the paths your settings layer resolved. Omit values that were not found.
+  claudeCode: (await resolveRuntimePath("claude-code")) ?? undefined,
+  codex: (await resolveRuntimePath("codex")) ?? undefined,
+  opencode: (await resolveRuntimePath("opencode")) ?? undefined,
+  grok: (await resolveRuntimePath("grok")) ?? undefined,
+  cursor: (await resolveRuntimePath("cursor")) ?? undefined,
+};
+
+const sna = await startSnaServerInProcess({
+  port: 3099,
+  dbPath: appPaths.snaDb,
+
+  // runtimePaths becomes SNA_CLAUDE_COMMAND, SNA_CODEX_COMMAND, and siblings.
+  runtimePaths,
+
+  // env is merged after runtimePaths, so it works as a final escape hatch.
+  env: {
+    SNA_MAX_SESSIONS: "20",
+  },
+});
+```
+
+For a forked standalone SNA server, path changes should usually be applied before launch or by restarting SNA. For in-process SNA, updating `process.env.SNA_*_COMMAND` in the host can affect later spawns because the providers resolve paths inside the same process.
+
+## Test the real runtime with `runOnce`
+
+A setup screen should test the real CLI path and agent bootstrap, not only check whether a file exists. The health check below assumes the path was already saved into the host settings and mirrored to the SNA launch environment.
+
+```ts
+const HEALTH_MODELS: Partial<Record<RuntimeId, string>> = {
+  "claude-code": "haiku",
+  codex: "gpt-5.4-mini",
+  grok: "grok-build",
+  cursor: "auto",
+};
+
+async function testRuntime(client: SnaClient, runtimeId: RuntimeId) {
+  const result = await client.agent.runOnce({
+    provider: runtimeId,
+    model: HEALTH_MODELS[runtimeId],
+
+    // Keep setup probes out of the user's project directory.
+    cwd: `/tmp/my-app-runtime-tests/${runtimeId}`,
+
+    // This call is a health check, so it should return a sentinel and stop.
+    permissionMode: "bypassPermissions",
+    systemPrompt: "Reply exactly APP_RUNTIME_OK and do not use tools.",
+    message: "Reply exactly: APP_RUNTIME_OK",
+
+    // First-run auth or CLI bootstrap can be slower than a normal turn.
+    timeout: 120_000,
+  });
+
+  const text = result.result.trim();
+  return {
+    ok: text.includes("APP_RUNTIME_OK"),
+    response: text.slice(0, 500),
+  };
+}
+```
+
+This gives you stronger confidence than a path check: the app verified that SNA can spawn the runtime, pass a prompt, receive output, and complete the one-shot session.
+
+## List models before registering them
+
+`agent.listModels(runtime, config?)` is a catalog call. `config.cliPath` only affects model listing for runtimes that inspect their CLI, such as Codex and OpenCode. It does not replace launcher `runtimePaths` for normal agent spawns.
+
+```ts
+async function refreshCatalog(client: SnaClient, runtimeId: RuntimeId, cliPath?: string) {
+  const catalog = await client.agent.listModels(runtimeId, {
+    // Useful when the user just edited a CLI path in settings.
+    cliPath,
+
+    // Bypass provider-side cache for an explicit refresh button.
+    refresh: true,
+  });
+
+  if (catalog.error) {
+    // The UI can still render fallback models, but should surface the warning.
+    toast.warning(`Model catalog was partial: ${catalog.error}`);
+  }
+
+  return catalog.models;
+}
+
+async function registerModel(runtimeId: RuntimeId, model: RuntimeModelInfo) {
+  // Registration is a product decision. The model id from SNA becomes the
+  // runtime-native slug; the app stores a compound id for its own selectors.
+  await settingsDb.addModel(runtimeId, {
+    id: `${runtimeId}/${model.id}`,
+    modelSlug: model.id,
+    label: model.label,
+    provider: model.provider,
+  });
+}
+```
+
+This two-step flow is useful for product UX: users can inspect a catalog, add only the entries they want, and later disable a runtime without deleting its model list.
+
+## React settings flow
+
+The settings UI can be a thin shell over host APIs. Keep filesystem validation, env mirroring, and SNA health checks in the host process; the renderer only coordinates user intent.
+
+```tsx
+function RuntimeSetupPanel({ runtimeId }: { runtimeId: RuntimeId }) {
+  const [cliPath, setCliPath] = useState("");
+  const [models, setModels] = useState<RuntimeModelInfo[]>([]);
+  const [testing, setTesting] = useState(false);
+
+  async function redetect() {
+    // Host code can use login-shell lookup, static candidates, and cache writes.
+    const path = await window.appRuntime.redetect(runtimeId);
+    if (path) setCliPath(path);
+  }
+
+  async function saveAndTest() {
+    setTesting(true);
+    try {
+      // Persist first so the SNA provider resolves this path during runOnce.
+      await window.appRuntime.setPath(runtimeId, cliPath);
+
+      // This is a real runtime invocation through SNA, not only a fake ping.
+      const result = await window.appRuntime.test(runtimeId);
+      if (!result.ok) throw new Error(result.response || "Runtime test failed");
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  async function refreshModels() {
+    // The CLI path helps catalog probing. Normal agent spawn still uses the
+    // path saved through setPath/startup runtimePaths.
+    const catalog = await window.appRuntime.listModels(runtimeId, { cliPath, refresh: true });
+    setModels(catalog.models);
+  }
+
+  async function addModel(model: RuntimeModelInfo) {
+    // Store only models the user actually wants in the product picker.
+    await window.appRuntime.registerModel(runtimeId, model);
+  }
+
+  return (
+    <section>
+      <input value={cliPath} onChange={(event) => setCliPath(event.target.value)} />
+      <button onClick={redetect}>Redetect</button>
+      <button onClick={saveAndTest} disabled={testing}>Test runtime</button>
+      <button onClick={refreshModels}>Refresh models</button>
+      {models.map((model) => (
+        <button key={model.id} onClick={() => addModel(model)}>
+          Add {model.label}
+        </button>
+      ))}
+    </section>
+  );
+}
+```
+
+The key product boundary is that the renderer never guesses how to mutate SNA's runtime environment. It asks the host to save, test, list, and register.

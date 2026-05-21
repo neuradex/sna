@@ -1,0 +1,167 @@
+---
+title: One-shot jobs
+description: completion、runOnce、runOnceStream call を product feature に使う pattern。
+icon: Zap
+---
+
+Loom は、ユーザーの長期 chat thread に入れたくない作業に one-shot call を使います。例: session title、query parsing、retrieval filtering、runtime health check、小さな background decision。
+
+## 最小の surface を選ぶ
+
+| Job shape | API | 理由 |
+| --- | --- | --- |
+| Text transform, classification, JSON extraction | `agent.completion()` | 最速 path。temporary session lifecycle がありません。 |
+| Agent が tool を使う、または provider 固有の agent behavior が必要 | `agent.runOnce()` | temporary session を作成し、完了を待ってから cleanup します。 |
+| Browser/Electron UI が one-shot の進捗を live 表示する | `agent.runOnceStream()` | HTTP SSE stream。長期 chat session は作りません。 |
+
+One-shot prompt は狭く保つと扱いやすいです。これは product plumbing であり、open-ended conversation ではありません。
+
+## `completion` で text-only utility を作る
+
+Title generation、intent classification、小さな parser call に使いやすい pattern です。
+
+```ts
+import type { SnaClient } from "@sna-sdk/client";
+
+export async function generateSessionTitle(client: SnaClient, firstMessage: string) {
+  const result = await client.agent.completion({
+    // Prompt は単一目的に保つと、失敗原因を log から見つけやすくなります。
+    prompt: `Create a 2-5 word title for this first user message:\n\n${firstMessage}`,
+
+    // App の model registry が選んだ cheap/fast model を使います。
+    model: "claude-haiku-4-5-20251001",
+
+    // Label を付けると trace と log を product feature ごとに検索できます。
+    label: "session-title",
+
+    // One-shot UX は早く失敗し、default title に fallback する方が安全です。
+    timeout: 30_000,
+
+    // Pure text transform では tool permission を開きません。
+    permissionMode: "bypassPermissions",
+  });
+
+  if (!result.text?.trim()) return null;
+
+  // Title は UI string なので quote/newline/prose を整理します。
+  return result.text.trim().replace(/^["']|["']$/g, "").split("\n")[0].slice(0, 50);
+}
+```
+
+## Fallback 付き structured extraction
+
+Model は JSON を fence で囲んだり、malformed output を返したりします。Parse failure は通常の branch として扱うと安全です。
+
+```ts
+type ParsedQuery = {
+  subject: string | null;
+  predicate: string | null;
+  object: string | null;
+  mode: "exact" | "broad";
+};
+
+const FALLBACK_QUERY: ParsedQuery = {
+  subject: null,
+  predicate: null,
+  object: null,
+  mode: "broad",
+};
+
+export async function parseQuery(client: SnaClient, userText: string): Promise<ParsedQuery> {
+  const result = await client.agent.completion({
+    // Schema は prompt に含めますが、log で検査できる長さに保ちます。
+    prompt: [
+      "Return ONLY JSON matching this TypeScript type:",
+      "{ subject: string|null; predicate: string|null; object: string|null; mode: 'exact'|'broad' }",
+      "",
+      userText,
+    ].join("\n"),
+    model: "claude-haiku-4-5-20251001",
+    label: "query-parse",
+    timeout: 30_000,
+    permissionMode: "bypassPermissions",
+  });
+
+  if (!result.text) return FALLBACK_QUERY;
+
+  // よくある fenced output は受け入れますが、任意の prose を黙って通しません。
+  const cleaned = result.text
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/i, "")
+    .trim();
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    return {
+      subject: typeof parsed.subject === "string" ? parsed.subject : null,
+      predicate: typeof parsed.predicate === "string" ? parsed.predicate : null,
+      object: typeof parsed.object === "string" ? parsed.object : null,
+      mode: parsed.mode === "exact" ? "exact" : "broad",
+    };
+  } catch {
+    // Malformed one-shot result は app を crash させず、feature を degrade します。
+    return FALLBACK_QUERY;
+  }
+}
+```
+
+## `runOnce` で runtime health check を行う
+
+実際の runtime path と agent bootstrap を動かす必要がある場合は `runOnce` が便利です。選択された CLI path は先に host settings または SNA launcher environment に反映し、`runOnce` は設定済み runtime が実際に応答できるかを見る役割にすると安全です。
+
+```ts
+export async function testRuntime(client: SnaClient, runtimeId: string) {
+  const result = await client.agent.runOnce({
+    provider: runtimeId,
+
+    // Runtime cache や project file が dev mode を汚さないよう cwd を隔離します。
+    cwd: `/tmp/my-app-runtime-tests/${runtimeId}`,
+
+    // Health check は permission prompt や tool call を発生させてはいけません。
+    permissionMode: "bypassPermissions",
+    systemPrompt: "Reply exactly APP_RUNTIME_OK and do not use tools.",
+    message: "Reply exactly: APP_RUNTIME_OK",
+
+    // Runtime first-run setup は遅いことがあるため、十分な timeout を置きます。
+    timeout: 120_000,
+  });
+
+  if (!result.result?.includes("APP_RUNTIME_OK")) {
+    return { ok: false, reason: "unexpected-response", response: result.result };
+  }
+  return { ok: true };
+}
+```
+
+## Streaming one-shot UI
+
+既存 session に接続しない作業でも、UI が live progress を見せたい場合は `runOnceStream` が便利です。
+
+```ts
+export async function previewPlan(client: SnaClient, request: string, append: (text: string) => void) {
+  for await (const event of client.agent.runOnceStream({
+    // Temporary one-shot run です。終了後に session は保持されません。
+    message: request,
+    provider: "codex",
+    model: "gpt-5.4-mini",
+    permissionMode: "bypassPermissions",
+    timeout: 60_000,
+  })) {
+    if (event.type === "assistant_delta") {
+      // 届いた token delta をそのまま UI に追加します。
+      append(String(event.delta ?? ""));
+    }
+    if (event.type === "error") {
+      throw new Error(String(event.error ?? "runOnceStream failed"));
+    }
+  }
+}
+```
+
+## Guardrails
+
+- すべての call に `label` を付けると product trace が読みやすくなります。
+- Timeout と明示的な fallback を用意しておくと運用しやすいです。
+- Prompt が tool を使わない作業のときだけ `permissionMode: "bypassPermissions"` を使うと安全です。
+- User が明示的に求めた output でない限り、one-shot result を user conversation に入れない方が扱いやすいです。
+- 繰り返し実行される background work は provider を hardcode せず、runtime/model registry から model を選ぶ構成が便利です。

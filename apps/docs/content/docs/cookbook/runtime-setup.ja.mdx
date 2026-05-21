@@ -1,0 +1,261 @@
+---
+title: Runtime setup
+description: runtime 検出、CLI path 保存、model 登録、install test の pattern。
+icon: Settings2
+---
+
+Agentic product には、runtime settings flow が必要になることがよくあります。Loom では runtime setup を 2 つの関心事に分けています。
+
+- **Path detection** は、ユーザーの machine 上にある実際の CLI binary を見つけます。
+- **Runtime registration** は、product UI にどの runtime と model を出すかを決めます。
+
+この 2 つを分けておくと settings 画面を扱いやすくなります。Auto-detection はよい初期値を入れ、ユーザーは registered model list を自分で管理できます。
+
+## Detection と registration を分ける
+
+Runtime は検出済みでも disabled のままにできます。Model も catalog には存在するが、まだ product に登録していない状態にできます。Product state では、この 2 つを別々に持つ形が扱いやすいです。
+
+```ts
+type RuntimeId = "claude-code" | "codex" | "opencode" | "grok" | "cursor";
+
+type RegisteredModel = {
+  // Product 内で使う安定した id です。Compound id にすると selector の衝突を避けやすくなります。
+  id: `${RuntimeId}/${string}`;
+
+  // SNA startAgent/runOnce に戻して渡す runtime-native model slug です。
+  modelSlug: string;
+
+  // Settings UI と model picker に出す、人が読みやすい label です。
+  label: string;
+
+  // Provider family は grouping、attribution、billing view に使いやすいです。
+  provider: "anthropic" | "openai" | "oss" | string;
+};
+
+type RuntimeSlot = {
+  // ユーザーは検出済み runtime を off にできますが、config は残せます。
+  enabled: boolean;
+
+  config: {
+    // CLI runtime は cliPath を使います。Hosted/local API runtime は baseUrl/apiKey を持てます。
+    cliPath?: string;
+    baseUrl?: string;
+    apiKey?: string;
+  };
+
+  // この curated list は app が所有します。SNA model catalog から seed できます。
+  models: RegisteredModel[];
+};
+```
+
+## CLI path は予測しやすい順序で resolve する
+
+Loom は CLI path を次の順序で resolve しています。
+
+1. Settings で保存した user override。
+2. 以前の detection が残した cache entry。
+3. 新しい filesystem scan。
+
+この優先順位にしておくと、ユーザーが手で直した値は安定して残り、初回ユーザーにも自動の初期値を出せます。
+
+```ts
+const RUNTIME_ENV: Record<RuntimeId, string> = {
+  "claude-code": "SNA_CLAUDE_COMMAND",
+  codex: "SNA_CODEX_COMMAND",
+  opencode: "SNA_OPENCODE_COMMAND",
+  grok: "SNA_GROK_COMMAND",
+  cursor: "SNA_CURSOR_COMMAND",
+};
+
+async function resolveRuntimePath(runtimeId: RuntimeId): Promise<string | null> {
+  // 1. ユーザーが入力した値は auto-detected path より優先すると扱いやすいです。
+  const override = await settingsDb.get(`runtime:${runtimeId}:path`);
+  if (override) return override;
+
+  // 2. Cache を読むと、app boot のたびに shell probe を走らせずに済みます。
+  const cached = await pathCache.read(runtimeId);
+  if (cached) return cached;
+
+  // 3. Fresh detection では static install location と login-shell PATH を見られます。
+  const detected = await detectCliOnDisk(runtimeId);
+  if (detected) await pathCache.write(runtimeId, detected);
+  return detected;
+}
+
+async function setRuntimePath(runtimeId: RuntimeId, cliPath: string) {
+  // 保存前に validate しておくと、typo で次の agent launch が壊れるリスクを下げられます。
+  await validateExecutable(cliPath);
+
+  // ユーザーが選んだ値は cache ではなく override として保存します。
+  await settingsDb.set(`runtime:${runtimeId}:path`, cliPath);
+
+  // SNA を同じ process に embed している場合、process.env mirror で次の provider spawn が同じ path を見ます。
+  process.env[RUNTIME_ENV[runtimeId]] = cliPath;
+}
+```
+
+## SNA launcher に runtime path を渡す
+
+Electron から SNA を起動するときに、resolve 済み runtime path を startup option として渡しておくとよいです。SNA はこの値を runtime resolver が読む provider environment variable に mapping します。
+
+```ts
+import { startSnaServerInProcess } from "@sna-sdk/core/electron";
+
+const runtimePaths = {
+  // Settings layer が resolve した path を使います。見つからない値は省略できます。
+  claudeCode: (await resolveRuntimePath("claude-code")) ?? undefined,
+  codex: (await resolveRuntimePath("codex")) ?? undefined,
+  opencode: (await resolveRuntimePath("opencode")) ?? undefined,
+  grok: (await resolveRuntimePath("grok")) ?? undefined,
+  cursor: (await resolveRuntimePath("cursor")) ?? undefined,
+};
+
+const sna = await startSnaServerInProcess({
+  port: 3099,
+  dbPath: appPaths.snaDb,
+
+  // runtimePaths は SNA_CLAUDE_COMMAND、SNA_CODEX_COMMAND などの env に変換されます。
+  runtimePaths,
+
+  // env は runtimePaths のあとに merge されるため、最後の escape hatch として使えます。
+  env: {
+    SNA_MAX_SESSIONS: "20",
+  },
+});
+```
+
+Forked standalone SNA server では、path change を launch 前に反映するか、SNA を再起動する構成が扱いやすいです。In-process SNA では provider が同じ process 内で path を resolve するため、host が `process.env.SNA_*_COMMAND` を更新すると以後の spawn に反映できます。
+
+## `runOnce` で実 runtime を test する
+
+Settings screen では、file の存在だけでなく、実際の CLI path と agent bootstrap を一緒に test すると信頼しやすくなります。次の health check は、path がすでに host settings に保存され、SNA launch environment に mirror されている前提です。
+
+```ts
+const HEALTH_MODELS: Partial<Record<RuntimeId, string>> = {
+  "claude-code": "haiku",
+  codex: "gpt-5.4-mini",
+  grok: "grok-build",
+  cursor: "auto",
+};
+
+async function testRuntime(client: SnaClient, runtimeId: RuntimeId) {
+  const result = await client.agent.runOnce({
+    provider: runtimeId,
+    model: HEALTH_MODELS[runtimeId],
+
+    // Setup probe がユーザーの project directory を汚さないように cwd を分けます。
+    cwd: `/tmp/my-app-runtime-tests/${runtimeId}`,
+
+    // Health check は sentinel だけ返して終わる小さな call にすると判定しやすいです。
+    permissionMode: "bypassPermissions",
+    systemPrompt: "Reply exactly APP_RUNTIME_OK and do not use tools.",
+    message: "Reply exactly: APP_RUNTIME_OK",
+
+    // First-run auth や CLI bootstrap は通常 turn より遅いことがあります。
+    timeout: 120_000,
+  });
+
+  const text = result.result.trim();
+  return {
+    ok: text.includes("APP_RUNTIME_OK"),
+    response: text.slice(0, 500),
+  };
+}
+```
+
+この形は単なる path check より強い確認になります。SNA が runtime を spawn し、prompt を渡し、output を受け取り、one-shot session を完了できるかを見るためです。
+
+## Model は list してから register する
+
+`agent.listModels(runtime, config?)` は catalog call です。`config.cliPath` は Codex や OpenCode のように CLI を inspect する runtime の model listing にだけ影響します。通常の agent spawn path を変える場合は launcher `runtimePaths` または `SNA_*_COMMAND` 側を使います。
+
+```ts
+async function refreshCatalog(client: SnaClient, runtimeId: RuntimeId, cliPath?: string) {
+  const catalog = await client.agent.listModels(runtimeId, {
+    // Settings で CLI path を編集した直後の catalog probe に便利です。
+    cliPath,
+
+    // ユーザーが refresh button を押した場合は provider-side cache を bypass します。
+    refresh: true,
+  });
+
+  if (catalog.error) {
+    // UI は fallback model を表示できますが、partial warning も見せると親切です。
+    toast.warning(`Model catalog was partial: ${catalog.error}`);
+  }
+
+  return catalog.models;
+}
+
+async function registerModel(runtimeId: RuntimeId, model: RuntimeModelInfo) {
+  // Registration は product decision です。SNA model id は runtime-native slug として保存し、
+  // app selector では app-owned compound id を使います。
+  await settingsDb.addModel(runtimeId, {
+    id: `${runtimeId}/${model.id}`,
+    modelSlug: model.id,
+    label: model.label,
+    provider: model.provider,
+  });
+}
+```
+
+この two-step flow にしておくと、ユーザーは catalog を見て必要な entry だけ追加できます。Runtime をあとで disabled にしても model list 自体は保持できます。
+
+## React settings flow
+
+Settings UI は host API の上に薄い shell として置くと扱いやすいです。Filesystem validation、env mirroring、SNA health check は host process が担当し、renderer は user intent の調整に集中できます。
+
+```tsx
+function RuntimeSetupPanel({ runtimeId }: { runtimeId: RuntimeId }) {
+  const [cliPath, setCliPath] = useState("");
+  const [models, setModels] = useState<RuntimeModelInfo[]>([]);
+  const [testing, setTesting] = useState(false);
+
+  async function redetect() {
+    // Host code は login-shell lookup、static candidates、cache write を使えます。
+    const path = await window.appRuntime.redetect(runtimeId);
+    if (path) setCliPath(path);
+  }
+
+  async function saveAndTest() {
+    setTesting(true);
+    try {
+      // 先に persist すると、SNA provider が runOnce 中にこの path を resolve できます。
+      await window.appRuntime.setPath(runtimeId, cliPath);
+
+      // これは fake ping ではなく、SNA 経由の実 runtime invocation です。
+      const result = await window.appRuntime.test(runtimeId);
+      if (!result.ok) throw new Error(result.response || "Runtime test failed");
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  async function refreshModels() {
+    // CLI path は catalog probing に役立ちます。通常の agent spawn は setPath/startup runtimePaths の path を使います。
+    const catalog = await window.appRuntime.listModels(runtimeId, { cliPath, refresh: true });
+    setModels(catalog.models);
+  }
+
+  async function addModel(model: RuntimeModelInfo) {
+    // Product picker に実際に出す model だけ保存します。
+    await window.appRuntime.registerModel(runtimeId, model);
+  }
+
+  return (
+    <section>
+      <input value={cliPath} onChange={(event) => setCliPath(event.target.value)} />
+      <button onClick={redetect}>Redetect</button>
+      <button onClick={saveAndTest} disabled={testing}>Test runtime</button>
+      <button onClick={refreshModels}>Refresh models</button>
+      {models.map((model) => (
+        <button key={model.id} onClick={() => addModel(model)}>
+          Add {model.label}
+        </button>
+      ))}
+    </section>
+  );
+}
+```
+
+ここで大事な product boundary は、renderer が SNA runtime environment を推測して直接変えないことです。Renderer は host に save、test、list、register を依頼し、host が実際の environment mutation を受け持つ構造が安定します。
