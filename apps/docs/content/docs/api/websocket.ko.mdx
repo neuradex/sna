@@ -16,6 +16,18 @@ ws://<host>:<port>/ws
 
 클라이언트가 한 번 연결하고 그 단일 연결로 모든 세션을 다중화합니다.
 
+## 인증
+
+WebSocket upgrade는 보호된 HTTP 라우트와 같은 토큰을 요구합니다. Browser
+client는 임의의 upgrade header를 설정할 수 없으므로 TypeScript client는
+토큰을 `ws://<host>:<port>/ws?token=<authToken>` 형태로 보냅니다. Native
+client는 upgrade 요청에 `Authorization: Bearer <authToken>` 또는
+`X-SNA-Token`을 사용할 수도 있습니다.
+
+서버에 origin allowlist가 있으면 browser WebSocket 연결은 허용된 `Origin`에서
+와야 합니다. 토큰 실패는 upgrade를 `401`로 닫고, origin 실패는 `403`으로
+닫습니다.
+
 ## 와이어 모양
 
 모든 메시지는 `type`과 payload를 가진 JSON 객체입니다.

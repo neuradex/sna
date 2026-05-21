@@ -132,7 +132,9 @@ const sna = await startSnaServerInProcess({
 
 `sna.connection` を `SnaClient` または `SnaProvider` に渡します。Token は
 この server process のために生成され、connection object と一緒に扱われる
-値なので、長期間残るユーザー設定として保存しないでください。
+値なので、長期間残るユーザー設定として保存しない方が安全です。HTTP と SSE
+呼び出しはこの token を `Authorization: Bearer <authToken>` として送り、
+browser WebSocket 接続は upgrade に `/ws?token=<authToken>` を使います。
 
 Forked standalone SNA server では、path change を launch 前に反映するか、SNA を再起動する構成が扱いやすいです。In-process SNA では runtime adapter が同じ process 内で path を resolve するため、host が `process.env.SNA_*_COMMAND` を更新すると以後の spawn に反映できます。
 

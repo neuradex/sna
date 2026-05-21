@@ -49,7 +49,9 @@ await sna.agent.send(sessionId, "What's in this directory?");
 
 Protected SNA servers require a bearer token, but SDK launchers keep it paired
 with the server handle. Pass `handle.connection` to `SnaClient` instead of
-copying the token into app settings.
+copying the token into app settings. HTTP and SSE requests send
+`Authorization: Bearer <authToken>`; WebSocket uses `/ws?token=<authToken>` for
+browser-compatible upgrades.
 
 ### What HTTP guarantees (`http: true`)
 

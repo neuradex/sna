@@ -70,4 +70,6 @@ const client = new SnaClient(sna.connection);
 `<SnaProvider>`는 `GET /api/sna-port` 헬퍼를 자동으로 사용합니다.
 따라서 React 앱에서는 IPC 없이도 renderer가 포트를 찾을 수 있습니다.
 Host가 같은 신뢰된 app endpoint에서 `{ baseUrl, authToken }`을 반환하면
-`SnaProvider`가 그 값을 connection으로 자동 사용합니다.
+`SnaProvider`가 그 값을 connection으로 자동 사용합니다. 이 helper는 host app
+경계 안에 두는 것이 안전합니다. 런타임 자체의 `/api/sna-port` 라우트는 보호되어
+있고, 같은 token이 SSE와 WebSocket traffic도 인증합니다.

@@ -73,6 +73,12 @@ type RuntimePaths = {
 | `runtimePaths` | auto-detect | 明示的なランタイム CLI コマンドまたは絶対パス。`SNA_CLAUDE_COMMAND`、`SNA_CODEX_COMMAND`、`SNA_OPENCODE_COMMAND`、`SNA_GROK_COMMAND`、`SNA_CURSOR_COMMAND` に変換されます。 |
 | `langfuse` | none | Metadata で tracing を opt in した session で Langfuse tracing を有効にします。 |
 
+Launcher は `authToken` と `connection: { baseUrl, authToken }` を一緒に
+返します。Token を保存したり environment variable から組み立てたりせず、
+`connection` を `SnaClient` または `SnaProvider` に渡すのが安全です。
+生成された token は server handle が所有します。Token rotation が必要な場合は
+新しい token でサーバーを起動し直します。
+
 ホストアプリに設定画面がある場合や、ユーザーが選んだ CLI 位置を保存する
 場合は `runtimePaths` を使ってください。`env` は最後の退避手段として
 残り、`runtimePaths` から生成された値を上書きします。Server identity、

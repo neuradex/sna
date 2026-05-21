@@ -30,5 +30,16 @@ see here, the SDK types, and the live spec can't drift.
 | `GET /docs` | Swagger UI |
 | `GET /spec` | Plain text spec |
 
+## Authentication
+
+All runtime HTTP routes except `GET /health` require
+`Authorization: Bearer <authToken>`. The same token protects SSE
+streams and WebSocket upgrades. SDK launchers return it as
+`handle.connection.authToken`, and clients should pass
+`handle.connection` through intact.
+
+The OpenAPI document declares global `bearerAuth`, clears security on
+`/health`, and lists `401`/`403` responses on protected routes.
+
 When in doubt, hit the live server: it's always more authoritative than
 this page.

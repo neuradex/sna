@@ -3,6 +3,7 @@
   "description": "OpenAPI-rendered HTTP endpoint reference.",
   "icon": "Route",
   "pages": [
+    "index",
     "---System---",
     "health/get",
     "api/sna-port/get",

@@ -20,6 +20,18 @@ Hono 서버는 라우트가 쓰는 같은 Zod 스키마에서 생성한 OpenAPI 
 
 `3099`는 `startSnaServer({ port })`가 반환한 포트로 바꿔서 사용하세요.
 
+## 인증 계약
+
+런타임 스펙은 `components.securitySchemes.bearerAuth`를 포함하고 문서 레벨에
+`security: [{ bearerAuth: [] }]`를 설정합니다. `GET /health`만 공개 operation이며
+`security: []`로 표시됩니다. 보호된 operation에는 표준 error envelope을 쓰는
+공통 `401`과 `403` 응답이 포함됩니다.
+
+`/openapi.json`, `/docs`, `/spec`에 직접 접근할 때도 다른 런타임 라우트와
+같은 인증 middleware를 거칩니다. 정적 문서 생성은 docs build script 안에서만
+`unsafeDisableAuth`를 사용하므로 라이브 secret 없이 published reference를
+생성할 수 있습니다.
+
 ## 유스케이스
 
 - **다른 언어 클라이언트 생성.** `/openapi.json`에 원하는 OpenAPI

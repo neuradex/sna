@@ -16,13 +16,13 @@ description: "SnaProvider、SnaSession、useSnaContext の props と返り値。
 | Prop | Type | Default | Description |
 | --- | --- | --- | --- |
 | `children` | `React.ReactNode` | required | SNA context を受け取る subtree です。 |
-| `connection` | `{ baseUrl: string; authToken?: string }` | none | SDK launcher が返す connection object です。Embedded SNA ではこれを優先します。 |
-| `snaUrl` | `string` | auto-discovery | SNA internal API server URL です。省略すると `/api/sna-port` を先に読み、失敗した場合は `http://localhost:3099` を使います。 |
-| `authToken` | `string` | none | Custom deployment 用の token override です。SDK app では通常 `connection` を使います。 |
+| `connection` | `{ baseUrl: string; authToken?: string }` | none | SDK launcher が返す connection object です。保護された embedded SNA では token と URL を一緒に保つため、これを優先します。 |
+| `snaUrl` | `string` | auto-discovery | SNA internal API server URL です。省略すると host app の `/api/sna-port` を先に読み、失敗した場合は `http://localhost:3099` を使います。 |
+| `authToken` | `string` | none | Custom deployment 用の token override です。SDK が server を起動していない保護サーバーでは `snaUrl` と一緒に使います。 |
 | `sessionId` | `string` | `default` | descendants の default session ID です。 |
 | `hydrate` | `boolean` | `true` | mount 時に chat store が保存済み sessions と messages を取得するかを制御します。chat store を使わない app では `false` にできます。 |
 
-`SnaProvider` は UI を render しません。React context に `{ apiUrl, authToken, sessionId }` を提供し、必要に応じて `useChatStore` を hydrate します。
+`SnaProvider` は UI を render しません。React context に `{ apiUrl, authToken, sessionId }` を提供し、必要に応じて `useChatStore` を hydrate します。Discovery route は `{ baseUrl, authToken }` または `{ port, authToken }` を返せます。この route は信頼済み host app route としてだけ公開するのが安全です。
 
 ## `<SnaSession>`
 

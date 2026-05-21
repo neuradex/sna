@@ -5,7 +5,7 @@
  * Zod schemas validate requests and generate OpenAPI spec automatically.
  */
 
-import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { OpenAPIHono, createRoute, z, type RouteConfig } from "@hono/zod-openapi";
 import { swaggerUI } from "@hono/swagger-ui";
 import { streamSSE } from "hono/streaming";
 import fs from "fs";
@@ -100,11 +100,64 @@ const ErrorResponse = z.object({
   stack: z.string().optional(),
 });
 
+const UnauthorizedResponse = {
+  description: "Authentication required.",
+  content: { "application/json": { schema: ErrorResponse } },
+} as const;
+
+const ForbiddenResponse = {
+  description: "Origin not allowed.",
+  content: { "application/json": { schema: ErrorResponse } },
+} as const;
+
+const bearerAuthSecurityScheme = {
+  type: "http",
+  scheme: "bearer",
+  bearerFormat: "SNA auth token",
+} as const;
+
+function withOpenApiSecurity(config: any) {
+  return {
+    ...config,
+    components: {
+      ...config.components,
+      securitySchemes: {
+        ...config.components?.securitySchemes,
+        bearerAuth: bearerAuthSecurityScheme,
+      },
+    },
+    security: config.security ?? [{ bearerAuth: [] }],
+  };
+}
+
+function applyOpenApiSecurity(document: any) {
+  document.components ??= {};
+  document.components.securitySchemes = {
+    ...document.components.securitySchemes,
+    bearerAuth: bearerAuthSecurityScheme,
+  };
+  document.security ??= [{ bearerAuth: [] }];
+  return document;
+}
+
+function protectedRoute<const P extends string, R extends Omit<RouteConfig, "path"> & { path: P }>(routeConfig: R) {
+  return createRoute({
+    ...routeConfig,
+    security: [{ bearerAuth: [] }],
+    responses: {
+      401: UnauthorizedResponse,
+      403: ForbiddenResponse,
+      ...routeConfig.responses,
+    },
+  });
+}
+
 // ── Health ────────────────────────────────────────────────────────────
 
 const healthRoute = createRoute({
   method: "get",
   path: "/health",
+  security: [],
   summary: "Health check",
   description: "Verify the SNA server is running.",
   responses: {
@@ -117,7 +170,7 @@ const healthRoute = createRoute({
 
 // ── SNA Port ──────────────────────────────────────────────────────────
 
-const snaPortRoute = createRoute({
+const snaPortRoute = protectedRoute({
   method: "get",
   path: "/api/sna-port",
   summary: "Get SNA API port",
@@ -136,7 +189,7 @@ const snaPortRoute = createRoute({
 
 // ── Session CRUD ──────────────────────────────────────────────────────
 
-const createSessionRoute = createRoute({
+const createSessionRoute = protectedRoute({
   method: "post",
   path: "/agent/sessions",
   summary: "Create a session",
@@ -172,7 +225,7 @@ const createSessionRoute = createRoute({
   },
 });
 
-const listSessionsRoute = createRoute({
+const listSessionsRoute = protectedRoute({
   method: "get",
   path: "/agent/sessions",
   summary: "List sessions",
@@ -190,7 +243,7 @@ const listSessionsRoute = createRoute({
   },
 });
 
-const removeSessionRoute = createRoute({
+const removeSessionRoute = protectedRoute({
   method: "delete",
   path: "/agent/sessions/{id}",
   summary: "Remove a session",
@@ -218,7 +271,7 @@ const removeSessionRoute = createRoute({
   },
 });
 
-const updateSessionRoute = createRoute({
+const updateSessionRoute = protectedRoute({
   method: "patch",
   path: "/agent/sessions/{id}",
   summary: "Update session",
@@ -251,7 +304,7 @@ const updateSessionRoute = createRoute({
 
 // ── Agent Lifecycle ───────────────────────────────────────────────────
 
-const startRoute = createRoute({
+const startRoute = protectedRoute({
   method: "post",
   path: "/agent/start",
   summary: "Start agent",
@@ -298,7 +351,7 @@ const startRoute = createRoute({
   },
 });
 
-const sendRoute = createRoute({
+const sendRoute = protectedRoute({
   method: "post",
   path: "/agent/send",
   summary: "Send message",
@@ -332,7 +385,7 @@ const sendRoute = createRoute({
   },
 });
 
-const restartRoute = createRoute({
+const restartRoute = protectedRoute({
   method: "post",
   path: "/agent/restart",
   summary: "Restart agent",
@@ -375,7 +428,7 @@ const restartRoute = createRoute({
   },
 });
 
-const resumeRoute = createRoute({
+const resumeRoute = protectedRoute({
   method: "post",
   path: "/agent/resume",
   summary: "Resume session",
@@ -423,7 +476,7 @@ const resumeRoute = createRoute({
   },
 });
 
-const interruptRoute = createRoute({
+const interruptRoute = protectedRoute({
   method: "post",
   path: "/agent/interrupt",
   summary: "Interrupt agent",
@@ -441,7 +494,7 @@ const interruptRoute = createRoute({
   },
 });
 
-const setModelRoute = createRoute({
+const setModelRoute = protectedRoute({
   method: "post",
   path: "/agent/set-model",
   summary: "Set model",
@@ -463,7 +516,7 @@ const setModelRoute = createRoute({
   },
 });
 
-const setPermissionModeRoute = createRoute({
+const setPermissionModeRoute = protectedRoute({
   method: "post",
   path: "/agent/set-permission-mode",
   summary: "Set permission mode",
@@ -485,7 +538,7 @@ const setPermissionModeRoute = createRoute({
   },
 });
 
-const sessionPatchRoute = createRoute({
+const sessionPatchRoute = protectedRoute({
   method: "patch",
   path: "/agent/session",
   summary: "Patch session config",
@@ -532,7 +585,7 @@ const sessionPatchRoute = createRoute({
   },
 });
 
-const killRoute = createRoute({
+const killRoute = protectedRoute({
   method: "post",
   path: "/agent/kill",
   summary: "Kill agent",
@@ -550,7 +603,7 @@ const killRoute = createRoute({
   },
 });
 
-const statusRoute = createRoute({
+const statusRoute = protectedRoute({
   method: "get",
   path: "/agent/status",
   summary: "Agent status",
@@ -582,7 +635,7 @@ const statusRoute = createRoute({
 
 // ── One-shot ──────────────────────────────────────────────────────────
 
-const runOnceRoute = createRoute({
+const runOnceRoute = protectedRoute({
   method: "post",
   path: "/agent/run-once",
   summary: "Run once",
@@ -624,7 +677,7 @@ const runOnceRoute = createRoute({
   },
 });
 
-const runOnceStreamRoute = createRoute({
+const runOnceStreamRoute = protectedRoute({
   method: "post",
   path: "/agent/run-once/stream",
   summary: "Run once (SSE stream)",
@@ -667,7 +720,7 @@ const runOnceStreamRoute = createRoute({
   },
 });
 
-const completionRoute = createRoute({
+const completionRoute = protectedRoute({
   method: "post",
   path: "/agent/completion",
   summary: "Completion",
@@ -720,7 +773,7 @@ const completionRoute = createRoute({
 
 // ── Permission ────────────────────────────────────────────────────────
 
-const permissionRequestRoute = createRoute({
+const permissionRequestRoute = protectedRoute({
   method: "post",
   path: "/agent/permission-request",
   summary: "Permission request",
@@ -742,7 +795,7 @@ const permissionRequestRoute = createRoute({
   },
 });
 
-const permissionRespondRoute = createRoute({
+const permissionRespondRoute = protectedRoute({
   method: "post",
   path: "/agent/permission-respond",
   summary: "Permission respond",
@@ -771,7 +824,7 @@ const permissionRespondRoute = createRoute({
   },
 });
 
-const listModelsRoute = createRoute({
+const listModelsRoute = protectedRoute({
   method: "post",
   path: "/agent/list-models",
   summary: "List models",
@@ -831,7 +884,7 @@ const listModelsRoute = createRoute({
   },
 });
 
-const agentEventsRoute = createRoute({
+const agentEventsRoute = protectedRoute({
   method: "get",
   path: "/agent/events",
   summary: "Agent event SSE stream",
@@ -862,7 +915,7 @@ const agentEventsRoute = createRoute({
   },
 });
 
-const permissionPendingRoute = createRoute({
+const permissionPendingRoute = protectedRoute({
   method: "get",
   path: "/agent/permission-pending",
   summary: "Pending permissions",
@@ -886,7 +939,7 @@ const permissionPendingRoute = createRoute({
 
 // ── Chat Sessions ─────────────────────────────────────────────────────
 
-const chatListSessionsRoute = createRoute({
+const chatListSessionsRoute = protectedRoute({
   method: "get",
   path: "/chat/sessions",
   summary: "List chat sessions",
@@ -912,7 +965,7 @@ const chatListSessionsRoute = createRoute({
   },
 });
 
-const chatCreateSessionRoute = createRoute({
+const chatCreateSessionRoute = protectedRoute({
   method: "post",
   path: "/chat/sessions",
   summary: "Create chat session",
@@ -944,7 +997,7 @@ const chatCreateSessionRoute = createRoute({
   },
 });
 
-const chatDeleteSessionRoute = createRoute({
+const chatDeleteSessionRoute = protectedRoute({
   method: "delete",
   path: "/chat/sessions/{id}",
   summary: "Delete chat session",
@@ -970,7 +1023,7 @@ const chatDeleteSessionRoute = createRoute({
 
 // ── Chat Messages ─────────────────────────────────────────────────────
 
-const chatListMessagesRoute = createRoute({
+const chatListMessagesRoute = protectedRoute({
   method: "get",
   path: "/chat/sessions/{id}/messages",
   summary: "List chat messages",
@@ -994,7 +1047,7 @@ const chatListMessagesRoute = createRoute({
   },
 });
 
-const chatCreateMessageRoute = createRoute({
+const chatCreateMessageRoute = protectedRoute({
   method: "post",
   path: "/chat/sessions/{id}/messages",
   summary: "Create chat message",
@@ -1030,7 +1083,7 @@ const chatCreateMessageRoute = createRoute({
   },
 });
 
-const chatClearMessagesRoute = createRoute({
+const chatClearMessagesRoute = protectedRoute({
   method: "delete",
   path: "/chat/sessions/{id}/messages",
   summary: "Clear chat messages",
@@ -1052,7 +1105,7 @@ const chatClearMessagesRoute = createRoute({
 
 // ── Image Serving ─────────────────────────────────────────────────────
 
-const serveImageRoute = createRoute({
+const serveImageRoute = protectedRoute({
   method: "get",
   path: "/chat/images/{sessionId}/{filename}",
   summary: "Serve image",
@@ -1083,6 +1136,12 @@ function getSessionId(c: { req: { query: (k: string) => string | undefined } }):
 
 export async function createOpenApiApp(options?: { sessionManager?: SessionManager } & SnaSecurityOptions) {
   const app = new OpenAPIHono();
+  const getOpenAPIDocument = app.getOpenAPIDocument.bind(app);
+  app.getOpenAPIDocument = ((objectConfig: any, generatorConfig?: any) =>
+    applyOpenApiSecurity(getOpenAPIDocument(withOpenApiSecurity(objectConfig), generatorConfig))) as typeof app.getOpenAPIDocument;
+  const getOpenAPI31Document = app.getOpenAPI31Document.bind(app);
+  app.getOpenAPI31Document = ((objectConfig: any, generatorConfig?: any) =>
+    applyOpenApiSecurity(getOpenAPI31Document(withOpenApiSecurity(objectConfig), generatorConfig))) as typeof app.getOpenAPI31Document;
   app.use("*", createHttpSecurityMiddleware(options ?? {}));
 
   const openApiInfo = {
@@ -1092,6 +1151,12 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
       version: SNA_VERSION,
       description: "Skills-Native Application SDK — HTTP API for spawning and communicating with AI agent providers (Claude Code, Codex, OpenCode).",
     },
+    components: {
+      securitySchemes: {
+        bearerAuth: bearerAuthSecurityScheme,
+      },
+    },
+    security: [{ bearerAuth: [] }],
   };
 
   // Swagger UI — accessible at /docs

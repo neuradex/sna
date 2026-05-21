@@ -16,13 +16,13 @@ description: "Props and return values for SnaProvider, SnaSession, and useSnaCon
 | Prop | Type | Default | Description |
 | --- | --- | --- | --- |
 | `children` | `React.ReactNode` | required | Subtree that receives SNA context. |
-| `connection` | `{ baseUrl: string; authToken?: string }` | none | Connection object returned by SDK launchers. Prefer this for embedded SNA. |
-| `snaUrl` | `string` | auto-discovery | SNA internal API server URL. If omitted, it first reads `/api/sna-port`, then falls back to `http://localhost:3099`. |
-| `authToken` | `string` | none | Token override for custom deployments. SDK apps usually use `connection`. |
+| `connection` | `{ baseUrl: string; authToken?: string }` | none | Connection object returned by SDK launchers. Prefer this for protected embedded SNA so the token stays paired with the URL. |
+| `snaUrl` | `string` | auto-discovery | SNA internal API server URL. If omitted, it first reads the host app's `/api/sna-port`, then falls back to `http://localhost:3099`. |
+| `authToken` | `string` | none | Token override for custom deployments. Use it with `snaUrl` when the protected server is not launched by the SDK. |
 | `sessionId` | `string` | `default` | Default session ID for descendants. |
 | `hydrate` | `boolean` | `true` | Controls whether the chat store fetches persisted sessions and messages on mount. Set to `false` when the app does not use the chat store. |
 
-`SnaProvider` does not render UI. It provides `{ apiUrl, authToken, sessionId }` through React context and hydrates `useChatStore` when requested.
+`SnaProvider` does not render UI. It provides `{ apiUrl, authToken, sessionId }` through React context and hydrates `useChatStore` when requested. The discovery route may return `{ baseUrl, authToken }` or `{ port, authToken }`; expose it only from a trusted host app route.
 
 ## `<SnaSession>`
 

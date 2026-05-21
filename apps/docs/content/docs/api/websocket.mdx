@@ -17,6 +17,18 @@ ws://<host>:<port>/ws
 The client connects once and multiplexes all sessions over that single
 connection.
 
+## Authentication
+
+WebSocket upgrades require the same token as protected HTTP routes.
+Browser clients cannot set arbitrary upgrade headers, so the TypeScript
+client sends the token as `ws://<host>:<port>/ws?token=<authToken>`.
+Native clients can also use `Authorization: Bearer <authToken>` or
+`X-SNA-Token` on the upgrade request.
+
+If the server has an origin allowlist, browser WebSocket connections must
+come from an allowed `Origin`. Token failures close the upgrade with
+`401`; origin failures close it with `403`.
+
 ## Wire shape
 
 Every message is a JSON object with `type` + payload:

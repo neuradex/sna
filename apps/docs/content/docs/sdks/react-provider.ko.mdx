@@ -20,9 +20,9 @@ description: "SnaProvider, SnaSession, useSnaContext의 props와 반환값."
 | Prop | Type | Default | Description |
 | --- | --- | --- | --- |
 | `children` | `React.ReactNode` | required | SNA context를 받을 subtree입니다. |
-| `connection` | `{ baseUrl: string; authToken?: string }` | none | SDK launcher가 반환한 connection object입니다. Embedded SNA에서는 이 값을 우선 사용합니다. |
-| `snaUrl` | `string` | auto-discovery | SNA internal API server URL입니다. 생략하면 `/api/sna-port`를 먼저 조회하고, 실패하면 `http://localhost:3099`를 사용합니다. |
-| `authToken` | `string` | none | Custom deployment용 token override입니다. SDK 앱은 보통 `connection`을 사용합니다. |
+| `connection` | `{ baseUrl: string; authToken?: string }` | none | SDK launcher가 반환한 connection object입니다. 보호된 embedded SNA에서는 token과 URL이 함께 유지되도록 이 값을 우선 사용합니다. |
+| `snaUrl` | `string` | auto-discovery | SNA internal API server URL입니다. 생략하면 host app의 `/api/sna-port`를 먼저 조회하고, 실패하면 `http://localhost:3099`를 사용합니다. |
+| `authToken` | `string` | none | Custom deployment용 token override입니다. SDK가 server를 시작하지 않은 보호 서버에서는 `snaUrl`과 함께 사용합니다. |
 | `sessionId` | `string` | `default` | subtree의 기본 session ID입니다. |
 | `hydrate` | `boolean` | `true` | mount 시 chat store가 저장된 session/message를 가져올지 결정합니다. Chat store를 쓰지 않으면 `false`로 둘 수 있습니다. |
 
@@ -38,7 +38,7 @@ export function Root({ children }: { children: React.ReactNode }) {
 
 **Output**
 
-`SnaProvider` 자체는 UI를 렌더링하지 않습니다. React context에 `{ apiUrl, authToken, sessionId }`를 넣고, 필요하면 `useChatStore`를 hydrate합니다.
+`SnaProvider` 자체는 UI를 렌더링하지 않습니다. React context에 `{ apiUrl, authToken, sessionId }`를 넣고, 필요하면 `useChatStore`를 hydrate합니다. Discovery route는 `{ baseUrl, authToken }` 또는 `{ port, authToken }`을 반환할 수 있습니다. 이 route는 신뢰된 host app route로만 노출하는 편이 안전합니다.
 
 ## `<SnaSession>`
 

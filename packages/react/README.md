@@ -24,13 +24,13 @@ import { SnaProvider } from "@sna-sdk/react/components/sna-provider";
 </SnaProvider>
 ```
 
-`SnaProvider` is a pure context provider — no UI, no peer deps beyond React. In SDK-managed apps, pass `connection={sna.connection}` so the token stays paired with the server handle. It auto-discovers the server URL via `/api/sna-port` if no connection or `snaUrl` is provided; otherwise falls back to `http://localhost:3099`.
+`SnaProvider` is a pure context provider with no UI and no peer deps beyond React. In SDK-managed apps, pass `connection={sna.connection}` so the token stays paired with the server handle. It auto-discovers the server URL via the host app's `/api/sna-port` if no connection or `snaUrl` is provided; that route may return `{ baseUrl, authToken }` or `{ port, authToken }`. Otherwise it falls back to `http://localhost:3099`.
 
 | Prop | |
 |------|---|
 | `connection?` | Connection object returned by `startSnaServer` |
 | `snaUrl?` | Override the server URL |
-| `authToken?` | Token override for custom deployments |
+| `authToken?` | Token override for protected custom deployments |
 | `sessionId?` | Default session id (default `"default"`) |
 | `hydrate?` | Hydrate chat-store on mount (default `true`) |
 

@@ -6,6 +6,18 @@ icon: Network
 
 The HTTP API is grouped by surface. Each path below links to a dedicated endpoint specification page.
 
+## Authentication
+
+`GET /health` is public. Every other route on the SNA runtime requires
+`Authorization: Bearer <authToken>`, including `/api/sna-port`, SSE
+routes, and chat image reads. Missing or invalid tokens return `401`;
+browser requests from disallowed origins return `403`.
+
+SDK-managed hosts should pass `handle.connection` to `SnaClient` or
+`SnaProvider`. A separate app-owned discovery endpoint may return
+`{ baseUrl, authToken }` to a trusted renderer, but the SNA runtime's
+own `/api/sna-port` route is still protected.
+
 ## System
 
 | Method | Path | Purpose |

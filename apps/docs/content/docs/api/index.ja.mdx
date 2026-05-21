@@ -30,5 +30,16 @@ SNA の HTTP/WebSocket API と ACP を比較している場合は、
 | `GET /docs` | Swagger UI |
 | `GET /spec` | プレーンテキスト仕様 |
 
+## 認証
+
+`GET /health` 以外のランタイム HTTP ルートは
+`Authorization: Bearer <authToken>` を要求します。SSE ストリームと
+WebSocket upgrade も同じトークンで保護されます。SDK ランチャーはこの値を
+`handle.connection.authToken` として返すため、クライアントには
+`handle.connection` をそのまま渡すのが安全です。
+
+OpenAPI ドキュメントは global `bearerAuth` を宣言し、`/health` の
+security は空にし、保護されたルートに `401`/`403` response を表示します。
+
 正確な契約を確認する場合は、ライブサーバのスペックを直接見てください。
 ライブスペックが常に最終基準です。

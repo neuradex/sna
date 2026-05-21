@@ -40,12 +40,19 @@ declare function createSnaApp(options?: {
   sessionManager?: SessionManager;
   authToken?: string;
   allowedOrigins?: string[];
+  unsafeDisableAuth?: boolean;
 }): Promise<Hono>;
 ```
 
 SNA route を公開する Hono HTTP application を作成します。OpenAPI app factory へ委譲するため、返された app には generated OpenAPI metadata と `/docs` の Swagger UI が含まれます。
 
 `sessionManager` を省略すると server が 1 つ作成します。HTTP route と WebSocket client が同じ session state を共有する必要がある場合、または host が lifecycle event に直接アクセスする必要がある場合は、manager を作成して渡してください。
+
+認証はデフォルトで有効です。`authToken` を渡すか `SNA_AUTH_TOKEN` を設定し、
+`GET /health` だけが公開状態に残ります。`unsafeDisableAuth` は隔離された
+test や docs generation にだけ使い、host app では使いません。
+`allowedOrigins` は token 検証の前に browser `Origin` 値を filter し、
+`Origin` を送らない native client は許可されます。
 
 ## `attachWebSocket(server, sessionManager, options?)`
 
@@ -54,6 +61,10 @@ const wss = attachWebSocket(httpServer, sessionManager, { authToken, allowedOrig
 ```
 
 既存 Node HTTP server の `/ws` upgrade path に WebSocket server を接続します。`createSnaApp` に渡したものと同じ `SessionManager` を使ってください。そうしないと、HTTP command と WebSocket subscription が別々の session state を見ることになります。
+
+`createSnaApp` で使ったものと同じ `authToken` と `allowedOrigins` を渡します。
+TypeScript client は browser upgrade を `?token=...` で認証します。Native
+client は `Authorization: Bearer ...` または `X-SNA-Token` も送れます。
 
 WebSocket server が push する message:
 

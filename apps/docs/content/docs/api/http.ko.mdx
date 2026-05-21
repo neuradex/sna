@@ -6,6 +6,18 @@ icon: Network
 
 HTTP API는 표면별로 묶여 있습니다. 아래 각 경로는 엔드포인트별 상세 명세 페이지로 연결됩니다.
 
+## 인증
+
+`GET /health`는 공개되어 있습니다. SNA 런타임의 그 밖의 모든 라우트는
+`/api/sna-port`, SSE 라우트, chat image 조회를 포함해
+`Authorization: Bearer <authToken>`을 요구합니다. 토큰이 없거나 맞지 않으면
+`401`, 허용되지 않은 browser origin이면 `403`을 반환합니다.
+
+SDK가 관리하는 host는 `handle.connection`을 `SnaClient`나 `SnaProvider`에
+전달하면 됩니다. 별도의 앱 소유 discovery endpoint가 신뢰된 renderer에
+`{ baseUrl, authToken }`을 반환할 수 있지만, SNA 런타임 자체의
+`/api/sna-port` 라우트는 계속 보호됩니다.
+
 ## 시스템
 
 | 메서드 | 경로 | 용도 |

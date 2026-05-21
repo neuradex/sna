@@ -83,7 +83,7 @@ const schemaDir = path.join(docsRoot, 'openapi');
 const endpointsDir = path.join(docsRoot, 'content/docs/api/endpoints');
 
 async function writeOpenApiSchema() {
-  const app = await createOpenApiApp();
+  const app = await createOpenApiApp({ unsafeDisableAuth: true });
   const packageJson = JSON.parse(
     await fs.readFile(path.join(repoRoot, 'packages/core/package.json'), 'utf8'),
   ) as { version?: string };
@@ -155,6 +155,8 @@ function localizeResponses(responses: Record<string, { description?: string }> |
 
   const translations: Record<string, Partial<Record<Locale, string>>> = {
     'Server is healthy.': { ko: '서버가 정상입니다.', ja: 'サーバは正常です。' },
+    'Authentication required.': { ko: '인증이 필요합니다.', ja: '認証が必要です。' },
+    'Origin not allowed.': { ko: '허용되지 않은 origin입니다.', ja: '許可されていない origin です。' },
     'Port number.': { ko: '포트 번호입니다.', ja: 'ポート番号です。' },
     'SNA API not running.': { ko: 'SNA API가 실행 중이 아닙니다.', ja: 'SNA API が実行されていません。' },
     'Session created.': { ko: '세션이 생성되었습니다.', ja: 'セッションが作成されました。' },

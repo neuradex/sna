@@ -1090,6 +1090,24 @@ describe("HTTP transport (http: true)", () => {
     assert.equal(mock.httpRequests[0].headers.authorization, "Bearer secret-token");
   });
 
+  it("sends authToken as a bearer token on HTTP SSE requests", async () => {
+    mock.queueHttpResponse(200, {});
+    mock.queueHttpResponse(200, {});
+    sna = new SnaClient({ baseUrl: mock.host, authToken: "secret-token", ws: false, http: true, reconnect: false });
+
+    for await (const _event of sna.agent.runOnceStream({ message: "hello" })) {
+      // Mock response has no SSE data lines.
+    }
+    for await (const _event of sna.agent.streamEvents("default")) {
+      // Mock response has no SSE data lines.
+    }
+
+    assert.equal(mock.httpRequests[0].url, "/agent/run-once/stream");
+    assert.equal(mock.httpRequests[0].headers.authorization, "Bearer secret-token");
+    assert.equal(mock.httpRequests[1].url, "/agent/events?session=default");
+    assert.equal(mock.httpRequests[1].headers.authorization, "Bearer secret-token");
+  });
+
   it("sessions.create — no opts sends empty body", async () => {
     mock.queueHttpResponse(200, { status: "created", sessionId: "auto", label: "auto", meta: null });
     sna = httpClient();
