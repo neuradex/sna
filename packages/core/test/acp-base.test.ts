@@ -279,6 +279,26 @@ describe("ACP shared adapter base", () => {
     assert.deepEqual(response.result, { outcome: { outcome: "selected", optionId: "allow-always" } });
   });
 
+  it("applies permissionMode patches in-place while leaving model and cwd for respawn", async () => {
+    const { proc, logPath } = await startProcess({ cwd: process.cwd() }, "permission");
+    const events: AgentEvent[] = [];
+    proc.on("event", (event) => events.push(event));
+
+    const leftover = proc.applyPatch({
+      cwd: "/new/path",
+      model: "next-model",
+      permissionMode: "bypassPermissions",
+    });
+    assert.deepEqual(leftover, { cwd: "/new/path", model: "next-model" });
+
+    proc.send("auto approve after patch");
+    await waitFor(() => readWire(logPath).some((entry) => entry.response?.id === 100));
+
+    assert.equal(events.some((event) => event.type === "permission_needed"), false);
+    const response = readWire(logPath).find((entry) => entry.response?.id === 100).response;
+    assert.deepEqual(response.result, { outcome: { outcome: "selected", optionId: "allow-always" } });
+  });
+
   it("auto-rejects disallowed ACP tools before surfacing a permission prompt", async () => {
     const { proc, logPath } = await startProcess({ cwd: process.cwd(), disallowedTools: ["Bash"] }, "permission");
     const events: AgentEvent[] = [];
