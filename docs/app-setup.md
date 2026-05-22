@@ -58,9 +58,9 @@ await sna.openAdmin();
 Daemon launchers bind to `127.0.0.1`, generate or reuse an auth token, write
 `.sna/sna-api.token` with private file permissions, and return
 `sna.connection` for SDK clients. `sna.adminUrl` is the plain local admin URL;
-`sna.openAdmin()` opens the browser with the token preloaded once in a URL
-fragment, then the admin page stores it in localStorage and removes it from the
-address bar.
+`sna.openAdmin()` opens the browser to the same-origin admin shell. The server
+sets an HttpOnly same-origin admin cookie when serving `/admin`, so the browser
+does not need to persist the owner bearer token.
 
 For local daemon data that should not be readable directly from the SQLite file,
 enable encrypted storage:
@@ -131,6 +131,43 @@ Client tokens are scoped. `sessions` gates session CRUD and session snapshot
 pushes, `agent` gates agent runtime and permission APIs, and `chat` gates chat
 session/message/image APIs. The launcher owner token bypasses client scopes and
 is intended for the local admin surface, not for distribution to consumer apps.
+
+### Manual daemon/admin smoke test
+
+Inside this repository, use the `mise` tasks to exercise the same standalone
+daemon and admin surface that a host app would embed:
+
+```bash
+mise run sna:dev
+mise run sna:health
+mise run sna:admin
+```
+
+`sna:dev` starts the standalone daemon on `127.0.0.1:3099` with the local
+development token from `mise.toml`. `sna:admin` opens the built admin shell
+served by that daemon. The `/admin` response sets the admin cookie, and
+subsequent same-origin admin API calls use that cookie.
+
+For HMR admin development, start the Vite console through mise so its proxy is
+configured with the daemon owner token:
+
+```bash
+mise run sna:admin:dev
+open http://127.0.0.1:3098/admin/
+```
+
+The local PKCE flow can be checked manually:
+
+```bash
+mise run sna:pkce:start
+# Approve the printed request URL in the admin Authorization page.
+mise run sna:pkce:exchange
+mise run sna:pkce:check
+```
+
+The final check confirms that the app access token can read scoped session/chat
+routes and is denied from owner-only agent routes. Use `mise run sna:auth-smoke`
+for the automated auth/OpenAPI/WebSocket/daemon test slice.
 
 ### Connecting from any framework
 

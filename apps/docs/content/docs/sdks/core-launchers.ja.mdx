@@ -132,6 +132,43 @@ integration では `startSnaServer()` または `startSnaServerInProcess()` を
 優先してください。Token、owner identity、bind host、shutdown lifecycle を
 host app が所有できます。
 
+## Local admin smoke test
+
+デーモンは同じ API origin の `/admin` で admin shell を提供します。この
+shell を読み込むと、サーバーが HttpOnly same-origin admin cookie を設定する
+ため、browser admin request は owner bearer token を localStorage や URL に
+保存する必要がありません。
+
+Repository 開発では、`mise.toml` task で再現可能な smoke flow を実行できます。
+
+```bash
+mise run sna:dev
+mise run sna:health
+mise run sna:admin
+```
+
+Vite admin console は、dev proxy が local daemon owner token を注入できるよう
+必ず mise 経由で起動します。
+
+```bash
+mise run sna:admin:dev
+open http://127.0.0.1:3098/admin/
+```
+
+Local PKCE authorization flow は次の順序で手動確認できます。
+
+```bash
+mise run sna:pkce:start
+# 出力された request URL を admin Authorization page で承認します。
+mise run sna:pkce:exchange
+mise run sna:pkce:check
+```
+
+`sna:pkce:check` は、app token が scoped session/chat route にアクセスでき、
+owner-only agent route では拒否されることを確認します。
+`mise run sna:auth-smoke` は auth/OpenAPI/WebSocket/daemon の自動テスト slice
+を実行します。
+
 ## 関数リファレンス
 
 ### `@sna-sdk/core/node` の `startSnaServer(options)`

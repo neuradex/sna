@@ -133,6 +133,42 @@ integrations should prefer `startSnaServer()` or `startSnaServerInProcess()` so
 the token, owner identity, bind host, and shutdown lifecycle stay under the host
 app's control.
 
+## Local admin smoke test
+
+The daemon serves the admin shell from the same API origin at `/admin`. Loading
+that shell sets an HttpOnly same-origin admin cookie, so browser admin requests
+do not need the owner bearer token in localStorage or in the URL.
+
+For repository development, the `mise.toml` tasks provide a repeatable smoke
+flow:
+
+```bash
+mise run sna:dev
+mise run sna:health
+mise run sna:admin
+```
+
+Use the Vite admin console only through mise so its dev proxy injects the local
+daemon owner token:
+
+```bash
+mise run sna:admin:dev
+open http://127.0.0.1:3098/admin/
+```
+
+The local PKCE authorization flow can be tested manually:
+
+```bash
+mise run sna:pkce:start
+# Approve the printed request URL in the admin Authorization page.
+mise run sna:pkce:exchange
+mise run sna:pkce:check
+```
+
+`sna:pkce:check` verifies that the app token can access scoped session/chat
+routes and is denied from owner-only agent routes. `mise run sna:auth-smoke`
+runs the automated auth/OpenAPI/WebSocket/daemon test slice.
+
 ## Function reference
 
 ### `startSnaServer(options)` from `@sna-sdk/core/node`

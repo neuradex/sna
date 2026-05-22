@@ -127,9 +127,9 @@ is already serving the requested port, the launcher adopts it and `stop()`
 returns `false` instead of killing a process it does not own.
 
 The daemon also serves a local admin shell at `/admin`. `sna.adminUrl` is the
-plain URL, while `sna.openAdmin()` opens the default browser with a one-time
-token URL fragment; the page stores that token in browser localStorage and
-removes it from the address bar before calling protected same-origin APIs.
+plain URL, while `sna.openAdmin()` opens the default browser to that same
+origin. The server sets an HttpOnly same-origin admin cookie when it serves the
+admin shell, so the browser never needs to store the owner bearer token.
 
 Optional encrypted daemon storage is available with
 `database: { encryption: "sqlite-cipher", keyProvider: { type: "keytar" } }`.
@@ -144,6 +144,35 @@ their own access/refresh tokens instead of receiving the launcher owner token.
 Client scopes are enforced by route family: `sessions` for session
 CRUD/snapshots, `agent` for runtime and permission APIs, and `chat` for chat
 session/message/image APIs.
+
+### Local daemon/admin smoke test
+
+This repository includes `mise` tasks for the manual standalone daemon flow:
+
+```bash
+mise run sna:dev          # start the standalone daemon on 127.0.0.1:3099
+mise run sna:health       # verify /health
+mise run sna:admin        # open the built admin shell from the daemon
+```
+
+For admin UI development with HMR, run the Vite console through mise so its
+proxy has the same owner token as the daemon:
+
+```bash
+mise run sna:admin:dev
+open http://127.0.0.1:3098/admin/
+```
+
+The PKCE app-authorization path can be checked end to end:
+
+```bash
+mise run sna:pkce:start     # prints an admin approval URL
+# Approve the request in the admin Authorization page.
+mise run sna:pkce:exchange  # exchanges the approved code for app tokens
+mise run sna:pkce:check     # verifies scoped access and owner-only denial
+```
+
+`mise run sna:auth-smoke` runs the automated auth/OpenAPI/WS/daemon test slice.
 
 > The running server publishes its own live OpenAPI 3.1 spec — open `http://localhost:3099/docs` for Swagger UI, `http://localhost:3099/openapi.json` for the raw JSON, or `http://localhost:3099/spec` for a plain-text view.
 
