@@ -43,8 +43,13 @@ export function resolveSnaSecurityOptions(options: SnaSecurityOptions = {}): Res
   return { authToken, allowedOrigins, unsafeDisableAuth };
 }
 
-export function isOriginAllowed(origin: string | undefined, allowedOrigins: string[]): boolean {
+export function isOriginAllowed(
+  origin: string | undefined,
+  allowedOrigins: string[],
+  requestOrigin?: string,
+): boolean {
   if (!origin) return true;
+  if (requestOrigin && origin === requestOrigin) return true;
   return allowedOrigins.includes("*") || allowedOrigins.includes(origin);
 }
 
@@ -119,8 +124,13 @@ function isPublicHttpRoute(method: string, pathname: string): boolean {
   return false;
 }
 
-function applyCorsHeaders(c: any, origin: string | undefined, allowedOrigins: string[]): void {
-  if (origin && isOriginAllowed(origin, allowedOrigins)) {
+function applyCorsHeaders(
+  c: any,
+  origin: string | undefined,
+  allowedOrigins: string[],
+  requestOrigin: string,
+): void {
+  if (origin && isOriginAllowed(origin, allowedOrigins, requestOrigin)) {
     c.header("Access-Control-Allow-Origin", origin);
     c.header("Vary", "Origin");
   }
@@ -133,14 +143,16 @@ export function createHttpSecurityMiddleware(options: SnaSecurityOptions) {
 
   return async (c: any, next: () => Promise<void>) => {
     const method = c.req.method;
-    const pathname = new URL(c.req.url).pathname;
+    const requestUrl = new URL(c.req.url);
+    const pathname = requestUrl.pathname;
+    const requestOrigin = requestUrl.origin;
     const origin = c.req.header("origin");
 
-    if (!security.unsafeDisableAuth && !isOriginAllowed(origin, security.allowedOrigins)) {
+    if (!security.unsafeDisableAuth && !isOriginAllowed(origin, security.allowedOrigins, requestOrigin)) {
       return c.json({ status: "error", message: "Origin not allowed" }, 403);
     }
 
-    applyCorsHeaders(c, origin, security.allowedOrigins);
+    applyCorsHeaders(c, origin, security.allowedOrigins, requestOrigin);
 
     if (method === "OPTIONS") {
       return c.body(null, 204);

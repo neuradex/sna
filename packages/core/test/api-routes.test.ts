@@ -180,6 +180,20 @@ describe("HTTP API Routes", () => {
       assert.equal(res.status, 200);
       assert.equal(res.headers.get("access-control-allow-origin"), ALLOWED_ORIGIN);
     });
+
+    it("allows protected same-origin admin requests even when the origin is not listed", async () => {
+      const origin = "http://127.0.0.1:43123";
+      const res = await app.request(`${origin}/auth/pkce/requests`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_TOKEN}`,
+          Origin: origin,
+        },
+      });
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.get("access-control-allow-origin"), origin);
+      assert.deepEqual(await res.json(), { requests: [] });
+    });
   });
 
   describe("OpenAPI auth contract", () => {

@@ -131,7 +131,7 @@ export function attachWebSocket(
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     if (url.pathname === "/ws") {
       const origin = req.headers.origin;
-      if (!security.unsafeDisableAuth && !isOriginAllowed(origin, security.allowedOrigins)) {
+      if (!security.unsafeDisableAuth && !isOriginAllowed(origin, security.allowedOrigins, url.origin)) {
         rejectUpgrade(socket, 403, "Origin not allowed");
         return;
       }

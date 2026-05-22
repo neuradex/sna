@@ -214,6 +214,22 @@ describe("WebSocket Handler", () => {
     }
   });
 
+  it("allows WebSocket upgrades from the same server origin even when it is not listed", async () => {
+    const serverCtx = await startServerOnly();
+    let sameOriginWs: WebSocket | undefined;
+    try {
+      sameOriginWs = await openWs(serverCtx.port, {
+        token: TEST_TOKEN,
+        origin: `http://localhost:${serverCtx.port}`,
+      });
+      assert.equal(sameOriginWs.readyState, WebSocket.OPEN);
+    } finally {
+      sameOriginWs?.close();
+      serverCtx.server.close();
+      serverCtx.cleanup();
+    }
+  });
+
   it("enforces client token scopes on WebSocket messages", async () => {
     const serverCtx = await startServerOnly();
     let scopedWs: WebSocket | undefined;
