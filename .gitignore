@@ -3,6 +3,8 @@ node_modules/
 .sna/
 .agents/
 .dev.log
+mise.local.toml
+.mise.local.toml
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

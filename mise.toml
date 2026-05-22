@@ -1,0 +1,189 @@
+[env]
+SNA_HOST = "127.0.0.1"
+SNA_PORT = "3099"
+SNA_AUTH_TOKEN = "dev-owner-token"
+SNA_DB_PATH = ".sna/local/sna.db"
+SNA_ALLOWED_ORIGINS = "http://localhost:5173"
+SNA_PKCE_CLIENT_ID = "manual-test-client"
+SNA_PKCE_SCOPES = "sessions,chat"
+SNA_PKCE_STATE_DIR = ".sna/pkce-test"
+
+[tasks."sna:dev"]
+description = "Start the local SNA standalone server for manual daemon/API testing"
+run = '''
+set -euo pipefail
+mkdir -p "$(dirname "$SNA_DB_PATH")" "$SNA_PKCE_STATE_DIR"
+pnpm --dir packages/core dev
+'''
+
+[tasks."sna:health"]
+description = "Check the local SNA server health endpoint"
+run = '''
+set -euo pipefail
+curl -fsS "http://${SNA_HOST}:${SNA_PORT}/health"
+echo
+'''
+
+[tasks."sna:openapi"]
+description = "Verify auth routes are present in the live OpenAPI document"
+run = '''
+set -euo pipefail
+curl -fsS \
+  -H "Authorization: Bearer ${SNA_AUTH_TOKEN}" \
+  "http://${SNA_HOST}:${SNA_PORT}/openapi.json" \
+  | node -e '
+let raw = "";
+process.stdin.on("data", (chunk) => raw += chunk);
+process.stdin.on("end", () => {
+  const doc = JSON.parse(raw);
+  for (const path of ["/auth/pkce/start", "/auth/pkce/token", "/auth/pkce/requests/{id}"]) {
+    if (!doc.paths?.[path]) throw new Error(`Missing OpenAPI path: ${path}`);
+    console.log(`${path}: ok`);
+  }
+});
+'
+'''
+
+[tasks."sna:admin"]
+description = "Open the local SNA admin page with the owner token preloaded"
+run = '''
+set -euo pipefail
+open "http://${SNA_HOST}:${SNA_PORT}/admin#token=${SNA_AUTH_TOKEN}"
+'''
+
+[tasks."sna:pkce:start"]
+description = "Create a manual PKCE authorization request and save its verifier/state"
+run = '''
+set -euo pipefail
+mkdir -p "$SNA_PKCE_STATE_DIR"
+node --input-type=module <<'NODE'
+import { createHash, randomBytes } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
+const host = process.env.SNA_HOST || "127.0.0.1";
+const port = process.env.SNA_PORT || "3099";
+const baseUrl = `http://${host}:${port}`;
+const stateDir = process.env.SNA_PKCE_STATE_DIR || ".sna/pkce-test";
+const clientId = process.env.SNA_PKCE_CLIENT_ID || "manual-test-client";
+const scopes = (process.env.SNA_PKCE_SCOPES || "sessions,chat")
+  .split(",")
+  .map((scope) => scope.trim())
+  .filter(Boolean);
+
+mkdirSync(stateDir, { recursive: true });
+const verifier = randomBytes(32).toString("base64url");
+const challenge = createHash("sha256").update(verifier).digest("base64url");
+
+const res = await fetch(`${baseUrl}/auth/pkce/start`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    clientId,
+    displayName: clientId,
+    codeChallenge: challenge,
+    codeChallengeMethod: "S256",
+    scopes,
+  }),
+});
+const text = await res.text();
+if (!res.ok) throw new Error(`PKCE start failed: HTTP ${res.status} ${text}`);
+const started = JSON.parse(text);
+
+writeFileSync(path.join(stateDir, "verifier"), verifier);
+writeFileSync(path.join(stateDir, "start.json"), JSON.stringify(started, null, 2));
+
+console.log(`requestId=${started.requestId}`);
+console.log(`scopes=${scopes.join(",")}`);
+console.log(`admin=${started.authorizeUrl.replace("/admin#", `/admin#token=${encodeURIComponent(process.env.SNA_AUTH_TOKEN || "")}&`)}`);
+console.log(`state=${stateDir}`);
+NODE
+'''
+
+[tasks."sna:pkce:exchange"]
+description = "Exchange the approved PKCE request for client access/refresh tokens"
+run = '''
+set -euo pipefail
+node --input-type=module <<'NODE'
+import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
+const host = process.env.SNA_HOST || "127.0.0.1";
+const port = process.env.SNA_PORT || "3099";
+const baseUrl = `http://${host}:${port}`;
+const stateDir = process.env.SNA_PKCE_STATE_DIR || ".sna/pkce-test";
+const started = JSON.parse(readFileSync(path.join(stateDir, "start.json"), "utf8"));
+const verifier = readFileSync(path.join(stateDir, "verifier"), "utf8").trim();
+
+const poll = await fetch(`${baseUrl}/auth/pkce/requests/${encodeURIComponent(started.requestId)}`);
+const request = await poll.json();
+if (!poll.ok) throw new Error(`PKCE poll failed: HTTP ${poll.status} ${JSON.stringify(request)}`);
+if (!request.code) {
+  console.error(`Authorization is ${request.status}. Approve it first:`);
+  console.error(started.authorizeUrl.replace("/admin#", `/admin#token=${encodeURIComponent(process.env.SNA_AUTH_TOKEN || "")}&`));
+  process.exit(1);
+}
+
+const tokenRes = await fetch(`${baseUrl}/auth/pkce/token`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    grantType: "authorization_code",
+    requestId: started.requestId,
+    code: request.code,
+    codeVerifier: verifier,
+  }),
+});
+const token = await tokenRes.json();
+if (!tokenRes.ok) throw new Error(`Token exchange failed: HTTP ${tokenRes.status} ${JSON.stringify(token)}`);
+
+writeFileSync(path.join(stateDir, "token.json"), JSON.stringify(token, null, 2));
+console.log(`accessToken=${token.accessToken}`);
+console.log(`refreshToken=${token.refreshToken}`);
+console.log(`tokenFile=${path.join(stateDir, "token.json")}`);
+NODE
+'''
+
+[tasks."sna:pkce:check"]
+description = "Check that the saved client token can access scoped routes and is denied elsewhere"
+run = '''
+set -euo pipefail
+node --input-type=module <<'NODE'
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+const host = process.env.SNA_HOST || "127.0.0.1";
+const port = process.env.SNA_PORT || "3099";
+const baseUrl = `http://${host}:${port}`;
+const stateDir = process.env.SNA_PKCE_STATE_DIR || ".sna/pkce-test";
+const token = JSON.parse(readFileSync(path.join(stateDir, "token.json"), "utf8"));
+
+async function check(route, expected) {
+  const res = await fetch(`${baseUrl}${route}`, {
+    headers: { Authorization: `Bearer ${token.accessToken}` },
+  });
+  const body = await res.text();
+  if (res.status !== expected) {
+    throw new Error(`${route}: expected HTTP ${expected}, got ${res.status}: ${body}`);
+  }
+  console.log(`${route}: HTTP ${res.status}`);
+}
+
+await check("/agent/sessions", 200);
+await check("/chat/sessions", 200);
+await check("/agent/status", 403);
+NODE
+'''
+
+[tasks."sna:auth-smoke"]
+description = "Run the automated auth/OpenAPI/WS/daemon smoke test slice"
+run = "pnpm --dir packages/core exec node --import tsx --test test/api-routes.test.ts test/ws-handler.test.ts test/daemon-manager.test.ts"
+
+[tasks."sna:verify"]
+description = "Run the core test suite and both package builds"
+run = '''
+set -euo pipefail
+pnpm --dir packages/core test
+pnpm --filter @sna-sdk/client build
+pnpm --filter @sna-sdk/core build
+'''
