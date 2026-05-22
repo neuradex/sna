@@ -208,6 +208,24 @@ describe("HTTP API Routes", () => {
       assert.ok(document.paths["/agent/sessions"].get.responses["401"].content["application/json"].schema);
     });
 
+    it("documents local PKCE authorization routes", async () => {
+      const document = getDocument();
+
+      assert.deepEqual(document.paths["/auth/pkce/start"].post.security, []);
+      assert.ok(document.paths["/auth/pkce/start"].post.requestBody);
+      assert.ok(document.paths["/auth/pkce/start"].post.responses["201"]);
+
+      assert.deepEqual(document.paths["/auth/pkce/token"].post.security, []);
+      assert.ok(document.paths["/auth/pkce/token"].post.requestBody);
+      assert.ok(document.paths["/auth/pkce/token"].post.responses["200"]);
+
+      assert.deepEqual(document.paths["/auth/pkce/requests/{id}"].get.security, []);
+      assert.deepEqual(document.paths["/auth/pkce/requests"].get.security, [{ bearerAuth: [] }]);
+      assert.deepEqual(document.paths["/auth/pkce/requests/{id}/approve"].post.security, [{ bearerAuth: [] }]);
+      assert.deepEqual(document.paths["/auth/pkce/requests/{id}/deny"].post.security, [{ bearerAuth: [] }]);
+      assert.deepEqual(document.paths["/auth/revoke"].post.security, [{ bearerAuth: [] }]);
+    });
+
     it("can generate the documented auth contract with runtime auth disabled for tooling", async () => {
       const { createSnaApp } = await import("../src/server/index.js");
       const docsApp = await createSnaApp({ unsafeDisableAuth: true });
@@ -310,6 +328,37 @@ describe("HTTP API Routes", () => {
         token: issued.accessToken,
       });
       assert.equal(forbidden.status, 403);
+    });
+
+    it("enforces client token scopes on protected HTTP routes", async () => {
+      const verifier = "test-verifier-for-scope-check";
+      const start = await req("POST", "/auth/pkce/start", {
+        clientId: "scope-check-client",
+        codeChallenge: pkceChallenge(verifier),
+        codeChallengeMethod: "S256",
+        scopes: ["chat"],
+      }, { auth: false });
+      const started = await start.json();
+      const approve = await req("POST", `/auth/pkce/requests/${started.requestId}/approve`);
+      const approved = await approve.json();
+      const token = await req("POST", "/auth/pkce/token", {
+        grantType: "authorization_code",
+        requestId: started.requestId,
+        code: approved.code,
+        codeVerifier: verifier,
+      }, { auth: false });
+      const issued = await token.json();
+
+      const chatAllowed = await req("GET", "/chat/sessions", undefined, { token: issued.accessToken });
+      assert.equal(chatAllowed.status, 200);
+
+      const sessionsDenied = await req("GET", "/agent/sessions", undefined, { token: issued.accessToken });
+      assert.equal(sessionsDenied.status, 403);
+      assert.match((await sessionsDenied.json()).message, /Insufficient scope.*sessions/);
+
+      const agentDenied = await req("GET", "/agent/status", undefined, { token: issued.accessToken });
+      assert.equal(agentDenied.status, 403);
+      assert.match((await agentDenied.json()).message, /Insufficient scope.*agent/);
     });
   });
 
