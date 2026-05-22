@@ -839,6 +839,40 @@ describe("HTTP API Routes", () => {
       assert.equal(level2.modelPresetId, "fast-model");
     });
 
+    it("deletes model presets and clears dependent profile assignments", async () => {
+      await req("PUT", "/agent/runtimes/delete-model-runtime", {
+        provider: "codex",
+        label: "Delete Model Runtime",
+        enabled: true,
+      });
+      await req("PUT", "/agent/model-presets/delete-model-preset", {
+        name: "Delete Model Preset",
+        runtimeId: "delete-model-runtime",
+        model: "gpt-5.4-mini",
+        reasoningLevel: 2,
+      });
+      await req("PUT", "/agent/profiles/3", {
+        modelPresetId: "delete-model-preset",
+      });
+
+      const deleteRes = await req("DELETE", "/agent/model-presets/delete-model-preset");
+      assert.equal(deleteRes.status, 200);
+      const deleted = await deleteRes.json();
+      assert.equal(deleted.status, "deleted");
+      assert.equal(deleted.modelPresetId, "delete-model-preset");
+      assert.deepEqual(deleted.clearedProfileLevels, [3]);
+
+      const presets = await (await req("GET", "/agent/model-presets")).json();
+      assert.equal(presets.presets.some((p: any) => p.id === "delete-model-preset"), false);
+
+      const profiles = await (await req("GET", "/agent/profiles")).json();
+      const level3 = profiles.profiles.find((p: any) => p.level === 3);
+      assert.equal(level3.modelPresetId, undefined);
+
+      const missingRes = await req("DELETE", "/agent/model-presets/delete-model-preset");
+      assert.equal(missingRes.status, 404);
+    });
+
     it("reports runtime and app audit information", async () => {
       const { resetConfig, setConfig } = await import("../src/config.js");
       setConfig({ appId: "audit-host" });

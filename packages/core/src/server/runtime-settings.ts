@@ -65,6 +65,12 @@ export interface DeleteRegisteredRuntimeResult {
   clearedProfileLevels: DifficultyLevel[];
 }
 
+export interface DeleteModelPresetResult {
+  status: "deleted";
+  modelPresetId: string;
+  clearedProfileLevels: DifficultyLevel[];
+}
+
 export interface ResolveLaunchInput extends RuntimeLaunchConfig {
   profileLevel?: DifficultyLevel;
   runtimeId?: string;
@@ -315,6 +321,36 @@ export function upsertModelPreset(
     : [...presets, next];
   writeSetting(db, MODEL_PRESET_SETTINGS_KEY, updated);
   return next;
+}
+
+export function deleteModelPreset(id: string): DeleteModelPresetResult | undefined {
+  const db = getDb();
+  assertValidId(id);
+  const now = Date.now();
+  const presets = listModelPresetsFromDb(db);
+  const existing = presets.find((preset) => preset.id === id);
+  if (!existing) return undefined;
+
+  writeSetting(db, MODEL_PRESET_SETTINGS_KEY, presets.filter((preset) => preset.id !== id));
+
+  const clearedProfileLevels: DifficultyLevel[] = [];
+  const profiles = listRuntimeProfilesFromDb(db);
+  const nextProfiles = profiles.map((profile) => {
+    if (profile.modelPresetId !== id) return profile;
+    const next: RuntimeProfile = { ...profile, updatedAt: now };
+    delete next.modelPresetId;
+    clearedProfileLevels.push(next.level);
+    return next;
+  });
+  if (clearedProfileLevels.length) {
+    writeSetting(db, PROFILE_SETTINGS_KEY, nextProfiles);
+  }
+
+  return {
+    status: "deleted",
+    modelPresetId: id,
+    clearedProfileLevels,
+  };
 }
 
 function listRuntimeProfilesFromDb(db: Database.Database): RuntimeProfile[] {

@@ -3,6 +3,7 @@ import {
   apiRequest,
   type AgentAuditResponse,
   type AuthRequestsResponse,
+  type DeleteModelPresetResponse,
   type DeleteRuntimeResponse,
   type DifficultyLevel,
   type HealthResponse,
@@ -164,6 +165,22 @@ export function useModelPresetMutation() {
     }) => apiRequest<{ status: "saved"; preset: ModelPreset }>(`/agent/model-presets/${encodeURIComponent(id)}`, {
       method: "PUT",
       body: input,
+    }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.modelPresets }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.runtimeProfiles }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.agentAudit }),
+      ]);
+    },
+  });
+}
+
+export function useDeleteModelPresetMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => apiRequest<DeleteModelPresetResponse>(`/agent/model-presets/${encodeURIComponent(id)}`, {
+      method: "DELETE",
     }),
     onSuccess: async () => {
       await Promise.all([

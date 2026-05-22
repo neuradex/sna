@@ -100,6 +100,12 @@ export interface DeleteRuntimeResponse {
   clearedProfileLevels: DifficultyLevel[];
 }
 
+export interface DeleteModelPresetResponse {
+  status: "deleted";
+  modelPresetId: string;
+  clearedProfileLevels: DifficultyLevel[];
+}
+
 export interface RuntimeCatalogResponse {
   runtimes: RuntimeCatalogEntry[];
 }

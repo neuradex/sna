@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState, type ReactNode } from "react";
-import { Edit3, Layers, Loader2, Plus, Save, SlidersHorizontal } from "lucide-react";
+import { Edit3, Layers, Loader2, Plus, Save, SlidersHorizontal, Trash2 } from "lucide-react";
 import { Button } from "../components/button";
 import { Dialog, DialogContent } from "../components/dialog";
 import { Input } from "../components/input";
@@ -7,6 +7,7 @@ import { RuntimeIcon } from "../components/runtime-icon";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/select";
 import { EmptyState, ErrorText, Panel, Skeleton, StatusBadge } from "../components/ui";
 import {
+  useDeleteModelPresetMutation,
   useModelPresetMutation,
   useModelPresetsQuery,
   useRegisteredRuntimesQuery,
@@ -27,9 +28,11 @@ export function ModelsPage() {
   const catalog = useRuntimeCatalogQuery();
   const profiles = useRuntimeProfilesQuery();
   const presetMutation = useModelPresetMutation();
+  const deletePresetMutation = useDeleteModelPresetMutation();
   const profileMutation = useRuntimeProfileMutation();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingPreset, setEditingPreset] = useState<ModelPreset | undefined>();
+  const [deleteTarget, setDeleteTarget] = useState<ModelPreset | null>(null);
 
   const presetRows = presets.data?.presets ?? [];
   const runtimeRows = runtimes.data?.runtimes ?? [];
@@ -97,7 +100,9 @@ export function ModelsPage() {
                 preset={preset}
                 runtime={runtimeRows.find((runtime) => runtime.id === preset.runtimeId)}
                 catalogRuntime={catalogRows.find((runtime) => runtime.id === runtimeRows.find((candidate) => candidate.id === preset.runtimeId)?.provider)}
+                deleting={deletePresetMutation.isPending && deletePresetMutation.variables?.id === preset.id}
                 onEdit={() => openPresetDialog(preset)}
+                onDelete={() => setDeleteTarget(preset)}
               />
             ))}
           </div>
@@ -151,6 +156,22 @@ export function ModelsPage() {
           { onSuccess: () => setDialogOpen(false) },
         )}
       />
+      <DeleteModelPresetDialog
+        preset={deleteTarget}
+        open={Boolean(deleteTarget)}
+        busy={deletePresetMutation.isPending}
+        error={deletePresetMutation.error}
+        onOpenChange={(open) => {
+          if (!open && !deletePresetMutation.isPending) setDeleteTarget(null);
+        }}
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          deletePresetMutation.mutate(
+            { id: deleteTarget.id },
+            { onSuccess: () => setDeleteTarget(null) },
+          );
+        }}
+      />
     </div>
   );
 }
@@ -159,12 +180,16 @@ function ModelPresetCard({
   preset,
   runtime,
   catalogRuntime,
+  deleting,
   onEdit,
+  onDelete,
 }: {
   preset: ModelPreset;
   runtime?: RegisteredRuntime;
   catalogRuntime?: RuntimeCatalogEntry;
+  deleting: boolean;
   onEdit: () => void;
+  onDelete: () => void;
 }) {
   return (
     <article className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--panel-subtle)] p-4">
@@ -182,14 +207,26 @@ function ModelPresetCard({
             <p className="mt-1 truncate font-mono text-[11px] text-[var(--fg-muted)]">{preset.id}</p>
           </div>
         </div>
-        <Button
-          type="button"
-          className="focus-ring inline-flex h-8 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel-subtle)] px-3 font-mono text-[10px] font-medium text-[var(--fg-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--fg)]"
-          onClick={onEdit}
-        >
-          <Edit3 size={14} />
-          Edit
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            className="focus-ring inline-flex h-8 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel-subtle)] px-3 font-mono text-[10px] font-medium text-[var(--fg-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--fg)]"
+            onClick={onEdit}
+          >
+            <Edit3 size={14} />
+            Edit
+          </Button>
+          <Button
+            type="button"
+            className="focus-ring inline-flex size-8 items-center justify-center rounded-lg border border-red-500/20 bg-[var(--bad-soft)] text-[var(--bad)] transition hover:border-red-500/40"
+            title="Delete model preset"
+            aria-label={`Delete ${preset.name}`}
+            disabled={deleting}
+            onClick={onDelete}
+          >
+            {deleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+          </Button>
+        </div>
       </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-3">
         <ModelFact label="Runtime" value={runtime?.label ?? preset.runtimeId} />
@@ -220,6 +257,60 @@ function ModelPresetCardSkeleton() {
         <Skeleton className="h-14 rounded-lg" />
       </div>
     </article>
+  );
+}
+
+function DeleteModelPresetDialog({
+  preset,
+  open,
+  busy,
+  error,
+  onOpenChange,
+  onConfirm,
+}: {
+  preset: ModelPreset | null;
+  open: boolean;
+  busy: boolean;
+  error: unknown;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md" title="Delete model preset" description="Remove this model preset.">
+        {preset ? (
+          <div className="grid gap-4">
+            <div className="rounded-xl border border-red-500/20 bg-[var(--bad-soft)] p-3">
+              <div className="font-semibold text-[var(--fg)]">{preset.name}</div>
+              <div className="mt-1 font-mono text-xs text-[var(--fg-muted)]">{preset.id}</div>
+              <p className="mt-3 text-sm leading-6 text-[var(--fg-soft)]">
+                This clears level defaults that currently point to this preset.
+              </p>
+            </div>
+            {error ? <ErrorText error={error} /> : null}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                className="focus-ring inline-flex h-10 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--panel-subtle)] px-4 font-mono text-xs font-medium text-[var(--fg-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--fg)]"
+                disabled={busy}
+                onClick={() => onOpenChange(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-500/30 bg-[var(--bad-soft)] px-4 font-mono text-xs font-medium text-[var(--bad)] transition hover:border-red-500/50"
+                disabled={busy}
+                onClick={onConfirm}
+              >
+                {busy ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                Delete
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
   );
 }
 
