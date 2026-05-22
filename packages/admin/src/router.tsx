@@ -2,6 +2,7 @@ import { createRootRoute, createRoute, createRouter } from "@tanstack/react-rout
 import { Shell } from "./components/shell";
 import { OverviewPage } from "./pages/overview";
 import { AuthorizationPage } from "./pages/authorization";
+import { ModelsPage } from "./pages/models";
 import { RuntimePage } from "./pages/runtime";
 import { SessionsPage } from "./pages/sessions";
 
@@ -33,7 +34,13 @@ const runtimeRoute = createRoute({
   component: RuntimePage,
 });
 
-const routeTree = rootRoute.addChildren([overviewRoute, authorizationRoute, sessionsRoute, runtimeRoute]);
+const modelsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/models",
+  component: ModelsPage,
+});
+
+const routeTree = rootRoute.addChildren([overviewRoute, authorizationRoute, sessionsRoute, runtimeRoute, modelsRoute]);
 
 export const router = createRouter({
   routeTree,

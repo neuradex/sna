@@ -28,6 +28,7 @@ export interface RuntimeProfile {
   label: string;
   description: string;
   runtimeId?: string;
+  modelPresetId?: string;
   config: RuntimeLaunchConfig;
   updatedAt?: number;
 }
@@ -46,19 +47,33 @@ export interface RegisteredRuntime {
   updatedAt: number;
 }
 
+export interface ModelPreset {
+  id: string;
+  name: string;
+  runtimeId: string;
+  model?: string;
+  modelProvider?: string;
+  reasoningLevel: ReasoningLevel;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ResolveLaunchInput extends RuntimeLaunchConfig {
   profileLevel?: DifficultyLevel;
   runtimeId?: string;
+  modelPresetId?: string;
   [key: string]: unknown;
 }
 
 export interface ResolvedLaunchConfig extends ResolveLaunchInput {
   profileLevel?: DifficultyLevel;
   runtimeId?: string;
+  modelPresetId?: string;
 }
 
 const RUNTIME_SETTINGS_KEY = "agent.runtimes.v1";
 const PROFILE_SETTINGS_KEY = "agent.profiles.v1";
+const MODEL_PRESET_SETTINGS_KEY = "agent.modelPresets.v1";
 
 const DEFAULT_PROFILES: RuntimeProfile[] = [
   {
@@ -115,7 +130,7 @@ function writeSetting<T>(db: Database.Database, key: string, value: T): void {
 
 function assertValidId(id: string): void {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(id)) {
-    throw new Error("runtime id must be 1-64 chars and contain only letters, numbers, dot, underscore, or dash");
+    throw new Error("id must be 1-64 chars and contain only letters, numbers, dot, underscore, or dash");
   }
 }
 
@@ -190,6 +205,61 @@ export function upsertRegisteredRuntime(
   return next;
 }
 
+function assertReasoningLevel(level: number): asserts level is ReasoningLevel {
+  if (![0, 1, 2, 3, 4, 5].includes(level)) {
+    throw new Error("reasoning level must be between 0 and 5");
+  }
+}
+
+function listModelPresetsFromDb(db: Database.Database): ModelPreset[] {
+  return readSetting<ModelPreset[]>(db, MODEL_PRESET_SETTINGS_KEY, []);
+}
+
+export function listModelPresets(): ModelPreset[] {
+  return listModelPresetsFromDb(getDb());
+}
+
+function getModelPresetFromDb(id: string, db: Database.Database): ModelPreset | undefined {
+  return listModelPresetsFromDb(db).find((preset) => preset.id === id);
+}
+
+export function upsertModelPreset(
+  id: string,
+  input: {
+    name?: string;
+    runtimeId: string;
+    model?: string;
+    modelProvider?: string;
+    reasoningLevel: number;
+  },
+): ModelPreset {
+  const db = getDb();
+  assertValidId(id);
+  assertValidId(input.runtimeId);
+  assertReasoningLevel(input.reasoningLevel);
+  const runtime = getRegisteredRuntimeFromDb(input.runtimeId, db);
+  if (!runtime) throw new Error(`Registered runtime "${input.runtimeId}" not found`);
+  const now = Date.now();
+  const presets = listModelPresetsFromDb(db);
+  const existing = presets.find((preset) => preset.id === id);
+  const name = input.name?.trim() || existing?.name || id;
+  const next: ModelPreset = {
+    id,
+    name,
+    runtimeId: input.runtimeId,
+    model: input.model?.trim() || undefined,
+    modelProvider: input.modelProvider?.trim() || undefined,
+    reasoningLevel: input.reasoningLevel,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+  const updated = existing
+    ? presets.map((preset) => preset.id === id ? next : preset)
+    : [...presets, next];
+  writeSetting(db, MODEL_PRESET_SETTINGS_KEY, updated);
+  return next;
+}
+
 function listRuntimeProfilesFromDb(db: Database.Database): RuntimeProfile[] {
   const stored = readSetting<RuntimeProfile[]>(db, PROFILE_SETTINGS_KEY, []);
   return DEFAULT_PROFILES.map((profile) => {
@@ -220,20 +290,28 @@ export function upsertRuntimeProfile(
   input: {
     label?: string;
     description?: string;
-    runtimeId?: string;
+    runtimeId?: string | null;
+    modelPresetId?: string | null;
     config?: RuntimeLaunchConfig;
   },
 ): RuntimeProfile {
   const db = getDb();
   assertDifficultyLevel(level);
-  if (input.runtimeId !== undefined) assertValidId(input.runtimeId);
+  if (input.runtimeId !== undefined && input.runtimeId !== null) assertValidId(input.runtimeId);
+  if (input.modelPresetId !== undefined && input.modelPresetId !== null) {
+    assertValidId(input.modelPresetId);
+    if (!getModelPresetFromDb(input.modelPresetId, db)) {
+      throw new Error(`Model preset "${input.modelPresetId}" not found`);
+    }
+  }
   const profiles = listRuntimeProfilesFromDb(db);
   const current = profiles.find((profile) => profile.level === level)!;
   const next: RuntimeProfile = {
     ...current,
     label: input.label ?? current.label,
     description: input.description ?? current.description,
-    runtimeId: input.runtimeId ?? current.runtimeId,
+    runtimeId: input.runtimeId === null ? undefined : input.runtimeId ?? current.runtimeId,
+    modelPresetId: input.modelPresetId === null ? undefined : input.modelPresetId ?? current.modelPresetId,
     config: mergeDefined(current.config as Record<string, unknown>, input.config as Record<string, unknown>) as RuntimeLaunchConfig,
     updatedAt: Date.now(),
   };
@@ -263,7 +341,14 @@ export function resolveLaunchConfig<T extends ResolveLaunchInput>(input: T): T &
     profile = getRuntimeProfileFromDb(profileLevel, db);
   }
 
-  const runtimeId = input.runtimeId ?? profile?.runtimeId;
+  let modelPreset: ModelPreset | undefined;
+  const modelPresetId = input.modelPresetId ?? profile?.modelPresetId;
+  if (modelPresetId) {
+    modelPreset = getModelPresetFromDb(modelPresetId, db);
+    if (!modelPreset) throw new Error(`Model preset "${modelPresetId}" not found`);
+  }
+
+  const runtimeId = input.runtimeId ?? modelPreset?.runtimeId ?? profile?.runtimeId;
   let runtime: RegisteredRuntime | undefined;
   if (runtimeId) {
     runtime = getRegisteredRuntimeFromDb(runtimeId, db);
@@ -271,9 +356,23 @@ export function resolveLaunchConfig<T extends ResolveLaunchInput>(input: T): T &
     if (!runtime.enabled) throw new Error(`Registered runtime "${runtimeId}" is disabled`);
   }
 
+  const profileConfig = profile ? { ...profile.config } : undefined;
+  if (profileConfig && modelPreset) {
+    delete profileConfig.model;
+    delete profileConfig.modelProvider;
+    delete profileConfig.reasoningLevel;
+  }
+
   return mergeDefined(
     runtime ? runtimeDefaults(runtime) as unknown as Record<string, unknown> : undefined,
-    profile ? { ...profile.config, profileLevel: profile.level, runtimeId: runtimeId ?? profile.runtimeId } : undefined,
+    profile ? { ...profileConfig, profileLevel: profile.level, runtimeId: runtimeId ?? profile.runtimeId } : undefined,
+    modelPreset ? {
+      model: modelPreset.model,
+      modelProvider: modelPreset.modelProvider,
+      reasoningLevel: modelPreset.reasoningLevel,
+      runtimeId: modelPreset.runtimeId,
+      modelPresetId: modelPreset.id,
+    } : undefined,
     input,
   ) as T & ResolvedLaunchConfig;
 }
@@ -292,6 +391,7 @@ export function buildAgentAudit(
   sessions: SessionInfo[],
 ): {
   profiles: RuntimeProfile[];
+  modelPresets: ModelPreset[];
   runtimes: Array<RegisteredRuntime & { config?: RuntimeLaunchConfig; activeSessionCount: number; sessionCount: number }>;
   sessions: SessionInfo[];
   apps: Array<{
@@ -369,6 +469,7 @@ export function buildAgentAudit(
 
   return {
     profiles,
+    modelPresets: listModelPresetsFromDb(db),
     runtimes,
     sessions,
     apps: Array.from(appMap.values()).map((app) => ({

@@ -1,5 +1,5 @@
 import { Link, Outlet } from "@tanstack/react-router";
-import { Gauge, LayoutDashboard, ListChecks, Moon, ShieldCheck, Sun } from "lucide-react";
+import { Bot, Gauge, LayoutDashboard, ListChecks, Moon, ShieldCheck, Sun } from "lucide-react";
 import { useHealthQuery } from "../queries";
 import { useTheme } from "../theme";
 import snaIcon from "../assets/sna-icon.svg";
@@ -10,6 +10,7 @@ const navItems = [
   { to: "/authorization", label: "Authorization", icon: ShieldCheck },
   { to: "/sessions", label: "Sessions", icon: ListChecks },
   { to: "/runtime", label: "Runtime", icon: Gauge },
+  { to: "/models", label: "Models", icon: Bot },
 ] as const;
 
 export function Shell() {
@@ -45,7 +46,7 @@ export function Shell() {
         </div>
       </header>
 
-      <nav className="grid grid-cols-2 gap-1 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-1 backdrop-blur sm:grid-cols-4">
+      <nav className="grid grid-cols-2 gap-1 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-1 backdrop-blur sm:grid-cols-5">
         {navItems.map((item) => {
           const Icon = item.icon;
           return (

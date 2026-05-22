@@ -18,6 +18,8 @@ export type {
   ReasoningLevel,
   RuntimeLaunchConfig,
   RuntimeProfile,
+  ModelPreset,
+  UpsertModelPresetInput,
   RegisteredRuntime,
   RegisterRuntimeInput,
   UpdateRuntimeProfileInput,

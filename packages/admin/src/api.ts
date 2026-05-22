@@ -73,8 +73,20 @@ export interface RuntimeProfile {
   label: string;
   description: string;
   runtimeId?: string;
+  modelPresetId?: string;
   config: RuntimeLaunchConfig;
   updatedAt?: number;
+}
+
+export interface ModelPreset {
+  id: string;
+  name: string;
+  runtimeId: string;
+  model?: string;
+  modelProvider?: string;
+  reasoningLevel: ReasoningLevel;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface RuntimesResponse {
@@ -87,6 +99,10 @@ export interface RuntimeCatalogResponse {
 
 export interface ProfilesResponse {
   profiles: RuntimeProfile[];
+}
+
+export interface ModelPresetsResponse {
+  presets: ModelPreset[];
 }
 
 export interface RuntimeModelInfo {
@@ -120,6 +136,7 @@ export interface RuntimeAuditSession {
   modelProvider?: string;
   model?: string;
   runtimeId?: string;
+  modelPresetId?: string;
   profileLevel?: DifficultyLevel;
   reasoningLevel?: ReasoningLevel;
   cwd: string;
@@ -138,6 +155,7 @@ export interface RuntimeAuditApp {
 
 export interface AgentAuditResponse {
   profiles: RuntimeProfile[];
+  modelPresets: ModelPreset[];
   runtimes: RuntimeAuditRuntime[];
   sessions: RuntimeAuditSession[];
   apps: RuntimeAuditApp[];

@@ -1729,6 +1729,42 @@ describe("HTTP transport — new operations", () => {
     assert.equal(req.body.config.model, "gpt-5.4");
   });
 
+  it("runtime.listModelPresets — GET /agent/model-presets", async () => {
+    mock.queueHttpResponse(200, {
+      presets: [{ id: "fast", name: "Fast", runtimeId: "codex-main", model: "gpt-5.4-mini", reasoningLevel: 2, createdAt: 3, updatedAt: 3 }],
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.listModelPresets();
+
+    assert.equal(res.presets[0].id, "fast");
+    assert.equal(mock.httpRequests[0].method, "GET");
+    assert.equal(mock.httpRequests[0].url, "/agent/model-presets");
+  });
+
+  it("runtime.upsertModelPreset — PUT /agent/model-presets/:id", async () => {
+    mock.queueHttpResponse(200, {
+      status: "saved",
+      preset: { id: "deep", name: "Deep", runtimeId: "codex-main", model: "gpt-5.4", modelProvider: "openai", reasoningLevel: 5, createdAt: 4, updatedAt: 4 },
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.upsertModelPreset("deep", {
+      name: "Deep",
+      runtimeId: "codex-main",
+      model: "gpt-5.4",
+      modelProvider: "openai",
+      reasoningLevel: 5,
+    });
+
+    assert.equal(res.status, "saved");
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "PUT");
+    assert.equal(req.url, "/agent/model-presets/deep");
+    assert.equal(req.body.runtimeId, "codex-main");
+    assert.equal(req.body.reasoningLevel, 5);
+  });
+
   it("runtime.registerRuntime — PUT /agent/runtimes/:id", async () => {
     mock.queueHttpResponse(200, {
       status: "registered",
@@ -1767,6 +1803,7 @@ describe("HTTP transport — new operations", () => {
   it("runtime.audit — GET /agent/audit", async () => {
     mock.queueHttpResponse(200, {
       profiles: [],
+      modelPresets: [],
       runtimes: [],
       sessions: [],
       apps: [{ clientId: "app-a", displayName: "App A", scopes: ["agent:read"], tokenCount: 1, activeTokenCount: 1 }],

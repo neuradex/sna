@@ -275,7 +275,19 @@ export interface RuntimeProfile {
   label: string;
   description?: string;
   runtimeId?: string;
+  modelPresetId?: string;
   config: RuntimeLaunchConfig;
+  updatedAt: number;
+}
+
+export interface ModelPreset {
+  id: string;
+  name: string;
+  runtimeId: string;
+  model?: string;
+  modelProvider?: string;
+  reasoningLevel: ReasoningLevel;
+  createdAt: number;
   updatedAt: number;
 }
 
@@ -303,7 +315,17 @@ export type RegisterRuntimeInput = {
   models?: Array<{ id: string; label?: string; provider?: string }>;
   config?: RuntimeLaunchConfig;
 };
-export type UpdateRuntimeProfileInput = Partial<Omit<RuntimeProfile, "level" | "updatedAt">>;
+export type UpdateRuntimeProfileInput = Partial<Omit<RuntimeProfile, "level" | "updatedAt" | "runtimeId" | "modelPresetId">> & {
+  runtimeId?: string | null;
+  modelPresetId?: string | null;
+};
+export type UpsertModelPresetInput = {
+  name?: string;
+  runtimeId: string;
+  model?: string;
+  modelProvider?: string;
+  reasoningLevel: ReasoningLevel;
+};
 
 export interface RuntimeCatalogEntry {
   id: string;
@@ -337,6 +359,7 @@ export interface RuntimeAuditSession {
   modelProvider?: string;
   model?: string;
   runtimeId?: string;
+  modelPresetId?: string;
   profileLevel?: DifficultyLevel;
   reasoningLevel?: ReasoningLevel;
   cwd: string;
@@ -355,6 +378,7 @@ export interface RuntimeAuditApp {
 
 export interface AgentAuditSnapshot {
   profiles: RuntimeProfile[];
+  modelPresets: ModelPreset[];
   runtimes: RuntimeAuditRuntime[];
   sessions: RuntimeAuditSession[];
   apps: RuntimeAuditApp[];
@@ -886,6 +910,8 @@ export interface CompletionOptions {
   profileLevel?: DifficultyLevel;
   /** Registered runtime defaults to merge before explicit options. */
   runtimeId?: string;
+  /** Named model preset to merge before explicit options. */
+  modelPresetId?: string;
   model?: string;
   systemPrompt?: string;
   appendSystemPrompt?: string;
@@ -943,6 +969,8 @@ export interface RunOnceOptions {
   profileLevel?: DifficultyLevel;
   /** Registered runtime defaults to merge before explicit options. */
   runtimeId?: string;
+  /** Named model preset to merge before explicit options. */
+  modelPresetId?: string;
   model?: string;
   systemPrompt?: string;
   appendSystemPrompt?: string;
@@ -1141,6 +1169,23 @@ class RuntimeSettingsApi {
   async listProfiles(): Promise<{ profiles: RuntimeProfile[] }> {
     this.requireHttp();
     return this.client._httpFetch("GET", "/agent/profiles");
+  }
+
+  async listModelPresets(): Promise<{ presets: ModelPreset[] }> {
+    this.requireHttp();
+    return this.client._httpFetch("GET", "/agent/model-presets");
+  }
+
+  async upsertModelPreset(id: string, input: UpsertModelPresetInput): Promise<{
+    status: "saved";
+    preset: ModelPreset;
+  }> {
+    this.requireHttp();
+    return this.client._httpFetch(
+      "PUT",
+      `/agent/model-presets/${encodeURIComponent(id)}`,
+      input as unknown as Record<string, unknown>,
+    );
   }
 
   async updateProfile(level: DifficultyLevel, input: UpdateRuntimeProfileInput): Promise<{
@@ -1400,6 +1445,8 @@ export interface AgentStartConfig {
    * runtime" and do not want to carry CLI/model settings.
    */
   runtimeId?: string;
+  /** Named model preset to merge before explicit options. */
+  modelPresetId?: string;
   /**
    * Runtime — the CLI binary to spawn (e.g. `"claude-code"`, `"codex"`).
    * Dispatches the request to a registered AgentProvider.
@@ -1726,6 +1773,7 @@ class AgentApi {
   async resume(session: string, opts?: {
     profileLevel?: DifficultyLevel;
     runtimeId?: string;
+    modelPresetId?: string;
     provider?: string;
     modelProvider?: string;
     model?: string;

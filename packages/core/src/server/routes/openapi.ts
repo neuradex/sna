@@ -45,9 +45,11 @@ import {
 import { createHttpSecurityMiddleware, type SnaAuthIdentity, type SnaSecurityOptions } from "../security.js";
 import {
   buildAgentAudit,
+  listModelPresets,
   listRegisteredRuntimes,
   listRuntimeProfiles,
   resolveLaunchConfig,
+  upsertModelPreset,
   upsertRegisteredRuntime,
   upsertRuntimeProfile,
 } from "../runtime-settings.js";
@@ -134,6 +136,7 @@ const SessionConfigSchema = z.object({
   permissionMode: z.string().optional(),
   profileLevel: z.number().int().min(1).max(5).optional(),
   runtimeId: z.string().optional(),
+  modelPresetId: z.string().optional(),
   reasoningLevel: z.number().int().min(0).max(5).optional(),
   configDir: z.string().optional(),
   extraArgs: z.array(z.string()).optional(),
@@ -197,8 +200,20 @@ const RuntimeProfileSchema = z.object({
   label: z.string(),
   description: z.string(),
   runtimeId: z.string().optional(),
+  modelPresetId: z.string().optional(),
   config: RuntimeLaunchConfigSchema,
   updatedAt: z.number().optional(),
+});
+
+const ModelPresetSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  runtimeId: z.string(),
+  model: z.string().optional(),
+  modelProvider: z.string().optional(),
+  reasoningLevel: z.number().int().min(0).max(5),
+  createdAt: z.number(),
+  updatedAt: z.number(),
 });
 
 const RuntimeChainEntrySchema = z.object({
@@ -675,6 +690,48 @@ const listProfilesRoute = protectedRoute({
   },
 });
 
+const listModelPresetsRoute = protectedRoute({
+  method: "get",
+  path: "/agent/model-presets",
+  summary: "List model presets",
+  description: "List named model presets that can be assigned to difficulty levels.",
+  responses: {
+    200: {
+      description: "Model presets.",
+      content: { "application/json": { schema: z.object({ presets: z.array(ModelPresetSchema) }) } },
+    },
+  },
+});
+
+const upsertModelPresetRoute = protectedRoute({
+  method: "put",
+  path: "/agent/model-presets/{id}",
+  summary: "Save model preset",
+  description: "Create or update a named model preset with runtime, model, and reasoning effort.",
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: { "application/json": { schema: z.object({
+        name: z.string().optional(),
+        runtimeId: z.string(),
+        model: z.string().optional(),
+        modelProvider: z.string().optional(),
+        reasoningLevel: z.number().int().min(0).max(5),
+      }).strict() }},
+    },
+  },
+  responses: {
+    200: {
+      description: "Model preset saved.",
+      content: { "application/json": { schema: z.object({ status: z.literal("saved"), preset: ModelPresetSchema }) } },
+    },
+    400: {
+      description: "Invalid model preset.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
 const upsertProfileRoute = protectedRoute({
   method: "put",
   path: "/agent/profiles/{level}",
@@ -686,7 +743,8 @@ const upsertProfileRoute = protectedRoute({
       content: { "application/json": { schema: z.object({
         label: z.string().optional(),
         description: z.string().optional(),
-        runtimeId: z.string().optional(),
+        runtimeId: z.string().nullable().optional(),
+        modelPresetId: z.string().nullable().optional(),
         config: RuntimeLaunchConfigSchema.optional(),
       }).strict() }},
     },
@@ -713,6 +771,7 @@ const auditRoute = protectedRoute({
       description: "Audit snapshot.",
       content: { "application/json": { schema: z.object({
         profiles: z.array(RuntimeProfileSchema),
+        modelPresets: z.array(ModelPresetSchema),
         runtimes: z.array(RegisteredRuntimeSchema.extend({
           activeSessionCount: z.number(),
           sessionCount: z.number(),
@@ -747,6 +806,7 @@ const startRoute = protectedRoute({
         modelProvider: z.string().optional(),
         profileLevel: z.number().int().min(1).max(5).optional(),
         runtimeId: z.string().optional(),
+        modelPresetId: z.string().optional(),
         prompt: z.string().optional(),
         model: z.string().optional(),
         permissionMode: z.string().optional(),
@@ -834,6 +894,7 @@ const restartRoute = protectedRoute({
         modelProvider: z.string().optional(),
         profileLevel: z.number().int().min(1).max(5).optional(),
         runtimeId: z.string().optional(),
+        modelPresetId: z.string().optional(),
         model: z.string().optional(),
         cwd: z.string().optional(),
         permissionMode: z.string().optional(),
@@ -887,6 +948,7 @@ const resumeRoute = protectedRoute({
         modelProvider: z.string().optional(),
         profileLevel: z.number().int().min(1).max(5).optional(),
         runtimeId: z.string().optional(),
+        modelPresetId: z.string().optional(),
         extraArgs: z.array(z.string()).optional(),
         providerOptions: z.record(z.string(), z.any()).optional(),
         systemPrompt: z.string().optional(),
@@ -1098,6 +1160,7 @@ const runOnceRoute = protectedRoute({
         provider: z.string().optional(),
         profileLevel: z.number().int().min(1).max(5).optional(),
         runtimeId: z.string().optional(),
+        modelPresetId: z.string().optional(),
         extraArgs: z.array(z.string()).optional(),
         env: z.record(z.string(), z.any()).optional(),
         providerOptions: z.record(z.string(), z.any()).optional(),
@@ -1143,6 +1206,7 @@ const runOnceStreamRoute = protectedRoute({
         provider: z.string().optional(),
         profileLevel: z.number().int().min(1).max(5).optional(),
         runtimeId: z.string().optional(),
+        modelPresetId: z.string().optional(),
         extraArgs: z.array(z.string()).optional(),
         env: z.record(z.string(), z.any()).optional(),
         providerOptions: z.record(z.string(), z.any()).optional(),
@@ -1181,6 +1245,7 @@ const completionRoute = protectedRoute({
         model: z.string().optional(),
         profileLevel: z.number().int().min(1).max(5).optional(),
         runtimeId: z.string().optional(),
+        modelPresetId: z.string().optional(),
         systemPrompt: z.string().optional(),
         appendSystemPrompt: z.string().optional(),
         reasoningLevel: z.number().int().min(0).max(5).optional(),
@@ -1809,6 +1874,20 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     return c.json({ profiles: listRuntimeProfiles() }, 200);
   });
 
+  app.openapi(listModelPresetsRoute, (c) => {
+    return c.json({ presets: listModelPresets() }, 200);
+  });
+
+  app.openapi(upsertModelPresetRoute, (c) => {
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      return c.json({ status: "saved" as const, preset: upsertModelPreset(id, body as any) }, 200);
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
+  });
+
   app.openapi(upsertProfileRoute, (c) => {
     const { level } = c.req.valid("param");
     const body = c.req.valid("json");
@@ -1899,6 +1978,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
         permissionMode: body.permissionMode,
         profileLevel: body.profileLevel as (1 | 2 | 3 | 4 | 5) | undefined,
         runtimeId: body.runtimeId,
+        modelPresetId: body.modelPresetId,
         reasoningLevel: body.reasoningLevel as (0 | 1 | 2 | 3 | 4 | 5) | undefined,
         configDir: body.configDir,
         extraArgs: body.extraArgs,
@@ -2122,6 +2202,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
         permissionMode,
         profileLevel: body.profileLevel as (1 | 2 | 3 | 4 | 5) | undefined,
         runtimeId: body.runtimeId,
+        modelPresetId: body.modelPresetId,
         reasoningLevel: body.reasoningLevel as (0 | 1 | 2 | 3 | 4 | 5) | undefined,
         configDir,
         extraArgs,

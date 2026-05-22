@@ -588,6 +588,61 @@ describe("HTTP API Routes", () => {
       assert.equal(session.config.reasoningLevel, 4);
     });
 
+    it("resolves profileLevel through assigned model presets", async () => {
+      const providerName = `test-preset-${Date.now()}`;
+      const { registerProvider } = await import("../src/core/providers/index.js");
+      registerProvider(createFakeApiProvider(providerName));
+
+      const runtimeRes = await req("PUT", "/agent/runtimes/preset-runtime", {
+        provider: providerName,
+        label: "Preset Runtime",
+        enabled: true,
+        modelProvider: "runtime-vendor",
+        defaultModel: "runtime-default",
+        config: {
+          permissionMode: "plan",
+          reasoningLevel: 1,
+        },
+      });
+      assert.equal(runtimeRes.status, 200);
+
+      const presetRes = await req("PUT", "/agent/model-presets/deep-model", {
+        name: "Deep Model",
+        runtimeId: "preset-runtime",
+        model: "preset-model",
+        modelProvider: "preset-vendor",
+        reasoningLevel: 5,
+      });
+      assert.equal(presetRes.status, 200);
+
+      const profileRes = await req("PUT", "/agent/profiles/5", {
+        modelPresetId: "deep-model",
+        config: {
+          model: "legacy-profile-model",
+          reasoningLevel: 5,
+        },
+      });
+      assert.equal(profileRes.status, 200);
+
+      const startRes = await req("POST", "/agent/start?session=preset-start", {
+        profileLevel: 5,
+      });
+      assert.equal(startRes.status, 200);
+      assert.equal((await startRes.json()).provider, providerName);
+
+      const list = await (await req("GET", "/agent/sessions?include=chain")).json();
+      const session = list.sessions.find((s: any) => s.id === "preset-start");
+      assert.ok(session);
+      assert.equal(session.config.provider, providerName);
+      assert.equal(session.config.modelProvider, "preset-vendor");
+      assert.equal(session.config.model, "preset-model");
+      assert.equal(session.config.permissionMode, "plan");
+      assert.equal(session.config.profileLevel, 5);
+      assert.equal(session.config.runtimeId, "preset-runtime");
+      assert.equal(session.config.modelPresetId, "deep-model");
+      assert.equal(session.config.reasoningLevel, 5);
+    });
+
     it("POST /agent/start exposes runtime-chain and message-count changes through APIs", async () => {
       const providerName = `test-spawn-${Date.now()}`;
       const { registerProvider } = await import("../src/core/providers/index.js");
@@ -708,6 +763,39 @@ describe("HTTP API Routes", () => {
       assert.equal(registered.defaultModel, "gpt-5.4");
     });
 
+    it("saves model presets and assigns them to profile slots", async () => {
+      await req("PUT", "/agent/runtimes/model-runtime", {
+        provider: "codex",
+        label: "Model Runtime",
+        enabled: true,
+      });
+
+      const presetRes = await req("PUT", "/agent/model-presets/fast-model", {
+        name: "Fast Model",
+        runtimeId: "model-runtime",
+        model: "gpt-5.4-mini",
+        modelProvider: "openai",
+        reasoningLevel: 2,
+      });
+      assert.equal(presetRes.status, 200);
+      const preset = await presetRes.json();
+      assert.equal(preset.preset.id, "fast-model");
+      assert.equal(preset.preset.reasoningLevel, 2);
+
+      const profileRes = await req("PUT", "/agent/profiles/2", {
+        runtimeId: null,
+        modelPresetId: "fast-model",
+      });
+      assert.equal(profileRes.status, 200);
+
+      const presets = await (await req("GET", "/agent/model-presets")).json();
+      assert.ok(presets.presets.some((candidate: any) => candidate.id === "fast-model" && candidate.name === "Fast Model"));
+
+      const profiles = await (await req("GET", "/agent/profiles")).json();
+      const level2 = profiles.profiles.find((p: any) => p.level === 2);
+      assert.equal(level2.modelPresetId, "fast-model");
+    });
+
     it("reports runtime and app audit information", async () => {
       const { resetConfig, setConfig } = await import("../src/config.js");
       setConfig({ appId: "audit-host" });
@@ -724,6 +812,7 @@ describe("HTTP API Routes", () => {
         assert.equal(res.status, 200);
         const json = await res.json();
         assert.ok(Array.isArray(json.runtimes));
+        assert.ok(Array.isArray(json.modelPresets));
         assert.ok(Array.isArray(json.apps));
         assert.ok(Array.isArray(json.sessions));
         assert.ok(json.runtimes.some((r: any) => r.id === "audit-runtime"));

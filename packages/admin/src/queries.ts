@@ -6,6 +6,8 @@ import {
   type DifficultyLevel,
   type HealthResponse,
   type ListModelsResponse,
+  type ModelPreset,
+  type ModelPresetsResponse,
   type ProfilesResponse,
   type RegisteredRuntime,
   type RuntimeCatalogResponse,
@@ -20,6 +22,7 @@ export const queryKeys = {
   sessions: ["sessions"] as const,
   runtimeCatalog: ["runtime-catalog"] as const,
   runtimeModels: (runtime: string, cliPath: string) => ["runtime-models", runtime, cliPath] as const,
+  modelPresets: ["model-presets"] as const,
   runtimeProfiles: ["runtime-profiles"] as const,
   registeredRuntimes: ["registered-runtimes"] as const,
   agentAudit: ["agent-audit"] as const,
@@ -96,6 +99,14 @@ export function useRuntimeModelsQuery(runtime: string, cliPath = "", enabled = t
   });
 }
 
+export function useModelPresetsQuery() {
+  return useQuery({
+    queryKey: queryKeys.modelPresets,
+    queryFn: () => apiRequest<ModelPresetsResponse>("/agent/model-presets"),
+    refetchInterval: 5_000,
+  });
+}
+
 export function useRegisteredRuntimesQuery() {
   return useQuery({
     queryKey: queryKeys.registeredRuntimes,
@@ -120,7 +131,8 @@ export function useRuntimeProfileMutation() {
       input: {
         label?: string;
         description?: string;
-        runtimeId?: string;
+        runtimeId?: string | null;
+        modelPresetId?: string | null;
         config?: RuntimeLaunchConfig;
       };
     }) => apiRequest(`/agent/profiles/${level}`, {
@@ -129,6 +141,32 @@ export function useRuntimeProfileMutation() {
     }),
     onSuccess: async () => {
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.runtimeProfiles }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.agentAudit }),
+      ]);
+    },
+  });
+}
+
+export function useModelPresetMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: {
+      id: string;
+      input: {
+        name?: string;
+        runtimeId: string;
+        model?: string;
+        modelProvider?: string;
+        reasoningLevel: number;
+      };
+    }) => apiRequest<{ status: "saved"; preset: ModelPreset }>(`/agent/model-presets/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: input,
+    }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.modelPresets }),
         queryClient.invalidateQueries({ queryKey: queryKeys.runtimeProfiles }),
         queryClient.invalidateQueries({ queryKey: queryKeys.agentAudit }),
       ]);
