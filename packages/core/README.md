@@ -71,12 +71,38 @@ const sna = await startSnaDaemon({
 
 console.log(await sna.status());
 console.log(`pid=${sna.pid} log=${sna.logPath}`);
+console.log(`admin=${sna.adminUrl}`);
+await sna.openAdmin();
 ```
 
 The daemon launcher writes `.sna/sna-daemon.pid`, `.sna/sna-daemon.log`,
-and `.sna/sna-api.port`. If a healthy SNA daemon is already serving the
-requested port, the returned handle is marked `adopted: true` and
-`stop()` returns `false`.
+`.sna/sna-api.port`, and `.sna/sna-api.token`. If a healthy SNA daemon is
+already serving the requested port, the returned handle is marked
+`adopted: true` and `stop()` returns `false`.
+
+The daemon admin shell is available at `sna.adminUrl`. Call
+`sna.openAdmin()` to open the local browser with the daemon token preloaded;
+the browser page stores it locally, removes it from the address bar, and then
+uses same-origin authenticated API calls.
+
+For daemon-owned storage that should only be readable through SNA, enable the
+optional encrypted SQLite driver:
+
+```ts
+const sna = await startSnaDaemon({
+  dbPath: "./data/sna.db",
+  database: {
+    encryption: "sqlite-cipher",
+    keyProvider: { type: "keytar" },
+  },
+});
+```
+
+Encrypted mode requires the consumer app to install
+`better-sqlite3-multiple-ciphers`. The default key provider is `keytar`, which
+also requires the `keytar` package and stores a generated key in the OS
+credential store; `env`, `raw`, and `custom` providers are also available for
+controlled deployments and tests.
 
 ### Mount the routes manually
 

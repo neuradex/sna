@@ -36,6 +36,52 @@ const sna = await startSnaServer({
 
 For Electron, swap to `@sna-sdk/core/electron` and add `asarUnpack: ["node_modules/@sna-sdk/core/**"]` to electron-builder. The Electron launcher additionally locates the consumer app's electron-rebuilt `better-sqlite3` and threads the binding path through. Store user-selected runtime CLI paths in your app settings and pass them through `runtimePaths`.
 
+### Background daemon and local admin
+
+Use `startSnaDaemon()` when SNA should keep running after the launcher process
+returns:
+
+```ts
+import { startSnaDaemon } from "@sna-sdk/core/node";
+
+const sna = await startSnaDaemon({
+  port: 3099,
+  dbPath: "./data/sna.db",
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+  },
+});
+
+await sna.openAdmin();
+```
+
+Daemon launchers bind to `127.0.0.1`, generate or reuse an auth token, write
+`.sna/sna-api.token` with private file permissions, and return
+`sna.connection` for SDK clients. `sna.adminUrl` is the plain local admin URL;
+`sna.openAdmin()` opens the browser with the token preloaded once in a URL
+fragment, then the admin page stores it in localStorage and removes it from the
+address bar.
+
+For local daemon data that should not be readable directly from the SQLite file,
+enable encrypted storage:
+
+```ts
+const sna = await startSnaDaemon({
+  port: 3099,
+  dbPath: "./data/sna.db",
+  database: {
+    encryption: "sqlite-cipher",
+    keyProvider: { type: "keytar" },
+  },
+});
+```
+
+Encrypted mode is optional and requires the consumer app to install
+`better-sqlite3-multiple-ciphers`; the keychain-backed provider also requires
+`keytar`. With `keytar`, SNA creates or reads the DB key from the OS credential
+store without requiring admin privileges. Use the `env`, `raw`, or `custom` key
+providers when the host app wants to own key delivery itself.
+
 ### Connecting from any framework
 
 ```ts

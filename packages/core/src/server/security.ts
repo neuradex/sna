@@ -79,7 +79,7 @@ export function rejectUpgrade(socket: { write(data: string): void; destroy(): vo
 }
 
 function isPublicHttpRoute(method: string, pathname: string): boolean {
-  return method === "GET" && pathname === "/health";
+  return method === "GET" && (pathname === "/health" || pathname === "/admin");
 }
 
 function applyCorsHeaders(c: any, origin: string | undefined, allowedOrigins: string[]): void {

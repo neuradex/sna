@@ -30,6 +30,7 @@ import { completion, type CompletionOptions } from "../../core/completion.js";
 import type { ContentBlock } from "../../core/providers/types.js";
 import { resolveImagePath } from "../image-store.js";
 import { runOnce, type RunOnceOptions } from "../run-once.js";
+import { renderAdminPage } from "../admin-ui.js";
 import { createHttpSecurityMiddleware, type SnaSecurityOptions } from "../security.js";
 
 // Resolve our own version from package.json so the OpenAPI document
@@ -1163,6 +1164,8 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
   app.doc("/openapi.json", openApiInfo);
 
   app.get("/docs", swaggerUI({ url: "/openapi.json" }));
+
+  app.get("/admin", (c) => c.html(renderAdminPage()));
 
   // Plain JSON spec viewer — non-interactive, just formatted JSON
   app.get("/spec", async (c) => {

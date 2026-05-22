@@ -17,44 +17,73 @@ const NATIVE_DIR = path.join(process.cwd(), ".sna/native");
 let _db: Database.Database | null = null;
 
 /**
- * Load better-sqlite3 (peer dependency — installed by consumer).
+ * Load the configured SQLite driver (peer dependency — installed by consumer).
  *
  * Resolution order:
  *   1. SNA_MODULES_PATH env — consumer's node_modules (set by Electron launcher for link: dev)
  *   2. .sna/native/ — legacy isolated copy left by older builds
  *   3. Standard resolution — peer dep in consumer's node_modules (published install)
  */
-function loadBetterSqlite3(): typeof Database {
+function loadSqliteDriver(): typeof Database {
+  const packageName = process.env.SNA_DB_ENCRYPTION === "sqlite-cipher"
+    ? "better-sqlite3-multiple-ciphers"
+    : "better-sqlite3";
   const modulesPath = process.env.SNA_MODULES_PATH;
   if (modulesPath) {
-    const entry = path.join(modulesPath, "better-sqlite3");
+    const entry = path.join(modulesPath, packageName);
     if (fs.existsSync(entry)) {
       const req = createRequire(path.join(modulesPath, "noop.js"));
-      return req("better-sqlite3");
+      return req(packageName);
     }
   }
 
-  const nativeEntry = path.join(NATIVE_DIR, "node_modules", "better-sqlite3");
+  const nativeEntry = path.join(NATIVE_DIR, "node_modules", packageName);
   if (fs.existsSync(nativeEntry)) {
     const req = createRequire(path.join(NATIVE_DIR, "noop.js"));
-    return req("better-sqlite3");
+    return req(packageName);
   }
   const req = createRequire(import.meta.url);
-  return req("better-sqlite3");
+  try {
+    return req(packageName);
+  } catch (err) {
+    if (packageName === "better-sqlite3-multiple-ciphers") {
+      throw new Error(
+        "Encrypted SQLite requires better-sqlite3-multiple-ciphers. " +
+        "Install it or disable SNA_DB_ENCRYPTION.",
+      );
+    }
+    throw err;
+  }
 }
 
 export function getDb(): Database.Database {
   if (!_db) {
-    const BetterSqlite3 = loadBetterSqlite3();
+    const BetterSqlite3 = loadSqliteDriver();
     const dir = path.dirname(getDbPath());
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const nativeBinding = process.env.SNA_SQLITE_NATIVE_BINDING || undefined;
     _db = nativeBinding ? new BetterSqlite3(getDbPath(), { nativeBinding }) : new BetterSqlite3(getDbPath());
+    applyDatabaseEncryption(_db);
     _db.pragma("foreign_keys = ON");
     _db.pragma("journal_mode = WAL");
     initSchema(_db);
   }
   return _db;
+}
+
+function applyDatabaseEncryption(db: Database.Database): void {
+  if (process.env.SNA_DB_ENCRYPTION !== "sqlite-cipher") return;
+
+  const key = process.env.SNA_DB_KEY?.trim();
+  if (!key) throw new Error("SNA_DB_KEY is required when SNA_DB_ENCRYPTION=sqlite-cipher");
+
+  const cipher = process.env.SNA_DB_CIPHER?.trim() || "sqlcipher";
+  db.pragma(`cipher='${escapePragmaString(cipher)}'`);
+  db.pragma(`key='${escapePragmaString(key)}'`);
+}
+
+function escapePragmaString(value: string): string {
+  return value.replace(/'/g, "''");
 }
 
 /** Reset the DB singleton cache. Used by tests for isolation. */

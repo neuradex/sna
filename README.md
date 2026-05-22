@@ -117,12 +117,26 @@ const sna = await startSnaDaemon({
 });
 
 console.log(`SNA daemon pid=${sna.pid}, log=${sna.logPath}`);
+console.log(`SNA daemon admin=${sna.adminUrl}`);
+await sna.openAdmin();
 ```
 
 `startSnaDaemon()` stores `.sna/sna-daemon.pid`, `.sna/sna-daemon.log`,
-and `.sna/sna-api.port`. If another healthy SNA daemon is already serving
-the requested port, the launcher adopts it and `stop()` returns `false`
-instead of killing a process it does not own.
+`.sna/sna-api.port`, and `.sna/sna-api.token`. If another healthy SNA daemon
+is already serving the requested port, the launcher adopts it and `stop()`
+returns `false` instead of killing a process it does not own.
+
+The daemon also serves a local admin shell at `/admin`. `sna.adminUrl` is the
+plain URL, while `sna.openAdmin()` opens the default browser with a one-time
+token URL fragment; the page stores that token in browser localStorage and
+removes it from the address bar before calling protected same-origin APIs.
+
+Optional encrypted daemon storage is available with
+`database: { encryption: "sqlite-cipher", keyProvider: { type: "keytar" } }`.
+The consumer app installs `better-sqlite3-multiple-ciphers` and, for the
+default keychain-backed provider, `keytar`; `keytar` stores a generated DB key
+in the OS credential store, while `env`, `raw`, and `custom` providers cover
+other deployment models.
 
 > The running server publishes its own live OpenAPI 3.1 spec — open `http://localhost:3099/docs` for Swagger UI, `http://localhost:3099/openapi.json` for the raw JSON, or `http://localhost:3099/spec` for a plain-text view.
 

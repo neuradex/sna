@@ -4,6 +4,8 @@ import { fileURLToPath } from "url";
 import fs from "fs";
 import http from "http";
 import path from "path";
+import { resolveDatabaseKey, type EncryptedDatabaseOptions } from "./db/encryption.js";
+import { generateSnaAuthToken } from "./server/security.js";
 
 type RuntimePaths = {
   claudeCode?: string;
@@ -29,9 +31,37 @@ export interface SnaDaemonStatus {
   error?: string;
 }
 
+export interface SnaDaemonAdminUrlOptions {
+  /** Include the bearer token once so the admin page can store it locally. Default: true. */
+  withToken?: boolean;
+}
+
+export interface OpenSnaDaemonAdminOptions extends SnaDaemonAdminUrlOptions {
+  /**
+   * Custom opener for Electron or tests. Defaults to the OS browser opener.
+   * Electron apps can pass `shell.openExternal`.
+   */
+  opener?: (url: string) => void | Promise<void>;
+}
+
 export interface SnaDaemonOptions {
   /** Port for the SNA API server. Default: 3099 */
   port?: number;
+
+  /** Hostname to bind. Default: 127.0.0.1 */
+  host?: string;
+
+  /** Application owner ID for this daemon. Default: sna-sdk */
+  appId?: string;
+
+  /**
+   * Bearer token required for protected HTTP and WebSocket routes.
+   * When omitted, the daemon launcher reads tokenPath or generates one.
+   */
+  authToken?: string;
+
+  /** Browser origins allowed to call SNA. Native clients without Origin are allowed. */
+  allowedOrigins?: string[];
 
   /** Absolute path to the SQLite database file. Required. */
   dbPath: string;
@@ -47,6 +77,9 @@ export interface SnaDaemonOptions {
 
   /** Explicit log file path. Default: path.join(daemonDir, "sna-daemon.log") */
   logPath?: string;
+
+  /** Explicit auth token file path. Default: path.join(daemonDir, "sna-api.token") */
+  tokenPath?: string;
 
   /** Test/debug escape hatch for launching a custom standalone-compatible script. */
   serverScript?: string;
@@ -65,6 +98,9 @@ export interface SnaDaemonOptions {
 
   /** Base data directory for images and generated artifacts. */
   dataDir?: string;
+
+  /** Optional encrypted SQLite configuration for daemon-owned storage. */
+  database?: EncryptedDatabaseOptions;
 
   /** Explicit path to the better-sqlite3 native .node binding. */
   nativeBinding?: string;
@@ -94,9 +130,17 @@ export interface SnaDaemonOptions {
 export interface SnaDaemonHandle {
   pid?: number;
   port: number;
+  host: string;
+  appId: string;
   adopted: boolean;
+  baseUrl: string;
+  authToken: string;
+  connection: { baseUrl: string; authToken: string };
   pidPath: string;
   logPath: string;
+  tokenPath: string;
+  adminUrl: string;
+  openAdmin(options?: OpenSnaDaemonAdminOptions): Promise<string>;
   status(): Promise<SnaDaemonStatus>;
   stop(): Promise<boolean>;
 }
@@ -107,6 +151,7 @@ type DaemonPaths = {
   pidPath: string;
   logPath: string;
   portPath: string;
+  tokenPath: string;
 };
 
 const require = createRequire(import.meta.url);
@@ -121,6 +166,9 @@ const runtimePathEnvKeys: Record<keyof RuntimePaths, string> = {
 
 export class SnaDaemonManager {
   private readonly port: number;
+  private readonly host: string;
+  private readonly appId: string;
+  private readonly authToken: string;
   private readonly readyTimeout: number;
   private readonly healthTimeout: number;
   private readonly stopTimeout: number;
@@ -130,6 +178,8 @@ export class SnaDaemonManager {
 
   constructor(private readonly options: SnaDaemonOptions) {
     this.port = options.port ?? 3099;
+    this.host = options.host ?? "127.0.0.1";
+    this.appId = options.appId ?? "sna-sdk";
     this.readyTimeout = options.readyTimeout ?? 15_000;
     this.healthTimeout = options.healthTimeout ?? 1_000;
     this.stopTimeout = options.stopTimeout ?? 5_000;
@@ -142,15 +192,24 @@ export class SnaDaemonManager {
       pidPath: options.pidPath ?? path.join(daemonDir, "sna-daemon.pid"),
       logPath: options.logPath ?? path.join(daemonDir, "sna-daemon.log"),
       portPath: path.join(daemonDir, "sna-api.port"),
+      tokenPath: options.tokenPath ?? path.join(daemonDir, "sna-api.token"),
     };
+    this.authToken = resolveDaemonAuthToken(options, this.paths.tokenPath);
   }
 
   async start(): Promise<SnaDaemonHandle> {
     fs.mkdirSync(this.paths.cwd, { recursive: true });
-    fs.mkdirSync(this.paths.daemonDir, { recursive: true });
+    fs.mkdirSync(this.paths.daemonDir, { recursive: true, mode: 0o700 });
+    ensurePrivateDir(this.paths.daemonDir);
 
     const existing = await this.inspectExisting();
     if (isSnaHealth(existing.health)) {
+      const authenticated = await this.tryAuthenticatedProbe();
+      if (!authenticated) {
+        throw new Error(
+          `SNA daemon is already running on ${this.host}:${this.port}, but the configured auth token was rejected`,
+        );
+      }
       if (this.options.adoptExisting === false) {
         throw new Error(`SNA daemon is already running on port ${this.port}`);
       }
@@ -169,7 +228,14 @@ export class SnaDaemonManager {
 
     removeIfExists(this.paths.pidPath);
     const serverScript = this.options.serverScript ?? resolveStandaloneScript();
-    const env = buildDaemonEnv(this.options, this.port);
+    const dbKey = await resolveDatabaseKey(this.options.database, this.options.dbPath);
+    const env = buildDaemonEnv(this.options, {
+      appId: this.appId,
+      authToken: this.authToken,
+      dbKey,
+      host: this.host,
+      port: this.port,
+    });
     const logFd = fs.openSync(this.paths.logPath, "a");
 
     let childPid: number | undefined;
@@ -189,8 +255,9 @@ export class SnaDaemonManager {
         throw new Error("SNA daemon process did not expose a pid");
       }
 
-      fs.writeFileSync(this.paths.pidPath, String(childPid));
-      fs.writeFileSync(this.paths.portPath, String(this.port));
+      writePrivateFile(this.paths.pidPath, String(childPid));
+      writePrivateFile(this.paths.portPath, String(this.port));
+      writePrivateFile(this.paths.tokenPath, this.authToken);
 
       let exitError: Error | undefined;
       child.once("exit", (code, signal) => {
@@ -262,7 +329,7 @@ export class SnaDaemonManager {
   private async inspectExisting(): Promise<{ pid?: number; health?: SnaDaemonHealth; error?: string }> {
     const pid = this.pid ?? readPid(this.paths.pidPath);
     try {
-      const health = await readHealth(this.port, this.healthTimeout);
+      const health = await readHealth(this.host, this.port, this.healthTimeout);
       return { pid, health };
     } catch (err) {
       return { pid, error: err instanceof Error ? err.message : String(err) };
@@ -271,19 +338,43 @@ export class SnaDaemonManager {
 
   private async tryHealth(): Promise<SnaDaemonHealth | undefined> {
     try {
-      return await readHealth(this.port, this.healthTimeout);
+      return await readHealth(this.host, this.port, this.healthTimeout);
     } catch {
       return undefined;
     }
   }
 
+  private async tryAuthenticatedProbe(): Promise<boolean> {
+    try {
+      const probe = await readJson({
+        host: this.host,
+        port: this.port,
+        path: "/agent/sessions",
+        timeoutMs: this.healthTimeout,
+        authToken: this.authToken,
+      });
+      return probe.statusCode >= 200 && probe.statusCode < 300;
+    } catch {
+      return false;
+    }
+  }
+
   private createHandle(): SnaDaemonHandle {
+    const baseUrl = `http://${this.host}:${this.port}`;
     return {
       pid: this.pid,
       port: this.port,
+      host: this.host,
+      appId: this.appId,
       adopted: this.adopted,
+      baseUrl,
+      authToken: this.authToken,
+      connection: { baseUrl, authToken: this.authToken },
       pidPath: this.paths.pidPath,
       logPath: this.paths.logPath,
+      tokenPath: this.paths.tokenPath,
+      adminUrl: `${baseUrl}/admin`,
+      openAdmin: (options) => openSnaDaemonAdmin({ adminUrl: `${baseUrl}/admin`, authToken: this.authToken }, options),
       status: () => this.status(),
       stop: () => this.stop(),
     };
@@ -292,6 +383,31 @@ export class SnaDaemonManager {
 
 export async function startSnaDaemon(options: SnaDaemonOptions): Promise<SnaDaemonHandle> {
   return new SnaDaemonManager(options).start();
+}
+
+export function createSnaDaemonAdminUrl(
+  daemon: Pick<SnaDaemonHandle, "adminUrl" | "authToken">,
+  options: SnaDaemonAdminUrlOptions = {},
+): string {
+  if (options.withToken === false) return daemon.adminUrl;
+  const url = new URL(daemon.adminUrl);
+  const hashParams = new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : url.hash);
+  hashParams.set("token", daemon.authToken);
+  url.hash = hashParams.toString();
+  return url.toString();
+}
+
+export async function openSnaDaemonAdmin(
+  daemon: Pick<SnaDaemonHandle, "adminUrl" | "authToken">,
+  options: OpenSnaDaemonAdminOptions = {},
+): Promise<string> {
+  const url = createSnaDaemonAdminUrl(daemon, options);
+  if (options.opener) {
+    await options.opener(url);
+    return url;
+  }
+  await openUrlInDefaultBrowser(url);
+  return url;
 }
 
 function resolveStandaloneScript(): string {
@@ -319,7 +435,10 @@ function remapAsarPath(candidate: string): string {
   return candidate;
 }
 
-function buildDaemonEnv(options: SnaDaemonOptions, port: number): Record<string, string> {
+function buildDaemonEnv(
+  options: SnaDaemonOptions,
+  identity: { appId: string; authToken: string; dbKey?: string; host: string; port: number },
+): Record<string, string> {
   let consumerModules: string | undefined;
   try {
     const bsPkg = require.resolve("better-sqlite3/package.json", { paths: [process.cwd()] });
@@ -331,8 +450,8 @@ function buildDaemonEnv(options: SnaDaemonOptions, port: number): Record<string,
   const nodePath = buildNodePath();
   return {
     ...(process.env as Record<string, string>),
-    SNA_PORT: String(port),
-    SNA_DB_PATH: options.dbPath,
+    ...runtimePathsToEnv(options.runtimePaths),
+    ...(options.env ?? {}),
     ...(options.maxSessions != null ? { SNA_MAX_SESSIONS: String(options.maxSessions) } : {}),
     ...(options.permissionMode ? { SNA_PERMISSION_MODE: options.permissionMode } : {}),
     ...(options.model ? { SNA_MODEL: options.model } : {}),
@@ -341,8 +460,15 @@ function buildDaemonEnv(options: SnaDaemonOptions, port: number): Record<string,
     ...(options.nativeBinding ? { SNA_SQLITE_NATIVE_BINDING: options.nativeBinding } : {}),
     ...(consumerModules ? { SNA_MODULES_PATH: consumerModules } : {}),
     ...(nodePath ? { NODE_PATH: nodePath } : {}),
-    ...runtimePathsToEnv(options.runtimePaths),
-    ...(options.env ?? {}),
+    SNA_PORT: String(identity.port),
+    SNA_HOST: identity.host,
+    SNA_APP_ID: identity.appId,
+    SNA_AUTH_TOKEN: identity.authToken,
+    SNA_ALLOWED_ORIGINS: (options.allowedOrigins ?? []).join(","),
+    SNA_DB_PATH: options.dbPath,
+    ...(options.database?.encryption === "sqlite-cipher" ? { SNA_DB_ENCRYPTION: "sqlite-cipher" } : {}),
+    ...(options.database?.cipher ? { SNA_DB_CIPHER: options.database.cipher } : {}),
+    ...(identity.dbKey ? { SNA_DB_KEY: identity.dbKey } : {}),
     SNA_SUPERVISED: "daemon",
   };
 }
@@ -368,14 +494,30 @@ function buildNodePath(): string | undefined {
   return existing ? `${unpacked}${path.delimiter}${existing}` : unpacked;
 }
 
-function readHealth(port: number, timeoutMs: number): Promise<SnaDaemonHealth> {
+function readHealth(host: string, port: number, timeoutMs: number): Promise<SnaDaemonHealth> {
+  return readJson({ host, port, path: "/health", timeoutMs }).then((res) => {
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw new Error(`/health returned HTTP ${res.statusCode}`);
+    }
+    return res.body as SnaDaemonHealth;
+  });
+}
+
+function readJson(options: {
+  host: string;
+  port: number;
+  path: string;
+  timeoutMs: number;
+  authToken?: string;
+}): Promise<{ statusCode: number; body: unknown }> {
   return new Promise((resolve, reject) => {
     const req = http.get(
       {
-        hostname: "127.0.0.1",
-        port,
-        path: "/health",
-        timeout: timeoutMs,
+        hostname: options.host,
+        port: options.port,
+        path: options.path,
+        timeout: options.timeoutMs,
+        headers: options.authToken ? { Authorization: `Bearer ${options.authToken}` } : undefined,
       },
       (res) => {
         let body = "";
@@ -384,12 +526,8 @@ function readHealth(port: number, timeoutMs: number): Promise<SnaDaemonHealth> {
           body += chunk;
         });
         res.on("end", () => {
-          if ((res.statusCode ?? 0) < 200 || (res.statusCode ?? 0) >= 300) {
-            reject(new Error(`/health returned HTTP ${res.statusCode ?? "unknown"}`));
-            return;
-          }
           try {
-            resolve(JSON.parse(body) as SnaDaemonHealth);
+            resolve({ statusCode: res.statusCode ?? 0, body: JSON.parse(body) });
           } catch (err) {
             reject(err);
           }
@@ -398,10 +536,23 @@ function readHealth(port: number, timeoutMs: number): Promise<SnaDaemonHealth> {
     );
 
     req.on("timeout", () => {
-      req.destroy(new Error("/health request timed out"));
+      req.destroy(new Error(`${options.path} request timed out`));
     });
     req.on("error", reject);
   });
+}
+
+function resolveDaemonAuthToken(options: SnaDaemonOptions, tokenPath: string): string {
+  const explicit = options.authToken?.trim();
+  if (explicit) return explicit;
+
+  const persisted = readPrivateFile(tokenPath)?.trim();
+  if (persisted) return persisted;
+
+  const envToken = process.env.SNA_AUTH_TOKEN?.trim();
+  if (envToken) return envToken;
+
+  return generateSnaAuthToken();
 }
 
 async function waitUntil(predicate: () => Promise<boolean> | boolean, timeoutMs: number): Promise<void> {
@@ -449,10 +600,52 @@ function signalDaemon(pid: number, signal: NodeJS.Signals): void {
   }
 }
 
+function openUrlInDefaultBrowser(url: string): Promise<void> {
+  const command =
+    process.platform === "darwin" ? "open" :
+    process.platform === "win32" ? "cmd" :
+    "xdg-open";
+  const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { detached: true, stdio: "ignore" });
+    child.once("error", reject);
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
+
 function removeIfExists(filePath: string): void {
   try {
     fs.rmSync(filePath, { force: true });
   } catch {
     // non-fatal cleanup
+  }
+}
+
+function ensurePrivateDir(dir: string): void {
+  try {
+    fs.chmodSync(dir, 0o700);
+  } catch {
+    // Best effort; Windows and some filesystems may not support POSIX modes.
+  }
+}
+
+function writePrivateFile(filePath: string, content: string): void {
+  fs.writeFileSync(filePath, content, { mode: 0o600 });
+  try {
+    fs.chmodSync(filePath, 0o600);
+  } catch {
+    // Best effort; Windows and some filesystems may not support POSIX modes.
+  }
+}
+
+function readPrivateFile(filePath: string): string | undefined {
+  try {
+    return fs.readFileSync(filePath, "utf8");
+  } catch {
+    return undefined;
   }
 }

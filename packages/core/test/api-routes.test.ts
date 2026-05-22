@@ -142,6 +142,16 @@ describe("HTTP API Routes", () => {
       assert.equal(json.name, "sna");
     });
 
+    it("GET /admin returns the local admin shell without authentication", async () => {
+      const res = await req("GET", "/admin", undefined, { auth: false });
+      const html = await res.text();
+      assert.equal(res.status, 200);
+      assert.match(html, /<title>SNA Admin<\/title>/);
+      assert.match(html, /hashParams\.get\("token"\)/);
+      assert.match(html, /history\.replaceState/);
+      assert.doesNotMatch(html, new RegExp(TEST_TOKEN));
+    });
+
     it("rejects protected HTTP routes without a bearer token", async () => {
       const res = await req("GET", "/agent/sessions", undefined, { auth: false });
       assert.equal(res.status, 401);

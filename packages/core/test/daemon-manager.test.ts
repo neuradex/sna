@@ -4,7 +4,7 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { startSnaDaemon } from "../src/electron/index.js";
+import { createSnaDaemonAdminUrl, startSnaDaemon } from "../src/electron/index.js";
 
 const tempDirs: string[] = [];
 const handles: Array<{ stop(): Promise<boolean> }> = [];
@@ -29,7 +29,19 @@ const server = http.createServer((req, res) => {
       ok: true,
       name: "sna",
       supervised: process.env.SNA_SUPERVISED ?? null,
+      dbEncryption: process.env.SNA_DB_ENCRYPTION ?? null,
+      dbKeyPresent: process.env.SNA_DB_KEY ? true : false,
     }));
+    return;
+  }
+  if (req.url === "/agent/sessions") {
+    if (req.headers.authorization !== "Bearer " + process.env.SNA_AUTH_TOKEN) {
+      res.writeHead(401, { "content-type": "application/json" });
+      res.end(JSON.stringify({ status: "error", message: "Unauthorized" }));
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ sessions: [] }));
     return;
   }
   res.writeHead(404);
@@ -117,11 +129,34 @@ describe("SNA daemon launcher", () => {
     handles.push(handle);
 
     assert.equal(handle.port, port);
+    assert.equal(handle.host, "127.0.0.1");
+    assert.equal(handle.appId, "sna-sdk");
     assert.equal(handle.adopted, false);
+    assert.match(handle.authToken, /^sna_/);
+    assert.deepEqual(handle.connection, {
+      baseUrl: `http://127.0.0.1:${port}`,
+      authToken: handle.authToken,
+    });
+    assert.equal(handle.adminUrl, `http://127.0.0.1:${port}/admin`);
+    assert.equal(
+      createSnaDaemonAdminUrl(handle),
+      `http://127.0.0.1:${port}/admin#token=${encodeURIComponent(handle.authToken)}`,
+    );
+    assert.equal(createSnaDaemonAdminUrl(handle, { withToken: false }), handle.adminUrl);
+    let openedUrl = "";
+    assert.equal(
+      await handle.openAdmin({ opener: (url) => { openedUrl = url; } }),
+      createSnaDaemonAdminUrl(handle),
+    );
+    assert.equal(openedUrl, createSnaDaemonAdminUrl(handle));
     assert.ok(handle.pid && handle.pid > 0);
     assert.equal(fs.existsSync(handle.pidPath), true);
     assert.equal(fs.readFileSync(handle.pidPath, "utf8").trim(), String(handle.pid));
     assert.equal(fs.existsSync(handle.logPath), true);
+    assert.equal(fs.readFileSync(handle.tokenPath, "utf8"), handle.authToken);
+    if (process.platform !== "win32") {
+      assert.equal(fs.statSync(handle.tokenPath).mode & 0o777, 0o600);
+    }
 
     const status = await handle.status();
     assert.equal(status.state, "running");
@@ -164,6 +199,7 @@ describe("SNA daemon launcher", () => {
     handles.push(adopted);
 
     assert.equal(adopted.adopted, true);
+    assert.equal(adopted.authToken, owner.authToken);
     assert.equal(adopted.pid, owner.pid);
     assert.equal((await adopted.status()).state, "running");
 
@@ -173,6 +209,57 @@ describe("SNA daemon launcher", () => {
 
     assert.equal(await owner.stop(), true);
     handles.pop();
+  });
+
+  it("does not adopt an SNA daemon when the configured token is rejected", async () => {
+    const dir = makeTempDir("sna-daemon-token-");
+    const serverScript = writeFakeServerScript(dir);
+    const port = await getFreePort();
+    const daemonDir = path.join(dir, ".sna");
+
+    const owner = await startSnaDaemon({
+      port,
+      dbPath: path.join(dir, "sna.db"),
+      daemonDir,
+      serverScript,
+      readyTimeout: 5_000,
+    });
+    handles.push(owner);
+
+    await assert.rejects(
+      startSnaDaemon({
+        port,
+        dbPath: path.join(dir, "sna.db"),
+        daemonDir,
+        authToken: "wrong-token",
+        serverScript,
+        readyTimeout: 500,
+      }),
+      /configured auth token was rejected/,
+    );
+  });
+
+  it("passes encrypted database settings to the daemon process", async () => {
+    const dir = makeTempDir("sna-daemon-encrypted-");
+    const serverScript = writeFakeServerScript(dir);
+    const port = await getFreePort();
+
+    const handle = await startSnaDaemon({
+      port,
+      dbPath: path.join(dir, "sna.db"),
+      daemonDir: path.join(dir, ".sna"),
+      serverScript,
+      readyTimeout: 5_000,
+      database: {
+        encryption: "sqlite-cipher",
+        keyProvider: { type: "raw", key: "test-secret" },
+      },
+    });
+    handles.push(handle);
+
+    const status = await handle.status();
+    assert.equal(status.health?.dbEncryption, "sqlite-cipher");
+    assert.equal(status.health?.dbKeyPresent, true);
   });
 
   it("does not adopt a non-SNA service that happens to expose /health", async () => {
