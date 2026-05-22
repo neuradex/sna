@@ -148,4 +148,24 @@ describe("admin UI browser behavior", () => {
     assert.equal(approve?.init.method, "POST");
     assert.equal(approve?.init.headers.Authorization, "Bearer owner-token");
   });
+
+  it("does not render approve or deny actions for already handled authorization requests", async () => {
+    const harness = createAdminHarness("http://127.0.0.1:3099/admin#token=owner-token", async (path) => {
+      if (path === "/health") return jsonResponse(200, { ok: true, name: "sna", version: "1" });
+      if (path === "/auth/pkce/requests") return jsonResponse(200, {
+        requests: [
+          { requestId: "req-approved", clientId: "client-a", displayName: "Client A", scopes: ["agent"], status: "approved" },
+        ],
+      });
+      if (path === "/agent/sessions") return jsonResponse(200, { sessions: [] });
+      throw new Error(`unexpected fetch ${path}`);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const html = harness.elements.get("auth-requests")!.innerHTML;
+    assert.match(html, /approved/);
+    assert.doesNotMatch(html, /data-auth-action/);
+    assert.doesNotMatch(html, />Approve</);
+    assert.doesNotMatch(html, />Deny</);
+  });
 });
