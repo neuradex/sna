@@ -1679,6 +1679,29 @@ describe("HTTP transport — new operations", () => {
     assert.equal(mock.httpRequests[0].url, "/agent/profiles");
   });
 
+  it("runtime.listCatalog — GET /agent/runtime-catalog", async () => {
+    mock.queueHttpResponse(200, {
+      runtimes: [
+        {
+          id: "codex",
+          label: "Codex",
+          available: true,
+          supportsRuntimePooling: true,
+          supportsCwdPerThread: true,
+          modelListing: true,
+        },
+      ],
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.listCatalog();
+
+    assert.equal(res.runtimes[0].id, "codex");
+    assert.equal(res.runtimes[0].supportsRuntimePooling, true);
+    assert.equal(mock.httpRequests[0].method, "GET");
+    assert.equal(mock.httpRequests[0].url, "/agent/runtime-catalog");
+  });
+
   it("runtime.updateProfile — PUT /agent/profiles/:level", async () => {
     mock.queueHttpResponse(200, {
       status: "updated",

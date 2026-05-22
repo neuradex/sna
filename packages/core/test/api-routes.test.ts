@@ -655,6 +655,22 @@ describe("HTTP API Routes", () => {
       assert.equal(json.profiles[4].config.reasoningLevel, 5);
     });
 
+    it("returns SNA-supported runtime catalog entries for registration UIs", async () => {
+      const res = await req("GET", "/agent/runtime-catalog");
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.deepEqual(
+        json.runtimes.map((runtime: any) => runtime.id),
+        ["claude-code", "codex", "opencode", "grok", "cursor"],
+      );
+      const codex = json.runtimes.find((runtime: any) => runtime.id === "codex");
+      assert.equal(codex.label, "Codex");
+      assert.equal(codex.supportsRuntimePooling, true);
+      assert.equal(codex.supportsCwdPerThread, true);
+      assert.equal(codex.modelListing, true);
+      assert.equal(typeof codex.available, "boolean");
+    });
+
     it("registers runtimes and updates profile slots", async () => {
       const runtimeRes = await req("PUT", "/agent/runtimes/codex-main", {
         provider: "codex",
