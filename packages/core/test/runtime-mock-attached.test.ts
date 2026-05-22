@@ -42,6 +42,15 @@ async function waitUntil(predicate: () => boolean, label: string, timeoutMs = 5_
   throw new Error(`Timed out waiting for ${label}`);
 }
 
+async function removeTempDir(dir: string): Promise<void> {
+  await fs.promises.rm(dir, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  });
+}
+
 function systemText(system: unknown): string {
   if (typeof system === "string") return system;
   if (Array.isArray(system)) {
@@ -127,7 +136,7 @@ describe("real runtime CLIs with mock-attached LLM APIs", () => {
       assert.equal(request.userText, "mock attached claude");
       assert.equal(systemText(request.requestBody?.system).includes("SNA mock-attached Claude system prompt"), true);
     } finally {
-      fs.rmSync(cwd, { recursive: true, force: true });
+      await removeTempDir(cwd);
     }
   });
 
@@ -173,7 +182,7 @@ describe("real runtime CLIs with mock-attached LLM APIs", () => {
       assert.equal(request.requestBody?.service_tier, "priority");
       assert.ok(Array.isArray(deltas), "Codex delta capture should be wired even when this CLI emits final-only JSONL");
     } finally {
-      fs.rmSync(codexHomeRoot, { recursive: true, force: true });
+      await removeTempDir(codexHomeRoot);
     }
   });
 
@@ -283,7 +292,7 @@ describe("real runtime CLIs with mock-attached LLM APIs", () => {
     } finally {
       grokProcess?.kill();
       grokProcess = null;
-      fs.rmSync(cwd, { recursive: true, force: true });
+      await removeTempDir(cwd);
     }
   });
 });
