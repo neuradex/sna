@@ -179,7 +179,7 @@ describe("SNA daemon launcher", () => {
     assert.equal(handle.adminUrl, `http://127.0.0.1:${port}/admin`);
     assert.equal(
       createSnaDaemonAdminUrl(handle),
-      `http://127.0.0.1:${port}/admin#token=${encodeURIComponent(handle.authToken)}`,
+      `http://127.0.0.1:${port}/admin`,
     );
     assert.equal(createSnaDaemonAdminUrl(handle, { withToken: false }), handle.adminUrl);
     let openedUrl = "";

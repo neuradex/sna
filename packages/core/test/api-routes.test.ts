@@ -119,7 +119,7 @@ describe("HTTP API Routes", () => {
     method: string,
     path: string,
     body?: any,
-    options: { auth?: boolean; token?: string; origin?: string } = {},
+    options: { auth?: boolean; token?: string; origin?: string; cookie?: string } = {},
   ) {
     const opts: any = { method };
     const headers: Record<string, string> = {};
@@ -132,6 +132,9 @@ describe("HTTP API Routes", () => {
     }
     if (options.origin) {
       headers.Origin = options.origin;
+    }
+    if (options.cookie) {
+      headers.Cookie = options.cookie;
     }
     if (Object.keys(headers).length > 0) {
       opts.headers = headers;
@@ -151,6 +154,10 @@ describe("HTTP API Routes", () => {
       const res = await req("GET", "/admin", undefined, { auth: false });
       const html = await res.text();
       assert.equal(res.status, 200);
+      const cookie = res.headers.get("set-cookie");
+      assert.match(cookie ?? "", /sna_admin=/);
+      assert.match(cookie ?? "", /HttpOnly/);
+      assert.match(cookie ?? "", /SameSite=Strict/);
       assert.match(html, /<title>SNA Admin<\/title>/);
       assert.match(html, /<div id="root"><\/div>/);
       assert.match(html, /src="\/admin\/assets\/[^"]+\.js"/);
@@ -212,6 +219,32 @@ describe("HTTP API Routes", () => {
       assert.equal(res.status, 200);
       assert.equal(res.headers.get("access-control-allow-origin"), origin);
       assert.deepEqual(await res.json(), { requests: [] });
+    });
+
+    it("allows same-origin admin cookie requests without exposing the owner bearer token", async () => {
+      const origin = "http://127.0.0.1:43123";
+      const admin = await app.request(`${origin}/admin`, { method: "GET" });
+      const cookie = admin.headers.get("set-cookie")?.split(";")[0];
+      assert.match(cookie ?? "", /^sna_admin=/);
+
+      const sameOrigin = await app.request(`${origin}/auth/pkce/requests`, {
+        method: "GET",
+        headers: {
+          Cookie: cookie!,
+          Origin: origin,
+        },
+      });
+      assert.equal(sameOrigin.status, 200);
+      assert.deepEqual(await sameOrigin.json(), { requests: [] });
+
+      const crossOrigin = await app.request(`${origin}/auth/pkce/requests`, {
+        method: "GET",
+        headers: {
+          Cookie: cookie!,
+          Origin: ALLOWED_ORIGIN,
+        },
+      });
+      assert.equal(crossOrigin.status, 401);
     });
   });
 
