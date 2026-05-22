@@ -1,6 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Activity, AlertTriangle, CheckCircle2, Database, Loader2, Plus, RefreshCw, Save, ServerCog, Trash2 } from "lucide-react";
+import { Button } from "../components/button";
+import { Checkbox } from "../components/checkbox";
 import { Dialog, DialogContent } from "../components/dialog";
+import { Input } from "../components/input";
 import { RuntimeIcon, detectedPath } from "../components/runtime-icon";
 import { EmptyState, ErrorText, Panel, StatusBadge } from "../components/ui";
 import {
@@ -51,14 +54,14 @@ export function RuntimePage() {
               <HeroMetric label="Registered" value={registeredRuntimes.length} />
               <HeroMetric label="Active" value={activeSessions} />
             </div>
-            <button
+            <Button
               type="button"
               className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 font-mono text-xs font-medium text-[var(--accent)] transition hover:border-[var(--accent)]"
               onClick={() => openAddRuntime()}
             >
               <Plus size={16} />
               Add Runtime
-            </button>
+            </Button>
           </div>
         </div>
       </section>
@@ -167,7 +170,7 @@ function RegisteredRuntimeCard({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <StatusBadge tone="neutral">{runtime.provider}</StatusBadge>
-          <button
+          <Button
             type="button"
             className="focus-ring inline-flex size-8 items-center justify-center rounded-lg border border-red-500/20 bg-[var(--bad-soft)] text-[var(--bad)] transition hover:border-red-500/40"
             title="Delete runtime"
@@ -176,7 +179,7 @@ function RegisteredRuntimeCard({
             onClick={onDelete}
           >
             {deleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
-          </button>
+          </Button>
         </div>
       </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -216,15 +219,15 @@ function DeleteRuntimeDialog({
             </div>
             {error ? <ErrorText error={error} /> : null}
             <div className="flex flex-wrap justify-end gap-2">
-              <button
+              <Button
                 type="button"
                 className="focus-ring inline-flex h-10 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--panel-subtle)] px-4 font-mono text-xs font-medium text-[var(--fg-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--fg)]"
                 disabled={busy}
                 onClick={() => onOpenChange(false)}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-500/30 bg-[var(--bad-soft)] px-4 font-mono text-xs font-medium text-[var(--bad)] transition hover:border-red-500/50"
                 disabled={busy}
@@ -232,7 +235,7 @@ function DeleteRuntimeDialog({
               >
                 {busy ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
                 Delete
-              </button>
+              </Button>
             </div>
           </div>
         ) : null}
@@ -256,7 +259,7 @@ function CatalogRuntimeOption({
   const path = detectedPath(runtime) || runtime.detection.message || "No CLI detected";
 
   return (
-    <button
+    <Button
       type="button"
       className={`focus-ring flex min-h-14 w-full min-w-0 items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition ${selected ? "border-[var(--accent-border)] bg-[var(--accent-soft)] shadow-[0_0_0_1px_var(--accent-border)]" : "border-[var(--border)] bg-[var(--panel-subtle)] hover:border-[var(--border-strong)] hover:bg-[var(--panel-solid)]"}`}
       aria-pressed={selected}
@@ -274,7 +277,7 @@ function CatalogRuntimeOption({
         <StatusBadge tone={detected ? "good" : "warn"}>{detected ? runtime.detection.source : "missing"}</StatusBadge>
         {registered ? <StatusBadge tone="neutral">registered</StatusBadge> : null}
       </div>
-    </button>
+    </Button>
   );
 }
 
@@ -352,7 +355,7 @@ function AddRuntimeDialog({
                 <div className="field-label">Runtime Catalog</div>
                 <p className="mt-1 text-xs text-[var(--fg-muted)]">Detected local CLIs and supported providers.</p>
               </div>
-              <button
+              <Button
                 type="button"
                 className="focus-ring inline-flex h-8 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel-subtle)] px-3 font-mono text-[10px] font-medium text-[var(--fg-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--fg-soft)]"
                 onClick={onRefreshCatalog}
@@ -360,7 +363,7 @@ function AddRuntimeDialog({
               >
                 {catalogLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                 Detect
-              </button>
+              </Button>
             </div>
             {catalogError ? <ErrorText error={catalogError} /> : null}
             {runtimeCatalog.length ? (
@@ -390,17 +393,17 @@ function AddRuntimeDialog({
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <label className="inline-flex items-center gap-2 font-mono text-xs text-[var(--fg-muted)]">
-              <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+              <Checkbox checked={enabled} onCheckedChange={(checked) => setEnabled(checked === true)} />
               enabled
             </label>
-            <button
+            <Button
               type="submit"
               disabled={busy || !id.trim() || !provider}
               className="focus-ring inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 font-mono text-xs font-medium text-[var(--accent)] transition hover:border-[var(--accent)]"
             >
               <Save size={15} />
               Register
-            </button>
+            </Button>
           </div>
           {error ? <ErrorText error={error} /> : null}
         </form>
@@ -455,8 +458,7 @@ function Field({
   return (
     <label className={`grid min-w-0 gap-1 ${className}`}>
       <span className="field-label">{label}</span>
-      <input
-        className="focus-ring h-10 w-full min-w-0 rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-3 text-sm text-[var(--fg)] placeholder:text-[var(--fg-faint)]"
+      <Input
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}

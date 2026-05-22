@@ -1,4 +1,5 @@
 import { Check, X } from "lucide-react";
+import { Button } from "../components/button";
 import { EmptyState, ErrorText, Panel, StatusBadge } from "../components/ui";
 import { canActOnAuthRequest, authRequestLabel, statusTone, type AuthRequest } from "../features/auth-requests";
 import { useAuthRequestAction, useAuthRequestsQuery } from "../queries";
@@ -71,7 +72,7 @@ function AuthRequestRow({
         <div className="flex justify-end gap-2">
           {canAct ? (
             <>
-              <button
+              <Button
                 className="focus-ring inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 font-mono text-xs font-medium text-[var(--accent)] transition hover:border-[var(--accent)]"
                 type="button"
                 disabled={busy}
@@ -79,8 +80,8 @@ function AuthRequestRow({
               >
                 <Check size={15} />
                 Approve
-              </button>
-              <button
+              </Button>
+              <Button
                 className="focus-ring inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel-subtle)] px-3 font-mono text-xs font-medium text-[var(--fg-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--fg-soft)]"
                 type="button"
                 disabled={busy}
@@ -88,7 +89,7 @@ function AuthRequestRow({
               >
                 <X size={15} />
                 Deny
-              </button>
+              </Button>
             </>
           ) : <span className="font-mono text-xs text-[var(--fg-faint)]">Handled</span>}
         </div>

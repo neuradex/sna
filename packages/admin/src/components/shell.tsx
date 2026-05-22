@@ -3,6 +3,7 @@ import { Bot, Gauge, LayoutDashboard, ListChecks, Moon, ShieldCheck, Sun } from 
 import { useHealthQuery } from "../queries";
 import { useTheme } from "../theme";
 import snaIcon from "../assets/sna-icon.svg";
+import { Button } from "./button";
 import { StatusBadge } from "./ui";
 
 const navItems = [
@@ -31,14 +32,14 @@ export function Shell() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
+          <Button
             type="button"
             className="focus-ring inline-flex h-8 items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--panel-subtle)] px-2 font-mono text-[10px] font-medium text-[var(--fg-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--fg-soft)]"
             onClick={toggleTheme}
           >
             {theme === "dark" ? <Moon size={14} /> : <Sun size={14} />}
             {theme}
-          </button>
+          </Button>
           <StatusBadge tone={connected ? "good" : health.isError ? "bad" : "neutral"}>
             {connected ? "Connected" : health.isError ? "Error" : "Checking"}
           </StatusBadge>

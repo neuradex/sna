@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Edit3, Layers, Loader2, Plus, Save, SlidersHorizontal } from "lucide-react";
+import { Button } from "../components/button";
 import { Dialog, DialogContent } from "../components/dialog";
+import { Input } from "../components/input";
 import { RuntimeIcon } from "../components/runtime-icon";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/select";
 import { EmptyState, ErrorText, Panel, StatusBadge } from "../components/ui";
@@ -59,14 +61,14 @@ export function ModelsPage() {
               <HeroMetric label="Assigned" value={assignedLevels} />
               <HeroMetric label="Runtimes" value={runtimeRows.length} />
             </div>
-            <button
+            <Button
               type="button"
               className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 font-mono text-xs font-medium text-[var(--accent)] transition hover:border-[var(--accent)]"
               onClick={() => openPresetDialog()}
             >
               <Plus size={16} />
               Add Model
-            </button>
+            </Button>
           </div>
         </div>
       </section>
@@ -165,14 +167,14 @@ function ModelPresetCard({
             <p className="mt-1 truncate font-mono text-[11px] text-[var(--fg-muted)]">{preset.id}</p>
           </div>
         </div>
-        <button
+        <Button
           type="button"
           className="focus-ring inline-flex h-8 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel-subtle)] px-3 font-mono text-[10px] font-medium text-[var(--fg-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--fg)]"
           onClick={onEdit}
         >
           <Edit3 size={14} />
           Edit
-        </button>
+        </Button>
       </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-3">
         <ModelFact label="Runtime" value={runtime?.label ?? preset.runtimeId} />
@@ -236,7 +238,7 @@ function LevelAssignmentRow({
         </div>
       </div>
       <div className="flex justify-end">
-        <button
+        <Button
           type="button"
           disabled={busy}
           className="focus-ring inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 font-mono text-xs font-medium text-[var(--accent)] transition hover:border-[var(--accent)]"
@@ -244,7 +246,7 @@ function LevelAssignmentRow({
         >
           <Save size={15} />
           Save
-        </button>
+        </Button>
       </div>
       {error ? <div className="lg:col-span-3"><ErrorText error={error} /></div> : null}
     </div>
@@ -412,14 +414,14 @@ function ModelPresetDialog({
               {models.isFetching ? <StatusBadge tone="neutral"><Loader2 size={12} className="mr-1 animate-spin" />models</StatusBadge> : null}
               {models.data?.source ? <StatusBadge tone="neutral">{models.data.source}</StatusBadge> : null}
             </div>
-            <button
+            <Button
               type="submit"
               disabled={busy || !id.trim() || !runtimeId}
               className="focus-ring inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-4 font-mono text-xs font-medium text-[var(--accent)] transition hover:border-[var(--accent)]"
             >
               <Save size={15} />
               Save Preset
-            </button>
+            </Button>
           </div>
           {models.isError ? <ErrorText error={models.error} /> : null}
           {models.data?.error ? <div className="font-mono text-[10px] font-medium text-[var(--warn)]">{models.data.error}</div> : null}
@@ -464,8 +466,7 @@ function Field({
   return (
     <label className="grid min-w-0 gap-1">
       <span className="field-label">{label}</span>
-      <input
-        className="focus-ring h-10 w-full min-w-0 rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-3 text-sm text-[var(--fg)] placeholder:text-[var(--fg-faint)] disabled:cursor-not-allowed disabled:opacity-60"
+      <Input
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
