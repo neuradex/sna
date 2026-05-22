@@ -63,7 +63,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -78,4 +79,23 @@ button:disabled {
 
 .focus-ring:focus-visible {
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
+.runtime-icon-frame {
+  align-items: center;
+  background: #fff;
+  color: #15151d;
+  display: inline-flex;
+  justify-content: center;
+  overflow: hidden;
+}
+
+:root[data-theme="dark"] .runtime-icon-frame {
+  background: #15151d;
+  color: #f8fafc;
+}
+
+.runtime-icon-glyph {
+  display: block;
+  object-fit: contain;
 }

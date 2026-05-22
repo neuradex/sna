@@ -7,6 +7,7 @@ import {
   runtimePathsToEnv,
   startSnaServerInProcess,
 } from "../src/electron/index.js";
+import { DEFAULT_CURSOR_COMMAND, resolveCursorPath } from "../src/core/providers/cursor.js";
 import { resetConfig } from "../src/config.js";
 import { resetDb } from "../src/db/schema.js";
 
@@ -47,6 +48,15 @@ afterEach(() => {
 });
 
 describe("runtime path registration", () => {
+  it("uses cursor-agent as the Cursor default command name", () => {
+    assert.equal(DEFAULT_CURSOR_COMMAND, "cursor-agent");
+    assert.equal(resolveCursorPath(process.cwd(), {
+      env: {},
+      candidates: [],
+      isExecutable: () => false,
+    }), "cursor-agent");
+  });
+
   it("maps launcher runtimePaths to provider command env vars", () => {
     assert.deepEqual(runtimePathsToEnv({
       claudeCode: "/bin/claude",

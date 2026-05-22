@@ -57,6 +57,15 @@ export interface RuntimeCatalogEntry {
   supportsRuntimePooling: boolean;
   supportsCwdPerThread: boolean;
   modelListing: boolean;
+  detection: RuntimeDetectionInfo;
+}
+
+export interface RuntimeDetectionInfo {
+  detected: boolean;
+  path: string;
+  version?: string;
+  source: "env" | "cache" | "static" | "shell" | "fallback";
+  message?: string;
 }
 
 export interface RuntimeProfile {

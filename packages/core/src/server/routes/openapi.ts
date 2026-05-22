@@ -183,6 +183,13 @@ const RuntimeCatalogEntrySchema = z.object({
   supportsRuntimePooling: z.boolean(),
   supportsCwdPerThread: z.boolean(),
   modelListing: z.boolean(),
+  detection: z.object({
+    detected: z.boolean(),
+    path: z.string(),
+    version: z.string().optional(),
+    source: z.enum(["env", "cache", "static", "shell", "fallback"]),
+    message: z.string().optional(),
+  }),
 });
 
 const RuntimeProfileSchema = z.object({

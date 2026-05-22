@@ -1689,6 +1689,12 @@ describe("HTTP transport — new operations", () => {
           supportsRuntimePooling: true,
           supportsCwdPerThread: true,
           modelListing: true,
+          detection: {
+            detected: true,
+            path: "/usr/local/bin/codex",
+            version: "codex 1.0.0",
+            source: "static",
+          },
         },
       ],
     });
@@ -1698,6 +1704,7 @@ describe("HTTP transport — new operations", () => {
 
     assert.equal(res.runtimes[0].id, "codex");
     assert.equal(res.runtimes[0].supportsRuntimePooling, true);
+    assert.equal(res.runtimes[0].detection.source, "static");
     assert.equal(mock.httpRequests[0].method, "GET");
     assert.equal(mock.httpRequests[0].url, "/agent/runtime-catalog");
   });

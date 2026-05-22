@@ -1,5 +1,10 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Activity, Database, Plus, Save, ServerCog } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useState, type ComponentType, type CSSProperties } from "react";
+import ClaudeCode from "@lobehub/icons/es/ClaudeCode";
+import Codex from "@lobehub/icons/es/Codex";
+import Cursor from "@lobehub/icons/es/Cursor";
+import Grok from "@lobehub/icons/es/Grok";
+import OpenCode from "@lobehub/icons/es/OpenCode";
+import { Activity, AlertTriangle, CheckCircle2, Database, Loader2, Plus, RefreshCw, Save, ServerCog, SlidersHorizontal } from "lucide-react";
 import { EmptyState, ErrorText, Panel, StatusBadge } from "../components/ui";
 import {
   useAgentAuditQuery,
@@ -11,9 +16,36 @@ import {
   useRuntimeProfilesQuery,
 } from "../queries";
 import type { ReasoningLevel, RegisteredRuntime, RuntimeCatalogEntry, RuntimeModelInfo, RuntimeProfile } from "../api";
+import { useTheme } from "../theme";
 
 const reasoningLevels = [0, 1, 2, 3, 4, 5] as const;
 const permissionModes = ["", "default", "acceptEdits", "auto", "bypassPermissions", "dontAsk", "plan"] as const;
+
+type LobeIconComponent = ComponentType<{
+  className?: string;
+  size?: number | string;
+  style?: CSSProperties;
+}>;
+
+interface RuntimeIconSpec {
+  dark: LobeIconComponent;
+  light: LobeIconComponent;
+}
+
+const runtimeIconSpecs: Record<string, RuntimeIconSpec> = {
+  "claude-code": { light: ClaudeCode.Color, dark: ClaudeCode },
+  codex: { light: Codex.Color, dark: Codex },
+  cursor: { light: Cursor, dark: Cursor },
+  grok: { light: Grok, dark: Grok },
+  opencode: { light: OpenCode, dark: OpenCode },
+};
+const runtimeDescriptions: Record<string, string> = {
+  "claude-code": "Stateless Claude Code sessions.",
+  codex: "Pooled Codex app-server runtime.",
+  opencode: "OpenCode daemon runtime.",
+  grok: "Grok Build ACP runtime.",
+  cursor: "Cursor ACP runtime.",
+};
 
 export function RuntimePage() {
   const profiles = useRuntimeProfilesQuery();
@@ -28,6 +60,45 @@ export function RuntimePage() {
 
   return (
     <div className="grid gap-4">
+      <section className="min-w-0 overflow-hidden rounded-2xl border border-[var(--border)] bg-[linear-gradient(135deg,var(--panel),var(--panel-subtle))] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.10)]">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-2xl">
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-[var(--accent)]">
+              <SlidersHorizontal size={13} />
+              Runtime Control
+            </div>
+            <h2 className="text-2xl font-semibold tracking-normal text-[var(--fg)]">Runtime and model registry</h2>
+            <p className="mt-2 text-sm leading-6 text-[var(--fg-muted)]">
+              Detected CLIs, daemon registrations, model defaults, and difficulty slots stay separate.
+            </p>
+          </div>
+          <div className="grid gap-2 sm:min-w-[360px] sm:grid-cols-3">
+            <HeroMetric label="Detected" value={runtimeCatalog.data?.runtimes.filter((runtime) => runtime.detection.detected).length ?? 0} />
+            <HeroMetric label="Registered" value={runtimes.data?.runtimes.length ?? 0} />
+            <HeroMetric label="Active" value={activeSessions} />
+          </div>
+        </div>
+      </section>
+
+      <RuntimeSettingsPanel
+        runtimeCatalog={runtimeCatalog.data?.runtimes ?? []}
+        registeredRuntimes={runtimes.data?.runtimes ?? []}
+        catalogError={runtimeCatalog.error}
+        catalogFetching={runtimeCatalog.isFetching}
+        busy={runtimeMutation.isPending}
+        error={runtimeMutation.error}
+        onDetect={() => void runtimeCatalog.refetch()}
+        onSubmit={(id, input) => runtimeMutation.mutate({ id, input })}
+      />
+
+      <ModelSettingsPanel
+        runtimes={runtimes.data?.runtimes ?? []}
+        runtimeCatalog={runtimeCatalog.data?.runtimes ?? []}
+        busy={runtimeMutation.isPending}
+        error={runtimeMutation.error}
+        onSubmit={(id, input) => runtimeMutation.mutate({ id, input })}
+      />
+
       <Panel
         title="Difficulty Profiles"
         action={<StatusBadge tone={profiles.isError ? "bad" : "neutral"}>{profiles.data?.profiles.length ?? 0} levels</StatusBadge>}
@@ -63,53 +134,6 @@ export function RuntimePage() {
               </div>
             ) : null}
       </Panel>
-
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-            <Panel title="Register Runtime">
-              <RegisterRuntimeForm
-                runtimeCatalog={runtimeCatalog.data?.runtimes ?? []}
-                catalogError={runtimeCatalog.error}
-                busy={runtimeMutation.isPending}
-                error={runtimeMutation.error}
-                onSubmit={(id, input) => runtimeMutation.mutate({ id, input })}
-              />
-            </Panel>
-
-            <Panel
-              title="Registered Runtimes"
-              action={<StatusBadge tone={runtimes.isError ? "bad" : "neutral"}>{runtimes.data?.runtimes.length ?? 0} runtimes</StatusBadge>}
-            >
-              {runtimes.isError ? <ErrorText error={runtimes.error} /> : null}
-              {runtimes.isSuccess && !runtimes.data.runtimes.length ? <EmptyState>No registered runtimes</EmptyState> : null}
-              {runtimes.isSuccess && runtimes.data.runtimes.length ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse text-sm">
-                    <thead>
-                      <tr className="border-b border-[var(--border)] text-left font-mono text-[10px] font-medium uppercase tracking-wider text-[var(--fg-muted)]">
-                        <th className="py-2 pr-3">ID</th>
-                        <th className="px-3 py-2">Provider</th>
-                        <th className="px-3 py-2">Model</th>
-                        <th className="py-2 pl-3">State</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {runtimes.data.runtimes.map((runtime) => (
-                        <tr key={runtime.id} className="border-b border-[var(--border)] last:border-0">
-                          <td className="py-3 pr-3">
-                            <div className="font-semibold text-[var(--fg)]">{runtime.label}</div>
-                            <div className="break-all font-mono text-[10px] text-[var(--fg-muted)]">{runtime.id}</div>
-                          </td>
-                          <td className="px-3 py-3 font-mono text-xs text-[var(--fg-soft)]">{runtime.provider}</td>
-                          <td className="px-3 py-3 font-mono text-xs text-[var(--fg-soft)]">{runtime.defaultModel || runtime.config?.model || ""}</td>
-                          <td className="py-3 pl-3"><StatusBadge tone={runtime.enabled ? "good" : "warn"}>{runtime.enabled ? "enabled" : "disabled"}</StatusBadge></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
-            </Panel>
-      </div>
 
       <Panel title="Audit">
             {audit.isError ? <ErrorText error={audit.error} /> : null}
@@ -251,17 +275,23 @@ function ProfileRow({
   );
 }
 
-function RegisterRuntimeForm({
+function RuntimeSettingsPanel({
   runtimeCatalog,
+  registeredRuntimes,
   catalogError,
+  catalogFetching,
   busy,
   error,
+  onDetect,
   onSubmit,
 }: {
   runtimeCatalog: RuntimeCatalogEntry[];
+  registeredRuntimes: RegisteredRuntime[];
   catalogError: unknown;
+  catalogFetching: boolean;
   busy: boolean;
   error: unknown;
+  onDetect: () => void;
   onSubmit: (id: string, input: {
     provider: string;
     label?: string;
@@ -275,14 +305,9 @@ function RegisterRuntimeForm({
   const [id, setId] = useState("codex-main");
   const [label, setLabel] = useState("Codex Main");
   const [provider, setProvider] = useState("codex");
-  const [defaultModel, setDefaultModel] = useState("");
   const [cliPath, setCliPath] = useState("");
   const [enabled, setEnabled] = useState(true);
   const selectedRuntime = runtimeCatalog.find((runtime) => runtime.id === provider);
-  const trimmedCliPath = cliPath.trim();
-  const models = useRuntimeModelsQuery(provider, trimmedCliPath, selectedRuntime?.modelListing ?? true);
-  const modelOptions = models.data?.models ?? [];
-  const selectedModel = modelOptions.find((model) => model.id === defaultModel);
   const canSubmit = Boolean(id.trim() && selectedRuntime);
 
   useEffect(() => {
@@ -291,21 +316,15 @@ function RegisterRuntimeForm({
     if (catalogRuntime) {
       setLabel((current) => current.trim() ? current : `${catalogRuntime.label} Main`);
       setId((current) => current.trim() ? current : `${catalogRuntime.id}-main`);
+      setCliPath((current) => current.trim() ? current : detectedPath(catalogRuntime));
       return;
     }
-    const nextRuntime = runtimeCatalog[0];
+    const nextRuntime = runtimeCatalog.find((runtime) => runtime.detection.detected) ?? runtimeCatalog[0];
     setProvider(nextRuntime.id);
     setId(`${nextRuntime.id}-main`);
     setLabel(`${nextRuntime.label} Main`);
-    setDefaultModel("");
+    setCliPath(detectedPath(nextRuntime));
   }, [provider, runtimeCatalog]);
-
-  useEffect(() => {
-    if (!defaultModel || !modelOptions.length) return;
-    if (!modelOptions.some((model) => model.id === defaultModel)) {
-      setDefaultModel("");
-    }
-  }, [defaultModel, modelOptions]);
 
   function changeProvider(nextProvider: string) {
     const previousDefaultId = `${provider}-main`;
@@ -316,94 +335,247 @@ function RegisterRuntimeForm({
     setProvider(nextProvider);
     setId((current) => !current.trim() || current === previousDefaultId ? nextDefaultId : current);
     setLabel((current) => !current.trim() || current === previousDefaultLabel ? nextDefaultLabel : current);
-    setDefaultModel("");
+    setCliPath(detectedPath(nextRuntime));
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSubmit) return;
-    const registeredModels = selectedModel
-      ? [{ id: selectedModel.id, label: selectedModel.label, provider: selectedModel.provider }]
-      : undefined;
     onSubmit(id.trim(), {
       provider: provider.trim(),
       label: label.trim() || undefined,
       enabled,
-      defaultModel: defaultModel.trim() || undefined,
-      modelProvider: selectedModel?.provider,
-      models: registeredModels,
       cliPath: cliPath.trim() || undefined,
     });
   }
 
   return (
-    <form className="grid gap-3" onSubmit={submit}>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="ID" value={id} onChange={setId} placeholder="codex-main" />
-        <Field label="Label" value={label} onChange={setLabel} placeholder="Codex Main" />
-        <label className="grid gap-1">
-          <span className="font-mono text-[10px] font-medium uppercase tracking-wider text-[var(--fg-muted)]">Runtime</span>
-          <select
-            className="focus-ring h-9 rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-2 text-sm text-[var(--fg)]"
-            value={provider}
-            onChange={(event) => changeProvider(event.target.value)}
-            disabled={!runtimeCatalog.length}
-          >
-            {runtimeCatalog.length ? runtimeCatalog.map((runtime) => (
-              <option key={runtime.id} value={runtime.id}>
-                {runtime.label}{runtime.available ? "" : " (not found)"}
-              </option>
-            )) : (
-              <option value={provider}>Loading</option>
-            )}
-          </select>
-        </label>
-        <label className="grid gap-1">
-          <span className="font-mono text-[10px] font-medium uppercase tracking-wider text-[var(--fg-muted)]">Default model</span>
-          <select
-            className="focus-ring h-9 rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-2 text-sm text-[var(--fg)]"
-            value={defaultModel}
-            onChange={(event) => setDefaultModel(event.target.value)}
-          >
-            <option value="">Provider default</option>
-            {modelOptions.map((model) => (
-              <option key={`${model.provider}:${model.id}`} value={model.id}>
-                {formatModelOption(model)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <Field label="CLI path" value={cliPath} onChange={setCliPath} placeholder="/usr/local/bin/codex" />
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        {selectedRuntime ? (
-          <>
-            <StatusBadge tone={selectedRuntime.available ? "good" : "warn"}>{selectedRuntime.available ? "available" : "not found"}</StatusBadge>
-            <StatusBadge tone={selectedRuntime.supportsRuntimePooling ? "good" : "neutral"}>{selectedRuntime.supportsRuntimePooling ? "pooled" : "per session"}</StatusBadge>
-            <StatusBadge tone={selectedRuntime.supportsCwdPerThread ? "good" : "neutral"}>{selectedRuntime.supportsCwdPerThread ? "cwd/thread" : "cwd/process"}</StatusBadge>
-          </>
-        ) : null}
-        {models.isFetching ? <StatusBadge tone="neutral">models...</StatusBadge> : null}
-      </div>
-      {catalogError ? <ErrorText error={catalogError} /> : null}
-      {models.isError ? <ErrorText error={models.error} /> : null}
-      {models.data?.error ? <div className="font-mono text-[10px] font-medium text-[var(--warn)]">{models.data.error}</div> : null}
-      <div className="flex items-center justify-between gap-3">
-        <label className="inline-flex items-center gap-2 font-mono text-xs text-[var(--fg-muted)]">
-          <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
-          enabled
-        </label>
+    <Panel
+      title="Runtime Settings"
+      action={
         <button
-          className="focus-ring inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 font-mono text-xs font-medium text-[var(--accent)] transition hover:border-[var(--accent)]"
-          type="submit"
-          disabled={busy || !canSubmit}
+          className="focus-ring inline-flex h-8 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel-subtle)] px-3 font-mono text-[10px] font-medium text-[var(--fg-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--fg-soft)]"
+          type="button"
+          onClick={onDetect}
+          disabled={catalogFetching}
         >
-          <Plus size={15} />
-          Register
+          {catalogFetching ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+          Detect
         </button>
+      }
+    >
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(340px,0.9fr)]">
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+          {runtimeCatalog.map((runtime) => (
+            <RuntimeChoiceCard
+              key={runtime.id}
+              runtime={runtime}
+              selected={runtime.id === provider}
+              registered={registeredRuntimes.some((candidate) => candidate.provider === runtime.id)}
+              onSelect={() => changeProvider(runtime.id)}
+            />
+          ))}
+          {!runtimeCatalog.length ? <EmptyState>No supported runtimes loaded</EmptyState> : null}
+        </div>
+
+        <form className="grid min-w-0 gap-4 rounded-xl border border-[var(--border)] bg-[var(--panel-subtle)] p-4" onSubmit={submit}>
+          {selectedRuntime ? (
+            <div className="flex min-w-0 items-start gap-3">
+              <RuntimeIcon runtime={selectedRuntime} className="size-11 rounded-xl border border-[var(--border)] p-2" />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-base font-semibold text-[var(--fg)]">{selectedRuntime.label}</h3>
+                  <StatusBadge tone={selectedRuntime.detection.detected ? "good" : "warn"}>
+                    {selectedRuntime.detection.detected ? "detected" : "missing"}
+                  </StatusBadge>
+                </div>
+                <p className="mt-1 truncate font-mono text-[11px] text-[var(--fg-muted)]">
+                  {selectedRuntime.detection.version || selectedRuntime.detection.message || selectedRuntime.detection.source}
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="ID" value={id} onChange={setId} placeholder="codex-main" />
+            <Field label="Label" value={label} onChange={setLabel} placeholder="Codex Main" />
+            <Field className="sm:col-span-2" label="CLI path" value={cliPath} onChange={setCliPath} placeholder={selectedRuntime?.detection.path || "/usr/local/bin/codex"} />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedRuntime ? (
+              <>
+                <StatusBadge tone={selectedRuntime.supportsRuntimePooling ? "good" : "neutral"}>{selectedRuntime.supportsRuntimePooling ? "pooled" : "per session"}</StatusBadge>
+                <StatusBadge tone={selectedRuntime.supportsCwdPerThread ? "good" : "neutral"}>{selectedRuntime.supportsCwdPerThread ? "cwd/thread" : "cwd/process"}</StatusBadge>
+                <StatusBadge tone="neutral">{selectedRuntime.detection.source}</StatusBadge>
+              </>
+            ) : null}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <label className="inline-flex items-center gap-2 font-mono text-xs text-[var(--fg-muted)]">
+              <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+              enabled
+            </label>
+            <button
+              className="focus-ring inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 font-mono text-xs font-medium text-[var(--accent)] transition hover:border-[var(--accent)]"
+              type="submit"
+              disabled={busy || !canSubmit}
+            >
+              <Plus size={15} />
+              Register
+            </button>
+          </div>
+
+          {catalogError ? <ErrorText error={catalogError} /> : null}
+          {error ? <ErrorText error={error} /> : null}
+        </form>
       </div>
-      {error ? <ErrorText error={error} /> : null}
-    </form>
+    </Panel>
+  );
+}
+
+function ModelSettingsPanel({
+  runtimes,
+  runtimeCatalog,
+  busy,
+  error,
+  onSubmit,
+}: {
+  runtimes: RegisteredRuntime[];
+  runtimeCatalog: RuntimeCatalogEntry[];
+  busy: boolean;
+  error: unknown;
+  onSubmit: (id: string, input: {
+    provider: string;
+    label?: string;
+    enabled: boolean;
+    modelProvider?: string;
+    defaultModel?: string;
+    cliPath?: string;
+    models?: RegisteredRuntime["models"];
+  }) => void;
+}) {
+  const [runtimeId, setRuntimeId] = useState("");
+  const selectedRuntime = runtimes.find((runtime) => runtime.id === runtimeId) ?? runtimes[0];
+  const catalogRuntime = selectedRuntime ? runtimeCatalog.find((runtime) => runtime.id === selectedRuntime.provider) : undefined;
+  const models = useRuntimeModelsQuery(selectedRuntime?.provider ?? "", selectedRuntime?.cliPath ?? "", Boolean(selectedRuntime));
+  const modelOptions = models.data?.models ?? [];
+  const [defaultModel, setDefaultModel] = useState("");
+  const selectedModel = modelOptions.find((model) => model.id === defaultModel);
+
+  useEffect(() => {
+    if (!runtimeId && runtimes[0]) setRuntimeId(runtimes[0].id);
+  }, [runtimeId, runtimes]);
+
+  useEffect(() => {
+    setDefaultModel(selectedRuntime?.defaultModel ?? "");
+  }, [selectedRuntime?.id, selectedRuntime?.defaultModel]);
+
+  useEffect(() => {
+    if (!defaultModel || !modelOptions.length) return;
+    if (!modelOptions.some((model) => model.id === defaultModel)) setDefaultModel("");
+  }, [defaultModel, modelOptions]);
+
+  function saveModelSettings() {
+    if (!selectedRuntime) return;
+    const registeredModels = selectedModel
+      ? [{ id: selectedModel.id, label: selectedModel.label, provider: selectedModel.provider }]
+      : [];
+    onSubmit(selectedRuntime.id, {
+      provider: selectedRuntime.provider,
+      label: selectedRuntime.label,
+      enabled: selectedRuntime.enabled,
+      cliPath: selectedRuntime.cliPath,
+      defaultModel,
+      modelProvider: selectedModel?.provider ?? "",
+      models: registeredModels,
+    });
+  }
+
+  return (
+    <Panel
+      title="Model Settings"
+      action={<StatusBadge tone={models.isError ? "bad" : "neutral"}>{modelOptions.length} models</StatusBadge>}
+    >
+      {!runtimes.length ? <EmptyState>No registered runtimes</EmptyState> : null}
+      {runtimes.length ? (
+        <div className="grid gap-4 lg:grid-cols-[minmax(240px,0.42fr)_minmax(0,1fr)]">
+          <div className="grid gap-2">
+            {runtimes.map((runtime) => (
+              <button
+                key={runtime.id}
+                type="button"
+                onClick={() => setRuntimeId(runtime.id)}
+                className={`focus-ring flex min-w-0 items-center gap-3 rounded-xl border p-3 text-left transition ${
+                  selectedRuntime?.id === runtime.id
+                    ? "border-[var(--accent-border)] bg-[var(--accent-soft)]"
+                    : "border-[var(--border)] bg-[var(--panel-subtle)] hover:border-[var(--border-strong)]"
+                }`}
+              >
+                {runtimeCatalog.find((candidate) => candidate.id === runtime.provider) ? (
+                  <RuntimeIcon runtime={runtimeCatalog.find((candidate) => candidate.id === runtime.provider)!} className="size-9 rounded-lg border border-[var(--border)] p-2" />
+                ) : null}
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold text-[var(--fg)]">{runtime.label}</span>
+                  <span className="block truncate font-mono text-[10px] text-[var(--fg-muted)]">{runtime.id}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="grid min-w-0 gap-4 rounded-xl border border-[var(--border)] bg-[var(--panel-subtle)] p-4">
+            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <h3 className="truncate text-base font-semibold text-[var(--fg)]">{selectedRuntime?.label}</h3>
+                <p className="truncate font-mono text-[11px] text-[var(--fg-muted)]">
+                  {catalogRuntime?.label ?? selectedRuntime?.provider} - {selectedRuntime?.cliPath || "provider path"}
+                </p>
+              </div>
+              {models.isFetching ? <StatusBadge tone="neutral">loading</StatusBadge> : null}
+            </div>
+
+            <label className="grid min-w-0 gap-1">
+              <span className="font-mono text-[10px] font-medium uppercase tracking-wider text-[var(--fg-muted)]">Default model</span>
+              <select
+                className="focus-ring h-10 w-full min-w-0 rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-3 text-sm text-[var(--fg)]"
+                value={defaultModel}
+                onChange={(event) => setDefaultModel(event.target.value)}
+              >
+                <option value="">Provider default</option>
+                {modelOptions.map((model) => (
+                  <option key={`${model.provider}:${model.id}`} value={model.id}>
+                    {formatModelOption(model)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="grid gap-2 sm:grid-cols-3">
+              <ModelStat label="Source" value={models.data?.source ?? "pending"} />
+              <ModelStat label="Provider" value={selectedModel?.provider ?? selectedRuntime?.modelProvider ?? "default"} />
+              <ModelStat label="Selected" value={defaultModel || "default"} />
+            </div>
+
+            {models.isError ? <ErrorText error={models.error} /> : null}
+            {models.data?.error ? <div className="font-mono text-[10px] font-medium text-[var(--warn)]">{models.data.error}</div> : null}
+            {error ? <ErrorText error={error} /> : null}
+
+            <div className="flex justify-end">
+              <button
+                className="focus-ring inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 font-mono text-xs font-medium text-[var(--accent)] transition hover:border-[var(--accent)]"
+                type="button"
+                disabled={busy || !selectedRuntime}
+                onClick={saveModelSettings}
+              >
+                <Save size={15} />
+                Save Models
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </Panel>
   );
 }
 
@@ -412,22 +584,100 @@ function formatModelOption(model: RuntimeModelInfo): string {
   return `${label} - ${model.provider}`;
 }
 
+function HeroMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 py-3 text-right backdrop-blur">
+      <div className="font-mono text-[10px] font-medium uppercase tracking-wider text-[var(--fg-muted)]">{label}</div>
+      <div className="mt-1 text-2xl font-semibold tabular-nums text-[var(--fg)]">{value}</div>
+    </div>
+  );
+}
+
+function RuntimeChoiceCard({
+  runtime,
+  selected,
+  registered,
+  onSelect,
+}: {
+  runtime: RuntimeCatalogEntry;
+  selected: boolean;
+  registered: boolean;
+  onSelect: () => void;
+}) {
+  const detected = runtime.detection.detected;
+  const description = runtimeDescriptions[runtime.id] ?? "Agent runtime.";
+  const path = detectedPath(runtime) || runtime.detection.message || "No CLI detected";
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`focus-ring flex min-w-0 items-start gap-3 rounded-xl border p-3 text-left transition ${
+        selected
+          ? "border-[var(--accent-border)] bg-[var(--accent-soft)] shadow-[0_14px_38px_rgba(109,75,208,0.13)]"
+          : "border-[var(--border)] bg-[var(--panel-subtle)] hover:border-[var(--border-strong)] hover:bg-[var(--panel)]"
+      }`}
+    >
+      <RuntimeIcon runtime={runtime} className="size-11 shrink-0 rounded-xl border border-[var(--border)] p-2" />
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-semibold text-[var(--fg)]">{runtime.label}</span>
+          {detected ? <CheckCircle2 size={15} className="shrink-0 text-[var(--good)]" /> : <AlertTriangle size={15} className="shrink-0 text-[var(--warn)]" />}
+        </span>
+        <span className="mt-1 block text-xs leading-5 text-[var(--fg-muted)]">{description}</span>
+        <span className="mt-2 block truncate font-mono text-[10px] text-[var(--fg-faint)]">{path}</span>
+      </span>
+      <span className="flex shrink-0 flex-col items-end gap-2">
+        <StatusBadge tone={detected ? "good" : "warn"}>{detected ? "detected" : "missing"}</StatusBadge>
+        {registered ? <span className="font-mono text-[10px] font-medium text-[var(--accent)]">registered</span> : null}
+      </span>
+    </button>
+  );
+}
+
+function RuntimeIcon({ runtime, className = "" }: { runtime: RuntimeCatalogEntry; className?: string }) {
+  const { theme } = useTheme();
+  const spec = runtimeIconSpecs[runtime.id] ?? runtimeIconSpecs.opencode;
+  const Icon = theme === "dark" ? spec.dark : spec.light;
+  return (
+    <span aria-hidden="true" className={`runtime-icon-frame ${className}`}>
+      <Icon className="runtime-icon-glyph" size="100%" />
+    </span>
+  );
+}
+
+function ModelStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-3 py-2">
+      <div className="font-mono text-[10px] font-medium uppercase tracking-wider text-[var(--fg-muted)]">{label}</div>
+      <div className="mt-1 truncate font-mono text-xs text-[var(--fg)]">{value}</div>
+    </div>
+  );
+}
+
+function detectedPath(runtime?: RuntimeCatalogEntry): string {
+  if (!runtime?.detection.detected) return "";
+  return runtime.detection.path;
+}
+
 function Field({
   label,
   value,
   onChange,
   placeholder,
+  className = "",
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  className?: string;
 }) {
   return (
-    <label className="grid gap-1">
+    <label className={`grid min-w-0 gap-1 ${className}`}>
       <span className="font-mono text-[10px] font-medium uppercase tracking-wider text-[var(--fg-muted)]">{label}</span>
       <input
-        className="focus-ring h-9 rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-2 text-sm text-[var(--fg)] placeholder:text-[var(--fg-faint)]"
+        className="focus-ring h-9 w-full min-w-0 rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-2 text-sm text-[var(--fg)] placeholder:text-[var(--fg-faint)]"
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}

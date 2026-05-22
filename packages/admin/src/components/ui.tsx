@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 
 export function Panel({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) {
   return (
-    <section className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.08)] backdrop-blur">
-      <div className="mb-3 flex min-h-8 items-center justify-between gap-3">
+    <section className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.08)] backdrop-blur">
+      <div className="mb-3 flex min-h-8 min-w-0 flex-wrap items-center justify-between gap-3">
         <h2 className="font-mono text-xs font-semibold uppercase tracking-wider text-[var(--fg-muted)]">{title}</h2>
         {action}
       </div>

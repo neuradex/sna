@@ -22,6 +22,7 @@ export type {
   RegisterRuntimeInput,
   UpdateRuntimeProfileInput,
   RuntimeCatalogEntry,
+  RuntimeDetectionInfo,
   RuntimeAuditRuntime,
   RuntimeAuditSession,
   RuntimeAuditApp,

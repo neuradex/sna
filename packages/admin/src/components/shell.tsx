@@ -18,7 +18,7 @@ export function Shell() {
   const connected = health.isSuccess && health.data?.ok;
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
+    <main className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-3">
@@ -29,7 +29,7 @@ export function Shell() {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             className="focus-ring inline-flex h-8 items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--panel-subtle)] px-2 font-mono text-[10px] font-medium text-[var(--fg-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--fg-soft)]"
@@ -45,18 +45,18 @@ export function Shell() {
         </div>
       </header>
 
-      <nav className="flex gap-1 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-1 backdrop-blur">
+      <nav className="grid grid-cols-2 gap-1 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-1 backdrop-blur sm:grid-cols-4">
         {navItems.map((item) => {
           const Icon = item.icon;
           return (
             <Link
               key={item.to}
               to={item.to}
-              className="focus-ring inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-lg border border-transparent px-3 font-mono text-xs font-medium text-[var(--fg-muted)] transition hover:bg-[var(--panel-subtle)] hover:text-[var(--fg-soft)] [&.active]:border-[var(--accent-border)] [&.active]:bg-[var(--accent-soft)] [&.active]:text-[var(--accent)]"
+              className="focus-ring inline-flex h-10 w-full min-w-0 items-center justify-center gap-2 rounded-lg border border-transparent px-3 font-mono text-xs font-medium text-[var(--fg-muted)] transition hover:bg-[var(--panel-subtle)] hover:text-[var(--fg-soft)] [&.active]:border-[var(--accent-border)] [&.active]:bg-[var(--accent-soft)] [&.active]:text-[var(--accent)]"
               activeOptions={{ exact: item.to === "/" }}
             >
               <Icon size={16} />
-              {item.label}
+              <span className="truncate">{item.label}</span>
             </Link>
           );
         })}
