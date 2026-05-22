@@ -29,6 +29,7 @@ describe("DB Schema", () => {
     const names = tables.map(t => t.name).filter(n => !n.startsWith("sqlite_"));
     assert.ok(names.includes("chat_sessions"), "chat_sessions table");
     assert.ok(names.includes("chat_messages"), "chat_messages table");
+    assert.ok(names.includes("sna_settings"), "sna_settings table");
   });
 
   it("chat_sessions has all columns including new ones", async () => {
@@ -111,5 +112,15 @@ describe("DB Schema", () => {
     const names = indexes.map(i => i.name);
     assert.ok(names.includes("idx_chat_messages_session"));
     assert.ok(names.includes("idx_chat_messages_session_kind"));
+  });
+
+  it("sna_settings stores daemon-level runtime settings", async () => {
+    const { getDb } = await import("../src/db/schema.js");
+    const db = getDb();
+    const cols = db.prepare("PRAGMA table_info(sna_settings)").all() as { name: string }[];
+    const names = cols.map(c => c.name);
+    for (const col of ["key", "value", "updated_at"]) {
+      assert.ok(names.includes(col), `sna_settings should have column: ${col}`);
+    }
   });
 });

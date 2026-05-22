@@ -509,6 +509,52 @@ describe("HTTP API Routes", () => {
   });
 
   describe("Agent lifecycle with spawned runtime", () => {
+    it("resolves profileLevel into registered runtime defaults before spawning", async () => {
+      const providerName = `test-profile-${Date.now()}`;
+      const { registerProvider } = await import("../src/core/providers/index.js");
+      registerProvider(createFakeApiProvider(providerName));
+
+      const runtimeRes = await req("PUT", "/agent/runtimes/workhorse", {
+        provider: providerName,
+        label: "Workhorse",
+        enabled: true,
+        modelProvider: "test-vendor",
+        defaultModel: "runtime-default",
+        config: {
+          permissionMode: "acceptEdits",
+          reasoningLevel: 2,
+        },
+      });
+      assert.equal(runtimeRes.status, 200);
+
+      const profileRes = await req("PUT", "/agent/profiles/4", {
+        label: "Difficult",
+        runtimeId: "workhorse",
+        config: {
+          model: "profile-model",
+          reasoningLevel: 4,
+        },
+      });
+      assert.equal(profileRes.status, 200);
+
+      const startRes = await req("POST", "/agent/start?session=profile-start", {
+        profileLevel: 4,
+      });
+      assert.equal(startRes.status, 200);
+      assert.equal((await startRes.json()).provider, providerName);
+
+      const list = await (await req("GET", "/agent/sessions?include=chain")).json();
+      const session = list.sessions.find((s: any) => s.id === "profile-start");
+      assert.ok(session);
+      assert.equal(session.config.provider, providerName);
+      assert.equal(session.config.modelProvider, "test-vendor");
+      assert.equal(session.config.model, "profile-model");
+      assert.equal(session.config.permissionMode, "acceptEdits");
+      assert.equal(session.config.profileLevel, 4);
+      assert.equal(session.config.runtimeId, "workhorse");
+      assert.equal(session.config.reasoningLevel, 4);
+    });
+
     it("POST /agent/start exposes runtime-chain and message-count changes through APIs", async () => {
       const providerName = `test-spawn-${Date.now()}`;
       const { registerProvider } = await import("../src/core/providers/index.js");
@@ -562,6 +608,76 @@ describe("HTTP API Routes", () => {
       assert.equal(restarted.runtimeChain[0].retiredAt != null, true);
       assert.equal(restarted.runtimeChain[1].parentId, restarted.runtimeChain[0].id);
       assert.equal(restarted.runtimeChain[1].config.model, "fake-2");
+    });
+  });
+
+  describe("Runtime settings", () => {
+    it("returns five ordered difficulty profiles by default", async () => {
+      const res = await req("GET", "/agent/profiles");
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.profiles.length, 5);
+      assert.deepEqual(json.profiles.map((p: any) => p.level), [1, 2, 3, 4, 5]);
+      assert.equal(json.profiles[0].config.reasoningLevel, 1);
+      assert.equal(json.profiles[4].config.reasoningLevel, 5);
+    });
+
+    it("registers runtimes and updates profile slots", async () => {
+      const runtimeRes = await req("PUT", "/agent/runtimes/codex-main", {
+        provider: "codex",
+        label: "Codex Main",
+        enabled: true,
+        modelProvider: "openai",
+        defaultModel: "gpt-5.4",
+        cliPath: "/usr/local/bin/codex",
+      });
+      assert.equal(runtimeRes.status, 200);
+      const runtime = await runtimeRes.json();
+      assert.equal(runtime.runtime.id, "codex-main");
+      assert.equal(runtime.runtime.provider, "codex");
+
+      const profileRes = await req("PUT", "/agent/profiles/3", {
+        runtimeId: "codex-main",
+        config: {
+          permissionMode: "default",
+          reasoningLevel: 3,
+        },
+      });
+      assert.equal(profileRes.status, 200);
+
+      const profiles = await (await req("GET", "/agent/profiles")).json();
+      const level3 = profiles.profiles.find((p: any) => p.level === 3);
+      assert.equal(level3.runtimeId, "codex-main");
+      assert.equal(level3.config.permissionMode, "default");
+
+      const runtimes = await (await req("GET", "/agent/runtimes")).json();
+      assert.equal(runtimes.runtimes.length, 1);
+      assert.equal(runtimes.runtimes[0].defaultModel, "gpt-5.4");
+    });
+
+    it("reports runtime and app audit information", async () => {
+      const { resetConfig, setConfig } = await import("../src/config.js");
+      setConfig({ appId: "audit-host" });
+      try {
+        await req("PUT", "/agent/runtimes/audit-runtime", {
+          provider: "codex",
+          label: "Audit Runtime",
+          enabled: true,
+          defaultModel: "gpt-5.4",
+        });
+        await req("POST", "/agent/sessions", { id: "audit-session", label: "Audit Session" });
+
+        const res = await req("GET", "/agent/audit");
+        assert.equal(res.status, 200);
+        const json = await res.json();
+        assert.ok(Array.isArray(json.runtimes));
+        assert.ok(Array.isArray(json.apps));
+        assert.ok(Array.isArray(json.sessions));
+        assert.ok(json.runtimes.some((r: any) => r.id === "audit-runtime"));
+        assert.ok(json.apps.some((app: any) => app.appId === "audit-host" && app.sessionCount >= 1));
+      } finally {
+        resetConfig();
+      }
     });
   });
 
