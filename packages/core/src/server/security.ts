@@ -3,12 +3,14 @@ import { validateAccessToken, type SnaClientTokenIdentity } from "./auth.js";
 
 export interface SnaSecurityOptions {
   authToken?: string;
+  adminToken?: string;
   allowedOrigins?: string[];
   unsafeDisableAuth?: boolean;
 }
 
 export interface ResolvedSnaSecurityOptions {
   authToken?: string;
+  adminToken: string;
   allowedOrigins: string[];
   unsafeDisableAuth: boolean;
 }
@@ -19,8 +21,15 @@ export type SnaAuthIdentity =
 
 export type SnaScope = "sessions" | "agent" | "chat";
 
+const ADMIN_COOKIE_NAME = "sna_admin";
+const ADMIN_COOKIE_MAX_AGE_SECONDS = 24 * 60 * 60;
+
 export function generateSnaAuthToken(): string {
   return `sna_${randomBytes(32).toString("base64url")}`;
+}
+
+export function generateSnaAdminToken(): string {
+  return `sna_admin_${randomBytes(32).toString("base64url")}`;
 }
 
 export function parseAllowedOrigins(value?: string): string[] {
@@ -34,13 +43,14 @@ export function parseAllowedOrigins(value?: string): string[] {
 export function resolveSnaSecurityOptions(options: SnaSecurityOptions = {}): ResolvedSnaSecurityOptions {
   const unsafeDisableAuth = options.unsafeDisableAuth === true;
   const authToken = options.authToken?.trim() || process.env.SNA_AUTH_TOKEN?.trim();
+  const adminToken = options.adminToken?.trim() || process.env.SNA_ADMIN_TOKEN?.trim() || generateSnaAdminToken();
   const allowedOrigins = options.allowedOrigins ?? parseAllowedOrigins(process.env.SNA_ALLOWED_ORIGINS);
 
   if (!unsafeDisableAuth && !authToken) {
     throw new Error("SNA auth token is required. Pass authToken, set SNA_AUTH_TOKEN, or explicitly set unsafeDisableAuth for isolated tests only.");
   }
 
-  return { authToken, allowedOrigins, unsafeDisableAuth };
+  return { authToken, adminToken, allowedOrigins, unsafeDisableAuth };
 }
 
 export function isOriginAllowed(
@@ -124,6 +134,49 @@ function isPublicHttpRoute(method: string, pathname: string): boolean {
   return false;
 }
 
+function isAdminShellRoute(method: string, pathname: string): boolean {
+  if (method !== "GET") return false;
+  if (pathname === "/admin") return true;
+  return pathname.startsWith("/admin/") && !pathname.startsWith("/admin/assets/");
+}
+
+function serializeAdminCookie(token: string, secure: boolean): string {
+  const parts = [
+    `${ADMIN_COOKIE_NAME}=${encodeURIComponent(token)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Strict",
+    `Max-Age=${ADMIN_COOKIE_MAX_AGE_SECONDS}`,
+  ];
+  if (secure) parts.push("Secure");
+  return parts.join("; ");
+}
+
+function parseCookie(header: string | undefined, name: string): string | undefined {
+  if (!header) return undefined;
+  for (const part of header.split(";")) {
+    const [rawKey, ...rawValue] = part.trim().split("=");
+    if (rawKey !== name) continue;
+    try {
+      return decodeURIComponent(rawValue.join("="));
+    } catch {
+      return rawValue.join("=");
+    }
+  }
+  return undefined;
+}
+
+function resolveAdminCookieIdentity(
+  cookieHeader: string | undefined,
+  adminToken: string,
+  origin: string | undefined,
+  requestOrigin: string,
+): SnaAuthIdentity | undefined {
+  if (origin && origin !== requestOrigin) return undefined;
+  const cookieToken = parseCookie(cookieHeader, ADMIN_COOKIE_NAME);
+  return isAuthorizedToken(cookieToken, adminToken) ? { type: "owner" } : undefined;
+}
+
 function applyCorsHeaders(
   c: any,
   origin: string | undefined,
@@ -131,10 +184,10 @@ function applyCorsHeaders(
   requestOrigin: string,
 ): void {
   if (origin && isOriginAllowed(origin, allowedOrigins, requestOrigin)) {
-    c.header("Access-Control-Allow-Origin", origin);
+  c.header("Access-Control-Allow-Origin", origin);
     c.header("Vary", "Origin");
   }
-  c.header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
+  c.header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
   c.header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-SNA-Token");
 }
 
@@ -153,6 +206,9 @@ export function createHttpSecurityMiddleware(options: SnaSecurityOptions) {
     }
 
     applyCorsHeaders(c, origin, security.allowedOrigins, requestOrigin);
+    if (!security.unsafeDisableAuth && isAdminShellRoute(method, pathname)) {
+      c.header("Set-Cookie", serializeAdminCookie(security.adminToken, requestUrl.protocol === "https:"));
+    }
 
     if (method === "OPTIONS") {
       return c.body(null, 204);
@@ -168,7 +224,8 @@ export function createHttpSecurityMiddleware(options: SnaSecurityOptions) {
     }
 
     const token = extractBearerToken(c.req.header("authorization"), c.req.header("x-sna-token"));
-    const identity = resolveSnaAuthIdentity(token, security.authToken);
+    const identity = resolveSnaAuthIdentity(token, security.authToken)
+      ?? resolveAdminCookieIdentity(c.req.header("cookie"), security.adminToken, origin, requestOrigin);
     if (!identity) {
       return c.json({ status: "error", message: "Unauthorized" }, 401);
     }

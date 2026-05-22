@@ -32,7 +32,10 @@ export interface SnaDaemonStatus {
 }
 
 export interface SnaDaemonAdminUrlOptions {
-  /** Include the bearer token once so the admin page can store it locally. Default: true. */
+  /**
+   * @deprecated Admin authentication now uses an HttpOnly same-origin cookie
+   * issued by the daemon. This option is ignored.
+   */
   withToken?: boolean;
 }
 
@@ -387,14 +390,9 @@ export async function startSnaDaemon(options: SnaDaemonOptions): Promise<SnaDaem
 
 export function createSnaDaemonAdminUrl(
   daemon: Pick<SnaDaemonHandle, "adminUrl" | "authToken">,
-  options: SnaDaemonAdminUrlOptions = {},
+  _options: SnaDaemonAdminUrlOptions = {},
 ): string {
-  if (options.withToken === false) return daemon.adminUrl;
-  const url = new URL(daemon.adminUrl);
-  const hashParams = new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : url.hash);
-  hashParams.set("token", daemon.authToken);
-  url.hash = hashParams.toString();
-  return url.toString();
+  return daemon.adminUrl;
 }
 
 export async function openSnaDaemonAdmin(
