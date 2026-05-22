@@ -168,4 +168,23 @@ describe("admin UI browser behavior", () => {
     assert.doesNotMatch(html, />Approve</);
     assert.doesNotMatch(html, />Deny</);
   });
+
+  it("ignores repeated authorization action clicks after the button is disabled", async () => {
+    const calls: Array<{ path: string; init?: any }> = [];
+    const harness = createAdminHarness("http://127.0.0.1:3099/admin#token=owner-token", async (path, init) => {
+      calls.push({ path, init });
+      if (path === "/health") return jsonResponse(200, { ok: true, name: "sna", version: "1" });
+      if (path === "/auth/pkce/requests") return jsonResponse(200, { requests: [] });
+      if (path === "/agent/sessions") return jsonResponse(200, { sessions: [] });
+      if (path === "/auth/pkce/requests/req1/approve") return jsonResponse(200, { requestId: "req1", status: "approved" });
+      throw new Error(`unexpected fetch ${path}`);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const button = new FakeButton("approve", "approve", "req1");
+    button.disabled = true;
+    await harness.elements.get("auth-requests")!.listeners.get("click")?.({ target: button });
+
+    assert.equal(calls.some((call) => call.path === "/auth/pkce/requests/req1/approve"), false);
+  });
 });
