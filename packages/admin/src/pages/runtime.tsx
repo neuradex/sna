@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Activity, AlertTriangle, CheckCircle2, ChevronDown, Database, Loader2, Plus, RefreshCw, Save, ServerCog, Trash2 } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, Database, Loader2, Plus, RefreshCw, Save, ServerCog, Trash2 } from "lucide-react";
 import { Dialog, DialogContent } from "../components/dialog";
-import { RuntimeIcon, detectedPath, runtimeDescriptions } from "../components/runtime-icon";
+import { RuntimeIcon, detectedPath } from "../components/runtime-icon";
 import { EmptyState, ErrorText, Panel, StatusBadge } from "../components/ui";
 import {
   useAgentAuditQuery,
@@ -254,46 +254,27 @@ function CatalogRuntimeOption({
 }) {
   const detected = runtime.detection.detected;
   const path = detectedPath(runtime) || runtime.detection.message || "No CLI detected";
-  const details = runtime.detection.version || runtime.detection.message || runtime.detection.source;
 
   return (
-    <article
-      className={`min-w-0 overflow-hidden rounded-lg border bg-[var(--panel-subtle)] transition ${selected ? "border-[var(--accent-border)] shadow-[0_0_0_1px_var(--accent-border)]" : "border-[var(--border)]"}`}
+    <button
+      type="button"
+      className={`focus-ring flex min-h-14 w-full min-w-0 items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition ${selected ? "border-[var(--accent-border)] bg-[var(--accent-soft)] shadow-[0_0_0_1px_var(--accent-border)]" : "border-[var(--border)] bg-[var(--panel-subtle)] hover:border-[var(--border-strong)] hover:bg-[var(--panel-solid)]"}`}
+      aria-pressed={selected}
+      onClick={onSelect}
     >
-      <button
-        type="button"
-        className={`focus-ring flex w-full min-w-0 items-center gap-3 px-3 py-2.5 text-left transition ${selected ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--panel-solid)]"}`}
-        aria-expanded={selected}
-        onClick={onSelect}
-      >
-        <RuntimeIcon runtime={runtime} className="size-8 shrink-0 rounded-lg border border-[var(--border)] p-1.5" />
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-sm font-semibold text-[var(--fg)]">{runtime.label}</span>
-            {detected ? <CheckCircle2 size={14} className="shrink-0 text-[var(--good)]" /> : <AlertTriangle size={14} className="shrink-0 text-[var(--warn)]" />}
-          </div>
-          <p className="mt-0.5 truncate font-mono text-[10px] text-[var(--fg-faint)]">{path}</p>
+      <RuntimeIcon runtime={runtime} className="size-8 shrink-0 rounded-lg border border-[var(--border)] p-1.5" />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-semibold text-[var(--fg)]">{runtime.label}</span>
+          {detected ? <CheckCircle2 size={14} className="shrink-0 text-[var(--good)]" /> : <AlertTriangle size={14} className="shrink-0 text-[var(--warn)]" />}
         </div>
-        <div className="hidden shrink-0 gap-1.5 sm:flex">
-          <StatusBadge tone={detected ? "good" : "warn"}>{detected ? runtime.detection.source : "missing"}</StatusBadge>
-          {registered ? <StatusBadge tone="neutral">registered</StatusBadge> : null}
-        </div>
-        <ChevronDown className={`size-4 shrink-0 text-[var(--fg-muted)] transition-transform ${selected ? "rotate-180" : ""}`} />
-      </button>
-      {selected ? (
-        <div className="border-t border-[var(--border)] px-3 py-3">
-          <p className="text-xs leading-5 text-[var(--fg-muted)]">{runtimeDescriptions[runtime.id] ?? "Agent runtime."}</p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            <RuntimeFact label="Detection" value={details} />
-            <RuntimeFact label="Mode" value={runtime.supportsRuntimePooling ? "pooled" : "per session"} />
-          </div>
-          <div className="mt-2 flex flex-wrap gap-2 sm:hidden">
-            <StatusBadge tone={detected ? "good" : "warn"}>{detected ? runtime.detection.source : "missing"}</StatusBadge>
-            {registered ? <StatusBadge tone="neutral">registered</StatusBadge> : null}
-          </div>
-        </div>
-      ) : null}
-    </article>
+        <p className="mt-0.5 truncate font-mono text-[10px] text-[var(--fg-faint)]">{path}</p>
+      </div>
+      <div className="hidden shrink-0 gap-1.5 sm:flex">
+        <StatusBadge tone={detected ? "good" : "warn"}>{detected ? runtime.detection.source : "missing"}</StatusBadge>
+        {registered ? <StatusBadge tone="neutral">registered</StatusBadge> : null}
+      </div>
+    </button>
   );
 }
 
@@ -383,7 +364,7 @@ function AddRuntimeDialog({
             </div>
             {catalogError ? <ErrorText error={catalogError} /> : null}
             {runtimeCatalog.length ? (
-              <div className="flex max-h-[17rem] flex-col gap-1.5 overflow-y-auto py-0.5 pr-1">
+              <div className="grid gap-2">
                 {runtimeCatalog.map((runtime) => (
                   <CatalogRuntimeOption
                     key={runtime.id}
