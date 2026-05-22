@@ -107,7 +107,9 @@ controlled deployments and tests.
 Shared local daemons also expose a local PKCE authorization flow under
 `/auth/pkce/*`. The owner token approves pending requests, then consumer apps
 exchange the approved code for access/refresh tokens. Access tokens are accepted
-by HTTP and WebSocket transports.
+by HTTP and WebSocket transports. Client scopes are enforced by route family:
+`sessions` for session CRUD/snapshots, `agent` for runtime and permission APIs,
+and `chat` for chat session/message/image APIs.
 
 ### Mount the routes manually
 

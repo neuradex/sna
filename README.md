@@ -141,6 +141,9 @@ other deployment models.
 For shared local daemons, consumer apps can use the client-side PKCE helpers
 (`client.auth.startPkce()`, `exchangePkceCode()`, `refreshAccessToken()`) to get
 their own access/refresh tokens instead of receiving the launcher owner token.
+Client scopes are enforced by route family: `sessions` for session
+CRUD/snapshots, `agent` for runtime and permission APIs, and `chat` for chat
+session/message/image APIs.
 
 > The running server publishes its own live OpenAPI 3.1 spec — open `http://localhost:3099/docs` for Swagger UI, `http://localhost:3099/openapi.json` for the raw JSON, or `http://localhost:3099/spec` for a plain-text view.
 

@@ -100,6 +100,7 @@ const request = await unauthenticated.auth.startPkce({
   displayName: "My App",
   codeChallenge: challenge,
   codeChallengeMethod: "S256",
+  scopes: ["sessions", "agent", "chat"],
 });
 open(request.authorizeUrl);
 
@@ -125,6 +126,11 @@ const sna = new SnaClient({
 Access tokens are accepted by HTTP and WebSocket transports. Refresh tokens are
 stored server-side as hashes and can be exchanged through
 `sna.auth.refreshAccessToken(refreshToken)`.
+
+Client tokens are scoped. `sessions` gates session CRUD and session snapshot
+pushes, `agent` gates agent runtime and permission APIs, and `chat` gates chat
+session/message/image APIs. The launcher owner token bypasses client scopes and
+is intended for the local admin surface, not for distribution to consumer apps.
 
 ### Connecting from any framework
 
