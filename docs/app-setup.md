@@ -88,40 +88,24 @@ admin URL for approval, poll until a short-lived code is approved, and exchange
 that code for its own access/refresh token pair:
 
 ```ts
-import { createHash, randomBytes } from "node:crypto";
 import { SnaClient } from "@sna-sdk/client";
 
-const verifier = randomBytes(32).toString("base64url");
-const challenge = createHash("sha256").update(verifier).digest("base64url");
 const unauthenticated = new SnaClient({ baseUrl: "http://127.0.0.1:3099", ws: false });
 
-const request = await unauthenticated.auth.startPkce({
+const { tokens } = await unauthenticated.auth.authorizeWithPkce({
   clientId: "com.example.my-app",
   displayName: "My App",
-  codeChallenge: challenge,
-  codeChallengeMethod: "S256",
   scopes: ["sessions", "agent", "chat"],
-});
-open(request.authorizeUrl);
-
-let approved = await unauthenticated.auth.getPkceRequest(request.requestId);
-while (approved.status === "pending") {
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-  approved = await unauthenticated.auth.getPkceRequest(request.requestId);
-}
-if (!approved.code) throw new Error(`Authorization ${approved.status}`);
-
-const tokens = await unauthenticated.auth.exchangePkceCode({
-  requestId: request.requestId,
-  code: approved.code,
-  codeVerifier: verifier,
+}, {
+  onAuthorizeUrl: (url) => open(url),
 });
 
-const sna = new SnaClient({
-  baseUrl: "http://127.0.0.1:3099",
-  authToken: tokens.accessToken,
-});
+const sna = unauthenticated.withAuthToken(tokens.accessToken);
 ```
+
+Browser-based apps must still be served from the daemon's same origin or from
+an origin listed in `allowedOrigins`; native/server callers that do not send an
+`Origin` header can start the PKCE flow directly.
 
 Access tokens are accepted by HTTP and WebSocket transports. Refresh tokens are
 stored server-side as hashes and can be exchanged through

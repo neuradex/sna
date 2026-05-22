@@ -1,4 +1,4 @@
-import { afterEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
@@ -15,6 +15,7 @@ const handles: Array<{ stop(): Promise<boolean> }> = [];
 const servers: http.Server[] = [];
 const mockClaudeClis: MockClaudeCli[] = [];
 const ALLOWED_ORIGIN = "http://localhost:5173";
+let originalSnaAuthToken: string | undefined;
 
 function makeTempDir(prefix: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -137,6 +138,11 @@ async function requestJson(
   return { status: res.status, body: await res.json() };
 }
 
+beforeEach(() => {
+  originalSnaAuthToken = process.env.SNA_AUTH_TOKEN;
+  delete process.env.SNA_AUTH_TOKEN;
+});
+
 afterEach(async () => {
   for (const handle of handles.splice(0).reverse()) {
     try { await handle.stop(); } catch { /* ignore cleanup failures */ }
@@ -150,9 +156,12 @@ afterEach(async () => {
   for (const mock of mockClaudeClis.splice(0)) {
     mock.close();
   }
+  if (originalSnaAuthToken === undefined) delete process.env.SNA_AUTH_TOKEN;
+  else process.env.SNA_AUTH_TOKEN = originalSnaAuthToken;
+  originalSnaAuthToken = undefined;
 });
 
-describe("SNA daemon launcher", () => {
+describe("SNA daemon launcher", { concurrency: false }, () => {
   it("starts a background server, writes daemon files, reports health, and stops it", async () => {
     const dir = makeTempDir("sna-daemon-");
     const serverScript = writeFakeServerScript(dir);

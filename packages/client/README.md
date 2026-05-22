@@ -53,6 +53,27 @@ copying the token into app settings. HTTP and SSE requests send
 `Authorization: Bearer <authToken>`; WebSocket uses `/ws?token=<authToken>` for
 browser-compatible upgrades.
 
+For shared local daemons, consumer apps should request scoped app tokens through
+the local PKCE helper instead of receiving the launcher owner token:
+
+```ts
+const unauthenticated = new SnaClient({ baseUrl: "http://127.0.0.1:3099", ws: false });
+
+const { tokens } = await unauthenticated.auth.authorizeWithPkce({
+  clientId: "com.example.my-app",
+  displayName: "My App",
+  scopes: ["sessions", "agent", "chat"],
+}, {
+  onAuthorizeUrl: (url) => open(url),
+});
+
+const sna = unauthenticated.withAuthToken(tokens.accessToken);
+```
+
+Browser-based apps must still run from the daemon's same origin or an
+`allowedOrigins` entry; native/server callers that do not send an `Origin`
+header can start the PKCE flow directly.
+
 ### What HTTP guarantees (`http: true`)
 
 State-changing ops resolve only after the server has committed:

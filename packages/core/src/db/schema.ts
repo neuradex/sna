@@ -88,6 +88,7 @@ function escapePragmaString(value: string): string {
 
 /** Reset the DB singleton cache. Used by tests for isolation. */
 export function resetDb(): void {
+  try { _db?.close(); } catch {}
   _db = null;
 }
 

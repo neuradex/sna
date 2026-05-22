@@ -211,6 +211,43 @@ export interface PkceStartOptions {
   scopes?: string[];
 }
 
+export type PkceAuthorizeOptions = Omit<PkceStartOptions, "codeChallenge" | "codeChallengeMethod"> & {
+  /**
+   * Optional caller-supplied verifier. When omitted, the SDK generates a
+   * high-entropy verifier and derives the S256 challenge.
+   */
+  codeVerifier?: string;
+};
+
+export interface PkceAuthorizationSession extends PkceStartResponse {
+  codeVerifier: string;
+  codeChallenge: string;
+  codeChallengeMethod: "S256";
+}
+
+export interface PkceApprovalWaitOptions {
+  /** Poll interval while the request is pending. Defaults to 1000ms. */
+  intervalMs?: number;
+  /** Maximum time to wait for owner approval. Defaults to 5 minutes. */
+  timeoutMs?: number;
+  /** Optional AbortSignal for UI cancellation. */
+  signal?: AbortSignal;
+}
+
+export interface PkceAuthorizationFlowOptions extends PkceApprovalWaitOptions {
+  /**
+   * Called after the authorization request is created. Consumer apps usually
+   * open this URL in the browser, or surface it in their own UI.
+   */
+  onAuthorizeUrl?: (authorizeUrl: string, session: PkceAuthorizationSession) => void | Promise<void>;
+}
+
+export interface PkceAuthorizationResult {
+  session: PkceAuthorizationSession;
+  request: PkceRequestInfo;
+  tokens: AuthTokenResponse;
+}
+
 export interface PkceRequestInfo {
   requestId: string;
   clientId: string;
@@ -319,6 +356,11 @@ export interface DeleteRuntimeResult {
   status: "deleted";
   runtimeId: string;
   removedModelPresetIds: string[];
+  clearedProfileLevels: DifficultyLevel[];
+}
+export interface DeleteModelPresetResult {
+  status: "deleted";
+  modelPresetId: string;
   clearedProfileLevels: DifficultyLevel[];
 }
 export type UpdateRuntimeProfileInput = Partial<Omit<RuntimeProfile, "level" | "updatedAt" | "runtimeId" | "modelPresetId">> & {
@@ -433,6 +475,62 @@ function withQueryParam(url: string, key: string, value: string): string {
   return parsed.toString();
 }
 
+export function generatePkceVerifier(byteLength = 32): string {
+  if (!globalThis.crypto?.getRandomValues) {
+    throw new Error("PKCE verifier generation requires crypto.getRandomValues");
+  }
+  const bytes = new Uint8Array(byteLength);
+  globalThis.crypto.getRandomValues(bytes);
+  return bytesToBase64Url(bytes);
+}
+
+export async function createPkceChallenge(codeVerifier: string): Promise<{
+  codeVerifier: string;
+  codeChallenge: string;
+  codeChallengeMethod: "S256";
+}> {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error("PKCE S256 challenge generation requires crypto.subtle");
+  }
+  const digest = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(codeVerifier),
+  );
+  return {
+    codeVerifier,
+    codeChallenge: bytesToBase64Url(new Uint8Array(digest)),
+    codeChallengeMethod: "S256",
+  };
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  const bufferCtor = (globalThis as unknown as {
+    Buffer?: { from(input: Uint8Array): { toString(encoding: "base64"): string } };
+  }).Buffer;
+  const base64 = typeof btoa === "function"
+    ? btoa(binary)
+    : bufferCtor?.from(bytes).toString("base64");
+  if (!base64) throw new Error("Base64 encoding is unavailable in this runtime");
+  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new Error("PKCE authorization was cancelled"));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(new Error("PKCE authorization was cancelled"));
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 // ── Client ────────────────────────────────────────────────────────
 
 /**
@@ -466,6 +564,9 @@ export class SnaClient {
   private disposed = false;
 
   private readonly wsUrl: string | null;
+  private readonly baseUrl: string;
+  private readonly wsEnabled: boolean;
+  private readonly httpEnabled: boolean;
   private readonly authToken: string | undefined;
   private readonly _reconnect: boolean;
   private readonly reconnectDelay: number;
@@ -524,6 +625,9 @@ export class SnaClient {
     const { wsUrl, httpBase } = resolveTransports(options);
     this.wsUrl = wsUrl;
     this._httpUrl = httpBase ?? undefined;
+    this.baseUrl = options.baseUrl;
+    this.wsEnabled = options.ws ?? true;
+    this.httpEnabled = options.http ?? true;
     this.authToken = options.authToken?.trim() || undefined;
     this._reconnect = options.reconnect ?? true;
     this.reconnectDelay = options.reconnectDelay ?? 2000;
@@ -534,6 +638,21 @@ export class SnaClient {
     this.chat = new ChatApi(this);
     this.auth = new AuthApi(this);
     this.runtime = new RuntimeSettingsApi(this);
+  }
+
+  withAuthToken(
+    authToken: string,
+    options: Partial<Omit<SnaClientOptions, "baseUrl" | "authToken">> = {},
+  ): SnaClient {
+    return new SnaClient({
+      baseUrl: this.baseUrl,
+      authToken,
+      ws: options.ws ?? this.wsEnabled,
+      http: options.http ?? this.httpEnabled,
+      reconnect: options.reconnect ?? this._reconnect,
+      reconnectDelay: options.reconnectDelay ?? this.reconnectDelay,
+      maxReconnectAttempts: options.maxReconnectAttempts ?? this.maxReconnectAttempts,
+    });
   }
 
   // ── Connection lifecycle ──────────────────────────────────────
@@ -1087,6 +1206,20 @@ export interface ChatMessage {
 class AuthApi {
   constructor(private client: SnaClient) {}
 
+  async startAuthorization(opts: PkceAuthorizeOptions): Promise<PkceAuthorizationSession> {
+    const pkce = await createPkceChallenge(opts.codeVerifier ?? generatePkceVerifier());
+    const { codeVerifier: _codeVerifier, ...request } = opts;
+    const started = await this.startPkce({
+      ...request,
+      codeChallenge: pkce.codeChallenge,
+      codeChallengeMethod: pkce.codeChallengeMethod,
+    });
+    return {
+      ...started,
+      ...pkce,
+    };
+  }
+
   async startPkce(opts: PkceStartOptions): Promise<PkceStartResponse> {
     this.requireHttp();
     return this.client._httpFetch("POST", "/auth/pkce/start", opts as unknown as Record<string, unknown>);
@@ -1112,6 +1245,27 @@ class AuthApi {
     return this.client._httpFetch("POST", `/auth/pkce/requests/${encodeURIComponent(requestId)}/deny`);
   }
 
+  async waitForPkceApproval(
+    requestId: string,
+    opts: PkceApprovalWaitOptions = {},
+  ): Promise<PkceRequestInfo> {
+    const intervalMs = opts.intervalMs ?? 1000;
+    const timeoutMs = opts.timeoutMs ?? 5 * 60_000;
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() <= deadline) {
+      opts.signal?.throwIfAborted?.();
+      const request = await this.getPkceRequest(requestId);
+      if (request.status === "approved" && request.code) return request;
+      if (request.status === "denied") throw new Error("PKCE authorization was denied");
+      if (request.status === "expired") throw new Error("PKCE authorization expired");
+      if (request.status === "consumed") throw new Error("PKCE authorization code was already consumed");
+      await delay(intervalMs, opts.signal);
+    }
+
+    throw new Error("Timed out waiting for PKCE authorization approval");
+  }
+
   async exchangePkceCode(opts: {
     requestId: string;
     code: string;
@@ -1122,6 +1276,29 @@ class AuthApi {
       grantType: "authorization_code",
       ...opts,
     });
+  }
+
+  async exchangeAuthorizationSession(
+    session: PkceAuthorizationSession,
+    request: Pick<PkceRequestInfo, "code"> = session,
+  ): Promise<AuthTokenResponse> {
+    if (!request.code) throw new Error("PKCE authorization request is not approved");
+    return this.exchangePkceCode({
+      requestId: session.requestId,
+      code: request.code,
+      codeVerifier: session.codeVerifier,
+    });
+  }
+
+  async authorizeWithPkce(
+    opts: PkceAuthorizeOptions,
+    flow: PkceAuthorizationFlowOptions = {},
+  ): Promise<PkceAuthorizationResult> {
+    const session = await this.startAuthorization(opts);
+    await flow.onAuthorizeUrl?.(session.authorizeUrl, session);
+    const request = await this.waitForPkceApproval(session.requestId, flow);
+    const tokens = await this.exchangeAuthorizationSession(session, request);
+    return { session, request, tokens };
   }
 
   async refreshAccessToken(refreshToken: string): Promise<AuthTokenResponse> {
@@ -1175,6 +1352,11 @@ class RuntimeSettingsApi {
   async deleteRuntime(id: string): Promise<DeleteRuntimeResult> {
     this.requireHttp();
     return this.client._httpFetch("DELETE", `/agent/runtimes/${encodeURIComponent(id)}`);
+  }
+
+  async deleteModelPreset(id: string): Promise<DeleteModelPresetResult> {
+    this.requireHttp();
+    return this.client._httpFetch("DELETE", `/agent/model-presets/${encodeURIComponent(id)}`);
   }
 
   async listProfiles(): Promise<{ profiles: RuntimeProfile[] }> {

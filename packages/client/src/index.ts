@@ -1,4 +1,4 @@
-export { SnaClient } from "./sna-client.js";
+export { SnaClient, createPkceChallenge, generatePkceVerifier } from "./sna-client.js";
 export type {
   SnaClientConnection,
   SnaClientOptions,
@@ -11,6 +11,11 @@ export type {
   RunOnceResult,
   WsMessage,
   PkceStartOptions,
+  PkceAuthorizeOptions,
+  PkceAuthorizationSession,
+  PkceApprovalWaitOptions,
+  PkceAuthorizationFlowOptions,
+  PkceAuthorizationResult,
   PkceRequestInfo,
   PkceStartResponse,
   AuthTokenResponse,
@@ -22,6 +27,7 @@ export type {
   UpsertModelPresetInput,
   RegisteredRuntime,
   RegisterRuntimeInput,
+  DeleteModelPresetResult,
   UpdateRuntimeProfileInput,
   RuntimeCatalogEntry,
   RuntimeDetectionInfo,

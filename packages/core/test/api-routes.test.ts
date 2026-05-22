@@ -22,12 +22,34 @@ function setup() {
   removeTestDir();
   fs.mkdirSync(TEST_DB_DIR, { recursive: true });
   const origCwd = process.cwd;
+  const origDbPath = process.env.SNA_DB_PATH;
   process.cwd = () => TEST_DB_DIR;
-  return () => { process.cwd = origCwd; removeTestDir(); };
+  delete process.env.SNA_DB_PATH;
+  return () => {
+    process.cwd = origCwd;
+    if (origDbPath === undefined) delete process.env.SNA_DB_PATH;
+    else process.env.SNA_DB_PATH = origDbPath;
+    removeTestDir();
+  };
+}
+
+async function resetDbSingleton() {
+  const { resetDb } = await import("../src/db/schema.js");
+  resetDb();
 }
 
 function pkceChallenge(verifier: string): string {
   return createHash("sha256").update(verifier).digest("base64url");
+}
+
+let testLock = Promise.resolve();
+
+async function acquireTestLock(): Promise<() => void> {
+  let release!: () => void;
+  const previous = testLock;
+  testLock = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  return release;
 }
 
 class FakeApiAgentProcess extends EventEmitter {
@@ -91,13 +113,17 @@ function createFakeApiProvider(name: string) {
   };
 }
 
-describe("HTTP API Routes", () => {
+describe("HTTP API Routes", { concurrency: false }, () => {
   let cleanup: () => void;
   let app: any;
   let sm: any;
+  let releaseTestLock: (() => void) | undefined;
 
   beforeEach(async () => {
+    releaseTestLock = await acquireTestLock();
+    await resetDbSingleton();
     cleanup = setup();
+    await resetDbSingleton();
     const { createSnaApp } = await import("../src/server/index.js");
     const { SessionManager } = await import("../src/server/session-manager.js");
     sm = new SessionManager();
@@ -111,7 +137,10 @@ describe("HTTP API Routes", () => {
   afterEach(async () => {
     sm?.killAll?.();
     await new Promise((resolve) => setTimeout(resolve, 50));
+    await resetDbSingleton();
     cleanup?.();
+    releaseTestLock?.();
+    releaseTestLock = undefined;
   });
 
   // Helper

@@ -139,8 +139,14 @@ in the OS credential store, while `env`, `raw`, and `custom` providers cover
 other deployment models.
 
 For shared local daemons, consumer apps can use the client-side PKCE helpers
-(`client.auth.startPkce()`, `exchangePkceCode()`, `refreshAccessToken()`) to get
-their own access/refresh tokens instead of receiving the launcher owner token.
+(`client.auth.authorizeWithPkce()`, `refreshAccessToken()`) to get their own
+access/refresh tokens instead of receiving the launcher owner token. The helper
+generates the PKCE verifier/challenge, opens a caller-provided approval hook,
+polls the local request, and exchanges the approved code. Use
+`client.withAuthToken(tokens.accessToken)` to create the scoped app client.
+Browser-based apps must still run from the daemon's same origin or an
+`allowedOrigins` entry; native/server callers that do not send an `Origin`
+header can start the PKCE flow directly.
 Client scopes are enforced by route family: `sessions` for session
 CRUD/snapshots, `agent` for runtime and permission APIs, and `chat` for chat
 session/message/image APIs.
