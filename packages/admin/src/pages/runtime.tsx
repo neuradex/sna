@@ -23,7 +23,6 @@ export function RuntimePage() {
   const catalogEntries = catalog.data?.runtimes ?? [];
   const registeredRuntimes = runtimes.data?.runtimes ?? [];
   const catalogById = useMemo(() => new Map(catalogEntries.map((runtime) => [runtime.id, runtime])), [catalogEntries]);
-  const detectedCount = catalogEntries.filter((runtime) => runtime.detection.detected).length;
   const activeSessions = audit.data?.sessions.filter((session) => session.alive).length ?? 0;
 
   function openAddRuntime(provider?: string) {
@@ -46,8 +45,7 @@ export function RuntimePage() {
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <div className="grid gap-2 sm:min-w-[360px] sm:grid-cols-3">
-              <HeroMetric label="Detected" value={detectedCount} />
+            <div className="grid gap-2 sm:min-w-[240px] sm:grid-cols-2">
               <HeroMetric label="Registered" value={registeredRuntimes.length} />
               <HeroMetric label="Active" value={activeSessions} />
             </div>
@@ -84,37 +82,6 @@ export function RuntimePage() {
       </Panel>
 
       <Panel
-        title="Detected Runtime Catalog"
-        action={
-          <button
-            type="button"
-            className="focus-ring inline-flex h-8 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel-subtle)] px-3 font-mono text-[10px] font-medium text-[var(--fg-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--fg-soft)]"
-            onClick={() => void catalog.refetch()}
-            disabled={catalog.isFetching}
-          >
-            {catalog.isFetching ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            Detect
-          </button>
-        }
-      >
-        {catalog.isError ? <ErrorText error={catalog.error} /> : null}
-        {catalogEntries.length ? (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {catalogEntries.map((runtime) => (
-              <CatalogRuntimeCard
-                key={runtime.id}
-                runtime={runtime}
-                registered={registeredRuntimes.some((candidate) => candidate.provider === runtime.id)}
-                onAdd={() => openAddRuntime(runtime.id)}
-              />
-            ))}
-          </div>
-        ) : (
-          <EmptyState>No supported runtimes loaded</EmptyState>
-        )}
-      </Panel>
-
-      <Panel
         title="Runtime Audit"
         action={<StatusBadge tone={audit.isError ? "bad" : "neutral"}>{audit.data?.runtimes.length ?? 0} tracked</StatusBadge>}
       >
@@ -132,6 +99,10 @@ export function RuntimePage() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         runtimeCatalog={catalogEntries}
+        registeredRuntimes={registeredRuntimes}
+        catalogLoading={catalog.isFetching}
+        catalogError={catalog.error}
+        onRefreshCatalog={() => void catalog.refetch()}
         initialProvider={initialProvider}
         busy={runtimeMutation.isPending}
         error={runtimeMutation.error}
@@ -180,22 +151,26 @@ function RegisteredRuntimeCard({
   );
 }
 
-function CatalogRuntimeCard({
+function CatalogRuntimeOption({
   runtime,
   registered,
-  onAdd,
+  selected,
+  onSelect,
 }: {
   runtime: RuntimeCatalogEntry;
   registered: boolean;
-  onAdd: () => void;
+  selected: boolean;
+  onSelect: () => void;
 }) {
   const detected = runtime.detection.detected;
   const path = detectedPath(runtime) || runtime.detection.message || "No CLI detected";
 
   return (
-    <article className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--panel-subtle)] p-4">
+    <article
+      className={`min-w-0 rounded-xl border bg-[var(--panel-subtle)] p-3 transition ${selected ? "border-[var(--accent-border)] shadow-[0_0_0_1px_var(--accent-border)]" : "border-[var(--border)]"}`}
+    >
       <div className="flex min-w-0 items-start gap-3">
-        <RuntimeIcon runtime={runtime} className="size-11 shrink-0 rounded-xl border border-[var(--border)] p-2" />
+        <RuntimeIcon runtime={runtime} className="size-10 shrink-0 rounded-xl border border-[var(--border)] p-2" />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
             <h3 className="truncate text-sm font-semibold text-[var(--fg)]">{runtime.label}</h3>
@@ -214,10 +189,9 @@ function CatalogRuntimeCard({
         <button
           type="button"
           className="focus-ring inline-flex h-8 items-center gap-2 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 font-mono text-[10px] font-medium text-[var(--accent)] transition hover:border-[var(--accent)]"
-          onClick={onAdd}
+          onClick={onSelect}
         >
-          <Plus size={14} />
-          Add
+          {selected ? "Selected" : "Use"}
         </button>
       </div>
     </article>
@@ -228,6 +202,10 @@ function AddRuntimeDialog({
   open,
   onOpenChange,
   runtimeCatalog,
+  registeredRuntimes,
+  catalogLoading,
+  catalogError,
+  onRefreshCatalog,
   initialProvider,
   busy,
   error,
@@ -236,6 +214,10 @@ function AddRuntimeDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   runtimeCatalog: RuntimeCatalogEntry[];
+  registeredRuntimes: RegisteredRuntime[];
+  catalogLoading: boolean;
+  catalogError: unknown;
+  onRefreshCatalog: () => void;
   initialProvider?: string;
   busy: boolean;
   error: unknown;
@@ -287,8 +269,44 @@ function AddRuntimeDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title="Add runtime" description="Register a local agent runtime.">
+      <DialogContent className="max-w-4xl" title="Add runtime" description="Register a local agent runtime.">
         <form className="grid gap-4" onSubmit={submit}>
+          <section className="grid gap-3">
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <div>
+                <div className="field-label">Runtime Catalog</div>
+                <p className="mt-1 text-xs text-[var(--fg-muted)]">Detected local CLIs and supported providers.</p>
+              </div>
+              <button
+                type="button"
+                className="focus-ring inline-flex h-8 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel-subtle)] px-3 font-mono text-[10px] font-medium text-[var(--fg-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--fg-soft)]"
+                onClick={onRefreshCatalog}
+                disabled={catalogLoading}
+              >
+                {catalogLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                Detect
+              </button>
+            </div>
+            {catalogError ? <ErrorText error={catalogError} /> : null}
+            {runtimeCatalog.length ? (
+              <div className="grid max-h-[22rem] gap-2 overflow-y-auto pr-1 md:grid-cols-2">
+                {runtimeCatalog.map((runtime) => (
+                  <CatalogRuntimeOption
+                    key={runtime.id}
+                    runtime={runtime}
+                    selected={runtime.id === provider}
+                    registered={registeredRuntimes.some((candidate) => candidate.provider === runtime.id)}
+                    onSelect={() => applyRuntime(runtime)}
+                  />
+                ))}
+              </div>
+            ) : catalogLoading ? (
+              <EmptyState>Detecting runtimes...</EmptyState>
+            ) : (
+              <EmptyState>No supported runtimes loaded</EmptyState>
+            )}
+          </section>
+
           <label className="grid min-w-0 gap-1">
             <span className="field-label">Runtime</span>
             <Select value={provider} onValueChange={changeProvider} disabled={!runtimeCatalog.length}>
