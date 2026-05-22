@@ -17,6 +17,8 @@ export type SnaAuthIdentity =
   | { type: "owner" }
   | SnaClientTokenIdentity;
 
+export type SnaScope = "sessions" | "agent" | "chat";
+
 export function generateSnaAuthToken(): string {
   return `sna_${randomBytes(32).toString("base64url")}`;
 }
@@ -58,6 +60,27 @@ export function resolveSnaAuthIdentity(candidate: string | undefined, ownerToken
   if (isAuthorizedToken(candidate, ownerToken)) return { type: "owner" };
   if (!candidate) return undefined;
   return validateAccessToken(candidate);
+}
+
+export function identityHasScope(identity: SnaAuthIdentity | undefined, requiredScope: SnaScope | undefined): boolean {
+  if (!requiredScope) return true;
+  if (identity?.type === "owner") return true;
+  if (identity?.type !== "client") return false;
+  return identity.scopes.includes(requiredScope) || identity.scopes.includes("*");
+}
+
+export function requiredScopeForHttpRoute(_method: string, pathname: string): SnaScope | undefined {
+  if (pathname === "/agent/sessions" || pathname.startsWith("/agent/sessions/")) return "sessions";
+  if (pathname.startsWith("/agent/")) return "agent";
+  if (pathname.startsWith("/chat/")) return "chat";
+  return undefined;
+}
+
+export function requiredScopeForWsMessage(type: string): SnaScope | undefined {
+  if (type.startsWith("sessions.")) return "sessions";
+  if (type.startsWith("agent.") || type.startsWith("permission.")) return "agent";
+  if (type.startsWith("chat.")) return "chat";
+  return undefined;
 }
 
 export function extractBearerToken(
@@ -136,6 +159,10 @@ export function createHttpSecurityMiddleware(options: SnaSecurityOptions) {
     const identity = resolveSnaAuthIdentity(token, security.authToken);
     if (!identity) {
       return c.json({ status: "error", message: "Unauthorized" }, 401);
+    }
+    const requiredScope = requiredScopeForHttpRoute(method, pathname);
+    if (!identityHasScope(identity, requiredScope)) {
+      return c.json({ status: "error", message: `Insufficient scope: ${requiredScope} required` }, 403);
     }
     c.set?.("snaAuth", identity);
 

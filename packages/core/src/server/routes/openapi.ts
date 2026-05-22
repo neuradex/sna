@@ -87,6 +87,36 @@ const RevokeTokenInputSchema = z.object({
   token: z.string(),
 }).strict();
 
+const PkceRequestInfoSchema = z.object({
+  requestId: z.string(),
+  clientId: z.string(),
+  displayName: z.string().nullable(),
+  redirectUri: z.string().nullable(),
+  scopes: z.array(z.string()),
+  status: z.enum(["pending", "approved", "consumed", "expired", "denied"]),
+  code: z.string().optional(),
+  createdAt: z.number(),
+  expiresAt: z.number(),
+  approvedAt: z.number().nullable(),
+});
+
+const PkceStartResponseSchema = PkceRequestInfoSchema.extend({
+  authorizeUrl: z.string(),
+});
+
+const AuthTokenResponseSchema = z.object({
+  accessToken: z.string(),
+  refreshToken: z.string(),
+  tokenType: z.literal("Bearer"),
+  expiresIn: z.number(),
+  refreshExpiresIn: z.number(),
+  scopes: z.array(z.string()),
+});
+
+const RevokeTokenResponseSchema = z.object({
+  revoked: z.boolean(),
+});
+
 const SessionConfigSchema = z.object({
   provider: z.string(),
   modelProvider: z.string().optional(),
@@ -201,6 +231,162 @@ const healthRoute = createRoute({
     200: {
       description: "Server is healthy.",
       content: { "application/json": { schema: z.object({ ok: z.literal(true), name: z.literal("sna"), version: z.string() }) } },
+    },
+  },
+});
+
+// ── Local Authorization ───────────────────────────────────────────────
+
+const pkceStartRoute = createRoute({
+  method: "post",
+  path: "/auth/pkce/start",
+  security: [],
+  summary: "Start local PKCE authorization",
+  description: "Create a pending local authorization request for a consumer app. The owner approves it through the local admin UI.",
+  request: {
+    body: {
+      content: { "application/json": { schema: PkceStartInputSchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Authorization request created.",
+      content: { "application/json": { schema: PkceStartResponseSchema } },
+    },
+    400: {
+      description: "Invalid authorization request.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const pkceRequestRoute = createRoute({
+  method: "get",
+  path: "/auth/pkce/requests/{id}",
+  security: [],
+  summary: "Poll local PKCE authorization request",
+  description: "Read a single authorization request. Approved requests include a short-lived authorization code.",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Authorization request.",
+      content: { "application/json": { schema: PkceRequestInfoSchema } },
+    },
+    404: {
+      description: "Authorization request not found.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const pkceRequestsListRoute = protectedRoute({
+  method: "get",
+  path: "/auth/pkce/requests",
+  summary: "List pending local authorization requests",
+  description: "Owner-only list of pending and approved authorization requests for the local admin UI.",
+  responses: {
+    200: {
+      description: "Authorization request list.",
+      content: { "application/json": { schema: z.object({ requests: z.array(PkceRequestInfoSchema) }) } },
+    },
+    403: {
+      description: "Owner token required.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const pkceApproveRoute = protectedRoute({
+  method: "post",
+  path: "/auth/pkce/requests/{id}/approve",
+  summary: "Approve local PKCE authorization request",
+  description: "Owner-only approval endpoint. Returns an authorization code that the requesting app exchanges with its PKCE verifier.",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Authorization request approved.",
+      content: { "application/json": { schema: PkceRequestInfoSchema } },
+    },
+    400: {
+      description: "Authorization request cannot be approved.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+    403: {
+      description: "Owner token required.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const pkceDenyRoute = protectedRoute({
+  method: "post",
+  path: "/auth/pkce/requests/{id}/deny",
+  summary: "Deny local PKCE authorization request",
+  description: "Owner-only denial endpoint for a pending authorization request.",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Authorization request denied.",
+      content: { "application/json": { schema: PkceRequestInfoSchema } },
+    },
+    400: {
+      description: "Authorization request cannot be denied.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+    403: {
+      description: "Owner token required.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const pkceTokenRoute = createRoute({
+  method: "post",
+  path: "/auth/pkce/token",
+  security: [],
+  summary: "Exchange local PKCE authorization grant",
+  description: "Exchange an approved authorization code or refresh token for a client access token.",
+  request: {
+    body: {
+      content: { "application/json": { schema: PkceTokenInputSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Client token issued.",
+      content: { "application/json": { schema: AuthTokenResponseSchema } },
+    },
+    400: {
+      description: "Invalid authorization grant.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const revokeTokenRoute = protectedRoute({
+  method: "post",
+  path: "/auth/revoke",
+  summary: "Revoke local client token",
+  description: "Revoke an access or refresh token issued by the local daemon.",
+  request: {
+    body: {
+      content: { "application/json": { schema: RevokeTokenInputSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Token revocation result.",
+      content: { "application/json": { schema: RevokeTokenResponseSchema } },
+    },
+    400: {
+      description: "Invalid revocation request.",
+      content: { "application/json": { schema: ErrorResponse } },
     },
   },
 });
@@ -1171,14 +1357,6 @@ function getSessionId(c: { req: { query: (k: string) => string | undefined } }):
   return c.req.query("session") ?? "default";
 }
 
-async function readJsonBody(c: any): Promise<unknown> {
-  try {
-    return await c.req.json();
-  } catch {
-    return undefined;
-  }
-}
-
 function requireOwner(c: any): true | Response {
   const identity = c.get?.("snaAuth") as SnaAuthIdentity | undefined;
   if (identity?.type === "owner") return true;
@@ -1217,11 +1395,10 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
 
   app.get("/admin", (c) => c.html(renderAdminPage()));
 
-  app.post("/auth/pkce/start", async (c) => {
-    const parsed = PkceStartInputSchema.safeParse(await readJsonBody(c));
-    if (!parsed.success) return c.json({ status: "error", message: parsed.error.message }, 400);
+  app.openapi(pkceStartRoute, (c) => {
+    const body = c.req.valid("json");
     try {
-      const request = createPkceRequest(parsed.data);
+      const request = createPkceRequest(body);
       const origin = new URL(c.req.url).origin;
       return c.json({
         ...request,
@@ -1232,55 +1409,56 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     }
   });
 
-  app.get("/auth/pkce/requests/:id", (c) => {
-    const request = getPkceRequest(c.req.param("id"));
+  app.openapi(pkceRequestRoute, (c) => {
+    const { id } = c.req.valid("param");
+    const request = getPkceRequest(id);
     if (!request) return c.json({ status: "error", message: "Authorization request not found" }, 404);
     return c.json(request);
   });
 
-  app.get("/auth/pkce/requests", (c) => {
+  app.openapi(pkceRequestsListRoute, (c) => {
     const owner = requireOwner(c);
     if (owner !== true) return owner;
     return c.json({ requests: listPkceRequests() });
   });
 
-  app.post("/auth/pkce/requests/:id/approve", (c) => {
+  app.openapi(pkceApproveRoute, (c) => {
     const owner = requireOwner(c);
     if (owner !== true) return owner;
+    const { id } = c.req.valid("param");
     try {
-      return c.json(approvePkceRequest(c.req.param("id")));
+      return c.json(approvePkceRequest(id));
     } catch (err: any) {
       return c.json({ status: "error", message: err.message }, 400);
     }
   });
 
-  app.post("/auth/pkce/requests/:id/deny", (c) => {
+  app.openapi(pkceDenyRoute, (c) => {
     const owner = requireOwner(c);
     if (owner !== true) return owner;
+    const { id } = c.req.valid("param");
     try {
-      return c.json(denyPkceRequest(c.req.param("id")));
+      return c.json(denyPkceRequest(id));
     } catch (err: any) {
       return c.json({ status: "error", message: err.message }, 400);
     }
   });
 
-  app.post("/auth/pkce/token", async (c) => {
-    const parsed = PkceTokenInputSchema.safeParse(await readJsonBody(c));
-    if (!parsed.success) return c.json({ status: "error", message: parsed.error.message }, 400);
+  app.openapi(pkceTokenRoute, (c) => {
+    const body = c.req.valid("json");
     try {
-      if (parsed.data.grantType === "authorization_code") {
-        return c.json(exchangeAuthorizationCode(parsed.data));
+      if (body.grantType === "authorization_code") {
+        return c.json(exchangeAuthorizationCode(body));
       }
-      return c.json(refreshAccessToken(parsed.data.refreshToken));
+      return c.json(refreshAccessToken(body.refreshToken));
     } catch (err: any) {
       return c.json({ status: "error", message: err.message }, 400);
     }
   });
 
-  app.post("/auth/revoke", async (c) => {
-    const parsed = RevokeTokenInputSchema.safeParse(await readJsonBody(c));
-    if (!parsed.success) return c.json({ status: "error", message: parsed.error.message }, 400);
-    return c.json({ revoked: revokeToken(parsed.data.token) });
+  app.openapi(revokeTokenRoute, (c) => {
+    const body = c.req.valid("json");
+    return c.json({ revoked: revokeToken(body.token) });
   });
 
   // Plain JSON spec viewer — non-interactive, just formatted JSON

@@ -69,10 +69,13 @@ import { spawnWithPool } from "../core/providers/index.js";
 import type { RuntimeHandle } from "../core/providers/runtime.js";
 import {
   extractWsToken,
+  identityHasScope,
   isOriginAllowed,
   rejectUpgrade,
+  requiredScopeForWsMessage,
   resolveSnaAuthIdentity,
   resolveSnaSecurityOptions,
+  type SnaAuthIdentity,
   type SnaSecurityOptions,
 } from "./security.js";
 
@@ -91,6 +94,7 @@ interface ConnState {
   configChangedUnsub: (() => void) | null;
   stateChangedUnsub: (() => void) | null;
   metadataChangedUnsub: (() => void) | null;
+  auth: SnaAuthIdentity;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -132,10 +136,14 @@ export function attachWebSocket(
         return;
       }
       const token = extractWsToken(req.headers as { authorization?: string; "x-sna-token"?: string }, url);
-      if (!security.unsafeDisableAuth && !resolveSnaAuthIdentity(token, security.authToken)) {
+      const identity = security.unsafeDisableAuth
+        ? { type: "owner" as const }
+        : resolveSnaAuthIdentity(token, security.authToken);
+      if (!identity) {
         rejectUpgrade(socket, 401, "Unauthorized");
         return;
       }
+      (req as any).snaAuthIdentity = identity;
       wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit("connection", ws, req);
       });
@@ -144,30 +152,49 @@ export function attachWebSocket(
     }
   });
 
-  wss.on("connection", (ws) => {
+  wss.on("connection", (ws, req) => {
     logger.log("ws", "client connected");
-    const state: ConnState = { agentUnsubs: new Map(), permissionUnsub: null, lifecycleUnsub: null, configChangedUnsub: null, stateChangedUnsub: null, metadataChangedUnsub: null };
+    const auth = ((req as any).snaAuthIdentity ?? { type: "owner" }) as SnaAuthIdentity;
+    const state: ConnState = {
+      agentUnsubs: new Map(),
+      permissionUnsub: null,
+      lifecycleUnsub: null,
+      configChangedUnsub: null,
+      stateChangedUnsub: null,
+      metadataChangedUnsub: null,
+      auth,
+    };
 
     // Helper: push full session snapshot to this client
-    const pushSnapshot = () => send(ws, { type: "sessions.snapshot", sessions: sessionManager.listSessions() });
+    const pushSnapshot = () => {
+      if (identityHasScope(state.auth, "sessions")) {
+        send(ws, { type: "sessions.snapshot", sessions: sessionManager.listSessions() });
+      }
+    };
 
     // 1. Push snapshot immediately on connection
     pushSnapshot();
 
     // 2. Push snapshot on session lifecycle changes (started/killed/exited/crashed)
     state.lifecycleUnsub = sessionManager.onSessionLifecycle((event) => {
-      send(ws, { type: "session.lifecycle", ...event });
+      if (identityHasScope(state.auth, "sessions")) {
+        send(ws, { type: "session.lifecycle", ...event });
+      }
       pushSnapshot();
     });
 
     // Auto-push config changes to all clients (no subscribe needed)
     state.configChangedUnsub = sessionManager.onConfigChanged((event) => {
-      send(ws, { type: "session.config-changed", ...event });
+      if (identityHasScope(state.auth, "sessions")) {
+        send(ws, { type: "session.config-changed", ...event });
+      }
     });
 
     // 3. Push snapshot on agent status changes (idle/busy/disconnected)
     state.stateChangedUnsub = sessionManager.onStateChanged((event) => {
-      send(ws, { type: "session.state-changed", ...event });
+      if (identityHasScope(state.auth, "sessions")) {
+        send(ws, { type: "session.state-changed", ...event });
+      }
       pushSnapshot();
     });
 
@@ -219,6 +246,11 @@ function handleMessage(
   sm: SessionManager,
   state: ConnState,
 ): void {
+  const requiredScope = requiredScopeForWsMessage(msg.type);
+  if (!identityHasScope(state.auth, requiredScope)) {
+    return replyError(ws, msg, `Insufficient scope: ${requiredScope} required`);
+  }
+
   switch (msg.type) {
     // ── Session CRUD ──────────────────────────────────
     case "sessions.create":
