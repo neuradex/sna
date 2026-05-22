@@ -1,8 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Activity, AlertTriangle, CheckCircle2, Database, Loader2, Plus, RefreshCw, Save, ServerCog } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, ChevronDown, Database, Loader2, Plus, RefreshCw, Save, ServerCog } from "lucide-react";
 import { Dialog, DialogContent } from "../components/dialog";
 import { RuntimeIcon, detectedPath, runtimeDescriptions } from "../components/runtime-icon";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/select";
 import { EmptyState, ErrorText, Panel, StatusBadge } from "../components/ui";
 import {
   useAgentAuditQuery,
@@ -164,36 +163,45 @@ function CatalogRuntimeOption({
 }) {
   const detected = runtime.detection.detected;
   const path = detectedPath(runtime) || runtime.detection.message || "No CLI detected";
+  const details = runtime.detection.version || runtime.detection.message || runtime.detection.source;
 
   return (
     <article
-      className={`min-w-0 rounded-xl border bg-[var(--panel-subtle)] p-3 transition ${selected ? "border-[var(--accent-border)] shadow-[0_0_0_1px_var(--accent-border)]" : "border-[var(--border)]"}`}
+      className={`min-w-0 overflow-hidden rounded-lg border bg-[var(--panel-subtle)] transition ${selected ? "border-[var(--accent-border)] shadow-[0_0_0_1px_var(--accent-border)]" : "border-[var(--border)]"}`}
     >
-      <div className="flex min-w-0 items-start gap-3">
-        <RuntimeIcon runtime={runtime} className="size-10 shrink-0 rounded-xl border border-[var(--border)] p-2" />
+      <button
+        type="button"
+        className={`focus-ring flex w-full min-w-0 items-center gap-3 px-3 py-2.5 text-left transition ${selected ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--panel-solid)]"}`}
+        aria-expanded={selected}
+        onClick={onSelect}
+      >
+        <RuntimeIcon runtime={runtime} className="size-8 shrink-0 rounded-lg border border-[var(--border)] p-1.5" />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <h3 className="truncate text-sm font-semibold text-[var(--fg)]">{runtime.label}</h3>
-            {detected ? <CheckCircle2 size={15} className="shrink-0 text-[var(--good)]" /> : <AlertTriangle size={15} className="shrink-0 text-[var(--warn)]" />}
+            <span className="truncate text-sm font-semibold text-[var(--fg)]">{runtime.label}</span>
+            {detected ? <CheckCircle2 size={14} className="shrink-0 text-[var(--good)]" /> : <AlertTriangle size={14} className="shrink-0 text-[var(--warn)]" />}
           </div>
-          <p className="mt-1 text-xs leading-5 text-[var(--fg-muted)]">{runtimeDescriptions[runtime.id] ?? "Agent runtime."}</p>
-          <p className="mt-2 truncate font-mono text-[10px] text-[var(--fg-faint)]">{path}</p>
+          <p className="mt-0.5 truncate font-mono text-[10px] text-[var(--fg-faint)]">{path}</p>
         </div>
-      </div>
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap gap-2">
+        <div className="hidden shrink-0 gap-1.5 sm:flex">
           <StatusBadge tone={detected ? "good" : "warn"}>{detected ? runtime.detection.source : "missing"}</StatusBadge>
-          {runtime.supportsRuntimePooling ? <StatusBadge tone="good">pooled</StatusBadge> : <StatusBadge tone="neutral">per session</StatusBadge>}
           {registered ? <StatusBadge tone="neutral">registered</StatusBadge> : null}
         </div>
-        <button
-          type="button"
-          className="focus-ring inline-flex h-8 items-center gap-2 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 font-mono text-[10px] font-medium text-[var(--accent)] transition hover:border-[var(--accent)]"
-          onClick={onSelect}
-        >
-          {selected ? "Selected" : "Use"}
-        </button>
-      </div>
+        <ChevronDown className={`size-4 shrink-0 text-[var(--fg-muted)] transition-transform ${selected ? "rotate-180" : ""}`} />
+      </button>
+      {selected ? (
+        <div className="border-t border-[var(--border)] px-3 py-3">
+          <p className="text-xs leading-5 text-[var(--fg-muted)]">{runtimeDescriptions[runtime.id] ?? "Agent runtime."}</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <RuntimeFact label="Detection" value={details} />
+            <RuntimeFact label="Mode" value={runtime.supportsRuntimePooling ? "pooled" : "per session"} />
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2 sm:hidden">
+            <StatusBadge tone={detected ? "good" : "warn"}>{detected ? runtime.detection.source : "missing"}</StatusBadge>
+            {registered ? <StatusBadge tone="neutral">registered</StatusBadge> : null}
+          </div>
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -251,11 +259,6 @@ function AddRuntimeDialog({
     setEnabled(true);
   }
 
-  function changeProvider(nextProvider: string) {
-    const nextRuntime = runtimeCatalog.find((runtime) => runtime.id === nextProvider);
-    if (nextRuntime) applyRuntime(nextRuntime);
-  }
-
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!id.trim() || !provider) return;
@@ -269,8 +272,8 @@ function AddRuntimeDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl" title="Add runtime" description="Register a local agent runtime.">
-        <form className="grid gap-4" onSubmit={submit}>
+      <DialogContent className="max-w-3xl" title="Add runtime" description="Register a local agent runtime.">
+        <form className="grid gap-3" onSubmit={submit}>
           <section className="grid gap-3">
             <div className="flex min-w-0 items-center justify-between gap-3">
               <div>
@@ -289,7 +292,7 @@ function AddRuntimeDialog({
             </div>
             {catalogError ? <ErrorText error={catalogError} /> : null}
             {runtimeCatalog.length ? (
-              <div className="grid max-h-[22rem] gap-2 overflow-y-auto pr-1 md:grid-cols-2">
+              <div className="flex max-h-[17rem] flex-col gap-1.5 overflow-y-auto py-0.5 pr-1">
                 {runtimeCatalog.map((runtime) => (
                   <CatalogRuntimeOption
                     key={runtime.id}
@@ -306,37 +309,6 @@ function AddRuntimeDialog({
               <EmptyState>No supported runtimes loaded</EmptyState>
             )}
           </section>
-
-          <label className="grid min-w-0 gap-1">
-            <span className="field-label">Runtime</span>
-            <Select value={provider} onValueChange={changeProvider} disabled={!runtimeCatalog.length}>
-              <SelectTrigger className="h-10">
-                <SelectValue placeholder="Select runtime" />
-              </SelectTrigger>
-              <SelectContent>
-                {runtimeCatalog.map((runtime) => (
-                  <SelectItem key={runtime.id} value={runtime.id}>{runtime.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </label>
-
-          {selectedRuntime ? (
-            <div className="flex min-w-0 items-start gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel-subtle)] p-3">
-              <RuntimeIcon runtime={selectedRuntime} className="size-11 shrink-0 rounded-xl border border-[var(--border)] p-2" />
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-semibold text-[var(--fg)]">{selectedRuntime.label}</span>
-                  <StatusBadge tone={selectedRuntime.detection.detected ? "good" : "warn"}>
-                    {selectedRuntime.detection.detected ? "detected" : "missing"}
-                  </StatusBadge>
-                </div>
-                <p className="mt-1 truncate font-mono text-[11px] text-[var(--fg-muted)]">
-                  {selectedRuntime.detection.version || selectedRuntime.detection.message || selectedRuntime.detection.source}
-                </p>
-              </div>
-            </div>
-          ) : null}
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="ID" value={id} onChange={setId} placeholder="codex-main" />
