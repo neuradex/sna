@@ -5,6 +5,7 @@
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "fs";
 import path from "path";
 import { WebSocket } from "ws";
@@ -20,6 +21,10 @@ function setup() {
   const origCwd = process.cwd;
   process.cwd = () => TEST_DB_DIR;
   return () => { process.cwd = origCwd; fs.rmSync(TEST_DB_DIR, { recursive: true, force: true }); };
+}
+
+function pkceChallenge(verifier: string): string {
+  return createHash("sha256").update(verifier).digest("base64url");
 }
 
 interface TestContext {
@@ -64,6 +69,38 @@ async function startServer(): Promise<TestContext> {
   const ctx = await startServerOnly();
   const ws = await openWs(ctx.port, { token: TEST_TOKEN, origin: ALLOWED_ORIGIN });
   return { ...ctx, ws, rid: 0 };
+}
+
+async function issueAccessToken(port: number, scopes: string[]): Promise<string> {
+  const verifier = `ws-scope-verifier-${scopes.join("-")}`;
+  const post = async (path: string, body: Record<string, unknown>, token?: string) => {
+    return fetch(`http://localhost:${port}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+  };
+
+  const start = await post("/auth/pkce/start", {
+    clientId: `ws-scope-${scopes.join("-")}`,
+    codeChallenge: pkceChallenge(verifier),
+    codeChallengeMethod: "S256",
+    scopes,
+  });
+  const started = await start.json() as any;
+  const approve = await post(`/auth/pkce/requests/${started.requestId}/approve`, {}, TEST_TOKEN);
+  const approved = await approve.json() as any;
+  const token = await post("/auth/pkce/token", {
+    grantType: "authorization_code",
+    requestId: started.requestId,
+    code: approved.code,
+    codeVerifier: verifier,
+  });
+  const issued = await token.json() as any;
+  return issued.accessToken;
 }
 
 async function openWs(
@@ -172,6 +209,51 @@ describe("WebSocket Handler", () => {
     try {
       await assertWsRejected(serverCtx.port, { token: TEST_TOKEN, origin: "https://evil.example" });
     } finally {
+      serverCtx.server.close();
+      serverCtx.cleanup();
+    }
+  });
+
+  it("allows WebSocket upgrades from the same server origin even when it is not listed", async () => {
+    const serverCtx = await startServerOnly();
+    let sameOriginWs: WebSocket | undefined;
+    try {
+      sameOriginWs = await openWs(serverCtx.port, {
+        token: TEST_TOKEN,
+        origin: `http://localhost:${serverCtx.port}`,
+      });
+      assert.equal(sameOriginWs.readyState, WebSocket.OPEN);
+    } finally {
+      sameOriginWs?.close();
+      serverCtx.server.close();
+      serverCtx.cleanup();
+    }
+  });
+
+  it("enforces client token scopes on WebSocket messages", async () => {
+    const serverCtx = await startServerOnly();
+    let scopedWs: WebSocket | undefined;
+    try {
+      const accessToken = await issueAccessToken(serverCtx.port, ["chat"]);
+      scopedWs = await openWs(serverCtx.port, { token: accessToken, origin: ALLOWED_ORIGIN });
+      const scopedCtx: TestContext = { ...serverCtx, ws: scopedWs, rid: 0 };
+
+      const chatRid = send(scopedCtx, "chat.sessions.list");
+      const chatReply = await waitForReply(scopedCtx, chatRid);
+      assert.equal(chatReply.type, "chat.sessions.list");
+      assert.ok(Array.isArray(chatReply.sessions));
+
+      const sessionsRid = send(scopedCtx, "sessions.list");
+      const sessionsReply = await waitForReply(scopedCtx, sessionsRid);
+      assert.equal(sessionsReply.type, "error");
+      assert.match(sessionsReply.message, /Insufficient scope.*sessions/);
+
+      const agentRid = send(scopedCtx, "agent.status", { session: "default" });
+      const agentReply = await waitForReply(scopedCtx, agentRid);
+      assert.equal(agentReply.type, "error");
+      assert.match(agentReply.message, /Insufficient scope.*agent/);
+    } finally {
+      scopedWs?.close();
       serverCtx.server.close();
       serverCtx.cleanup();
     }

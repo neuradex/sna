@@ -72,27 +72,39 @@ import {
 
 // ── CLI discovery ────────────────────────────────────────────────────────────
 
+export const DEFAULT_CURSOR_COMMAND = "cursor-agent";
+
+interface ResolveCursorPathOptions {
+  env?: NodeJS.ProcessEnv;
+  candidates?: string[];
+  isExecutable?: (filePath: string) => boolean;
+}
+
 /**
  * Resolve the path to the `cursor-agent` CLI (Cursor's headless binary).
  * Env override → static common locations → PATH lookup.
  */
-export function resolveCursorPath(_cwd: string = process.cwd()): string {
-  if (process.env.SNA_CURSOR_COMMAND) return process.env.SNA_CURSOR_COMMAND;
-  const home = process.env.HOME ?? "";
-  const candidates = [
+export function resolveCursorPath(_cwd: string = process.cwd(), opts: ResolveCursorPathOptions = {}): string {
+  const env = opts.env ?? process.env;
+  if (env.SNA_CURSOR_COMMAND) return env.SNA_CURSOR_COMMAND;
+  const home = env.HOME ?? "";
+  const candidates = opts.candidates ?? [
     `${home}/.local/bin/cursor-agent`,
     "/usr/local/bin/cursor-agent",
     "/opt/homebrew/bin/cursor-agent",
   ];
-  for (const p of candidates) {
+  const isExecutable = opts.isExecutable ?? ((filePath: string) => {
     try {
-      execSync(`test -x "${p}"`, { stdio: "pipe" });
-      return p;
+      execSync(`test -x "${filePath}"`, { stdio: "pipe" });
+      return true;
     } catch {
-      // try next
+      return false;
     }
+  });
+  for (const p of candidates) {
+    if (isExecutable(p)) return p;
   }
-  return "cursor-agent";
+  return DEFAULT_CURSOR_COMMAND;
 }
 
 // ── Cursor tool_call wrapper variants ───────────────────────────────────────

@@ -36,6 +36,123 @@ const sna = await startSnaServer({
 
 For Electron, swap to `@sna-sdk/core/electron` and add `asarUnpack: ["node_modules/@sna-sdk/core/**"]` to electron-builder. The Electron launcher additionally locates the consumer app's electron-rebuilt `better-sqlite3` and threads the binding path through. Store user-selected runtime CLI paths in your app settings and pass them through `runtimePaths`.
 
+### Background daemon and local admin
+
+Use `startSnaDaemon()` when SNA should keep running after the launcher process
+returns:
+
+```ts
+import { startSnaDaemon } from "@sna-sdk/core/node";
+
+const sna = await startSnaDaemon({
+  port: 3099,
+  dbPath: "./data/sna.db",
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+  },
+});
+
+await sna.openAdmin();
+```
+
+Daemon launchers bind to `127.0.0.1`, generate or reuse an auth token, write
+`.sna/sna-api.token` with private file permissions, and return
+`sna.connection` for SDK clients. `sna.adminUrl` is the plain local admin URL;
+`sna.openAdmin()` opens the browser to the same-origin admin shell. The server
+sets an HttpOnly same-origin admin cookie when serving `/admin`, so the browser
+does not need to persist the owner bearer token.
+
+For local daemon data that should not be readable directly from the SQLite file,
+enable encrypted storage:
+
+```ts
+const sna = await startSnaDaemon({
+  port: 3099,
+  dbPath: "./data/sna.db",
+  database: {
+    encryption: "sqlite-cipher",
+    keyProvider: { type: "keytar" },
+  },
+});
+```
+
+Encrypted mode is optional and requires the consumer app to install
+`better-sqlite3-multiple-ciphers`; the keychain-backed provider also requires
+`keytar`. With `keytar`, SNA creates or reads the DB key from the OS credential
+store without requiring admin privileges. Use the `env`, `raw`, or `custom` key
+providers when the host app wants to own key delivery itself.
+
+When the daemon is shared by multiple local apps, do not hand each app the
+launcher owner token. Instead, let the app create a PKCE request, open the local
+admin URL for approval, poll until a short-lived code is approved, and exchange
+that code for its own access/refresh token pair:
+
+```ts
+import { SnaClient } from "@sna-sdk/client";
+
+const unauthenticated = new SnaClient({ baseUrl: "http://127.0.0.1:3099", ws: false });
+
+const { tokens } = await unauthenticated.auth.authorizeWithPkce({
+  clientId: "com.example.my-app",
+  displayName: "My App",
+  scopes: ["sessions", "agent", "chat"],
+}, {
+  onAuthorizeUrl: (url) => open(url),
+});
+
+const sna = unauthenticated.withAuthToken(tokens.accessToken);
+```
+
+Browser-based apps must still be served from the daemon's same origin or from
+an origin listed in `allowedOrigins`; native/server callers that do not send an
+`Origin` header can start the PKCE flow directly.
+
+Access tokens are accepted by HTTP and WebSocket transports. Refresh tokens are
+stored server-side as hashes and can be exchanged through
+`sna.auth.refreshAccessToken(refreshToken)`.
+
+Client tokens are scoped. `sessions` gates session CRUD and session snapshot
+pushes, `agent` gates agent runtime and permission APIs, and `chat` gates chat
+session/message/image APIs. The launcher owner token bypasses client scopes and
+is intended for the local admin surface, not for distribution to consumer apps.
+
+### Manual daemon/admin smoke test
+
+Inside this repository, use the `mise` tasks to exercise the same standalone
+daemon and admin surface that a host app would embed:
+
+```bash
+mise run sna:dev
+mise run sna:health
+mise run sna:admin
+```
+
+`sna:dev` starts the standalone daemon on `127.0.0.1:3099` with the local
+development token from `mise.toml`. `sna:admin` opens the built admin shell
+served by that daemon. The `/admin` response sets the admin cookie, and
+subsequent same-origin admin API calls use that cookie.
+
+For HMR admin development, start the Vite console through mise so its proxy is
+configured with the daemon owner token:
+
+```bash
+mise run sna:admin:dev
+open http://127.0.0.1:3098/admin/
+```
+
+The local PKCE flow can be checked manually:
+
+```bash
+mise run sna:pkce:start
+# Approve the printed request URL in the admin Authorization page.
+mise run sna:pkce:exchange
+mise run sna:pkce:check
+```
+
+The final check confirms that the app access token can read scoped session/chat
+routes and is denied from owner-only agent routes. Use `mise run sna:auth-smoke`
+for the automated auth/OpenAPI/WebSocket/daemon test slice.
+
 ### Connecting from any framework
 
 ```ts

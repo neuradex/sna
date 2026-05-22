@@ -48,6 +48,17 @@ export type { OpenCodeResolveResult } from "../core/providers/opencode.js";
 export { resolveGrokPath } from "../core/providers/grok.js";
 export { resolveCursorPath } from "../core/providers/cursor.js";
 export type { LogLevel } from "../lib/logger.js";
+export { createSnaDaemonAdminUrl, openSnaDaemonAdmin, SnaDaemonManager, startSnaDaemon } from "../daemon.js";
+export type {
+  OpenSnaDaemonAdminOptions,
+  SnaDaemonAdminUrlOptions,
+  SnaDaemonHandle,
+  SnaDaemonHealth,
+  SnaDaemonOptions,
+  SnaDaemonState,
+  SnaDaemonStatus,
+} from "../daemon.js";
+export type { DbKeyProvider, EncryptedDatabaseOptions } from "../db/encryption.js";
 import path from "path";
 
 // In-process mode imports

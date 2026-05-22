@@ -202,6 +202,236 @@ export interface WsMessage {
   [key: string]: unknown;
 }
 
+export interface PkceStartOptions {
+  clientId: string;
+  displayName?: string;
+  redirectUri?: string;
+  codeChallenge: string;
+  codeChallengeMethod?: "S256";
+  scopes?: string[];
+}
+
+export type PkceAuthorizeOptions = Omit<PkceStartOptions, "codeChallenge" | "codeChallengeMethod"> & {
+  /**
+   * Optional caller-supplied verifier. When omitted, the SDK generates a
+   * high-entropy verifier and derives the S256 challenge.
+   */
+  codeVerifier?: string;
+};
+
+export interface PkceAuthorizationSession extends PkceStartResponse {
+  codeVerifier: string;
+  codeChallenge: string;
+  codeChallengeMethod: "S256";
+}
+
+export interface PkceApprovalWaitOptions {
+  /** Poll interval while the request is pending. Defaults to 1000ms. */
+  intervalMs?: number;
+  /** Maximum time to wait for owner approval. Defaults to 5 minutes. */
+  timeoutMs?: number;
+  /** Optional AbortSignal for UI cancellation. */
+  signal?: AbortSignal;
+}
+
+export interface PkceAuthorizationFlowOptions extends PkceApprovalWaitOptions {
+  /**
+   * Called after the authorization request is created. Consumer apps usually
+   * open this URL in the browser, or surface it in their own UI.
+   */
+  onAuthorizeUrl?: (authorizeUrl: string, session: PkceAuthorizationSession) => void | Promise<void>;
+}
+
+export interface PkceAuthorizationResult {
+  session: PkceAuthorizationSession;
+  request: PkceRequestInfo;
+  tokens: AuthTokenResponse;
+}
+
+export interface PkceRequestInfo {
+  requestId: string;
+  clientId: string;
+  displayName: string | null;
+  redirectUri: string | null;
+  scopes: string[];
+  status: "pending" | "approved" | "consumed" | "expired" | "denied";
+  code?: string;
+  createdAt: number;
+  expiresAt: number;
+  approvedAt: number | null;
+}
+
+export interface PkceStartResponse extends PkceRequestInfo {
+  authorizeUrl: string;
+}
+
+export interface AuthTokenResponse {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: "Bearer";
+  expiresIn: number;
+  refreshExpiresIn: number;
+  scopes: string[];
+}
+
+/**
+ * User-facing task difficulty profile.
+ *
+ * Levels are ordered from lightest to heaviest so consumer apps can call a
+ * generic level without knowing the provider-specific runtime knobs.
+ */
+export type DifficultyLevel = 1 | 2 | 3 | 4 | 5;
+
+/**
+ * Provider-agnostic reasoning-level scale.
+ *
+ * 0 is the lightest reasoning the provider supports, 5 is the heaviest.
+ */
+export type ReasoningLevel = 0 | 1 | 2 | 3 | 4 | 5;
+
+export interface RuntimeLaunchConfig {
+  provider?: string;
+  modelProvider?: string;
+  model?: string;
+  permissionMode?: string;
+  cwd?: string;
+  configDir?: string;
+  systemPrompt?: string;
+  appendSystemPrompt?: string;
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  mcpServers?: Record<string, unknown>;
+  reasoningLevel?: ReasoningLevel;
+  providerOptions?: Record<string, unknown>;
+  extraArgs?: string[];
+  env?: Record<string, string>;
+}
+
+export interface RuntimeProfile {
+  level: DifficultyLevel;
+  label: string;
+  description?: string;
+  runtimeId?: string;
+  modelPresetId?: string;
+  config: RuntimeLaunchConfig;
+  updatedAt: number;
+}
+
+export interface ModelPreset {
+  id: string;
+  name: string;
+  runtimeId: string;
+  model?: string;
+  modelProvider?: string;
+  reasoningLevel: ReasoningLevel;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface RegisteredRuntime {
+  id: string;
+  provider: string;
+  label: string;
+  enabled: boolean;
+  modelProvider?: string;
+  defaultModel?: string;
+  cliPath?: string;
+  models?: Array<{ id: string; label?: string; provider?: string }>;
+  config?: RuntimeLaunchConfig;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type RegisterRuntimeInput = {
+  provider: string;
+  label?: string;
+  enabled?: boolean;
+  modelProvider?: string;
+  defaultModel?: string;
+  cliPath?: string;
+  models?: Array<{ id: string; label?: string; provider?: string }>;
+  config?: RuntimeLaunchConfig;
+};
+export interface DeleteRuntimeResult {
+  status: "deleted";
+  runtimeId: string;
+  removedModelPresetIds: string[];
+  clearedProfileLevels: DifficultyLevel[];
+}
+export interface DeleteModelPresetResult {
+  status: "deleted";
+  modelPresetId: string;
+  clearedProfileLevels: DifficultyLevel[];
+}
+export type UpdateRuntimeProfileInput = Partial<Omit<RuntimeProfile, "level" | "updatedAt" | "runtimeId" | "modelPresetId">> & {
+  runtimeId?: string | null;
+  modelPresetId?: string | null;
+};
+export type UpsertModelPresetInput = {
+  name?: string;
+  runtimeId: string;
+  model?: string;
+  modelProvider?: string;
+  reasoningLevel: ReasoningLevel;
+};
+
+export interface RuntimeCatalogEntry {
+  id: string;
+  label: string;
+  available: boolean;
+  supportsRuntimePooling: boolean;
+  supportsCwdPerThread: boolean;
+  modelListing: boolean;
+  detection: RuntimeDetectionInfo;
+}
+
+export interface RuntimeDetectionInfo {
+  detected: boolean;
+  path: string;
+  version?: string;
+  source: "env" | "cache" | "static" | "shell" | "fallback";
+  message?: string;
+}
+
+export interface RuntimeAuditRuntime extends RegisteredRuntime {
+  activeSessionCount: number;
+  sessionCount: number;
+}
+
+export interface RuntimeAuditSession {
+  id: string;
+  label: string;
+  state: string;
+  alive: boolean;
+  provider?: string;
+  modelProvider?: string;
+  model?: string;
+  runtimeId?: string;
+  modelPresetId?: string;
+  profileLevel?: DifficultyLevel;
+  reasoningLevel?: ReasoningLevel;
+  cwd: string;
+  createdAt: number;
+  lastActivityAt: number;
+}
+
+export interface RuntimeAuditApp {
+  clientId: string;
+  displayName: string | null;
+  scopes: string[];
+  tokenCount: number;
+  activeTokenCount: number;
+  lastIssuedAt?: number;
+}
+
+export interface AgentAuditSnapshot {
+  profiles: RuntimeProfile[];
+  modelPresets: ModelPreset[];
+  runtimes: RuntimeAuditRuntime[];
+  sessions: RuntimeAuditSession[];
+  apps: RuntimeAuditApp[];
+}
+
 // ── Helpers ───────────────────────────────────────────────────────
 
 interface ResolvedTransports {
@@ -245,6 +475,62 @@ function withQueryParam(url: string, key: string, value: string): string {
   return parsed.toString();
 }
 
+export function generatePkceVerifier(byteLength = 32): string {
+  if (!globalThis.crypto?.getRandomValues) {
+    throw new Error("PKCE verifier generation requires crypto.getRandomValues");
+  }
+  const bytes = new Uint8Array(byteLength);
+  globalThis.crypto.getRandomValues(bytes);
+  return bytesToBase64Url(bytes);
+}
+
+export async function createPkceChallenge(codeVerifier: string): Promise<{
+  codeVerifier: string;
+  codeChallenge: string;
+  codeChallengeMethod: "S256";
+}> {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error("PKCE S256 challenge generation requires crypto.subtle");
+  }
+  const digest = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(codeVerifier),
+  );
+  return {
+    codeVerifier,
+    codeChallenge: bytesToBase64Url(new Uint8Array(digest)),
+    codeChallengeMethod: "S256",
+  };
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  const bufferCtor = (globalThis as unknown as {
+    Buffer?: { from(input: Uint8Array): { toString(encoding: "base64"): string } };
+  }).Buffer;
+  const base64 = typeof btoa === "function"
+    ? btoa(binary)
+    : bufferCtor?.from(bytes).toString("base64");
+  if (!base64) throw new Error("Base64 encoding is unavailable in this runtime");
+  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new Error("PKCE authorization was cancelled"));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(new Error("PKCE authorization was cancelled"));
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 // ── Client ────────────────────────────────────────────────────────
 
 /**
@@ -278,6 +564,9 @@ export class SnaClient {
   private disposed = false;
 
   private readonly wsUrl: string | null;
+  private readonly baseUrl: string;
+  private readonly wsEnabled: boolean;
+  private readonly httpEnabled: boolean;
   private readonly authToken: string | undefined;
   private readonly _reconnect: boolean;
   private readonly reconnectDelay: number;
@@ -316,10 +605,29 @@ export class SnaClient {
    */
   readonly chat: ChatApi;
 
+  /**
+   * Local daemon authorization APIs.
+   *
+   * Use this namespace when a consumer app should obtain its own access token
+   * instead of holding the daemon owner's launcher token.
+   */
+  readonly auth: AuthApi;
+
+  /**
+   * Runtime profile, runtime registration, and local audit APIs.
+   *
+   * These APIs are HTTP-only because they mutate daemon settings and return
+   * point-in-time audit snapshots.
+   */
+  readonly runtime: RuntimeSettingsApi;
+
   constructor(options: SnaClientOptions) {
     const { wsUrl, httpBase } = resolveTransports(options);
     this.wsUrl = wsUrl;
     this._httpUrl = httpBase ?? undefined;
+    this.baseUrl = options.baseUrl;
+    this.wsEnabled = options.ws ?? true;
+    this.httpEnabled = options.http ?? true;
     this.authToken = options.authToken?.trim() || undefined;
     this._reconnect = options.reconnect ?? true;
     this.reconnectDelay = options.reconnectDelay ?? 2000;
@@ -328,6 +636,23 @@ export class SnaClient {
     this.sessions = new SessionsApi(this);
     this.agent = new AgentApi(this);
     this.chat = new ChatApi(this);
+    this.auth = new AuthApi(this);
+    this.runtime = new RuntimeSettingsApi(this);
+  }
+
+  withAuthToken(
+    authToken: string,
+    options: Partial<Omit<SnaClientOptions, "baseUrl" | "authToken">> = {},
+  ): SnaClient {
+    return new SnaClient({
+      baseUrl: this.baseUrl,
+      authToken,
+      ws: options.ws ?? this.wsEnabled,
+      http: options.http ?? this.httpEnabled,
+      reconnect: options.reconnect ?? this._reconnect,
+      reconnectDelay: options.reconnectDelay ?? this.reconnectDelay,
+      maxReconnectAttempts: options.maxReconnectAttempts ?? this.maxReconnectAttempts,
+    });
   }
 
   // ── Connection lifecycle ──────────────────────────────────────
@@ -706,6 +1031,12 @@ export interface SessionInfo {
 /** Options for a lightweight one-shot completion (no session). */
 export interface CompletionOptions {
   prompt: string;
+  /** Difficulty profile to resolve on the daemon before launch. */
+  profileLevel?: DifficultyLevel;
+  /** Registered runtime defaults to merge before explicit options. */
+  runtimeId?: string;
+  /** Named model preset to merge before explicit options. */
+  modelPresetId?: string;
   model?: string;
   systemPrompt?: string;
   appendSystemPrompt?: string;
@@ -726,7 +1057,7 @@ export interface CompletionOptions {
    *     5   | max                  | xhigh
    * Omit to inherit the provider's own default.
    */
-  reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
+  reasoningLevel?: ReasoningLevel;
   /**
    * Provider-specific options passed through to the selected runtime.
    *
@@ -759,6 +1090,12 @@ export interface CompletionResult {
 /** Options for a one-shot agent execution. */
 export interface RunOnceOptions {
   message: string;
+  /** Difficulty profile to resolve on the daemon before launch. */
+  profileLevel?: DifficultyLevel;
+  /** Registered runtime defaults to merge before explicit options. */
+  runtimeId?: string;
+  /** Named model preset to merge before explicit options. */
+  modelPresetId?: string;
   model?: string;
   systemPrompt?: string;
   appendSystemPrompt?: string;
@@ -768,7 +1105,7 @@ export interface RunOnceOptions {
   provider?: string;
   extraArgs?: string[];
   /** Reasoning effort 0..5. See {@link CompletionOptions.reasoningLevel}. */
-  reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
+  reasoningLevel?: ReasoningLevel;
   /** Provider-specific options. See {@link CompletionOptions.providerOptions}. */
   providerOptions?: Record<string, unknown>;
 }
@@ -859,6 +1196,211 @@ export interface ChatMessage {
   meta: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Local daemon authorization APIs.
+ *
+ * Access via `sna.auth`.
+ */
+class AuthApi {
+  constructor(private client: SnaClient) {}
+
+  async startAuthorization(opts: PkceAuthorizeOptions): Promise<PkceAuthorizationSession> {
+    const pkce = await createPkceChallenge(opts.codeVerifier ?? generatePkceVerifier());
+    const { codeVerifier: _codeVerifier, ...request } = opts;
+    const started = await this.startPkce({
+      ...request,
+      codeChallenge: pkce.codeChallenge,
+      codeChallengeMethod: pkce.codeChallengeMethod,
+    });
+    return {
+      ...started,
+      ...pkce,
+    };
+  }
+
+  async startPkce(opts: PkceStartOptions): Promise<PkceStartResponse> {
+    this.requireHttp();
+    return this.client._httpFetch("POST", "/auth/pkce/start", opts as unknown as Record<string, unknown>);
+  }
+
+  async getPkceRequest(requestId: string): Promise<PkceRequestInfo> {
+    this.requireHttp();
+    return this.client._httpFetch("GET", `/auth/pkce/requests/${encodeURIComponent(requestId)}`);
+  }
+
+  async listPkceRequests(): Promise<{ requests: PkceRequestInfo[] }> {
+    this.requireHttp();
+    return this.client._httpFetch("GET", "/auth/pkce/requests");
+  }
+
+  async approvePkceRequest(requestId: string): Promise<PkceRequestInfo> {
+    this.requireHttp();
+    return this.client._httpFetch("POST", `/auth/pkce/requests/${encodeURIComponent(requestId)}/approve`);
+  }
+
+  async denyPkceRequest(requestId: string): Promise<PkceRequestInfo> {
+    this.requireHttp();
+    return this.client._httpFetch("POST", `/auth/pkce/requests/${encodeURIComponent(requestId)}/deny`);
+  }
+
+  async waitForPkceApproval(
+    requestId: string,
+    opts: PkceApprovalWaitOptions = {},
+  ): Promise<PkceRequestInfo> {
+    const intervalMs = opts.intervalMs ?? 1000;
+    const timeoutMs = opts.timeoutMs ?? 5 * 60_000;
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() <= deadline) {
+      opts.signal?.throwIfAborted?.();
+      const request = await this.getPkceRequest(requestId);
+      if (request.status === "approved" && request.code) return request;
+      if (request.status === "denied") throw new Error("PKCE authorization was denied");
+      if (request.status === "expired") throw new Error("PKCE authorization expired");
+      if (request.status === "consumed") throw new Error("PKCE authorization code was already consumed");
+      await delay(intervalMs, opts.signal);
+    }
+
+    throw new Error("Timed out waiting for PKCE authorization approval");
+  }
+
+  async exchangePkceCode(opts: {
+    requestId: string;
+    code: string;
+    codeVerifier: string;
+  }): Promise<AuthTokenResponse> {
+    this.requireHttp();
+    return this.client._httpFetch("POST", "/auth/pkce/token", {
+      grantType: "authorization_code",
+      ...opts,
+    });
+  }
+
+  async exchangeAuthorizationSession(
+    session: PkceAuthorizationSession,
+    request: Pick<PkceRequestInfo, "code"> = session,
+  ): Promise<AuthTokenResponse> {
+    if (!request.code) throw new Error("PKCE authorization request is not approved");
+    return this.exchangePkceCode({
+      requestId: session.requestId,
+      code: request.code,
+      codeVerifier: session.codeVerifier,
+    });
+  }
+
+  async authorizeWithPkce(
+    opts: PkceAuthorizeOptions,
+    flow: PkceAuthorizationFlowOptions = {},
+  ): Promise<PkceAuthorizationResult> {
+    const session = await this.startAuthorization(opts);
+    await flow.onAuthorizeUrl?.(session.authorizeUrl, session);
+    const request = await this.waitForPkceApproval(session.requestId, flow);
+    const tokens = await this.exchangeAuthorizationSession(session, request);
+    return { session, request, tokens };
+  }
+
+  async refreshAccessToken(refreshToken: string): Promise<AuthTokenResponse> {
+    this.requireHttp();
+    return this.client._httpFetch("POST", "/auth/pkce/token", {
+      grantType: "refresh_token",
+      refreshToken,
+    });
+  }
+
+  async revokeToken(token: string): Promise<{ revoked: boolean }> {
+    this.requireHttp();
+    return this.client._httpFetch("POST", "/auth/revoke", { token });
+  }
+
+  private requireHttp(): void {
+    if (!this.client._httpUrl) throw new Error("auth APIs require http: true");
+  }
+}
+
+/**
+ * Runtime settings, difficulty profiles, and audit APIs.
+ *
+ * Access via `sna.runtime`.
+ */
+class RuntimeSettingsApi {
+  constructor(private client: SnaClient) {}
+
+  async listCatalog(): Promise<{ runtimes: RuntimeCatalogEntry[] }> {
+    this.requireHttp();
+    return this.client._httpFetch("GET", "/agent/runtime-catalog");
+  }
+
+  async listRuntimes(): Promise<{ runtimes: RegisteredRuntime[] }> {
+    this.requireHttp();
+    return this.client._httpFetch("GET", "/agent/runtimes");
+  }
+
+  async registerRuntime(id: string, input: RegisterRuntimeInput): Promise<{
+    status: "registered";
+    runtime: RegisteredRuntime;
+  }> {
+    this.requireHttp();
+    return this.client._httpFetch(
+      "PUT",
+      `/agent/runtimes/${encodeURIComponent(id)}`,
+      input as unknown as Record<string, unknown>,
+    );
+  }
+
+  async deleteRuntime(id: string): Promise<DeleteRuntimeResult> {
+    this.requireHttp();
+    return this.client._httpFetch("DELETE", `/agent/runtimes/${encodeURIComponent(id)}`);
+  }
+
+  async deleteModelPreset(id: string): Promise<DeleteModelPresetResult> {
+    this.requireHttp();
+    return this.client._httpFetch("DELETE", `/agent/model-presets/${encodeURIComponent(id)}`);
+  }
+
+  async listProfiles(): Promise<{ profiles: RuntimeProfile[] }> {
+    this.requireHttp();
+    return this.client._httpFetch("GET", "/agent/profiles");
+  }
+
+  async listModelPresets(): Promise<{ presets: ModelPreset[] }> {
+    this.requireHttp();
+    return this.client._httpFetch("GET", "/agent/model-presets");
+  }
+
+  async upsertModelPreset(id: string, input: UpsertModelPresetInput): Promise<{
+    status: "saved";
+    preset: ModelPreset;
+  }> {
+    this.requireHttp();
+    return this.client._httpFetch(
+      "PUT",
+      `/agent/model-presets/${encodeURIComponent(id)}`,
+      input as unknown as Record<string, unknown>,
+    );
+  }
+
+  async updateProfile(level: DifficultyLevel, input: UpdateRuntimeProfileInput): Promise<{
+    status: "updated";
+    profile: RuntimeProfile;
+  }> {
+    this.requireHttp();
+    return this.client._httpFetch(
+      "PUT",
+      `/agent/profiles/${level}`,
+      input as unknown as Record<string, unknown>,
+    );
+  }
+
+  async audit(): Promise<AgentAuditSnapshot> {
+    this.requireHttp();
+    return this.client._httpFetch("GET", "/agent/audit");
+  }
+
+  private requireHttp(): void {
+    if (!this.client._httpUrl) throw new Error("runtime APIs require http: true");
+  }
 }
 
 /**
@@ -1086,6 +1628,19 @@ class SessionsApi {
  */
 export interface AgentStartConfig {
   /**
+   * Difficulty profile to resolve on the daemon before launch.
+   * Explicit fields on this config still win after profile/runtime defaults.
+   */
+  profileLevel?: DifficultyLevel;
+  /**
+   * Registered runtime defaults to merge before explicit options.
+   * This is useful for consumer apps that only know "use my default Codex
+   * runtime" and do not want to carry CLI/model settings.
+   */
+  runtimeId?: string;
+  /** Named model preset to merge before explicit options. */
+  modelPresetId?: string;
+  /**
    * Runtime — the CLI binary to spawn (e.g. `"claude-code"`, `"codex"`).
    * Dispatches the request to a registered AgentProvider.
    */
@@ -1140,7 +1695,7 @@ export interface AgentStartConfig {
    *     5   | max                  | xhigh
    * OpenCode ignores it. Omit to inherit the provider's own default.
    */
-  reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
+  reasoningLevel?: ReasoningLevel;
   /**
    * Provider-specific structured options. See SpawnOptions.providerOptions
    * for the per-provider shape. Dropped on cross-provider restart.
@@ -1261,6 +1816,25 @@ class AgentApi {
       return this.client._httpFetch("POST", `/agent/start?session=${encodeURIComponent(session)}`, config as Record<string, unknown>);
     }
     return this.client.request("agent.start", { session, ...config });
+  }
+
+  /**
+   * Start an agent using one of the daemon's ordered difficulty profiles.
+   *
+   * This is a convenience wrapper around {@link start}. The daemon resolves
+   * the profile and any registered runtime defaults, then explicit config
+   * fields still override those defaults.
+   */
+  async startWithProfile(
+    session: string,
+    profileLevel: DifficultyLevel,
+    config: Omit<AgentStartConfig, "profileLevel"> = {},
+  ): Promise<{
+    status: "started" | "already_running";
+    provider: string;
+    sessionId: string;
+  }> {
+    return this.start(session, { ...config, profileLevel });
   }
 
   /**
@@ -1390,12 +1964,17 @@ class AgentApi {
    * ```
    */
   async resume(session: string, opts?: {
+    profileLevel?: DifficultyLevel;
+    runtimeId?: string;
+    modelPresetId?: string;
     provider?: string;
+    modelProvider?: string;
     model?: string;
     permissionMode?: string;
     configDir?: string;
     prompt?: string;
     extraArgs?: string[];
+    reasoningLevel?: ReasoningLevel;
     providerOptions?: Record<string, unknown>;
   }): Promise<{
     status: "resumed";

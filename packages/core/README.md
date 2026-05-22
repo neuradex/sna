@@ -16,7 +16,7 @@ Your app → SNA server → spawn(agentic CLI runtime) → events back over WS
 - **Cache-friendly session continuity** — normal turns call `send()` on the same SNA session, so the active runtime conversation/thread stays attached. `resume` and restart paths rebuild from canonical history only when a process or runtime boundary requires it.
 - **One-shot completion** — `completion({ prompt, model?, provider?, reasoningLevel? })` for short single-prompt jobs. Each provider implements its own optimal one-shot path (Codex `exec --ephemeral` or pooled thread; Claude `-p`; OpenCode pooled session or ephemeral serve). Opportunistically reuses a pooled daemon when one is already alive for the cwd, so high-frequency callers (autocomplete, etc.) don't pay per-call cold-start.
 - **Cross-runtime latency and Codex config knobs** — `reasoningLevel: 0..5` (mapped per runtime), Codex-only `providerOptions.serviceTier` (mirrors Codex `/fast`: `"priority"`, `"flex"`, `"batch"`), `providerOptions.profile` (`--profile`), and `providerOptions.config` (repeatable `-c key=value` overrides, including Codex `model_providers.*` entries for OpenAI-compatible gateways such as OpenRouter or local model servers).
-- **Launcher API** — `startSnaServer({ port, dbPath, runtimePaths, ... })` from `@sna-sdk/core/node` or `@sna-sdk/core/electron`. Forks the standalone server, resolves native bindings, registers runtime CLI paths, waits for ready.
+- **Launcher API** — `startSnaServer({ port, dbPath, runtimePaths, ... })` starts a host-owned child server. `startSnaDaemon(...)` starts a detached background server, records pid/log files, and can adopt an already healthy SNA daemon on the same port.
 - **PreToolUse hook** — `scripts/hook.ts`, auto-injected by `ClaudeCodeProvider.spawn()`. No manual `.claude/settings.json` editing needed.
 
 ## Install
@@ -55,6 +55,61 @@ listed in `allowedOrigins`. Direct standalone server launches are for
 development/debugging and must provide `SNA_AUTH_TOKEN` explicitly.
 
 For Electron, use `@sna-sdk/core/electron` and add `asarUnpack: ["node_modules/@sna-sdk/core/**"]`.
+
+### Start a background daemon
+
+```ts
+import { startSnaDaemon } from "@sna-sdk/core/node";
+
+const sna = await startSnaDaemon({
+  port: 3099,
+  dbPath: "./data/sna.db",
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+  },
+});
+
+console.log(await sna.status());
+console.log(`pid=${sna.pid} log=${sna.logPath}`);
+console.log(`admin=${sna.adminUrl}`);
+await sna.openAdmin();
+```
+
+The daemon launcher writes `.sna/sna-daemon.pid`, `.sna/sna-daemon.log`,
+`.sna/sna-api.port`, and `.sna/sna-api.token`. If a healthy SNA daemon is
+already serving the requested port, the returned handle is marked
+`adopted: true` and `stop()` returns `false`.
+
+The daemon admin shell is available at `sna.adminUrl`. Call
+`sna.openAdmin()` to open the local browser with the daemon token preloaded;
+the browser page stores it locally, removes it from the address bar, and then
+uses same-origin authenticated API calls.
+
+For daemon-owned storage that should only be readable through SNA, enable the
+optional encrypted SQLite driver:
+
+```ts
+const sna = await startSnaDaemon({
+  dbPath: "./data/sna.db",
+  database: {
+    encryption: "sqlite-cipher",
+    keyProvider: { type: "keytar" },
+  },
+});
+```
+
+Encrypted mode requires the consumer app to install
+`better-sqlite3-multiple-ciphers`. The default key provider is `keytar`, which
+also requires the `keytar` package and stores a generated key in the OS
+credential store; `env`, `raw`, and `custom` providers are also available for
+controlled deployments and tests.
+
+Shared local daemons also expose a local PKCE authorization flow under
+`/auth/pkce/*`. The owner token approves pending requests, then consumer apps
+exchange the approved code for access/refresh tokens. Access tokens are accepted
+by HTTP and WebSocket transports. Client scopes are enforced by route family:
+`sessions` for session CRUD/snapshots, `agent` for runtime and permission APIs,
+and `chat` for chat session/message/image APIs.
 
 ### Mount the routes manually
 
@@ -175,8 +230,8 @@ const db = getDb();
 | `@sna-sdk/core/server` | `createSnaApp`, `attachWebSocket`, `generateSnaAuthToken`, `SessionManager`, `snaPortRoute`, `buildCanonicalFromDb`, `completion`, `runOnce`, related types |
 | `@sna-sdk/core/db/schema` | `getDb`, `resetDb`, schema types (`ChatSession`, `ChatMessage`, `ChatActor`, `ChatKind`) |
 | `@sna-sdk/core/providers` | `getProvider`, `registerProvider`, `getRuntimePool`, `ClaudeCodeProvider`, `CodexProvider`, `OpenCodeProvider`, `RuntimePool`, schemas (`SpawnOptionsSchema`, `RuntimeConfigSchema`, `RuntimeHandleSchema`) |
-| `@sna-sdk/core/electron` | `startSnaServer` (Electron-aware launcher) |
-| `@sna-sdk/core/node` | `startSnaServer` (plain Node launcher) |
+| `@sna-sdk/core/electron` | `startSnaServer`, `startSnaServerInProcess`, `startSnaDaemon`, runtime CLI resolution helpers |
+| `@sna-sdk/core/node` | `startSnaServer`, `startSnaDaemon`, runtime CLI resolution helpers |
 
 ## Environment variables
 

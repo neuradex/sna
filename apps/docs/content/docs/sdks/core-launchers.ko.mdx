@@ -11,13 +11,14 @@ description: "SNA 서버를 시작하기 위한 Node 및 Electron 실행 표면�
 | `@sna-sdk/core/node` | `startSnaServer(options)` | Node host에서 SNA를 시작합니다. |
 | `@sna-sdk/core/electron` | `startSnaServer(options)` | Electron host에서 SNA를 forked child process로 시작합니다. |
 | `@sna-sdk/core/electron` | `startSnaServerInProcess(options)` | 현재 Electron main process 안에서 SNA를 실행합니다. |
+| `@sna-sdk/core/node`, `@sna-sdk/core/electron` | `startSnaDaemon(options)` | SNA를 분리된 백그라운드 데몬으로 띄우고 pid/log 파일을 남깁니다. |
 | `@sna-sdk/core/node`, `@sna-sdk/core/electron` | `resolveClaudeCli`, `resolveCodexCli`, `resolveOpenCodeCli` | setup 및 diagnostics 화면에서 사용할 런타임 CLI 설치를 찾습니다. |
 
-Launcher handle은 서버를 중지하고 발견된 URL을 `@sna-sdk/client` 또는 `@sna-sdk/react`에 전달하기에 충분한 정보를 노출합니다.
+Launcher handle은 서버를 중지하고 발견된 URL을 `@sna-sdk/client` 또는 `@sna-sdk/react`에 전달하는 데 필요한 정보를 제공합니다.
 
 ## Options
 
-`dbPath`는 필수입니다. 나머지 field는 optional입니다.
+`dbPath`는 필수입니다. 나머지 필드는 선택 사항입니다.
 
 ```ts
 type SnaServerOptions = {
@@ -51,6 +52,32 @@ type RuntimePaths = {
 };
 ```
 
+`startSnaDaemon()`은 database, runtime, model, permission, timeout 계열
+필드를 공유하고, 데몬 제어용 파일 경로를 추가로 받습니다.
+
+```ts
+type SnaDaemonOptions = {
+  port?: number;
+  dbPath: string;
+  cwd?: string;
+  daemonDir?: string;
+  pidPath?: string;
+  logPath?: string;
+  maxSessions?: number;
+  permissionMode?: "acceptEdits" | "bypassPermissions" | "default";
+  model?: string;
+  permissionTimeoutMs?: number;
+  nativeBinding?: string;
+  env?: Record<string, string>;
+  readyTimeout?: number;
+  healthTimeout?: number;
+  stopTimeout?: number;
+  dataDir?: string;
+  runtimePaths?: RuntimePaths;
+  adoptExisting?: boolean;
+};
+```
+
 | Field | Default | 설명 |
 | --- | --- | --- |
 | `port` | `3099` | Server에 전달할 API port. |
@@ -72,6 +99,12 @@ type RuntimePaths = {
 | `logLevel` | `info` | In-process logger output을 filter합니다. Forked server의 file log는 모든 level을 계속 기록합니다. |
 | `runtimePaths` | auto-detect | 명시적인 런타임 CLI 명령 또는 절대 경로입니다. 각각 `SNA_CLAUDE_COMMAND`, `SNA_CODEX_COMMAND`, `SNA_OPENCODE_COMMAND`, `SNA_GROK_COMMAND`, `SNA_CURSOR_COMMAND`로 변환됩니다. |
 | `langfuse` | none | Metadata로 tracing을 opt-in한 session에서 Langfuse tracing을 켭니다. |
+| `daemonDir` | `path.join(cwd, ".sna")` | 데몬 메타데이터 디렉터리입니다. `startSnaDaemon()`에서만 사용합니다. |
+| `pidPath` | `<daemonDir>/sna-daemon.pid` | 분리된 서버의 PID 파일 경로입니다. |
+| `logPath` | `<daemonDir>/sna-daemon.log` | 분리된 서버의 stdout/stderr를 기록하는 로그 파일입니다. |
+| `adoptExisting` | `true` | 요청한 port의 `/health`가 이미 SNA라고 응답하면 새 process를 만들지 않고 기존 데몬에 연결합니다. |
+| `healthTimeout` | `1000` | 데몬 `/health` 확인 1회당 timeout(ms). |
+| `stopTimeout` | `5000` | Graceful stop을 기다릴 시간. 초과하면 launcher가 `SIGKILL`을 보냅니다. |
 
 Launcher는 `authToken`과 `connection: { baseUrl, authToken }`을 함께
 반환합니다. Token을 저장하거나 environment variable에서 다시 만들지 말고
@@ -90,6 +123,7 @@ bind host, origin policy는 typed launcher field로 지정합니다.
 | --- | --- | --- |
 | Forked `startSnaServer` | 프로세스 격리가 필요하고 standalone child server를 두고 싶을 때. | Packaged Electron app은 `@sna-sdk/core`를 unpack해야 하며, child process가 정상적으로 시작되어야 ready가 됩니다. |
 | `startSnaServerInProcess` | asar path, environment propagation, orphaned child 문제 때문에 Electron `fork()`가 불안정할 때. | Caller의 Node event loop을 공유합니다. Host가 shutdown 시점에 `stop()`을 호출해야 합니다. |
+| Detached `startSnaDaemon` | Launcher가 반환된 뒤에도 SNA를 local background server로 계속 유지하고 싶을 때. | SDK가 pid/log/status/adoption은 관리하지만 OS service manager는 아닙니다. 로그인 시 자동 시작이나 crash 후 재시작이 필요하면 launchd, systemd, 또는 host app supervisor를 함께 쓰십시오. |
 
 In-process mode는 default agent를 자동으로 spawn하지 않습니다. Host가 HTTP, WebSocket 또는 반환된 `sessionManager`로 session을 시작합니다.
 
@@ -97,6 +131,41 @@ Standalone server를 직접 실행하는 방식은 개발/디버깅용 경로입
 integration에서는 `startSnaServer()` 또는 `startSnaServerInProcess()`를
 우선 사용하십시오. 그래야 token, owner identity, bind host, shutdown lifecycle을
 host app이 직접 소유할 수 있습니다.
+
+## Local admin smoke test
+
+데몬은 같은 API origin의 `/admin`에서 admin shell을 제공합니다. 이 shell을
+로드하면 서버가 HttpOnly same-origin admin cookie를 설정하므로, 브라우저
+admin 요청은 owner bearer token을 localStorage나 URL에 보관하지 않아도 됩니다.
+
+Repository 개발에서는 `mise.toml` task로 반복 가능한 smoke flow를 실행합니다.
+
+```bash
+mise run sna:dev
+mise run sna:health
+mise run sna:admin
+```
+
+Vite admin console은 dev proxy가 local daemon owner token을 주입하도록 반드시
+mise를 통해 시작합니다.
+
+```bash
+mise run sna:admin:dev
+open http://127.0.0.1:3098/admin/
+```
+
+Local PKCE authorization flow는 다음 순서로 수동 확인할 수 있습니다.
+
+```bash
+mise run sna:pkce:start
+# 출력된 request URL을 admin Authorization page에서 승인합니다.
+mise run sna:pkce:exchange
+mise run sna:pkce:check
+```
+
+`sna:pkce:check`는 app token이 scoped session/chat route에는 접근하고,
+owner-only agent route에서는 거절되는지 확인합니다. `mise run sna:auth-smoke`는
+auth/OpenAPI/WebSocket/daemon 자동 테스트 slice를 실행합니다.
 
 ## 함수 레퍼런스
 
@@ -149,6 +218,43 @@ type SnaServerHandle = {
   stop(): void;
 };
 ```
+
+### `@sna-sdk/core/node` 또는 `@sna-sdk/core/electron`의 `startSnaDaemon(options)`
+
+같은 standalone SNA server를 분리된 background process로 시작합니다.
+Launcher는 `/health`가 준비될 때까지 기다리고 `.sna/sna-daemon.pid`,
+`.sna/sna-daemon.log`, `.sna/sna-api.port`를 기록한 뒤 control handle을
+반환합니다.
+
+```ts
+const daemon = await startSnaDaemon({
+  dbPath: "/Users/me/Library/Application Support/MyApp/sna.db",
+  port: 3099,
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+  },
+});
+
+console.log(await daemon.status());
+```
+
+Returns:
+
+```ts
+type SnaDaemonHandle = {
+  pid?: number;
+  port: number;
+  adopted: boolean;
+  pidPath: string;
+  logPath: string;
+  status(): Promise<SnaDaemonStatus>;
+  stop(): Promise<boolean>;
+};
+```
+
+요청한 port에서 건강한 SNA daemon이 이미 동작 중이면 launcher는
+`adopted: true` handle을 반환하고 그 process의 소유권을 가져오지
+않습니다. 이 경우 `stop()`은 `false`를 반환합니다.
 
 ### `startSnaServerInProcess(options)`
 

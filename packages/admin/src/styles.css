@@ -1,0 +1,132 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --bg: #f7f5fb;
+  --fg: #191622;
+  --fg-soft: rgba(25, 22, 34, 0.72);
+  --fg-muted: rgba(25, 22, 34, 0.48);
+  --fg-faint: rgba(25, 22, 34, 0.28);
+  --panel: rgba(255, 255, 255, 0.86);
+  --panel-solid: #ffffff;
+  --panel-subtle: rgba(45, 37, 72, 0.035);
+  --border: rgba(45, 37, 72, 0.12);
+  --border-strong: rgba(45, 37, 72, 0.22);
+  --accent: #6d4bd0;
+  --accent-soft: rgba(109, 75, 208, 0.12);
+  --accent-border: rgba(109, 75, 208, 0.28);
+  --good: #0f8b61;
+  --good-soft: rgba(16, 185, 129, 0.13);
+  --warn: #a16207;
+  --warn-soft: rgba(245, 158, 11, 0.14);
+  --bad: #b91c1c;
+  --bad-soft: rgba(239, 68, 68, 0.12);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0a0a0f;
+  --fg: #e8e8f0;
+  --fg-soft: rgba(232, 232, 240, 0.72);
+  --fg-muted: rgba(232, 232, 240, 0.42);
+  --fg-faint: rgba(232, 232, 240, 0.22);
+  --panel: rgba(13, 13, 20, 0.84);
+  --panel-solid: #0d0d14;
+  --panel-subtle: rgba(255, 255, 255, 0.035);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.15);
+  --accent: #a78bfa;
+  --accent-soft: rgba(139, 92, 246, 0.15);
+  --accent-border: rgba(139, 92, 246, 0.28);
+  --good: #34d399;
+  --good-soft: rgba(16, 185, 129, 0.11);
+  --warn: #fbbf24;
+  --warn-soft: rgba(245, 158, 11, 0.10);
+  --bad: #f87171;
+  --bad-soft: rgba(239, 68, 68, 0.11);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 50% -12rem, var(--accent-soft), transparent 34rem),
+    var(--bg);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.focus-ring {
+  outline: none;
+}
+
+.focus-ring:focus-visible {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
+.skeleton-shimmer {
+  background-image: linear-gradient(90deg, var(--panel-subtle), var(--border), var(--panel-subtle));
+  background-size: 220% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer {
+    animation: none;
+  }
+}
+
+.runtime-icon-frame {
+  align-items: center;
+  background: #fff;
+  color: #15151d;
+  display: inline-flex;
+  justify-content: center;
+  overflow: hidden;
+}
+
+:root[data-theme="dark"] .runtime-icon-frame {
+  background: #15151d;
+  color: #f8fafc;
+}
+
+.runtime-icon-glyph {
+  display: block;
+  object-fit: contain;
+}
+
+.field-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}

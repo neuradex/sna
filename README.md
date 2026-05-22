@@ -46,7 +46,7 @@ https://github.com/neuradex/sna/issues
 - **Reasoning effort knob.** A provider-agnostic `reasoningLevel: 0..5` flows to Claude Code's `--effort` and Codex's `model_reasoning_effort` / `turn/start.effort`. Set 0 for autocomplete-grade latency, 5 for deep thinking.
 - **Codex runtime knobs.** `providerOptions.serviceTier` mirrors Codex's `/fast` slash command (values: `"priority"`, `"flex"`, `"batch"`), `providerOptions.profile` maps to `--profile`, and `providerOptions.config` maps to repeatable `-c key=value` overrides. Use `providerOptions.config` for OpenAI-compatible gateways such as OpenRouter or local model servers by configuring Codex's native `model_providers.*` settings. Codex-only on purpose — Claude's `/fast` is a different MODEL variant with its own billing pool, so it's not auto-translated.
 - **Hooks / MCP / policy abstraction.** Define hooks, MCP servers, allowed/disallowed tools once; per-provider adapters apply them. Mid-session provider switches keep the same configuration.
-- **Embedded launcher.** `startSnaServer({ port, dbPath, runtimePaths, ... })` from `@sna-sdk/core/electron` or `@sna-sdk/core/node` forks the standalone server, resolves native bindings (asar-aware), registers runtime CLI paths, and waits for ready.
+- **Embedded launchers.** `startSnaServer({ port, dbPath, runtimePaths, ... })` starts a host-owned child server. `startSnaDaemon(...)` starts a detached background server, writes pid/log files under `.sna`, and can adopt an already healthy SNA daemon on the same port.
 
 ## Quick start
 
@@ -101,6 +101,86 @@ sna.stop();
 ```
 
 > Launchers bind to `127.0.0.1` by default, generate an auth token, and tag sessions with `appId`. SDK clients should pass the returned `sna.connection` object instead of handling the token separately. Protected HTTP and SSE routes use `Authorization: Bearer <authToken>`, and browser WebSocket upgrades use `/ws?token=<authToken>`. Direct standalone server usage is intended for development/debugging and must set `SNA_AUTH_TOKEN` explicitly.
+
+For desktop apps that want SNA to keep running after the launcher process
+returns, use the daemon launcher:
+
+```ts
+import { startSnaDaemon } from "@sna-sdk/core/node";
+
+const sna = await startSnaDaemon({
+  port: 3099,
+  dbPath: "./data/sna.db",
+  runtimePaths: {
+    claudeCode: claude.path,
+  },
+});
+
+console.log(`SNA daemon pid=${sna.pid}, log=${sna.logPath}`);
+console.log(`SNA daemon admin=${sna.adminUrl}`);
+await sna.openAdmin();
+```
+
+`startSnaDaemon()` stores `.sna/sna-daemon.pid`, `.sna/sna-daemon.log`,
+`.sna/sna-api.port`, and `.sna/sna-api.token`. If another healthy SNA daemon
+is already serving the requested port, the launcher adopts it and `stop()`
+returns `false` instead of killing a process it does not own.
+
+The daemon also serves a local admin shell at `/admin`. `sna.adminUrl` is the
+plain URL, while `sna.openAdmin()` opens the default browser to that same
+origin. The server sets an HttpOnly same-origin admin cookie when it serves the
+admin shell, so the browser never needs to store the owner bearer token.
+
+Optional encrypted daemon storage is available with
+`database: { encryption: "sqlite-cipher", keyProvider: { type: "keytar" } }`.
+The consumer app installs `better-sqlite3-multiple-ciphers` and, for the
+default keychain-backed provider, `keytar`; `keytar` stores a generated DB key
+in the OS credential store, while `env`, `raw`, and `custom` providers cover
+other deployment models.
+
+For shared local daemons, consumer apps can use the client-side PKCE helpers
+(`client.auth.authorizeWithPkce()`, `refreshAccessToken()`) to get their own
+access/refresh tokens instead of receiving the launcher owner token. The helper
+generates the PKCE verifier/challenge, opens a caller-provided approval hook,
+polls the local request, and exchanges the approved code. Use
+`client.withAuthToken(tokens.accessToken)` to create the scoped app client.
+Browser-based apps must still run from the daemon's same origin or an
+`allowedOrigins` entry; native/server callers that do not send an `Origin`
+header can start the PKCE flow directly.
+Client scopes are enforced by route family: `sessions` for session
+CRUD/snapshots, `agent` for runtime and permission APIs, and `chat` for chat
+session/message/image APIs.
+
+### Local daemon/admin smoke test
+
+This repository includes `mise` tasks for the manual standalone daemon flow:
+
+```bash
+mise run sna:dev          # start the standalone daemon on 127.0.0.1:3099
+mise run sna:health       # verify /health
+mise run sna:admin        # open the built admin shell from the daemon
+```
+
+For admin UI development with HMR, run the Vite console through mise so its
+proxy has the same owner token as the daemon:
+
+```bash
+mise run sna:admin:dev
+open http://127.0.0.1:3098/admin/
+```
+
+The PKCE app-authorization path can be checked end to end:
+
+```bash
+mise run sna:pkce:start     # prints an admin approval URL
+# Approve the request in the admin Authorization page.
+mise run sna:pkce:exchange  # exchanges the approved code for app tokens
+mise run sna:pkce:check     # verifies scoped access and owner-only denial
+```
+
+`mise run sna:auth-smoke` runs the automated auth/OpenAPI/WS/daemon test slice.
+
+> The running server publishes its own live OpenAPI 3.1 spec — open `http://localhost:3099/docs` for Swagger UI, `http://localhost:3099/openapi.json` for the raw JSON, or `http://localhost:3099/spec` for a plain-text view.
 
 ### As a React app
 

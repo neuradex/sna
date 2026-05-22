@@ -13,6 +13,7 @@ import path from "path";
 import { createRequire } from "node:module";
 import {
   getProvider,
+  listProviders,
   spawnWithPool,
   type AgentEvent,
 } from "../../core/providers/index.js";
@@ -30,7 +31,30 @@ import { completion, type CompletionOptions } from "../../core/completion.js";
 import type { ContentBlock } from "../../core/providers/types.js";
 import { resolveImagePath } from "../image-store.js";
 import { runOnce, type RunOnceOptions } from "../run-once.js";
-import { createHttpSecurityMiddleware, type SnaSecurityOptions } from "../security.js";
+import { getAdminAsset, renderAdminPage } from "../admin-ui.js";
+import {
+  approvePkceRequest,
+  createPkceRequest,
+  denyPkceRequest,
+  exchangeAuthorizationCode,
+  getPkceRequest,
+  listPkceRequests,
+  refreshAccessToken,
+  revokeToken,
+} from "../auth.js";
+import { createHttpSecurityMiddleware, type SnaAuthIdentity, type SnaSecurityOptions } from "../security.js";
+import {
+  buildAgentAudit,
+  deleteModelPreset,
+  deleteRegisteredRuntime,
+  listModelPresets,
+  listRegisteredRuntimes,
+  listRuntimeProfiles,
+  resolveLaunchConfig,
+  upsertModelPreset,
+  upsertRegisteredRuntime,
+  upsertRuntimeProfile,
+} from "../runtime-settings.js";
 
 // Resolve our own version from package.json so the OpenAPI document
 // reports whatever ships in @sna-sdk/core, not a hard-coded string that
@@ -50,15 +74,148 @@ const SNA_VERSION: string = ((): string => {
 const sessionStateSchema = z.enum(["idle", "processing", "waiting", "permission"]);
 const agentStatusSchema = z.enum(["idle", "busy", "disconnected"]);
 
+const PkceStartInputSchema = z.object({
+  clientId: z.string(),
+  displayName: z.string().optional(),
+  redirectUri: z.string().optional(),
+  codeChallenge: z.string(),
+  codeChallengeMethod: z.literal("S256").optional(),
+  scopes: z.array(z.string()).optional(),
+}).strict();
+
+const PkceTokenInputSchema = z.union([
+  z.object({
+    grantType: z.literal("authorization_code"),
+    requestId: z.string(),
+    code: z.string(),
+    codeVerifier: z.string(),
+  }).strict(),
+  z.object({
+    grantType: z.literal("refresh_token"),
+    refreshToken: z.string(),
+  }).strict(),
+]);
+
+const RevokeTokenInputSchema = z.object({
+  token: z.string(),
+}).strict();
+
+const PkceRequestInfoSchema = z.object({
+  requestId: z.string(),
+  clientId: z.string(),
+  displayName: z.string().nullable(),
+  redirectUri: z.string().nullable(),
+  scopes: z.array(z.string()),
+  status: z.enum(["pending", "approved", "consumed", "expired", "denied"]),
+  code: z.string().optional(),
+  createdAt: z.number(),
+  expiresAt: z.number(),
+  approvedAt: z.number().nullable(),
+});
+
+const PkceStartResponseSchema = PkceRequestInfoSchema.extend({
+  authorizeUrl: z.string(),
+});
+
+const AuthTokenResponseSchema = z.object({
+  accessToken: z.string(),
+  refreshToken: z.string(),
+  tokenType: z.literal("Bearer"),
+  expiresIn: z.number(),
+  refreshExpiresIn: z.number(),
+  scopes: z.array(z.string()),
+});
+
+const RevokeTokenResponseSchema = z.object({
+  revoked: z.boolean(),
+});
+
 const SessionConfigSchema = z.object({
   provider: z.string(),
   modelProvider: z.string().optional(),
   model: z.string(),
   cwd: z.string(),
   permissionMode: z.string().optional(),
+  profileLevel: z.number().int().min(1).max(5).optional(),
+  runtimeId: z.string().optional(),
+  modelPresetId: z.string().optional(),
+  reasoningLevel: z.number().int().min(0).max(5).optional(),
   configDir: z.string().optional(),
   extraArgs: z.array(z.string()).optional(),
   providerOptions: z.record(z.string(), z.any()).optional(),
+});
+
+const RuntimeLaunchConfigSchema = z.object({
+  provider: z.string().optional(),
+  modelProvider: z.string().optional(),
+  model: z.string().optional(),
+  cwd: z.string().optional(),
+  permissionMode: z.string().optional(),
+  configDir: z.string().optional(),
+  extraArgs: z.array(z.string()).optional(),
+  providerOptions: z.record(z.string(), z.any()).optional(),
+  systemPrompt: z.string().optional(),
+  appendSystemPrompt: z.string().optional(),
+  allowedTools: z.array(z.string()).optional(),
+  disallowedTools: z.array(z.string()).optional(),
+  mcpServers: z.record(z.string(), z.any()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  reasoningLevel: z.number().int().min(0).max(5).optional(),
+}).strict();
+
+const RegisteredRuntimeSchema = z.object({
+  id: z.string(),
+  provider: z.string(),
+  label: z.string(),
+  enabled: z.boolean(),
+  modelProvider: z.string().optional(),
+  defaultModel: z.string().optional(),
+  cliPath: z.string().optional(),
+  models: z.array(z.object({
+    id: z.string(),
+    label: z.string().optional(),
+    provider: z.string().optional(),
+  })).optional(),
+  config: RuntimeLaunchConfigSchema.optional(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+
+const RuntimeCatalogEntrySchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  available: z.boolean(),
+  supportsRuntimePooling: z.boolean(),
+  supportsCwdPerThread: z.boolean(),
+  modelListing: z.boolean(),
+  detection: z.object({
+    detected: z.boolean(),
+    path: z.string(),
+    version: z.string().optional(),
+    source: z.enum(["env", "cache", "static", "shell", "fallback"]),
+    message: z.string().optional(),
+  }),
+});
+
+const RuntimeProfileSchema = z.object({
+  level: z.number().int().min(1).max(5),
+  label: z.string(),
+  description: z.string(),
+  runtimeId: z.string().optional(),
+  modelPresetId: z.string().optional(),
+  config: RuntimeLaunchConfigSchema,
+  updatedAt: z.number().optional(),
+});
+
+const ModelPresetSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  runtimeId: z.string(),
+  model: z.string().optional(),
+  modelProvider: z.string().optional(),
+  reasoningLevel: z.number().int().min(0).max(5),
+  createdAt: z.number(),
+  updatedAt: z.number(),
 });
 
 const RuntimeChainEntrySchema = z.object({
@@ -164,6 +321,162 @@ const healthRoute = createRoute({
     200: {
       description: "Server is healthy.",
       content: { "application/json": { schema: z.object({ ok: z.literal(true), name: z.literal("sna"), version: z.string() }) } },
+    },
+  },
+});
+
+// ── Local Authorization ───────────────────────────────────────────────
+
+const pkceStartRoute = createRoute({
+  method: "post",
+  path: "/auth/pkce/start",
+  security: [],
+  summary: "Start local PKCE authorization",
+  description: "Create a pending local authorization request for a consumer app. The owner approves it through the local admin UI.",
+  request: {
+    body: {
+      content: { "application/json": { schema: PkceStartInputSchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Authorization request created.",
+      content: { "application/json": { schema: PkceStartResponseSchema } },
+    },
+    400: {
+      description: "Invalid authorization request.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const pkceRequestRoute = createRoute({
+  method: "get",
+  path: "/auth/pkce/requests/{id}",
+  security: [],
+  summary: "Poll local PKCE authorization request",
+  description: "Read a single authorization request. Approved requests include a short-lived authorization code.",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Authorization request.",
+      content: { "application/json": { schema: PkceRequestInfoSchema } },
+    },
+    404: {
+      description: "Authorization request not found.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const pkceRequestsListRoute = protectedRoute({
+  method: "get",
+  path: "/auth/pkce/requests",
+  summary: "List pending local authorization requests",
+  description: "Owner-only list of pending and approved authorization requests for the local admin UI.",
+  responses: {
+    200: {
+      description: "Authorization request list.",
+      content: { "application/json": { schema: z.object({ requests: z.array(PkceRequestInfoSchema) }) } },
+    },
+    403: {
+      description: "Owner token required.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const pkceApproveRoute = protectedRoute({
+  method: "post",
+  path: "/auth/pkce/requests/{id}/approve",
+  summary: "Approve local PKCE authorization request",
+  description: "Owner-only approval endpoint. Returns an authorization code that the requesting app exchanges with its PKCE verifier.",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Authorization request approved.",
+      content: { "application/json": { schema: PkceRequestInfoSchema } },
+    },
+    400: {
+      description: "Authorization request cannot be approved.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+    403: {
+      description: "Owner token required.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const pkceDenyRoute = protectedRoute({
+  method: "post",
+  path: "/auth/pkce/requests/{id}/deny",
+  summary: "Deny local PKCE authorization request",
+  description: "Owner-only denial endpoint for a pending authorization request.",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Authorization request denied.",
+      content: { "application/json": { schema: PkceRequestInfoSchema } },
+    },
+    400: {
+      description: "Authorization request cannot be denied.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+    403: {
+      description: "Owner token required.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const pkceTokenRoute = createRoute({
+  method: "post",
+  path: "/auth/pkce/token",
+  security: [],
+  summary: "Exchange local PKCE authorization grant",
+  description: "Exchange an approved authorization code or refresh token for a client access token.",
+  request: {
+    body: {
+      content: { "application/json": { schema: PkceTokenInputSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Client token issued.",
+      content: { "application/json": { schema: AuthTokenResponseSchema } },
+    },
+    400: {
+      description: "Invalid authorization grant.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const revokeTokenRoute = protectedRoute({
+  method: "post",
+  path: "/auth/revoke",
+  summary: "Revoke local client token",
+  description: "Revoke an access or refresh token issued by the local daemon.",
+  request: {
+    body: {
+      content: { "application/json": { schema: RevokeTokenInputSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Token revocation result.",
+      content: { "application/json": { schema: RevokeTokenResponseSchema } },
+    },
+    400: {
+      description: "Invalid revocation request.",
+      content: { "application/json": { schema: ErrorResponse } },
     },
   },
 });
@@ -302,6 +615,241 @@ const updateSessionRoute = protectedRoute({
   },
 });
 
+// ── Runtime Settings ─────────────────────────────────────────────────
+
+const runtimeCatalogRoute = protectedRoute({
+  method: "get",
+  path: "/agent/runtime-catalog",
+  summary: "List supported runtimes",
+  description: "List SNA-supported agent runtimes that can be selected when registering daemon runtime profiles.",
+  responses: {
+    200: {
+      description: "Supported runtimes.",
+      content: { "application/json": { schema: z.object({ runtimes: z.array(RuntimeCatalogEntrySchema) }) } },
+    },
+  },
+});
+
+const listRuntimesRoute = protectedRoute({
+  method: "get",
+  path: "/agent/runtimes",
+  summary: "List registered runtimes",
+  description: "List daemon-level runtime registrations used by difficulty profiles.",
+  responses: {
+    200: {
+      description: "Registered runtimes.",
+      content: { "application/json": { schema: z.object({ runtimes: z.array(RegisteredRuntimeSchema) }) } },
+    },
+  },
+});
+
+const upsertRuntimeRoute = protectedRoute({
+  method: "put",
+  path: "/agent/runtimes/{id}",
+  summary: "Register runtime",
+  description: "Create or update a named runtime registration. Consumers can reference it through profile levels.",
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: { "application/json": { schema: z.object({
+        provider: z.string(),
+        label: z.string().optional(),
+        enabled: z.boolean().optional(),
+        modelProvider: z.string().optional(),
+        defaultModel: z.string().optional(),
+        cliPath: z.string().optional(),
+        models: z.array(z.object({
+          id: z.string(),
+          label: z.string().optional(),
+          provider: z.string().optional(),
+        })).optional(),
+        config: RuntimeLaunchConfigSchema.optional(),
+      }).strict() }},
+    },
+  },
+  responses: {
+    200: {
+      description: "Runtime registered.",
+      content: { "application/json": { schema: z.object({ status: z.literal("registered"), runtime: RegisteredRuntimeSchema }) } },
+    },
+    400: {
+      description: "Invalid runtime registration.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const deleteRuntimeRoute = protectedRoute({
+  method: "delete",
+  path: "/agent/runtimes/{id}",
+  summary: "Delete runtime",
+  description: "Delete a named runtime registration. Model presets tied to the runtime are removed, and profile assignments referencing the runtime or removed presets are cleared.",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Runtime deleted.",
+      content: { "application/json": { schema: z.object({
+        status: z.literal("deleted"),
+        runtimeId: z.string(),
+        removedModelPresetIds: z.array(z.string()),
+        clearedProfileLevels: z.array(z.number()),
+      }) } },
+    },
+    404: {
+      description: "Runtime not found.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+    400: {
+      description: "Invalid runtime id.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const listProfilesRoute = protectedRoute({
+  method: "get",
+  path: "/agent/profiles",
+  summary: "List difficulty profiles",
+  description: "List the five daemon-level task difficulty profiles. Consumers may pass `profileLevel` to lifecycle calls instead of duplicating runtime settings.",
+  responses: {
+    200: {
+      description: "Difficulty profiles.",
+      content: { "application/json": { schema: z.object({ profiles: z.array(RuntimeProfileSchema) }) } },
+    },
+  },
+});
+
+const listModelPresetsRoute = protectedRoute({
+  method: "get",
+  path: "/agent/model-presets",
+  summary: "List model presets",
+  description: "List named model presets that can be assigned to difficulty levels.",
+  responses: {
+    200: {
+      description: "Model presets.",
+      content: { "application/json": { schema: z.object({ presets: z.array(ModelPresetSchema) }) } },
+    },
+  },
+});
+
+const upsertModelPresetRoute = protectedRoute({
+  method: "put",
+  path: "/agent/model-presets/{id}",
+  summary: "Save model preset",
+  description: "Create or update a named model preset with runtime, model, and reasoning effort.",
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: { "application/json": { schema: z.object({
+        name: z.string().optional(),
+        runtimeId: z.string(),
+        model: z.string().optional(),
+        modelProvider: z.string().optional(),
+        reasoningLevel: z.number().int().min(0).max(5),
+      }).strict() }},
+    },
+  },
+  responses: {
+    200: {
+      description: "Model preset saved.",
+      content: { "application/json": { schema: z.object({ status: z.literal("saved"), preset: ModelPresetSchema }) } },
+    },
+    400: {
+      description: "Invalid model preset.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const deleteModelPresetRoute = protectedRoute({
+  method: "delete",
+  path: "/agent/model-presets/{id}",
+  summary: "Delete model preset",
+  description: "Delete a named model preset and clear difficulty profile assignments that reference it.",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Model preset deleted.",
+      content: { "application/json": { schema: z.object({
+        status: z.literal("deleted"),
+        modelPresetId: z.string(),
+        clearedProfileLevels: z.array(z.number()),
+      }) } },
+    },
+    404: {
+      description: "Model preset not found.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+    400: {
+      description: "Invalid model preset id.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const upsertProfileRoute = protectedRoute({
+  method: "put",
+  path: "/agent/profiles/{level}",
+  summary: "Update difficulty profile",
+  description: "Update one of the five difficulty profile slots.",
+  request: {
+    params: z.object({ level: z.string().regex(/^[1-5]$/) }),
+    body: {
+      content: { "application/json": { schema: z.object({
+        label: z.string().optional(),
+        description: z.string().optional(),
+        runtimeId: z.string().nullable().optional(),
+        modelPresetId: z.string().nullable().optional(),
+        config: RuntimeLaunchConfigSchema.optional(),
+      }).strict() }},
+    },
+  },
+  responses: {
+    200: {
+      description: "Profile updated.",
+      content: { "application/json": { schema: z.object({ status: z.literal("updated"), profile: RuntimeProfileSchema }) } },
+    },
+    400: {
+      description: "Invalid profile update.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const auditRoute = protectedRoute({
+  method: "get",
+  path: "/agent/audit",
+  summary: "Agent audit",
+  description: "Return registered runtimes, difficulty profiles, live session audit data, and app/client attribution data.",
+  responses: {
+    200: {
+      description: "Audit snapshot.",
+      content: { "application/json": { schema: z.object({
+        profiles: z.array(RuntimeProfileSchema),
+        modelPresets: z.array(ModelPresetSchema),
+        runtimes: z.array(RegisteredRuntimeSchema.extend({
+          activeSessionCount: z.number(),
+          sessionCount: z.number(),
+        })),
+        sessions: z.array(SessionInfoSchema),
+        apps: z.array(z.object({
+          appId: z.string(),
+          displayName: z.string().nullable(),
+          scopes: z.array(z.string()),
+          tokenCount: z.number(),
+          activeTokenCount: z.number(),
+          sessionCount: z.number(),
+          lastUsedAt: z.number().nullable(),
+        })),
+      }) } },
+    },
+  },
+});
+
 // ── Agent Lifecycle ───────────────────────────────────────────────────
 
 const startRoute = protectedRoute({
@@ -315,6 +863,9 @@ const startRoute = protectedRoute({
       content: { "application/json": { schema: z.object({
         provider: z.string().optional(),
         modelProvider: z.string().optional(),
+        profileLevel: z.number().int().min(1).max(5).optional(),
+        runtimeId: z.string().optional(),
+        modelPresetId: z.string().optional(),
         prompt: z.string().optional(),
         model: z.string().optional(),
         permissionMode: z.string().optional(),
@@ -343,6 +894,10 @@ const startRoute = protectedRoute({
         provider: z.string(),
         sessionId: z.string(),
       }) } },
+    },
+    400: {
+      description: "Invalid profile or runtime reference.",
+      content: { "application/json": { schema: ErrorResponse } },
     },
     500: {
       description: "Start failed.",
@@ -396,6 +951,9 @@ const restartRoute = protectedRoute({
       content: { "application/json": { schema: z.object({
         provider: z.string().optional(),
         modelProvider: z.string().optional(),
+        profileLevel: z.number().int().min(1).max(5).optional(),
+        runtimeId: z.string().optional(),
+        modelPresetId: z.string().optional(),
         model: z.string().optional(),
         cwd: z.string().optional(),
         permissionMode: z.string().optional(),
@@ -421,6 +979,10 @@ const restartRoute = protectedRoute({
         sessionId: z.string(),
       }) } },
     },
+    400: {
+      description: "Invalid profile or runtime reference.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
     500: {
       description: "Restart failed.",
       content: { "application/json": { schema: ErrorResponse } },
@@ -443,6 +1005,9 @@ const resumeRoute = protectedRoute({
         configDir: z.string().optional(),
         provider: z.string().optional(),
         modelProvider: z.string().optional(),
+        profileLevel: z.number().int().min(1).max(5).optional(),
+        runtimeId: z.string().optional(),
+        modelPresetId: z.string().optional(),
         extraArgs: z.array(z.string()).optional(),
         providerOptions: z.record(z.string(), z.any()).optional(),
         systemPrompt: z.string().optional(),
@@ -652,6 +1217,9 @@ const runOnceRoute = protectedRoute({
         cwd: z.string().optional(),
         timeout: z.number().optional(),
         provider: z.string().optional(),
+        profileLevel: z.number().int().min(1).max(5).optional(),
+        runtimeId: z.string().optional(),
+        modelPresetId: z.string().optional(),
         extraArgs: z.array(z.string()).optional(),
         env: z.record(z.string(), z.any()).optional(),
         providerOptions: z.record(z.string(), z.any()).optional(),
@@ -695,6 +1263,9 @@ const runOnceStreamRoute = protectedRoute({
         cwd: z.string().optional(),
         timeout: z.number().optional(),
         provider: z.string().optional(),
+        profileLevel: z.number().int().min(1).max(5).optional(),
+        runtimeId: z.string().optional(),
+        modelPresetId: z.string().optional(),
         extraArgs: z.array(z.string()).optional(),
         env: z.record(z.string(), z.any()).optional(),
         providerOptions: z.record(z.string(), z.any()).optional(),
@@ -731,6 +1302,9 @@ const completionRoute = protectedRoute({
         prompt: z.string(),
         provider: z.string().optional(),
         model: z.string().optional(),
+        profileLevel: z.number().int().min(1).max(5).optional(),
+        runtimeId: z.string().optional(),
+        modelPresetId: z.string().optional(),
         systemPrompt: z.string().optional(),
         appendSystemPrompt: z.string().optional(),
         reasoningLevel: z.number().int().min(0).max(5).optional(),
@@ -1134,6 +1708,12 @@ function getSessionId(c: { req: { query: (k: string) => string | undefined } }):
   return c.req.query("session") ?? "default";
 }
 
+function requireOwner(c: any): true | Response {
+  const identity = c.get?.("snaAuth") as SnaAuthIdentity | undefined;
+  if (identity?.type === "owner") return true;
+  return c.json({ status: "error", message: "Owner token required" }, 403);
+}
+
 export async function createOpenApiApp(options?: { sessionManager?: SessionManager } & SnaSecurityOptions) {
   const app = new OpenAPIHono();
   const getOpenAPIDocument = app.getOpenAPIDocument.bind(app);
@@ -1163,6 +1743,83 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
   app.doc("/openapi.json", openApiInfo);
 
   app.get("/docs", swaggerUI({ url: "/openapi.json" }));
+
+  app.get("/admin/assets/*", (c) => {
+    const asset = getAdminAsset(new URL(c.req.url).pathname);
+    if (!asset) return c.text("Not found", 404);
+    c.header("Content-Type", asset.contentType);
+    c.header("Cache-Control", "public, max-age=31536000, immutable");
+    return c.body(asset.content as any);
+  });
+
+  app.get("/admin", (c) => c.html(renderAdminPage()));
+  app.get("/admin/*", (c) => c.html(renderAdminPage()));
+
+  app.openapi(pkceStartRoute, (c) => {
+    const body = c.req.valid("json");
+    try {
+      const request = createPkceRequest(body);
+      const origin = new URL(c.req.url).origin;
+      return (c as any).json({
+        ...request,
+        authorizeUrl: `${origin}/admin/authorization?request=${encodeURIComponent(request.requestId)}`,
+      }, 201);
+    } catch (err: any) {
+      return (c as any).json({ status: "error", message: err.message }, 400);
+    }
+  });
+
+  app.openapi(pkceRequestRoute, (c) => {
+    const { id } = c.req.valid("param");
+    const request = getPkceRequest(id);
+    if (!request) return (c as any).json({ status: "error", message: "Authorization request not found" }, 404);
+    return (c as any).json(request);
+  });
+
+  app.openapi(pkceRequestsListRoute, (c) => {
+    const owner = requireOwner(c);
+    if (owner !== true) return owner as any;
+    return (c as any).json({ requests: listPkceRequests() });
+  });
+
+  app.openapi(pkceApproveRoute, (c) => {
+    const owner = requireOwner(c);
+    if (owner !== true) return owner as any;
+    const { id } = c.req.valid("param");
+    try {
+      return (c as any).json(approvePkceRequest(id));
+    } catch (err: any) {
+      return (c as any).json({ status: "error", message: err.message }, 400);
+    }
+  });
+
+  app.openapi(pkceDenyRoute, (c) => {
+    const owner = requireOwner(c);
+    if (owner !== true) return owner as any;
+    const { id } = c.req.valid("param");
+    try {
+      return (c as any).json(denyPkceRequest(id));
+    } catch (err: any) {
+      return (c as any).json({ status: "error", message: err.message }, 400);
+    }
+  });
+
+  app.openapi(pkceTokenRoute, (c) => {
+    const body = c.req.valid("json");
+    try {
+      if (body.grantType === "authorization_code") {
+        return (c as any).json(exchangeAuthorizationCode(body));
+      }
+      return (c as any).json(refreshAccessToken(body.refreshToken));
+    } catch (err: any) {
+      return (c as any).json({ status: "error", message: err.message }, 400);
+    }
+  });
+
+  app.openapi(revokeTokenRoute, (c) => {
+    const body = c.req.valid("json");
+    return (c as any).json({ revoked: revokeToken(body.token) });
+  });
 
   // Plain JSON spec viewer — non-interactive, just formatted JSON
   app.get("/spec", async (c) => {
@@ -1252,12 +1909,94 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     }
   });
 
+  // ── Runtime Settings ─────────────────────────────────────────
+
+  app.openapi(runtimeCatalogRoute, async (c) => {
+    return c.json({ runtimes: await listProviders() }, 200);
+  });
+
+  app.openapi(listRuntimesRoute, (c) => {
+    return c.json({ runtimes: listRegisteredRuntimes() }, 200);
+  });
+
+  app.openapi(upsertRuntimeRoute, (c) => {
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      return c.json({ status: "registered" as const, runtime: upsertRegisteredRuntime(id, body as any) }, 200);
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
+  });
+
+  app.openapi(deleteRuntimeRoute, (c) => {
+    const { id } = c.req.valid("param");
+    try {
+      const deleted = deleteRegisteredRuntime(id);
+      if (!deleted) return c.json({ status: "error", message: "Runtime not found" }, 404);
+      return c.json(deleted, 200);
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
+  });
+
+  app.openapi(listProfilesRoute, (c) => {
+    return c.json({ profiles: listRuntimeProfiles() }, 200);
+  });
+
+  app.openapi(listModelPresetsRoute, (c) => {
+    return c.json({ presets: listModelPresets() }, 200);
+  });
+
+  app.openapi(upsertModelPresetRoute, (c) => {
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      return c.json({ status: "saved" as const, preset: upsertModelPreset(id, body as any) }, 200);
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
+  });
+
+  app.openapi(deleteModelPresetRoute, (c) => {
+    const { id } = c.req.valid("param");
+    try {
+      const deleted = deleteModelPreset(id);
+      if (!deleted) return c.json({ status: "error", message: "Model preset not found" }, 404);
+      return c.json(deleted, 200);
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
+  });
+
+  app.openapi(upsertProfileRoute, (c) => {
+    const { level } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      return c.json({ status: "updated" as const, profile: upsertRuntimeProfile(Number(level), body as any) }, 200);
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
+  });
+
+  app.openapi(auditRoute, (c) => {
+    if (!sessionManager) {
+      return c.json(buildAgentAudit([]), 200);
+    }
+    return c.json(buildAgentAudit(sessionManager.listSessions({ includeRuntimeChain: true })), 200);
+  });
+
   // ── Agent Lifecycle ───────────────────────────────────────────
 
   app.openapi(startRoute, async (c) => {
     if (!sessionManager) return c.json({ status: "error", message: "SessionManager not provided" }, 500);
     const sessionId = getSessionId(c);
-    const body = c.req.valid("json");
+    let body = c.req.valid("json");
+    try {
+      body = resolveLaunchConfig(body as any) as typeof body;
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
 
     const session = sessionManager.getOrCreateSession(sessionId, { cwd: body.cwd, meta: configuredAppMeta() });
 
@@ -1318,6 +2057,10 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
         model,
         cwd: session.cwd,
         permissionMode: body.permissionMode,
+        profileLevel: body.profileLevel as (1 | 2 | 3 | 4 | 5) | undefined,
+        runtimeId: body.runtimeId,
+        modelPresetId: body.modelPresetId,
+        reasoningLevel: body.reasoningLevel as (0 | 1 | 2 | 3 | 4 | 5) | undefined,
         configDir: body.configDir,
         extraArgs: body.extraArgs,
         providerOptions: body.providerOptions,
@@ -1408,7 +2151,12 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
   app.openapi(restartRoute, async (c) => {
     if (!sessionManager) return c.json({ status: "error", message: "SessionManager not provided" }, 500);
     const sessionId = getSessionId(c);
-    const body = c.req.valid("json");
+    let body = c.req.valid("json");
+    try {
+      body = resolveLaunchConfig(body as any) as typeof body;
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
 
     try {
       const session = sessionManager.getSession(sessionId);
@@ -1436,7 +2184,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
       // branch (no-op for non-pooled providers like claude-code). Earlier
       // versions had separate branches and the duplication caused #21's
       // openapi.ts regression — the helper closes that off.
-      const { config } = await sessionManager.restartSession(sessionId, body, async (cfg) => {
+      const { config } = await sessionManager.restartSession(sessionId, body as Partial<SessionConfig>, async (cfg) => {
         const prov = getProvider(cfg.provider);
         const providerChanged = prevProvider && cfg.provider !== prevProvider;
 
@@ -1452,6 +2200,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
             history: history.length > 0 ? history : undefined,
             extraArgs: cfg.extraArgs,
             providerOptions: cfg.providerOptions,
+            reasoningLevel: cfg.reasoningLevel,
             ...typedOpts,
           });
         }
@@ -1465,6 +2214,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
           resumeSessionId: ccSessionId ?? undefined,
           extraArgs: cfg.extraArgs,
           providerOptions: cfg.providerOptions,
+          reasoningLevel: cfg.reasoningLevel,
           ...typedOpts,
         });
       });
@@ -1479,7 +2229,12 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
   app.openapi(resumeRoute, async (c) => {
     if (!sessionManager) return c.json({ status: "error", message: "SessionManager not provided" }, 500);
     const sessionId = getSessionId(c);
-    const body = c.req.valid("json");
+    let body = c.req.valid("json");
+    try {
+      body = resolveLaunchConfig(body as any) as typeof body;
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
 
     const session = sessionManager.getOrCreateSession(sessionId);
     if (session.process?.alive) {
@@ -1526,6 +2281,10 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
         model,
         cwd: session.cwd,
         permissionMode,
+        profileLevel: body.profileLevel as (1 | 2 | 3 | 4 | 5) | undefined,
+        runtimeId: body.runtimeId,
+        modelPresetId: body.modelPresetId,
+        reasoningLevel: body.reasoningLevel as (0 | 1 | 2 | 3 | 4 | 5) | undefined,
         configDir,
         extraArgs,
         providerOptions,
@@ -1660,7 +2419,12 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
 
   app.openapi(runOnceRoute, async (c) => {
     if (!sessionManager) return c.json({ status: "error", message: "SessionManager not provided" }, 500);
-    const body = c.req.valid("json");
+    let body = c.req.valid("json");
+    try {
+      body = resolveLaunchConfig(body as any) as typeof body;
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
     if (!body.message) {
       return c.json({ status: "error", message: "message is required" }, 400);
     }
@@ -1677,7 +2441,12 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     if (!sessionManager) {
       return c.json({ status: "error", message: "SessionManager not provided" }, 500) as any;
     }
-    const body = c.req.valid("json");
+    let body = c.req.valid("json");
+    try {
+      body = resolveLaunchConfig(body as any) as typeof body;
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400) as any;
+    }
     if (!body.message) {
       return c.json({ status: "error", message: "message is required" }, 400);
     }
@@ -1750,7 +2519,12 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
   });
 
   app.openapi(completionRoute, async (c) => {
-    const body = c.req.valid("json");
+    let body = c.req.valid("json");
+    try {
+      body = resolveLaunchConfig(body as any) as typeof body;
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
     if (!body.prompt) {
       return c.json({ status: "error", message: "prompt is required" }, 400);
     }

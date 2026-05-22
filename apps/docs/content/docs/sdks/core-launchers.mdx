@@ -11,6 +11,7 @@ Launchers are for host applications that need to start SNA as part of their own 
 | `@sna-sdk/core/node` | `startSnaServer(options)` | Starts SNA from a Node host. |
 | `@sna-sdk/core/electron` | `startSnaServer(options)` | Starts SNA from an Electron host as a forked child process. |
 | `@sna-sdk/core/electron` | `startSnaServerInProcess(options)` | Runs SNA in the current Electron main process. |
+| `@sna-sdk/core/node`, `@sna-sdk/core/electron` | `startSnaDaemon(options)` | Starts a detached background SNA server with pid/log files and adoption. |
 | `@sna-sdk/core/node`, `@sna-sdk/core/electron` | `resolveClaudeCli`, `resolveCodexCli`, `resolveOpenCodeCli` | Finds runtime CLI installations for setup and diagnostics. |
 
 Launcher handles expose enough information to stop the server and pass the discovered URL to `@sna-sdk/client` or `@sna-sdk/react`.
@@ -51,6 +52,32 @@ type RuntimePaths = {
 };
 ```
 
+`startSnaDaemon()` accepts the same runtime, database, model, permission, and
+timeout fields, plus daemon-specific file locations:
+
+```ts
+type SnaDaemonOptions = {
+  port?: number;
+  dbPath: string;
+  cwd?: string;
+  daemonDir?: string;
+  pidPath?: string;
+  logPath?: string;
+  maxSessions?: number;
+  permissionMode?: "acceptEdits" | "bypassPermissions" | "default";
+  model?: string;
+  permissionTimeoutMs?: number;
+  nativeBinding?: string;
+  env?: Record<string, string>;
+  readyTimeout?: number;
+  healthTimeout?: number;
+  stopTimeout?: number;
+  dataDir?: string;
+  runtimePaths?: RuntimePaths;
+  adoptExisting?: boolean;
+};
+```
+
 | Field | Default | Description |
 | --- | --- | --- |
 | `port` | `3099` | API port passed to the server. |
@@ -72,6 +99,12 @@ type RuntimePaths = {
 | `logLevel` | `info` | Filters in-process logger output. Forked server file logs still record all levels. |
 | `runtimePaths` | auto-detect | Explicit runtime CLI commands or absolute paths. They map to `SNA_CLAUDE_COMMAND`, `SNA_CODEX_COMMAND`, `SNA_OPENCODE_COMMAND`, `SNA_GROK_COMMAND`, and `SNA_CURSOR_COMMAND`. |
 | `langfuse` | none | Enables tracing for sessions whose metadata opts in. |
+| `daemonDir` | `path.join(cwd, ".sna")` | Daemon metadata directory. Used by `startSnaDaemon()` only. |
+| `pidPath` | `<daemonDir>/sna-daemon.pid` | PID file path for the detached server. |
+| `logPath` | `<daemonDir>/sna-daemon.log` | Combined stdout/stderr log file for the detached server. |
+| `adoptExisting` | `true` | If `/health` on the requested port already reports SNA, return an adopted handle instead of spawning another server. |
+| `healthTimeout` | `1000` | Per-request timeout for daemon `/health` checks. |
+| `stopTimeout` | `5000` | Graceful stop timeout before the daemon launcher sends `SIGKILL`. |
 
 The launcher returns both `authToken` and
 `connection: { baseUrl, authToken }`. Pass `connection` to
@@ -91,6 +124,7 @@ server identity, auth, bind host, and origin policy.
 | --- | --- | --- |
 | Forked `startSnaServer` | You want process isolation and a standalone child server. | Requires packaged Electron apps to unpack `@sna-sdk/core`; readiness depends on the child process starting cleanly. |
 | `startSnaServerInProcess` | Electron `fork()` is unreliable because of asar paths, environment propagation, or orphaned children. | Shares the caller's Node event loop; the host must call `stop()` during shutdown. |
+| Detached `startSnaDaemon` | You want SNA to keep running as a background local server after the launcher returns. | The SDK manages pid/log/status/adoption, but it is not an OS service manager; use launchd, systemd, or your app supervisor if you need login-time or crash-time restart. |
 
 In-process mode does not spawn a default agent. The host starts sessions through HTTP, WebSocket, or the returned `sessionManager`.
 
@@ -98,6 +132,42 @@ Directly running the standalone server is a development/debugging path. Product
 integrations should prefer `startSnaServer()` or `startSnaServerInProcess()` so
 the token, owner identity, bind host, and shutdown lifecycle stay under the host
 app's control.
+
+## Local admin smoke test
+
+The daemon serves the admin shell from the same API origin at `/admin`. Loading
+that shell sets an HttpOnly same-origin admin cookie, so browser admin requests
+do not need the owner bearer token in localStorage or in the URL.
+
+For repository development, the `mise.toml` tasks provide a repeatable smoke
+flow:
+
+```bash
+mise run sna:dev
+mise run sna:health
+mise run sna:admin
+```
+
+Use the Vite admin console only through mise so its dev proxy injects the local
+daemon owner token:
+
+```bash
+mise run sna:admin:dev
+open http://127.0.0.1:3098/admin/
+```
+
+The local PKCE authorization flow can be tested manually:
+
+```bash
+mise run sna:pkce:start
+# Approve the printed request URL in the admin Authorization page.
+mise run sna:pkce:exchange
+mise run sna:pkce:check
+```
+
+`sna:pkce:check` verifies that the app token can access scoped session/chat
+routes and is denied from owner-only agent routes. `mise run sna:auth-smoke`
+runs the automated auth/OpenAPI/WebSocket/daemon test slice.
 
 ## Function reference
 
@@ -150,6 +220,43 @@ type SnaServerHandle = {
   stop(): void;
 };
 ```
+
+### `startSnaDaemon(options)` from `@sna-sdk/core/node` or `@sna-sdk/core/electron`
+
+Starts the same standalone SNA server as a detached background process. The
+launcher waits for `/health`, writes `.sna/sna-daemon.pid`,
+`.sna/sna-daemon.log`, and `.sna/sna-api.port`, then returns a small control
+handle.
+
+```ts
+const daemon = await startSnaDaemon({
+  dbPath: "/Users/me/Library/Application Support/MyApp/sna.db",
+  port: 3099,
+  runtimePaths: {
+    claudeCode: "/opt/homebrew/bin/claude",
+  },
+});
+
+console.log(await daemon.status());
+```
+
+Returns:
+
+```ts
+type SnaDaemonHandle = {
+  pid?: number;
+  port: number;
+  adopted: boolean;
+  pidPath: string;
+  logPath: string;
+  status(): Promise<SnaDaemonStatus>;
+  stop(): Promise<boolean>;
+};
+```
+
+If a healthy SNA daemon is already serving the requested port, the launcher
+returns `adopted: true` and does not take ownership of that process. In that
+case `stop()` returns `false`.
 
 ### `startSnaServerInProcess(options)`
 

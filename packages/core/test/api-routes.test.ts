@@ -5,6 +5,7 @@
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import fs from "fs";
 import path from "path";
@@ -21,8 +22,34 @@ function setup() {
   removeTestDir();
   fs.mkdirSync(TEST_DB_DIR, { recursive: true });
   const origCwd = process.cwd;
+  const origDbPath = process.env.SNA_DB_PATH;
   process.cwd = () => TEST_DB_DIR;
-  return () => { process.cwd = origCwd; removeTestDir(); };
+  delete process.env.SNA_DB_PATH;
+  return () => {
+    process.cwd = origCwd;
+    if (origDbPath === undefined) delete process.env.SNA_DB_PATH;
+    else process.env.SNA_DB_PATH = origDbPath;
+    removeTestDir();
+  };
+}
+
+async function resetDbSingleton() {
+  const { resetDb } = await import("../src/db/schema.js");
+  resetDb();
+}
+
+function pkceChallenge(verifier: string): string {
+  return createHash("sha256").update(verifier).digest("base64url");
+}
+
+let testLock = Promise.resolve();
+
+async function acquireTestLock(): Promise<() => void> {
+  let release!: () => void;
+  const previous = testLock;
+  testLock = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  return release;
 }
 
 class FakeApiAgentProcess extends EventEmitter {
@@ -86,13 +113,17 @@ function createFakeApiProvider(name: string) {
   };
 }
 
-describe("HTTP API Routes", () => {
+describe("HTTP API Routes", { concurrency: false }, () => {
   let cleanup: () => void;
   let app: any;
   let sm: any;
+  let releaseTestLock: (() => void) | undefined;
 
   beforeEach(async () => {
+    releaseTestLock = await acquireTestLock();
+    await resetDbSingleton();
     cleanup = setup();
+    await resetDbSingleton();
     const { createSnaApp } = await import("../src/server/index.js");
     const { SessionManager } = await import("../src/server/session-manager.js");
     sm = new SessionManager();
@@ -106,7 +137,10 @@ describe("HTTP API Routes", () => {
   afterEach(async () => {
     sm?.killAll?.();
     await new Promise((resolve) => setTimeout(resolve, 50));
+    await resetDbSingleton();
     cleanup?.();
+    releaseTestLock?.();
+    releaseTestLock = undefined;
   });
 
   // Helper
@@ -114,7 +148,7 @@ describe("HTTP API Routes", () => {
     method: string,
     path: string,
     body?: any,
-    options: { auth?: boolean; token?: string; origin?: string } = {},
+    options: { auth?: boolean; token?: string; origin?: string; cookie?: string } = {},
   ) {
     const opts: any = { method };
     const headers: Record<string, string> = {};
@@ -128,6 +162,9 @@ describe("HTTP API Routes", () => {
     if (options.origin) {
       headers.Origin = options.origin;
     }
+    if (options.cookie) {
+      headers.Cookie = options.cookie;
+    }
     if (Object.keys(headers).length > 0) {
       opts.headers = headers;
     }
@@ -140,6 +177,39 @@ describe("HTTP API Routes", () => {
       const json = await res.json();
       assert.equal(json.ok, true);
       assert.equal(json.name, "sna");
+    });
+
+    it("GET /admin returns the local admin shell without authentication", async () => {
+      const res = await req("GET", "/admin", undefined, { auth: false });
+      const html = await res.text();
+      assert.equal(res.status, 200);
+      const cookie = res.headers.get("set-cookie");
+      assert.match(cookie ?? "", /sna_admin=/);
+      assert.match(cookie ?? "", /HttpOnly/);
+      assert.match(cookie ?? "", /SameSite=Strict/);
+      assert.match(html, /<title>SNA Admin<\/title>/);
+      assert.match(html, /<div id="root"><\/div>/);
+      assert.match(html, /src="\/admin\/assets\/[^"]+\.js"/);
+      assert.doesNotMatch(html, new RegExp(TEST_TOKEN));
+    });
+
+    it("GET /admin nested routes return the local admin shell without authentication", async () => {
+      const res = await req("GET", "/admin/authorization", undefined, { auth: false });
+      const html = await res.text();
+      assert.equal(res.status, 200);
+      assert.match(html, /<div id="root"><\/div>/);
+    });
+
+    it("GET /admin assets returns the built static asset without authentication", async () => {
+      const htmlRes = await req("GET", "/admin", undefined, { auth: false });
+      const html = await htmlRes.text();
+      const assetPath = html.match(/src="\/admin\/([^"]+\.js)"/)?.[1];
+      assert.ok(assetPath);
+
+      const assetRes = await req("GET", `/admin/${assetPath}`, undefined, { auth: false });
+      assert.equal(assetRes.status, 200);
+      assert.equal(assetRes.headers.get("content-type"), "text/javascript; charset=utf-8");
+      assert.match(await assetRes.text(), /createRoot/);
     });
 
     it("rejects protected HTTP routes without a bearer token", async () => {
@@ -164,6 +234,46 @@ describe("HTTP API Routes", () => {
       const res = await req("GET", "/agent/sessions", undefined, { origin: ALLOWED_ORIGIN });
       assert.equal(res.status, 200);
       assert.equal(res.headers.get("access-control-allow-origin"), ALLOWED_ORIGIN);
+    });
+
+    it("allows protected same-origin admin requests even when the origin is not listed", async () => {
+      const origin = "http://127.0.0.1:43123";
+      const res = await app.request(`${origin}/auth/pkce/requests`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${TEST_TOKEN}`,
+          Origin: origin,
+        },
+      });
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.get("access-control-allow-origin"), origin);
+      assert.deepEqual(await res.json(), { requests: [] });
+    });
+
+    it("allows same-origin admin cookie requests without exposing the owner bearer token", async () => {
+      const origin = "http://127.0.0.1:43123";
+      const admin = await app.request(`${origin}/admin`, { method: "GET" });
+      const cookie = admin.headers.get("set-cookie")?.split(";")[0];
+      assert.match(cookie ?? "", /^sna_admin=/);
+
+      const sameOrigin = await app.request(`${origin}/auth/pkce/requests`, {
+        method: "GET",
+        headers: {
+          Cookie: cookie!,
+          Origin: origin,
+        },
+      });
+      assert.equal(sameOrigin.status, 200);
+      assert.deepEqual(await sameOrigin.json(), { requests: [] });
+
+      const crossOrigin = await app.request(`${origin}/auth/pkce/requests`, {
+        method: "GET",
+        headers: {
+          Cookie: cookie!,
+          Origin: ALLOWED_ORIGIN,
+        },
+      });
+      assert.equal(crossOrigin.status, 401);
     });
   });
 
@@ -193,6 +303,24 @@ describe("HTTP API Routes", () => {
       assert.ok(document.paths["/agent/sessions"].get.responses["401"].content["application/json"].schema);
     });
 
+    it("documents local PKCE authorization routes", async () => {
+      const document = getDocument();
+
+      assert.deepEqual(document.paths["/auth/pkce/start"].post.security, []);
+      assert.ok(document.paths["/auth/pkce/start"].post.requestBody);
+      assert.ok(document.paths["/auth/pkce/start"].post.responses["201"]);
+
+      assert.deepEqual(document.paths["/auth/pkce/token"].post.security, []);
+      assert.ok(document.paths["/auth/pkce/token"].post.requestBody);
+      assert.ok(document.paths["/auth/pkce/token"].post.responses["200"]);
+
+      assert.deepEqual(document.paths["/auth/pkce/requests/{id}"].get.security, []);
+      assert.deepEqual(document.paths["/auth/pkce/requests"].get.security, [{ bearerAuth: [] }]);
+      assert.deepEqual(document.paths["/auth/pkce/requests/{id}/approve"].post.security, [{ bearerAuth: [] }]);
+      assert.deepEqual(document.paths["/auth/pkce/requests/{id}/deny"].post.security, [{ bearerAuth: [] }]);
+      assert.deepEqual(document.paths["/auth/revoke"].post.security, [{ bearerAuth: [] }]);
+    });
+
     it("can generate the documented auth contract with runtime auth disabled for tooling", async () => {
       const { createSnaApp } = await import("../src/server/index.js");
       const docsApp = await createSnaApp({ unsafeDisableAuth: true });
@@ -200,6 +328,132 @@ describe("HTTP API Routes", () => {
 
       assert.deepEqual(document.security, [{ bearerAuth: [] }]);
       assert.deepEqual(document.paths["/agent/sessions"].get.security, [{ bearerAuth: [] }]);
+    });
+  });
+
+  describe("Local OAuth PKCE", () => {
+    it("issues, refreshes, and revokes client tokens through owner-approved PKCE", async () => {
+      const verifier = "test-verifier-for-local-pkce";
+      const start = await req("POST", "/auth/pkce/start", {
+        clientId: "test-client",
+        displayName: "Test Client",
+        codeChallenge: pkceChallenge(verifier),
+        codeChallengeMethod: "S256",
+        scopes: ["agent", "sessions"],
+      }, { auth: false });
+      assert.equal(start.status, 201);
+      const started = await start.json();
+      assert.match(started.requestId, /^authreq_/);
+      assert.match(started.authorizeUrl, new RegExp(`/admin/authorization\\?request=${started.requestId}`));
+
+      const unauthList = await req("GET", "/auth/pkce/requests", undefined, { auth: false });
+      assert.equal(unauthList.status, 401);
+
+      const ownerList = await req("GET", "/auth/pkce/requests");
+      assert.equal(ownerList.status, 200);
+      assert.equal((await ownerList.json()).requests.length, 1);
+
+      const approve = await req("POST", `/auth/pkce/requests/${started.requestId}/approve`);
+      assert.equal(approve.status, 200);
+      const approved = await approve.json();
+      assert.equal(approved.status, "approved");
+      assert.match(approved.code, /^authcode_/);
+
+      const polled = await req("GET", `/auth/pkce/requests/${started.requestId}`, undefined, { auth: false });
+      assert.equal(polled.status, 200);
+      assert.equal((await polled.json()).code, approved.code);
+
+      const token = await req("POST", "/auth/pkce/token", {
+        grantType: "authorization_code",
+        requestId: started.requestId,
+        code: approved.code,
+        codeVerifier: verifier,
+      }, { auth: false });
+      assert.equal(token.status, 200);
+      const issued = await token.json();
+      assert.match(issued.accessToken, /^sna_at_/);
+      assert.match(issued.refreshToken, /^sna_rt_/);
+      assert.equal(issued.tokenType, "Bearer");
+
+      const withAccessToken = await req("GET", "/agent/sessions", undefined, { token: issued.accessToken });
+      assert.equal(withAccessToken.status, 200);
+
+      const refresh = await req("POST", "/auth/pkce/token", {
+        grantType: "refresh_token",
+        refreshToken: issued.refreshToken,
+      }, { auth: false });
+      assert.equal(refresh.status, 200);
+      const refreshed = await refresh.json();
+      assert.match(refreshed.accessToken, /^sna_at_/);
+      assert.equal(refreshed.refreshToken, issued.refreshToken);
+
+      const revoke = await req("POST", "/auth/revoke", { token: refreshed.accessToken });
+      assert.equal(revoke.status, 200);
+      assert.equal((await revoke.json()).revoked, true);
+
+      const revokedAccess = await req("GET", "/agent/sessions", undefined, { token: refreshed.accessToken });
+      assert.equal(revokedAccess.status, 401);
+    });
+
+    it("rejects non-owner approval attempts from client access tokens", async () => {
+      const verifier = "test-verifier-for-owner-check";
+      const start = await req("POST", "/auth/pkce/start", {
+        clientId: "owner-check-client",
+        codeChallenge: pkceChallenge(verifier),
+        codeChallengeMethod: "S256",
+      }, { auth: false });
+      const started = await start.json();
+      const approve = await req("POST", `/auth/pkce/requests/${started.requestId}/approve`);
+      const approved = await approve.json();
+      const token = await req("POST", "/auth/pkce/token", {
+        grantType: "authorization_code",
+        requestId: started.requestId,
+        code: approved.code,
+        codeVerifier: verifier,
+      }, { auth: false });
+      const issued = await token.json();
+
+      const second = await req("POST", "/auth/pkce/start", {
+        clientId: "second-client",
+        codeChallenge: pkceChallenge("second-verifier"),
+        codeChallengeMethod: "S256",
+      }, { auth: false });
+      const secondStarted = await second.json();
+      const forbidden = await req("POST", `/auth/pkce/requests/${secondStarted.requestId}/approve`, undefined, {
+        token: issued.accessToken,
+      });
+      assert.equal(forbidden.status, 403);
+    });
+
+    it("enforces client token scopes on protected HTTP routes", async () => {
+      const verifier = "test-verifier-for-scope-check";
+      const start = await req("POST", "/auth/pkce/start", {
+        clientId: "scope-check-client",
+        codeChallenge: pkceChallenge(verifier),
+        codeChallengeMethod: "S256",
+        scopes: ["chat"],
+      }, { auth: false });
+      const started = await start.json();
+      const approve = await req("POST", `/auth/pkce/requests/${started.requestId}/approve`);
+      const approved = await approve.json();
+      const token = await req("POST", "/auth/pkce/token", {
+        grantType: "authorization_code",
+        requestId: started.requestId,
+        code: approved.code,
+        codeVerifier: verifier,
+      }, { auth: false });
+      const issued = await token.json();
+
+      const chatAllowed = await req("GET", "/chat/sessions", undefined, { token: issued.accessToken });
+      assert.equal(chatAllowed.status, 200);
+
+      const sessionsDenied = await req("GET", "/agent/sessions", undefined, { token: issued.accessToken });
+      assert.equal(sessionsDenied.status, 403);
+      assert.match((await sessionsDenied.json()).message, /Insufficient scope.*sessions/);
+
+      const agentDenied = await req("GET", "/agent/status", undefined, { token: issued.accessToken });
+      assert.equal(agentDenied.status, 403);
+      assert.match((await agentDenied.json()).message, /Insufficient scope.*agent/);
     });
   });
 
@@ -317,6 +571,107 @@ describe("HTTP API Routes", () => {
   });
 
   describe("Agent lifecycle with spawned runtime", () => {
+    it("resolves profileLevel into registered runtime defaults before spawning", async () => {
+      const providerName = `test-profile-${Date.now()}`;
+      const { registerProvider } = await import("../src/core/providers/index.js");
+      registerProvider(createFakeApiProvider(providerName));
+
+      const runtimeRes = await req("PUT", "/agent/runtimes/workhorse", {
+        provider: providerName,
+        label: "Workhorse",
+        enabled: true,
+        modelProvider: "test-vendor",
+        defaultModel: "runtime-default",
+        config: {
+          permissionMode: "acceptEdits",
+          reasoningLevel: 2,
+        },
+      });
+      assert.equal(runtimeRes.status, 200);
+
+      const profileRes = await req("PUT", "/agent/profiles/4", {
+        label: "Difficult",
+        runtimeId: "workhorse",
+        config: {
+          model: "profile-model",
+          reasoningLevel: 4,
+        },
+      });
+      assert.equal(profileRes.status, 200);
+
+      const startRes = await req("POST", "/agent/start?session=profile-start", {
+        profileLevel: 4,
+      });
+      assert.equal(startRes.status, 200);
+      assert.equal((await startRes.json()).provider, providerName);
+
+      const list = await (await req("GET", "/agent/sessions?include=chain")).json();
+      const session = list.sessions.find((s: any) => s.id === "profile-start");
+      assert.ok(session);
+      assert.equal(session.config.provider, providerName);
+      assert.equal(session.config.modelProvider, "test-vendor");
+      assert.equal(session.config.model, "profile-model");
+      assert.equal(session.config.permissionMode, "acceptEdits");
+      assert.equal(session.config.profileLevel, 4);
+      assert.equal(session.config.runtimeId, "workhorse");
+      assert.equal(session.config.reasoningLevel, 4);
+    });
+
+    it("resolves profileLevel through assigned model presets", async () => {
+      const providerName = `test-preset-${Date.now()}`;
+      const { registerProvider } = await import("../src/core/providers/index.js");
+      registerProvider(createFakeApiProvider(providerName));
+
+      const runtimeRes = await req("PUT", "/agent/runtimes/preset-runtime", {
+        provider: providerName,
+        label: "Preset Runtime",
+        enabled: true,
+        modelProvider: "runtime-vendor",
+        defaultModel: "runtime-default",
+        config: {
+          permissionMode: "plan",
+          reasoningLevel: 1,
+        },
+      });
+      assert.equal(runtimeRes.status, 200);
+
+      const presetRes = await req("PUT", "/agent/model-presets/deep-model", {
+        name: "Deep Model",
+        runtimeId: "preset-runtime",
+        model: "preset-model",
+        modelProvider: "preset-vendor",
+        reasoningLevel: 5,
+      });
+      assert.equal(presetRes.status, 200);
+
+      const profileRes = await req("PUT", "/agent/profiles/5", {
+        modelPresetId: "deep-model",
+        config: {
+          model: "legacy-profile-model",
+          reasoningLevel: 5,
+        },
+      });
+      assert.equal(profileRes.status, 200);
+
+      const startRes = await req("POST", "/agent/start?session=preset-start", {
+        profileLevel: 5,
+      });
+      assert.equal(startRes.status, 200);
+      assert.equal((await startRes.json()).provider, providerName);
+
+      const list = await (await req("GET", "/agent/sessions?include=chain")).json();
+      const session = list.sessions.find((s: any) => s.id === "preset-start");
+      assert.ok(session);
+      assert.equal(session.config.provider, providerName);
+      assert.equal(session.config.modelProvider, "preset-vendor");
+      assert.equal(session.config.model, "preset-model");
+      assert.equal(session.config.permissionMode, "plan");
+      assert.equal(session.config.profileLevel, 5);
+      assert.equal(session.config.runtimeId, "preset-runtime");
+      assert.equal(session.config.modelPresetId, "deep-model");
+      assert.equal(session.config.reasoningLevel, 5);
+    });
+
     it("POST /agent/start exposes runtime-chain and message-count changes through APIs", async () => {
       const providerName = `test-spawn-${Date.now()}`;
       const { registerProvider } = await import("../src/core/providers/index.js");
@@ -370,6 +725,207 @@ describe("HTTP API Routes", () => {
       assert.equal(restarted.runtimeChain[0].retiredAt != null, true);
       assert.equal(restarted.runtimeChain[1].parentId, restarted.runtimeChain[0].id);
       assert.equal(restarted.runtimeChain[1].config.model, "fake-2");
+    });
+  });
+
+  describe("Runtime settings", () => {
+    it("returns five ordered difficulty profiles by default", async () => {
+      const res = await req("GET", "/agent/profiles");
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.profiles.length, 5);
+      assert.deepEqual(json.profiles.map((p: any) => p.level), [1, 2, 3, 4, 5]);
+      assert.equal(json.profiles[0].config.reasoningLevel, 1);
+      assert.equal(json.profiles[4].config.reasoningLevel, 5);
+    });
+
+    it("returns SNA-supported runtime catalog entries for registration UIs", async () => {
+      const res = await req("GET", "/agent/runtime-catalog");
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.deepEqual(
+        json.runtimes.map((runtime: any) => runtime.id),
+        ["claude-code", "codex", "opencode", "grok", "cursor"],
+      );
+      const codex = json.runtimes.find((runtime: any) => runtime.id === "codex");
+      assert.equal(codex.label, "Codex");
+      assert.equal(codex.supportsRuntimePooling, true);
+      assert.equal(codex.supportsCwdPerThread, true);
+      assert.equal(codex.modelListing, true);
+      assert.equal(typeof codex.available, "boolean");
+      assert.equal(typeof codex.detection.detected, "boolean");
+      assert.equal(typeof codex.detection.path, "string");
+      assert.match(codex.detection.source, /^(env|cache|static|shell|fallback)$/);
+    });
+
+    it("registers runtimes and updates profile slots", async () => {
+      const runtimeRes = await req("PUT", "/agent/runtimes/codex-main", {
+        provider: "codex",
+        label: "Codex Main",
+        enabled: true,
+        modelProvider: "openai",
+        defaultModel: "gpt-5.4",
+        cliPath: "/usr/local/bin/codex",
+      });
+      assert.equal(runtimeRes.status, 200);
+      const runtime = await runtimeRes.json();
+      assert.equal(runtime.runtime.id, "codex-main");
+      assert.equal(runtime.runtime.provider, "codex");
+
+      const profileRes = await req("PUT", "/agent/profiles/3", {
+        runtimeId: "codex-main",
+        config: {
+          permissionMode: "default",
+          reasoningLevel: 3,
+        },
+      });
+      assert.equal(profileRes.status, 200);
+
+      const profiles = await (await req("GET", "/agent/profiles")).json();
+      const level3 = profiles.profiles.find((p: any) => p.level === 3);
+      assert.equal(level3.runtimeId, "codex-main");
+      assert.equal(level3.config.permissionMode, "default");
+
+      const runtimes = await (await req("GET", "/agent/runtimes")).json();
+      const registered = runtimes.runtimes.find((r: any) => r.id === "codex-main");
+      assert.ok(registered);
+      assert.equal(registered.defaultModel, "gpt-5.4");
+    });
+
+    it("deletes runtimes and clears dependent model/profile assignments", async () => {
+      await req("PUT", "/agent/runtimes/delete-runtime", {
+        provider: "codex",
+        label: "Delete Runtime",
+        enabled: true,
+      });
+      await req("PUT", "/agent/model-presets/delete-preset", {
+        name: "Delete Preset",
+        runtimeId: "delete-runtime",
+        model: "gpt-5.4-mini",
+        reasoningLevel: 2,
+      });
+      await req("PUT", "/agent/profiles/4", {
+        runtimeId: "delete-runtime",
+      });
+      await req("PUT", "/agent/profiles/5", {
+        modelPresetId: "delete-preset",
+      });
+
+      const deleteRes = await req("DELETE", "/agent/runtimes/delete-runtime");
+      assert.equal(deleteRes.status, 200);
+      const deleted = await deleteRes.json();
+      assert.equal(deleted.status, "deleted");
+      assert.equal(deleted.runtimeId, "delete-runtime");
+      assert.deepEqual(deleted.removedModelPresetIds, ["delete-preset"]);
+      assert.deepEqual([...deleted.clearedProfileLevels].sort(), [4, 5]);
+
+      const runtimes = await (await req("GET", "/agent/runtimes")).json();
+      assert.equal(runtimes.runtimes.some((r: any) => r.id === "delete-runtime"), false);
+
+      const presets = await (await req("GET", "/agent/model-presets")).json();
+      assert.equal(presets.presets.some((p: any) => p.id === "delete-preset"), false);
+
+      const profiles = await (await req("GET", "/agent/profiles")).json();
+      const level4 = profiles.profiles.find((p: any) => p.level === 4);
+      const level5 = profiles.profiles.find((p: any) => p.level === 5);
+      assert.equal(level4.runtimeId, undefined);
+      assert.equal(level5.modelPresetId, undefined);
+
+      const missingRes = await req("DELETE", "/agent/runtimes/delete-runtime");
+      assert.equal(missingRes.status, 404);
+    });
+
+    it("saves model presets and assigns them to profile slots", async () => {
+      await req("PUT", "/agent/runtimes/model-runtime", {
+        provider: "codex",
+        label: "Model Runtime",
+        enabled: true,
+      });
+
+      const presetRes = await req("PUT", "/agent/model-presets/fast-model", {
+        name: "Fast Model",
+        runtimeId: "model-runtime",
+        model: "gpt-5.4-mini",
+        modelProvider: "openai",
+        reasoningLevel: 2,
+      });
+      assert.equal(presetRes.status, 200);
+      const preset = await presetRes.json();
+      assert.equal(preset.preset.id, "fast-model");
+      assert.equal(preset.preset.reasoningLevel, 2);
+
+      const profileRes = await req("PUT", "/agent/profiles/2", {
+        runtimeId: null,
+        modelPresetId: "fast-model",
+      });
+      assert.equal(profileRes.status, 200);
+
+      const presets = await (await req("GET", "/agent/model-presets")).json();
+      assert.ok(presets.presets.some((candidate: any) => candidate.id === "fast-model" && candidate.name === "Fast Model"));
+
+      const profiles = await (await req("GET", "/agent/profiles")).json();
+      const level2 = profiles.profiles.find((p: any) => p.level === 2);
+      assert.equal(level2.modelPresetId, "fast-model");
+    });
+
+    it("deletes model presets and clears dependent profile assignments", async () => {
+      await req("PUT", "/agent/runtimes/delete-model-runtime", {
+        provider: "codex",
+        label: "Delete Model Runtime",
+        enabled: true,
+      });
+      await req("PUT", "/agent/model-presets/delete-model-preset", {
+        name: "Delete Model Preset",
+        runtimeId: "delete-model-runtime",
+        model: "gpt-5.4-mini",
+        reasoningLevel: 2,
+      });
+      await req("PUT", "/agent/profiles/3", {
+        modelPresetId: "delete-model-preset",
+      });
+
+      const deleteRes = await req("DELETE", "/agent/model-presets/delete-model-preset");
+      assert.equal(deleteRes.status, 200);
+      const deleted = await deleteRes.json();
+      assert.equal(deleted.status, "deleted");
+      assert.equal(deleted.modelPresetId, "delete-model-preset");
+      assert.deepEqual(deleted.clearedProfileLevels, [3]);
+
+      const presets = await (await req("GET", "/agent/model-presets")).json();
+      assert.equal(presets.presets.some((p: any) => p.id === "delete-model-preset"), false);
+
+      const profiles = await (await req("GET", "/agent/profiles")).json();
+      const level3 = profiles.profiles.find((p: any) => p.level === 3);
+      assert.equal(level3.modelPresetId, undefined);
+
+      const missingRes = await req("DELETE", "/agent/model-presets/delete-model-preset");
+      assert.equal(missingRes.status, 404);
+    });
+
+    it("reports runtime and app audit information", async () => {
+      const { resetConfig, setConfig } = await import("../src/config.js");
+      setConfig({ appId: "audit-host" });
+      try {
+        await req("PUT", "/agent/runtimes/audit-runtime", {
+          provider: "codex",
+          label: "Audit Runtime",
+          enabled: true,
+          defaultModel: "gpt-5.4",
+        });
+        await req("POST", "/agent/sessions", { id: "audit-session", label: "Audit Session" });
+
+        const res = await req("GET", "/agent/audit");
+        assert.equal(res.status, 200);
+        const json = await res.json();
+        assert.ok(Array.isArray(json.runtimes));
+        assert.ok(Array.isArray(json.modelPresets));
+        assert.ok(Array.isArray(json.apps));
+        assert.ok(Array.isArray(json.sessions));
+        assert.ok(json.runtimes.some((r: any) => r.id === "audit-runtime"));
+        assert.ok(json.apps.some((app: any) => app.appId === "audit-host" && app.sessionCount >= 1));
+      } finally {
+        resetConfig();
+      }
     });
   });
 

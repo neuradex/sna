@@ -21,7 +21,7 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { startMockWsServer, waitFor, sleep, type MockServer } from "./test-helpers.js";
-import { SnaClient } from "./sna-client.js";
+import { SnaClient, createPkceChallenge, generatePkceVerifier } from "./sna-client.js";
 
 let mock: MockServer;
 let sna: SnaClient;
@@ -1108,6 +1108,152 @@ describe("HTTP transport (http: true)", () => {
     assert.equal(mock.httpRequests[1].headers.authorization, "Bearer secret-token");
   });
 
+  it("derives RFC-compatible PKCE S256 challenges", async () => {
+    const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    const pkce = await createPkceChallenge(verifier);
+
+    assert.equal(pkce.codeVerifier, verifier);
+    assert.equal(pkce.codeChallengeMethod, "S256");
+    assert.equal(pkce.codeChallenge, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+  });
+
+  it("generates PKCE verifiers that satisfy the minimum RFC length", () => {
+    const verifier = generatePkceVerifier();
+
+    assert.match(verifier, /^[A-Za-z0-9_-]+$/);
+    assert.ok(verifier.length >= 43);
+  });
+
+  it("auth.authorizeWithPkce starts, polls, exchanges, and returns scoped tokens", async () => {
+    const now = Date.now();
+    mock.queueHttpResponse(201, {
+      requestId: "authreq_1",
+      clientId: "consumer-app",
+      displayName: "Consumer App",
+      redirectUri: null,
+      scopes: ["sessions", "agent"],
+      status: "pending",
+      createdAt: now,
+      expiresAt: now + 60_000,
+      approvedAt: null,
+      authorizeUrl: `http://${mock.host}/admin/authorization?request=authreq_1`,
+    });
+    mock.queueHttpResponse(200, {
+      requestId: "authreq_1",
+      clientId: "consumer-app",
+      displayName: "Consumer App",
+      redirectUri: null,
+      scopes: ["sessions", "agent"],
+      status: "pending",
+      createdAt: now,
+      expiresAt: now + 60_000,
+      approvedAt: null,
+    });
+    mock.queueHttpResponse(200, {
+      requestId: "authreq_1",
+      clientId: "consumer-app",
+      displayName: "Consumer App",
+      redirectUri: null,
+      scopes: ["sessions", "agent"],
+      status: "approved",
+      code: "authcode_1",
+      createdAt: now,
+      expiresAt: now + 60_000,
+      approvedAt: now + 1,
+    });
+    mock.queueHttpResponse(200, {
+      accessToken: "app-access-token",
+      refreshToken: "app-refresh-token",
+      tokenType: "Bearer",
+      expiresIn: 3600,
+      refreshExpiresIn: 86_400,
+      scopes: ["sessions", "agent"],
+    });
+    sna = httpClient();
+    const authorizeUrls: string[] = [];
+
+    const result = await sna.auth.authorizeWithPkce({
+      clientId: "consumer-app",
+      displayName: "Consumer App",
+      scopes: ["sessions", "agent"],
+      codeVerifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+    }, {
+      intervalMs: 1,
+      timeoutMs: 500,
+      onAuthorizeUrl: (url) => authorizeUrls.push(url),
+    });
+
+    assert.equal(result.tokens.accessToken, "app-access-token");
+    assert.deepEqual(result.tokens.scopes, ["sessions", "agent"]);
+    assert.equal(result.request.code, "authcode_1");
+    assert.deepEqual(authorizeUrls, [`http://${mock.host}/admin/authorization?request=authreq_1`]);
+    assert.equal(mock.httpRequests[0].method, "POST");
+    assert.equal(mock.httpRequests[0].url, "/auth/pkce/start");
+    assert.equal(mock.httpRequests[0].body.clientId, "consumer-app");
+    assert.equal(mock.httpRequests[0].body.codeChallengeMethod, "S256");
+    assert.equal(mock.httpRequests[0].body.codeChallenge, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+    assert.equal("codeVerifier" in mock.httpRequests[0].body, false);
+    assert.equal(mock.httpRequests[1].url, "/auth/pkce/requests/authreq_1");
+    assert.equal(mock.httpRequests[2].url, "/auth/pkce/requests/authreq_1");
+    assert.equal(mock.httpRequests[3].method, "POST");
+    assert.equal(mock.httpRequests[3].url, "/auth/pkce/token");
+    assert.equal(mock.httpRequests[3].body.grantType, "authorization_code");
+    assert.equal(mock.httpRequests[3].body.code, "authcode_1");
+    assert.equal(mock.httpRequests[3].body.codeVerifier, "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk");
+  });
+
+  it("auth.authorizeWithPkce rejects when the owner denies the request", async () => {
+    const now = Date.now();
+    mock.queueHttpResponse(201, {
+      requestId: "authreq_denied",
+      clientId: "consumer-app",
+      displayName: "Consumer App",
+      redirectUri: null,
+      scopes: ["sessions"],
+      status: "pending",
+      createdAt: now,
+      expiresAt: now + 60_000,
+      approvedAt: null,
+      authorizeUrl: `http://${mock.host}/admin/authorization?request=authreq_denied`,
+    });
+    mock.queueHttpResponse(200, {
+      requestId: "authreq_denied",
+      clientId: "consumer-app",
+      displayName: "Consumer App",
+      redirectUri: null,
+      scopes: ["sessions"],
+      status: "denied",
+      createdAt: now,
+      expiresAt: now + 60_000,
+      approvedAt: null,
+    });
+    sna = httpClient();
+
+    await assert.rejects(
+      sna.auth.authorizeWithPkce({
+        clientId: "consumer-app",
+        codeVerifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+      }, {
+        intervalMs: 1,
+        timeoutMs: 500,
+      }),
+      /PKCE authorization was denied/,
+    );
+    assert.equal(mock.httpRequests.length, 2);
+  });
+
+  it("withAuthToken creates a consumer client that sends scoped access tokens", async () => {
+    mock.queueHttpResponse(200, { sessions: [] });
+    const unauthenticated = httpClient();
+    sna = unauthenticated.withAuthToken("app-access-token");
+
+    await sna.sessions.list();
+
+    assert.equal(mock.httpRequests[0].method, "GET");
+    assert.equal(mock.httpRequests[0].url, "/agent/sessions");
+    assert.equal(mock.httpRequests[0].headers.authorization, "Bearer app-access-token");
+  });
+
   it("sessions.create — no opts sends empty body", async () => {
     mock.queueHttpResponse(200, { status: "created", sessionId: "auto", label: "auto", meta: null });
     sna = httpClient();
@@ -1621,6 +1767,236 @@ describe("HTTP transport — new operations", () => {
     assert.equal(req.url, "/agent/run-once");
     assert.equal(req.body.message, "6 * 7");
     assert.equal(req.body.timeout, 5000);
+  });
+
+  it("agent.startWithProfile — POST /agent/start with profileLevel", async () => {
+    mock.queueHttpResponse(200, { status: "started", provider: "codex", sessionId: "default" });
+    sna = httpClient();
+
+    const res = await sna.agent.startWithProfile("default", 4, {
+      force: true,
+      prompt: "inspect",
+    });
+
+    assert.equal(res.status, "started");
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/agent/start?session=default");
+    assert.equal(req.body.profileLevel, 4);
+    assert.equal(req.body.force, true);
+    assert.equal(req.body.prompt, "inspect");
+  });
+
+  it("agent lifecycle calls can include profileLevel and runtimeId", async () => {
+    mock.queueHttpResponse(200, { status: "resumed", provider: "codex", sessionId: "default", historyCount: 2 });
+    mock.queueHttpResponse(200, { result: "done", usage: null });
+    mock.queueHttpResponse(200, {
+      text: "done",
+      usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      costUsd: 0,
+      durationMs: 1,
+      durationApiMs: 1,
+      model: "gpt-5.4",
+    });
+    sna = httpClient();
+
+    await sna.agent.resume("default", { profileLevel: 3, runtimeId: "codex-main" });
+    await sna.agent.runOnce({ message: "run", profileLevel: 2, runtimeId: "codex-main" });
+    await sna.agent.completion({ prompt: "complete", profileLevel: 1, runtimeId: "codex-main" });
+
+    assert.equal(mock.httpRequests[0].body.profileLevel, 3);
+    assert.equal(mock.httpRequests[0].body.runtimeId, "codex-main");
+    assert.equal(mock.httpRequests[1].body.profileLevel, 2);
+    assert.equal(mock.httpRequests[1].body.runtimeId, "codex-main");
+    assert.equal(mock.httpRequests[2].body.profileLevel, 1);
+    assert.equal(mock.httpRequests[2].body.runtimeId, "codex-main");
+  });
+
+  it("runtime.listProfiles — GET /agent/profiles", async () => {
+    mock.queueHttpResponse(200, {
+      profiles: [{ level: 1, label: "Level 1", config: { reasoningLevel: 1 }, updatedAt: 1 }],
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.listProfiles();
+
+    assert.equal(res.profiles[0].level, 1);
+    assert.equal(mock.httpRequests[0].method, "GET");
+    assert.equal(mock.httpRequests[0].url, "/agent/profiles");
+  });
+
+  it("runtime.listCatalog — GET /agent/runtime-catalog", async () => {
+    mock.queueHttpResponse(200, {
+      runtimes: [
+        {
+          id: "codex",
+          label: "Codex",
+          available: true,
+          supportsRuntimePooling: true,
+          supportsCwdPerThread: true,
+          modelListing: true,
+          detection: {
+            detected: true,
+            path: "/usr/local/bin/codex",
+            version: "codex 1.0.0",
+            source: "static",
+          },
+        },
+      ],
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.listCatalog();
+
+    assert.equal(res.runtimes[0].id, "codex");
+    assert.equal(res.runtimes[0].supportsRuntimePooling, true);
+    assert.equal(res.runtimes[0].detection.source, "static");
+    assert.equal(mock.httpRequests[0].method, "GET");
+    assert.equal(mock.httpRequests[0].url, "/agent/runtime-catalog");
+  });
+
+  it("runtime.updateProfile — PUT /agent/profiles/:level", async () => {
+    mock.queueHttpResponse(200, {
+      status: "updated",
+      profile: { level: 3, label: "Level 3", runtimeId: "codex-main", config: { reasoningLevel: 3 }, updatedAt: 2 },
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.updateProfile(3, {
+      runtimeId: "codex-main",
+      config: { reasoningLevel: 3, model: "gpt-5.4" },
+    });
+
+    assert.equal(res.status, "updated");
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "PUT");
+    assert.equal(req.url, "/agent/profiles/3");
+    assert.equal(req.body.runtimeId, "codex-main");
+    assert.equal(req.body.config.model, "gpt-5.4");
+  });
+
+  it("runtime.listModelPresets — GET /agent/model-presets", async () => {
+    mock.queueHttpResponse(200, {
+      presets: [{ id: "fast", name: "Fast", runtimeId: "codex-main", model: "gpt-5.4-mini", reasoningLevel: 2, createdAt: 3, updatedAt: 3 }],
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.listModelPresets();
+
+    assert.equal(res.presets[0].id, "fast");
+    assert.equal(mock.httpRequests[0].method, "GET");
+    assert.equal(mock.httpRequests[0].url, "/agent/model-presets");
+  });
+
+  it("runtime.upsertModelPreset — PUT /agent/model-presets/:id", async () => {
+    mock.queueHttpResponse(200, {
+      status: "saved",
+      preset: { id: "deep", name: "Deep", runtimeId: "codex-main", model: "gpt-5.4", modelProvider: "openai", reasoningLevel: 5, createdAt: 4, updatedAt: 4 },
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.upsertModelPreset("deep", {
+      name: "Deep",
+      runtimeId: "codex-main",
+      model: "gpt-5.4",
+      modelProvider: "openai",
+      reasoningLevel: 5,
+    });
+
+    assert.equal(res.status, "saved");
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "PUT");
+    assert.equal(req.url, "/agent/model-presets/deep");
+    assert.equal(req.body.runtimeId, "codex-main");
+    assert.equal(req.body.reasoningLevel, 5);
+  });
+
+  it("runtime.deleteModelPreset — DELETE /agent/model-presets/:id", async () => {
+    mock.queueHttpResponse(200, {
+      status: "deleted",
+      modelPresetId: "deep",
+      clearedProfileLevels: [4, 5],
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.deleteModelPreset("deep");
+
+    assert.equal(res.status, "deleted");
+    assert.equal(res.modelPresetId, "deep");
+    assert.deepEqual(res.clearedProfileLevels, [4, 5]);
+    assert.equal(mock.httpRequests[0].method, "DELETE");
+    assert.equal(mock.httpRequests[0].url, "/agent/model-presets/deep");
+  });
+
+  it("runtime.registerRuntime — PUT /agent/runtimes/:id", async () => {
+    mock.queueHttpResponse(200, {
+      status: "registered",
+      runtime: { id: "codex-main", provider: "codex", label: "Codex", enabled: true, defaultModel: "gpt-5.4", createdAt: 3, updatedAt: 3 },
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.registerRuntime("codex-main", {
+      provider: "codex",
+      label: "Codex",
+      defaultModel: "gpt-5.4",
+    });
+
+    assert.equal(res.status, "registered");
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "PUT");
+    assert.equal(req.url, "/agent/runtimes/codex-main");
+    assert.equal(req.body.provider, "codex");
+    assert.equal(req.body.label, "Codex");
+    assert.equal(req.body.defaultModel, "gpt-5.4");
+  });
+
+  it("runtime.listRuntimes — GET /agent/runtimes", async () => {
+    mock.queueHttpResponse(200, {
+      runtimes: [{ id: "codex-main", provider: "codex", label: "Codex", enabled: true, createdAt: 3, updatedAt: 3 }],
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.listRuntimes();
+
+    assert.equal(res.runtimes[0].id, "codex-main");
+    assert.equal(mock.httpRequests[0].method, "GET");
+    assert.equal(mock.httpRequests[0].url, "/agent/runtimes");
+  });
+
+  it("runtime.deleteRuntime — DELETE /agent/runtimes/:id", async () => {
+    mock.queueHttpResponse(200, {
+      status: "deleted",
+      runtimeId: "codex-main",
+      removedModelPresetIds: ["fast-codex"],
+      clearedProfileLevels: [2],
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.deleteRuntime("codex-main");
+
+    assert.equal(res.status, "deleted");
+    assert.equal(res.runtimeId, "codex-main");
+    assert.deepEqual(res.removedModelPresetIds, ["fast-codex"]);
+    assert.deepEqual(res.clearedProfileLevels, [2]);
+    assert.equal(mock.httpRequests[0].method, "DELETE");
+    assert.equal(mock.httpRequests[0].url, "/agent/runtimes/codex-main");
+  });
+
+  it("runtime.audit — GET /agent/audit", async () => {
+    mock.queueHttpResponse(200, {
+      profiles: [],
+      modelPresets: [],
+      runtimes: [],
+      sessions: [],
+      apps: [{ clientId: "app-a", displayName: "App A", scopes: ["agent:read"], tokenCount: 1, activeTokenCount: 1 }],
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.audit();
+
+    assert.equal(res.apps[0].clientId, "app-a");
+    assert.equal(mock.httpRequests[0].method, "GET");
+    assert.equal(mock.httpRequests[0].url, "/agent/audit");
   });
 
   it("chat.listSessions — GET /chat/sessions", async () => {

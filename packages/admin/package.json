@@ -1,0 +1,41 @@
+{
+  "name": "@sna-sdk/admin",
+  "version": "0.17.2",
+  "description": "Static React admin console for SNA daemon",
+  "type": "module",
+  "files": [
+    "dist/"
+  ],
+  "exports": {
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    }
+  },
+  "scripts": {
+    "build": "vite build && tsx scripts/generate-server-assets.ts",
+    "dev": "vite dev --host 127.0.0.1 --port 3098",
+    "test": "node --import tsx --test test/**/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lobehub/icons": "^5.8.0",
+    "@tanstack/react-query": "^5.91.2",
+    "@tanstack/react-router": "^1.139.5",
+    "lucide-react": "^1.16.0",
+    "radix-ui": "^1.4.3",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "tailwindcss": "^4.3.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0"
+  }
+}
