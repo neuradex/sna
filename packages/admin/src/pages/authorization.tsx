@@ -1,6 +1,6 @@
 import { Check, X } from "lucide-react";
 import { Button } from "../components/button";
-import { EmptyState, ErrorText, Panel, StatusBadge } from "../components/ui";
+import { EmptyState, ErrorText, Panel, StatusBadge, TableSkeleton } from "../components/ui";
 import { canActOnAuthRequest, authRequestLabel, statusTone, type AuthRequest } from "../features/auth-requests";
 import { useAuthRequestAction, useAuthRequestsQuery } from "../queries";
 
@@ -8,10 +8,12 @@ export function AuthorizationPage() {
   const requests = useAuthRequestsQuery();
   const action = useAuthRequestAction();
   const focusedRequestId = new URLSearchParams(location.search).get("request");
+  const loading = !requests.isError && !requests.data && (requests.isLoading || requests.isFetching);
 
   return (
     <Panel title="Authorization Requests">
       {requests.isError ? <ErrorText error={requests.error} /> : null}
+      {loading ? <TableSkeleton columns={4} rows={3} /> : null}
       {requests.isSuccess && !requests.data.requests.length ? <EmptyState>No authorization requests</EmptyState> : null}
       {requests.isSuccess && requests.data.requests.length ? (
         <div className="overflow-x-auto">

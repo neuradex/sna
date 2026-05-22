@@ -5,7 +5,7 @@ import { Checkbox } from "../components/checkbox";
 import { Dialog, DialogContent } from "../components/dialog";
 import { Input } from "../components/input";
 import { RuntimeIcon, detectedPath } from "../components/runtime-icon";
-import { EmptyState, ErrorText, Panel, StatusBadge } from "../components/ui";
+import { EmptyState, ErrorText, Panel, Skeleton, StatusBadge } from "../components/ui";
 import {
   useAgentAuditQuery,
   useDeleteRuntimeMutation,
@@ -29,6 +29,9 @@ export function RuntimePage() {
   const registeredRuntimes = runtimes.data?.runtimes ?? [];
   const catalogById = useMemo(() => new Map(catalogEntries.map((runtime) => [runtime.id, runtime])), [catalogEntries]);
   const activeSessions = audit.data?.sessions.filter((session) => session.alive).length ?? 0;
+  const runtimesLoading = !runtimes.isError && !runtimes.data && (runtimes.isLoading || runtimes.isFetching);
+  const auditLoading = !audit.isError && !audit.data && (audit.isLoading || audit.isFetching);
+  const runtimesUnavailable = runtimes.isError && !runtimes.data;
 
   function openAddRuntime(provider?: string) {
     setInitialProvider(provider);
@@ -51,8 +54,8 @@ export function RuntimePage() {
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div className="grid gap-2 sm:min-w-[240px] sm:grid-cols-2">
-              <HeroMetric label="Registered" value={registeredRuntimes.length} />
-              <HeroMetric label="Active" value={activeSessions} />
+              <HeroMetric label="Registered" value={runtimesLoading ? <Skeleton className="ml-auto h-8 w-12" /> : registeredRuntimes.length} />
+              <HeroMetric label="Active" value={auditLoading ? <Skeleton className="ml-auto h-8 w-12" /> : activeSessions} />
             </div>
             <Button
               type="button"
@@ -68,10 +71,15 @@ export function RuntimePage() {
 
       <Panel
         title="Registered Runtimes"
-        action={<StatusBadge tone={runtimes.isError ? "bad" : "neutral"}>{registeredRuntimes.length} runtimes</StatusBadge>}
+        action={<StatusBadge tone={runtimes.isError ? "bad" : "neutral"}>{runtimesLoading ? "loading" : `${registeredRuntimes.length} runtimes`}</StatusBadge>}
       >
         {runtimes.isError ? <ErrorText error={runtimes.error} /> : null}
-        {registeredRuntimes.length ? (
+        {runtimesLoading ? (
+          <div className="grid gap-3 lg:grid-cols-2">
+            <RuntimeCardSkeleton />
+            <RuntimeCardSkeleton />
+          </div>
+        ) : !runtimesUnavailable && registeredRuntimes.length ? (
           <div className="grid gap-3 lg:grid-cols-2">
             {registeredRuntimes.map((runtime) => (
               <RegisteredRuntimeCard
@@ -83,17 +91,23 @@ export function RuntimePage() {
               />
             ))}
           </div>
-        ) : (
+        ) : !runtimesUnavailable ? (
           <EmptyState>No registered runtimes</EmptyState>
-        )}
+        ) : null}
       </Panel>
 
       <Panel
         title="Runtime Audit"
-        action={<StatusBadge tone={audit.isError ? "bad" : "neutral"}>{audit.data?.runtimes.length ?? 0} tracked</StatusBadge>}
+        action={<StatusBadge tone={audit.isError ? "bad" : "neutral"}>{auditLoading ? "loading" : `${audit.data?.runtimes.length ?? 0} tracked`}</StatusBadge>}
       >
         {audit.isError ? <ErrorText error={audit.error} /> : null}
-        {audit.isSuccess ? (
+        {auditLoading ? (
+          <div className="grid gap-3 md:grid-cols-3">
+            <AuditMetricSkeleton />
+            <AuditMetricSkeleton />
+            <AuditMetricSkeleton />
+          </div>
+        ) : audit.isSuccess ? (
           <div className="grid gap-3 md:grid-cols-3">
             <AuditMetric icon={<ServerCog size={18} />} label="Registered" value={audit.data.runtimes.length} />
             <AuditMetric icon={<Activity size={18} />} label="Active Sessions" value={activeSessions} />
@@ -379,7 +393,7 @@ function AddRuntimeDialog({
                 ))}
               </div>
             ) : catalogLoading ? (
-              <EmptyState>Detecting runtimes...</EmptyState>
+              <RuntimeCatalogSkeleton />
             ) : (
               <EmptyState>No supported runtimes loaded</EmptyState>
             )}
@@ -412,11 +426,51 @@ function AddRuntimeDialog({
   );
 }
 
-function HeroMetric({ label, value }: { label: string; value: number }) {
+function HeroMetric({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 py-3 text-right backdrop-blur">
       <div className="font-mono text-[10px] font-medium uppercase tracking-wider text-[var(--fg-muted)]">{label}</div>
       <div className="mt-1 text-2xl font-semibold tabular-nums text-[var(--fg)]">{value}</div>
+    </div>
+  );
+}
+
+function RuntimeCardSkeleton() {
+  return (
+    <article role="status" aria-live="polite" aria-label="Loading runtime" className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--panel-subtle)] p-4">
+      <span className="sr-only">Loading runtime</span>
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <Skeleton className="size-11 shrink-0 rounded-xl" />
+          <div className="min-w-0">
+            <Skeleton className="h-5 w-36" />
+            <Skeleton className="mt-2 h-3 w-28" />
+          </div>
+        </div>
+        <Skeleton className="h-7 w-20" />
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        <Skeleton className="h-14 rounded-lg" />
+        <Skeleton className="h-14 rounded-lg" />
+      </div>
+    </article>
+  );
+}
+
+function RuntimeCatalogSkeleton() {
+  return (
+    <div role="status" aria-live="polite" aria-label="Loading runtime catalog" className="grid gap-2">
+      <span className="sr-only">Loading runtime catalog</span>
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div key={index} className="flex min-h-14 items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel-subtle)] px-3 py-2.5">
+          <Skeleton className="size-8 shrink-0 rounded-lg" />
+          <div className="min-w-0 flex-1">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="mt-2 h-3 w-full max-w-xs" />
+          </div>
+          <Skeleton className="hidden h-7 w-16 shrink-0 sm:block" />
+        </div>
+      ))}
     </div>
   );
 }
@@ -437,6 +491,19 @@ function AuditMetric({ icon, label, value }: { icon: ReactNode; label: string; v
       <div>
         <div className="field-label">{label}</div>
         <div className="text-xl font-semibold text-[var(--fg)]">{value}</div>
+      </div>
+    </div>
+  );
+}
+
+function AuditMetricSkeleton() {
+  return (
+    <div role="status" aria-live="polite" aria-label="Loading audit metric" className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel-subtle)] p-3">
+      <span className="sr-only">Loading audit metric</span>
+      <Skeleton className="size-10 rounded-lg" />
+      <div className="min-w-0 flex-1">
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="mt-2 h-6 w-10" />
       </div>
     </div>
   );

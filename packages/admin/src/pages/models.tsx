@@ -1,11 +1,11 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState, type ReactNode } from "react";
 import { Edit3, Layers, Loader2, Plus, Save, SlidersHorizontal } from "lucide-react";
 import { Button } from "../components/button";
 import { Dialog, DialogContent } from "../components/dialog";
 import { Input } from "../components/input";
 import { RuntimeIcon } from "../components/runtime-icon";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/select";
-import { EmptyState, ErrorText, Panel, StatusBadge } from "../components/ui";
+import { EmptyState, ErrorText, Panel, Skeleton, StatusBadge } from "../components/ui";
 import {
   useModelPresetMutation,
   useModelPresetsQuery,
@@ -35,6 +35,10 @@ export function ModelsPage() {
   const runtimeRows = runtimes.data?.runtimes ?? [];
   const catalogRows = catalog.data?.runtimes ?? [];
   const assignedLevels = profiles.data?.profiles.filter((profile) => profile.modelPresetId).length ?? 0;
+  const presetsLoading = !presets.isError && !presets.data && (presets.isLoading || presets.isFetching);
+  const runtimesLoading = !runtimes.isError && !runtimes.data && (runtimes.isLoading || runtimes.isFetching);
+  const profilesLoading = !profiles.isError && !profiles.data && (profiles.isLoading || profiles.isFetching);
+  const presetsUnavailable = (presets.isError && !presets.data) || (runtimes.isError && !runtimes.data);
 
   function openPresetDialog(preset?: ModelPreset) {
     setEditingPreset(preset);
@@ -57,9 +61,9 @@ export function ModelsPage() {
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div className="grid gap-2 sm:min-w-[360px] sm:grid-cols-3">
-              <HeroMetric label="Presets" value={presetRows.length} />
-              <HeroMetric label="Assigned" value={assignedLevels} />
-              <HeroMetric label="Runtimes" value={runtimeRows.length} />
+              <HeroMetric label="Presets" value={presetsLoading ? <Skeleton className="ml-auto h-8 w-12" /> : presetRows.length} />
+              <HeroMetric label="Assigned" value={profilesLoading ? <Skeleton className="ml-auto h-8 w-12" /> : assignedLevels} />
+              <HeroMetric label="Runtimes" value={runtimesLoading ? <Skeleton className="ml-auto h-8 w-12" /> : runtimeRows.length} />
             </div>
             <Button
               type="button"
@@ -75,11 +79,17 @@ export function ModelsPage() {
 
       <Panel
         title="Model Presets"
-        action={<StatusBadge tone={presets.isError ? "bad" : "neutral"}>{presetRows.length} presets</StatusBadge>}
+        action={<StatusBadge tone={presets.isError ? "bad" : "neutral"}>{presetsLoading || runtimesLoading ? "loading" : `${presetRows.length} presets`}</StatusBadge>}
       >
         {presets.isError ? <ErrorText error={presets.error} /> : null}
-        {!runtimeRows.length ? <EmptyState>Register a runtime before adding model presets</EmptyState> : null}
-        {presetRows.length ? (
+        {runtimes.isError ? <ErrorText error={runtimes.error} /> : null}
+        {presetsLoading || runtimesLoading ? (
+          <div className="grid gap-3 lg:grid-cols-2">
+            <ModelPresetCardSkeleton />
+            <ModelPresetCardSkeleton />
+          </div>
+        ) : !presetsUnavailable && !runtimeRows.length ? <EmptyState>Register a runtime before adding model presets</EmptyState> : null}
+        {!presetsLoading && !runtimesLoading && !presetsUnavailable && presetRows.length ? (
           <div className="grid gap-3 lg:grid-cols-2">
             {presetRows.map((preset) => (
               <ModelPresetCard
@@ -91,17 +101,21 @@ export function ModelsPage() {
               />
             ))}
           </div>
-        ) : runtimeRows.length ? (
+        ) : !presetsLoading && !runtimesLoading && !presetsUnavailable && runtimeRows.length ? (
           <EmptyState>No model presets</EmptyState>
         ) : null}
       </Panel>
 
       <Panel
         title="Level Defaults"
-        action={<StatusBadge tone={profiles.isError ? "bad" : "neutral"}>{profiles.data?.profiles.length ?? 0} levels</StatusBadge>}
+        action={<StatusBadge tone={profiles.isError ? "bad" : "neutral"}>{profilesLoading ? "loading" : `${profiles.data?.profiles.length ?? 0} levels`}</StatusBadge>}
       >
         {profiles.isError ? <ErrorText error={profiles.error} /> : null}
-        {profiles.isSuccess ? (
+        {profilesLoading ? (
+          <div className="grid gap-3">
+            {Array.from({ length: 5 }).map((_, index) => <LevelAssignmentSkeleton key={index} />)}
+          </div>
+        ) : profiles.isSuccess ? (
           <div className="grid gap-3">
             {profiles.data.profiles.map((profile) => (
               <LevelAssignmentRow
@@ -128,6 +142,7 @@ export function ModelsPage() {
         onOpenChange={setDialogOpen}
         preset={editingPreset}
         runtimes={runtimeRows}
+        runtimesLoading={runtimesLoading}
         runtimeCatalog={catalogRows}
         busy={presetMutation.isPending}
         error={presetMutation.error}
@@ -180,6 +195,29 @@ function ModelPresetCard({
         <ModelFact label="Runtime" value={runtime?.label ?? preset.runtimeId} />
         <ModelFact label="Model" value={preset.model || "provider default"} />
         <ModelFact label="Effort" value={String(preset.reasoningLevel)} />
+      </div>
+    </article>
+  );
+}
+
+function ModelPresetCardSkeleton() {
+  return (
+    <article role="status" aria-live="polite" aria-label="Loading model preset" className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--panel-subtle)] p-4">
+      <span className="sr-only">Loading model preset</span>
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <Skeleton className="size-11 shrink-0 rounded-xl" />
+          <div className="min-w-0">
+            <Skeleton className="h-5 w-36" />
+            <Skeleton className="mt-2 h-3 w-28" />
+          </div>
+        </div>
+        <Skeleton className="h-8 w-20" />
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+        <Skeleton className="h-14 rounded-lg" />
+        <Skeleton className="h-14 rounded-lg" />
+        <Skeleton className="h-14 rounded-lg" />
       </div>
     </article>
   );
@@ -253,11 +291,34 @@ function LevelAssignmentRow({
   );
 }
 
+function LevelAssignmentSkeleton() {
+  return (
+    <div role="status" aria-live="polite" aria-label="Loading level default" className="grid gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel-subtle)] p-3 lg:grid-cols-[180px_minmax(0,1fr)_auto] lg:items-center">
+      <span className="sr-only">Loading level default</span>
+      <div>
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-7 w-10" />
+          <Skeleton className="h-4 w-24" />
+        </div>
+        <Skeleton className="mt-2 h-3 w-full max-w-40" />
+      </div>
+      <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(220px,0.45fr)_minmax(0,1fr)] sm:items-center">
+        <Skeleton className="h-10 rounded-lg" />
+        <Skeleton className="h-14 rounded-lg" />
+      </div>
+      <div className="flex justify-end">
+        <Skeleton className="h-9 w-20" />
+      </div>
+    </div>
+  );
+}
+
 function ModelPresetDialog({
   open,
   onOpenChange,
   preset,
   runtimes,
+  runtimesLoading,
   runtimeCatalog,
   busy,
   error,
@@ -267,6 +328,7 @@ function ModelPresetDialog({
   onOpenChange: (open: boolean) => void;
   preset?: ModelPreset;
   runtimes: RegisteredRuntime[];
+  runtimesLoading: boolean;
   runtimeCatalog: RuntimeCatalogEntry[];
   busy: boolean;
   error: unknown;
@@ -291,6 +353,7 @@ function ModelPresetDialog({
   const models = useRuntimeModelsQuery(selectedRuntime?.provider ?? "", selectedRuntime?.cliPath ?? "", open && Boolean(selectedRuntime));
   const modelOptions = models.data?.models ?? [];
   const selectedModel = modelOptions.find((candidate) => candidate.id === model);
+  const modelsLoading = !models.isError && !models.data && models.isFetching;
 
   useEffect(() => {
     if (!open) return;
@@ -348,19 +411,23 @@ function ModelPresetDialog({
             <Field label="Name" value={name} onChange={changeName} placeholder="Fast Codex" />
           </div>
 
-          <label className="grid min-w-0 gap-1">
-            <span className="field-label">Runtime</span>
-            <Select value={runtimeId} onValueChange={changeRuntime} disabled={!runtimes.length}>
-              <SelectTrigger className="h-10">
-                <SelectValue placeholder="Select runtime" />
-              </SelectTrigger>
-              <SelectContent>
-                {runtimes.map((runtime) => (
-                  <SelectItem key={runtime.id} value={runtime.id}>{runtime.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </label>
+          {runtimesLoading && !runtimes.length ? (
+            <RuntimeSelectSkeleton />
+          ) : (
+            <label className="grid min-w-0 gap-1">
+              <span className="field-label">Runtime</span>
+              <Select value={runtimeId} onValueChange={changeRuntime} disabled={!runtimes.length}>
+                <SelectTrigger className="h-10">
+                  <SelectValue placeholder="Select runtime" />
+                </SelectTrigger>
+                <SelectContent>
+                  {runtimes.map((runtime) => (
+                    <SelectItem key={runtime.id} value={runtime.id}>{runtime.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+          )}
 
           {selectedRuntime ? (
             <div className="flex min-w-0 items-start gap-3 rounded-xl border border-[var(--border)] bg-[var(--panel-subtle)] p-3">
@@ -406,6 +473,7 @@ function ModelPresetDialog({
               </Select>
             </label>
           </div>
+          {modelsLoading ? <ModelOptionsSkeleton /> : null}
 
           <Field label="Custom Model ID" value={model} onChange={setModel} placeholder="provider default" />
 
@@ -432,11 +500,35 @@ function ModelPresetDialog({
   );
 }
 
-function HeroMetric({ label, value }: { label: string; value: number }) {
+function HeroMetric({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 py-3 text-right backdrop-blur">
       <div className="field-label">{label}</div>
       <div className="mt-1 text-2xl font-semibold tabular-nums text-[var(--fg)]">{value}</div>
+    </div>
+  );
+}
+
+function RuntimeSelectSkeleton() {
+  return (
+    <div role="status" aria-live="polite" aria-label="Loading runtimes" className="grid min-w-0 gap-1">
+      <span className="sr-only">Loading runtimes</span>
+      <Skeleton className="h-3 w-16" />
+      <Skeleton className="h-10 rounded-lg" />
+    </div>
+  );
+}
+
+function ModelOptionsSkeleton() {
+  return (
+    <div role="status" aria-live="polite" aria-label="Loading models" className="grid gap-2 rounded-xl border border-[var(--border)] bg-[var(--panel-subtle)] p-3">
+      <span className="sr-only">Loading models</span>
+      <Skeleton className="h-3 w-20" />
+      <div className="grid gap-2 sm:grid-cols-3">
+        <Skeleton className="h-8 rounded-lg" />
+        <Skeleton className="h-8 rounded-lg" />
+        <Skeleton className="h-8 rounded-lg" />
+      </div>
     </div>
   );
 }

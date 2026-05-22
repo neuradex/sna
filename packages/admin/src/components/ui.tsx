@@ -40,6 +40,38 @@ export function EmptyState({ children }: { children: ReactNode }) {
   );
 }
 
+export function Skeleton({ className = "" }: { className?: string }) {
+  return <div aria-hidden="true" className={`skeleton-shimmer rounded-md ${className}`} />;
+}
+
+export function TableSkeleton({ columns = 4, rows = 4 }: { columns?: number; rows?: number }) {
+  const gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
+  return (
+    <div role="status" aria-live="polite" aria-label="Loading" className="grid gap-2">
+      <span className="sr-only">Loading</span>
+      <div className="grid gap-3 border-b border-[var(--border)] pb-2" style={{ gridTemplateColumns }}>
+        {Array.from({ length: columns }).map((_, index) => (
+          <Skeleton key={index} className="h-3 w-2/3" />
+        ))}
+      </div>
+      {Array.from({ length: rows }).map((_, rowIndex) => (
+        <div
+          key={rowIndex}
+          className="grid gap-3 border-b border-[var(--border)] py-3 last:border-0"
+          style={{ gridTemplateColumns }}
+        >
+          {Array.from({ length: columns }).map((_, columnIndex) => (
+            <Skeleton
+              key={columnIndex}
+              className={columnIndex === columns - 1 ? "h-4 w-full" : "h-4 w-3/4"}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ErrorText({ error }: { error: unknown }) {
   const message = error instanceof Error ? error.message : String(error);
   return <div className="rounded-lg border border-red-500/20 bg-[var(--bad-soft)] px-3 py-2 font-mono text-xs font-medium text-[var(--bad)]">{message}</div>;

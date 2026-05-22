@@ -1,12 +1,14 @@
-import { EmptyState, ErrorText, Panel, StatusBadge } from "../components/ui";
+import { EmptyState, ErrorText, Panel, StatusBadge, TableSkeleton } from "../components/ui";
 import { useSessionsQuery } from "../queries";
 
 export function SessionsPage() {
   const sessions = useSessionsQuery();
+  const loading = !sessions.isError && !sessions.data && (sessions.isLoading || sessions.isFetching);
 
   return (
     <Panel title="Sessions">
       {sessions.isError ? <ErrorText error={sessions.error} /> : null}
+      {loading ? <TableSkeleton columns={5} rows={4} /> : null}
       {sessions.isSuccess && !sessions.data.sessions.length ? <EmptyState>No sessions</EmptyState> : null}
       {sessions.isSuccess && sessions.data.sessions.length ? (
         <div className="overflow-x-auto">
