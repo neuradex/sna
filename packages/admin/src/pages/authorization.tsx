@@ -1,6 +1,6 @@
 import { Check, X } from "lucide-react";
 import { Button } from "../components/button";
-import { EmptyState, ErrorText, Panel, StatusBadge, TableSkeleton } from "../components/ui";
+import { EmptyState, ErrorText, InlineErrorText, Panel, StatusBadge, TableSkeleton } from "../components/ui";
 import { canActOnAuthRequest, authRequestLabel, statusTone, type AuthRequest } from "../features/auth-requests";
 import { useAuthRequestAction, useAuthRequestsQuery } from "../queries";
 
@@ -64,7 +64,7 @@ function AuthRequestRow({
       <td className="max-w-[320px] py-3 pr-3">
         <div className="font-semibold text-[var(--fg)]">{authRequestLabel(request)}</div>
         <div className="break-all font-mono text-[10px] text-[var(--fg-muted)]">{request.clientId}</div>
-        {error ? <div className="mt-2 font-mono text-[10px] font-medium text-[var(--bad)]">{error instanceof Error ? error.message : String(error)}</div> : null}
+        {error ? <div className="mt-2"><InlineErrorText error={error} /></div> : null}
       </td>
       <td className="px-3 py-3 font-mono text-xs text-[var(--fg-soft)]">{request.scopes.join(", ") || "none"}</td>
       <td className="px-3 py-3">

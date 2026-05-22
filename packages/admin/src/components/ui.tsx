@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { AlertTriangle } from "lucide-react";
 
 export function Panel({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) {
   return (
@@ -72,7 +73,90 @@ export function TableSkeleton({ columns = 4, rows = 4 }: { columns?: number; row
   );
 }
 
+export interface ErrorDisplay {
+  title: string;
+  message: string;
+  detail?: string;
+  status?: number;
+}
+
+export function getErrorDisplay(error: unknown): ErrorDisplay {
+  const status = getErrorStatus(error);
+  const rawMessage = getErrorMessage(error);
+
+  if (status === 401) {
+    return {
+      title: "Admin session required",
+      message: "Open this console from the daemon /admin URL, then reload the page to refresh the local admin cookie.",
+      detail: rawMessage,
+      status,
+    };
+  }
+
+  if (status === 403) {
+    return {
+      title: "Permission denied",
+      message: "This browser session is connected, but it is not allowed to use this admin operation.",
+      detail: rawMessage,
+      status,
+    };
+  }
+
+  if (rawMessage.toLowerCase().includes("failed to fetch")) {
+    return {
+      title: "Daemon unavailable",
+      message: "Check that the local SNA daemon is running, then reload this page.",
+      detail: rawMessage,
+    };
+  }
+
+  return {
+    title: "Request failed",
+    message: rawMessage,
+    status,
+  };
+}
+
 export function ErrorText({ error }: { error: unknown }) {
-  const message = error instanceof Error ? error.message : String(error);
-  return <div className="rounded-lg border border-red-500/20 bg-[var(--bad-soft)] px-3 py-2 font-mono text-xs font-medium text-[var(--bad)]">{message}</div>;
+  const display = getErrorDisplay(error);
+  return (
+    <div role="alert" className="rounded-xl border border-red-500/20 bg-[var(--bad-soft)] px-3 py-3 text-[var(--bad)]">
+      <div className="flex min-w-0 items-start gap-2">
+        <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+        <div className="min-w-0">
+          <div className="font-semibold text-sm text-[var(--bad)]">{display.title}</div>
+          <div className="mt-1 text-sm leading-5 text-[var(--bad)]">{display.message}</div>
+          {display.detail && display.detail !== display.message ? (
+            <div className="mt-2 break-all font-mono text-[10px] font-medium opacity-75">
+              {display.status ? `${display.status} ` : ""}{display.detail}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function InlineErrorText({ error }: { error: unknown }) {
+  const display = getErrorDisplay(error);
+  return (
+    <span role="alert" className="font-mono text-[10px] font-medium text-[var(--bad)]">
+      {display.title}: {display.detail ?? display.message}
+    </span>
+  );
+}
+
+function getErrorStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== "object" || !("status" in error)) return undefined;
+  const status = (error as { status?: unknown }).status;
+  return typeof status === "number" ? status : undefined;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message?: unknown }).message);
+  }
+  return String(error);
 }

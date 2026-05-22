@@ -1,6 +1,6 @@
 import { Fragment } from "react";
 import { ShieldCheck, Terminal } from "lucide-react";
-import { EmptyState, ErrorText, Panel, Skeleton, StatusBadge } from "../components/ui";
+import { ErrorText, Panel, Skeleton, StatusBadge } from "../components/ui";
 import { useAuthRequestsQuery, useHealthQuery, useSessionsQuery } from "../queries";
 
 export function OverviewPage() {
@@ -34,7 +34,7 @@ export function OverviewPage() {
               <MetricSkeleton />
               <MetricSkeleton />
             </div>
-          ) : authRequests.isError || sessions.isError ? <EmptyState>Admin session unavailable.</EmptyState> : (
+          ) : authRequests.isError || sessions.isError ? <ErrorText error={authRequests.error ?? sessions.error} /> : (
             <div className="grid gap-3 sm:grid-cols-2">
               <Metric icon={<ShieldCheck size={18} />} label="Pending authorizations" value={pendingCount} tone={pendingCount ? "warn" : "good"} />
               <Metric icon={<Terminal size={18} />} label="Sessions" value={sessions.data?.sessions.length ?? 0} tone="neutral" />
