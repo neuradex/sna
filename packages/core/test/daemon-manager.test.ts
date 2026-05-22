@@ -4,11 +4,17 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import { createSnaDaemonAdminUrl, startSnaDaemon } from "../src/electron/index.js";
+import { startMockClaudeCli, type MockClaudeCli } from "./mock-claude-cli.js";
 
+const require = createRequire(import.meta.url);
 const tempDirs: string[] = [];
 const handles: Array<{ stop(): Promise<boolean> }> = [];
 const servers: http.Server[] = [];
+const mockClaudeClis: MockClaudeCli[] = [];
+const ALLOWED_ORIGIN = "http://localhost:5173";
 
 function makeTempDir(prefix: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -101,6 +107,36 @@ async function waitFor(
   assert.fail("condition was not met before timeout");
 }
 
+function pkceChallenge(verifier: string): string {
+  return createHash("sha256").update(verifier).digest("base64url");
+}
+
+function nodeOptionsWithTsx(): string {
+  const existing = process.env.NODE_OPTIONS?.trim();
+  const tsxImport = `--import ${require.resolve("tsx")}`;
+  if (!existing) return tsxImport;
+  if (existing.includes("tsx")) return existing;
+  return `${existing} ${tsxImport}`;
+}
+
+async function requestJson(
+  baseUrl: string,
+  method: string,
+  urlPath: string,
+  body?: Record<string, unknown>,
+  authToken?: string,
+): Promise<{ status: number; body: any }> {
+  const res = await fetch(`${baseUrl}${urlPath}`, {
+    method,
+    headers: {
+      ...(body ? { "Content-Type": "application/json" } : {}),
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return { status: res.status, body: await res.json() };
+}
+
 afterEach(async () => {
   for (const handle of handles.splice(0).reverse()) {
     try { await handle.stop(); } catch { /* ignore cleanup failures */ }
@@ -110,6 +146,9 @@ afterEach(async () => {
   }
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+  for (const mock of mockClaudeClis.splice(0)) {
+    mock.close();
   }
 });
 
@@ -260,6 +299,70 @@ describe("SNA daemon launcher", () => {
     const status = await handle.status();
     assert.equal(status.health?.dbEncryption, "sqlite-cipher");
     assert.equal(status.health?.dbKeyPresent, true);
+  });
+
+  it("runs the real standalone daemon PKCE flow with scoped HTTP access", async () => {
+    const dir = makeTempDir("sna-daemon-smoke-");
+    const mockClaude = startMockClaudeCli();
+    mockClaudeClis.push(mockClaude);
+    const port = await getFreePort();
+
+    const handle = await startSnaDaemon({
+      port,
+      dbPath: path.join(dir, "sna.db"),
+      daemonDir: path.join(dir, ".sna"),
+      serverScript: path.resolve(import.meta.dirname, "../src/server/standalone.ts"),
+      readyTimeout: 10_000,
+      allowedOrigins: [ALLOWED_ORIGIN],
+      runtimePaths: { claudeCode: mockClaude.command },
+      env: { NODE_OPTIONS: nodeOptionsWithTsx() },
+    });
+    handles.push(handle);
+
+    const openapi = await requestJson(handle.baseUrl, "GET", "/openapi.json", undefined, handle.authToken);
+    assert.equal(openapi.status, 200);
+    assert.ok(openapi.body.paths["/auth/pkce/start"].post);
+
+    const verifier = "daemon-smoke-verifier";
+    const start = await requestJson(handle.baseUrl, "POST", "/auth/pkce/start", {
+      clientId: "daemon-smoke-client",
+      displayName: "Daemon Smoke Client",
+      codeChallenge: pkceChallenge(verifier),
+      codeChallengeMethod: "S256",
+      scopes: ["sessions", "chat"],
+    });
+    assert.equal(start.status, 201);
+
+    const approve = await requestJson(
+      handle.baseUrl,
+      "POST",
+      `/auth/pkce/requests/${start.body.requestId}/approve`,
+      {},
+      handle.authToken,
+    );
+    assert.equal(approve.status, 200);
+    assert.equal(approve.body.status, "approved");
+
+    const token = await requestJson(handle.baseUrl, "POST", "/auth/pkce/token", {
+      grantType: "authorization_code",
+      requestId: start.body.requestId,
+      code: approve.body.code,
+      codeVerifier: verifier,
+    });
+    assert.equal(token.status, 200);
+    assert.match(token.body.accessToken, /^sna_at_/);
+
+    const sessions = await requestJson(handle.baseUrl, "GET", "/agent/sessions", undefined, token.body.accessToken);
+    assert.equal(sessions.status, 200);
+    assert.ok(Array.isArray(sessions.body.sessions));
+
+    const chat = await requestJson(handle.baseUrl, "GET", "/chat/sessions", undefined, token.body.accessToken);
+    assert.equal(chat.status, 200);
+    assert.ok(Array.isArray(chat.body.sessions));
+
+    const agentDenied = await requestJson(handle.baseUrl, "GET", "/agent/status", undefined, token.body.accessToken);
+    assert.equal(agentDenied.status, 403);
+    assert.match(agentDenied.body.message, /Insufficient scope.*agent/);
   });
 
   it("does not adopt a non-SNA service that happens to expose /health", async () => {
