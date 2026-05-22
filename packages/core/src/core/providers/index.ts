@@ -29,12 +29,31 @@ import { OpenCodeProvider } from "./opencode.js";
 import { GrokProvider } from "./grok.js";
 import { CursorProvider } from "./cursor.js";
 
+export interface AgentProviderCatalogEntry {
+  id: string;
+  label: string;
+  available: boolean;
+  supportsRuntimePooling: boolean;
+  supportsCwdPerThread: boolean;
+  modelListing: boolean;
+}
+
 const providers: Record<string, AgentProvider> = {
   "claude-code": new ClaudeCodeProvider(),
   "codex": new CodexProvider(),
   "opencode": new OpenCodeProvider(),
   "grok": new GrokProvider(),
   "cursor": new CursorProvider(),
+};
+
+const builtinProviderIds = ["claude-code", "codex", "opencode", "grok", "cursor"] as const;
+
+const providerLabels: Record<string, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  opencode: "OpenCode",
+  grok: "Grok Build",
+  cursor: "Cursor",
 };
 
 /**
@@ -50,4 +69,22 @@ export function getProvider(name: string = "claude-code"): AgentProvider {
 /** Register a custom provider. */
 export function registerProvider(provider: AgentProvider): void {
   providers[provider.name] = provider;
+}
+
+/** List SNA-supported agent providers for registration UIs. */
+export async function listProviders(): Promise<AgentProviderCatalogEntry[]> {
+  return Promise.all(
+    builtinProviderIds.map(async (id) => {
+      const provider = providers[id];
+      const available = await provider.isAvailable().catch(() => false);
+      return {
+        id,
+        label: providerLabels[id] ?? id,
+        available,
+        supportsRuntimePooling: provider.supportsRuntimePooling,
+        supportsCwdPerThread: provider.supportsCwdPerThread === true,
+        modelListing: typeof provider.listModels === "function",
+      };
+    }),
+  );
 }

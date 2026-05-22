@@ -13,6 +13,7 @@ import path from "path";
 import { createRequire } from "node:module";
 import {
   getProvider,
+  listProviders,
   spawnWithPool,
   type AgentEvent,
 } from "../../core/providers/index.js";
@@ -173,6 +174,15 @@ const RegisteredRuntimeSchema = z.object({
   config: RuntimeLaunchConfigSchema.optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
+});
+
+const RuntimeCatalogEntrySchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  available: z.boolean(),
+  supportsRuntimePooling: z.boolean(),
+  supportsCwdPerThread: z.boolean(),
+  modelListing: z.boolean(),
 });
 
 const RuntimeProfileSchema = z.object({
@@ -582,6 +592,19 @@ const updateSessionRoute = protectedRoute({
 });
 
 // ── Runtime Settings ─────────────────────────────────────────────────
+
+const runtimeCatalogRoute = protectedRoute({
+  method: "get",
+  path: "/agent/runtime-catalog",
+  summary: "List supported runtimes",
+  description: "List SNA-supported agent runtimes that can be selected when registering daemon runtime profiles.",
+  responses: {
+    200: {
+      description: "Supported runtimes.",
+      content: { "application/json": { schema: z.object({ runtimes: z.array(RuntimeCatalogEntrySchema) }) } },
+    },
+  },
+});
 
 const listRuntimesRoute = protectedRoute({
   method: "get",
@@ -1756,6 +1779,10 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
   });
 
   // ── Runtime Settings ─────────────────────────────────────────
+
+  app.openapi(runtimeCatalogRoute, async (c) => {
+    return c.json({ runtimes: await listProviders() }, 200);
+  });
 
   app.openapi(listRuntimesRoute, (c) => {
     return c.json({ runtimes: listRegisteredRuntimes() }, 200);

@@ -5,8 +5,10 @@ import {
   type AuthRequestsResponse,
   type DifficultyLevel,
   type HealthResponse,
+  type ListModelsResponse,
   type ProfilesResponse,
   type RegisteredRuntime,
+  type RuntimeCatalogResponse,
   type RuntimeLaunchConfig,
   type RuntimesResponse,
   type SessionsResponse,
@@ -16,6 +18,8 @@ export const queryKeys = {
   health: ["health"] as const,
   authRequests: ["auth-requests"] as const,
   sessions: ["sessions"] as const,
+  runtimeCatalog: ["runtime-catalog"] as const,
+  runtimeModels: (runtime: string, cliPath: string) => ["runtime-models", runtime, cliPath] as const,
   runtimeProfiles: ["runtime-profiles"] as const,
   registeredRuntimes: ["registered-runtimes"] as const,
   agentAudit: ["agent-audit"] as const,
@@ -66,6 +70,29 @@ export function useRuntimeProfilesQuery() {
     queryKey: queryKeys.runtimeProfiles,
     queryFn: () => apiRequest<ProfilesResponse>("/agent/profiles"),
     refetchInterval: 5_000,
+  });
+}
+
+export function useRuntimeCatalogQuery() {
+  return useQuery({
+    queryKey: queryKeys.runtimeCatalog,
+    queryFn: () => apiRequest<RuntimeCatalogResponse>("/agent/runtime-catalog"),
+    refetchInterval: 10_000,
+  });
+}
+
+export function useRuntimeModelsQuery(runtime: string, cliPath = "", enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.runtimeModels(runtime, cliPath),
+    queryFn: () => apiRequest<ListModelsResponse>("/agent/list-models", {
+      method: "POST",
+      body: {
+        runtime,
+        ...(cliPath ? { config: { cliPath } } : {}),
+      },
+    }),
+    enabled: enabled && Boolean(runtime),
+    staleTime: 60_000,
   });
 }
 

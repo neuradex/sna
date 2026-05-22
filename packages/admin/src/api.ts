@@ -50,6 +50,15 @@ export interface RegisteredRuntime {
   updatedAt: number;
 }
 
+export interface RuntimeCatalogEntry {
+  id: string;
+  label: string;
+  available: boolean;
+  supportsRuntimePooling: boolean;
+  supportsCwdPerThread: boolean;
+  modelListing: boolean;
+}
+
 export interface RuntimeProfile {
   level: DifficultyLevel;
   label: string;
@@ -63,8 +72,29 @@ export interface RuntimesResponse {
   runtimes: RegisteredRuntime[];
 }
 
+export interface RuntimeCatalogResponse {
+  runtimes: RuntimeCatalogEntry[];
+}
+
 export interface ProfilesResponse {
   profiles: RuntimeProfile[];
+}
+
+export interface RuntimeModelInfo {
+  id: string;
+  label: string;
+  provider: string;
+  source: "static" | "api" | "cli";
+  contextWindow?: number;
+  deprecated?: boolean;
+  notes?: string;
+}
+
+export interface ListModelsResponse {
+  models: RuntimeModelInfo[];
+  source: "static" | "api" | "cli" | "mixed";
+  fetchedAt: number;
+  error?: string;
 }
 
 export interface RuntimeAuditRuntime extends RegisteredRuntime {

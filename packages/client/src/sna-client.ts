@@ -305,6 +305,15 @@ export type RegisterRuntimeInput = {
 };
 export type UpdateRuntimeProfileInput = Partial<Omit<RuntimeProfile, "level" | "updatedAt">>;
 
+export interface RuntimeCatalogEntry {
+  id: string;
+  label: string;
+  available: boolean;
+  supportsRuntimePooling: boolean;
+  supportsCwdPerThread: boolean;
+  modelListing: boolean;
+}
+
 export interface RuntimeAuditRuntime extends RegisteredRuntime {
   activeSessionCount: number;
   sessionCount: number;
@@ -1097,6 +1106,11 @@ class AuthApi {
  */
 class RuntimeSettingsApi {
   constructor(private client: SnaClient) {}
+
+  async listCatalog(): Promise<{ runtimes: RuntimeCatalogEntry[] }> {
+    this.requireHttp();
+    return this.client._httpFetch("GET", "/agent/runtime-catalog");
+  }
 
   async listRuntimes(): Promise<{ runtimes: RegisteredRuntime[] }> {
     this.requireHttp();

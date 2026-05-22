@@ -21,6 +21,7 @@ export type {
   RegisteredRuntime,
   RegisterRuntimeInput,
   UpdateRuntimeProfileInput,
+  RuntimeCatalogEntry,
   RuntimeAuditRuntime,
   RuntimeAuditSession,
   RuntimeAuditApp,

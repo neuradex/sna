@@ -5,10 +5,12 @@ import {
   useAgentAuditQuery,
   useRegisteredRuntimesQuery,
   useRegisterRuntimeMutation,
+  useRuntimeCatalogQuery,
+  useRuntimeModelsQuery,
   useRuntimeProfileMutation,
   useRuntimeProfilesQuery,
 } from "../queries";
-import type { ReasoningLevel, RegisteredRuntime, RuntimeProfile } from "../api";
+import type { ReasoningLevel, RegisteredRuntime, RuntimeCatalogEntry, RuntimeModelInfo, RuntimeProfile } from "../api";
 
 const reasoningLevels = [0, 1, 2, 3, 4, 5] as const;
 const permissionModes = ["", "default", "acceptEdits", "auto", "bypassPermissions", "dontAsk", "plan"] as const;
@@ -16,6 +18,7 @@ const permissionModes = ["", "default", "acceptEdits", "auto", "bypassPermission
 export function RuntimePage() {
   const profiles = useRuntimeProfilesQuery();
   const runtimes = useRegisteredRuntimesQuery();
+  const runtimeCatalog = useRuntimeCatalogQuery();
   const audit = useAgentAuditQuery();
   const profileMutation = useRuntimeProfileMutation();
   const runtimeMutation = useRegisterRuntimeMutation();
@@ -64,6 +67,8 @@ export function RuntimePage() {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
             <Panel title="Register Runtime">
               <RegisterRuntimeForm
+                runtimeCatalog={runtimeCatalog.data?.runtimes ?? []}
+                catalogError={runtimeCatalog.error}
                 busy={runtimeMutation.isPending}
                 error={runtimeMutation.error}
                 onSubmit={(id, input) => runtimeMutation.mutate({ id, input })}
@@ -247,10 +252,14 @@ function ProfileRow({
 }
 
 function RegisterRuntimeForm({
+  runtimeCatalog,
+  catalogError,
   busy,
   error,
   onSubmit,
 }: {
+  runtimeCatalog: RuntimeCatalogEntry[];
+  catalogError: unknown;
   busy: boolean;
   error: unknown;
   onSubmit: (id: string, input: {
@@ -260,26 +269,69 @@ function RegisterRuntimeForm({
     modelProvider?: string;
     defaultModel?: string;
     cliPath?: string;
+    models?: RegisteredRuntime["models"];
   }) => void;
 }) {
-  const [id, setId] = useState("");
-  const [label, setLabel] = useState("");
+  const [id, setId] = useState("codex-main");
+  const [label, setLabel] = useState("Codex Main");
   const [provider, setProvider] = useState("codex");
-  const [modelProvider, setModelProvider] = useState("openai");
   const [defaultModel, setDefaultModel] = useState("");
   const [cliPath, setCliPath] = useState("");
   const [enabled, setEnabled] = useState(true);
-  const canSubmit = id.trim() && provider.trim();
+  const selectedRuntime = runtimeCatalog.find((runtime) => runtime.id === provider);
+  const trimmedCliPath = cliPath.trim();
+  const models = useRuntimeModelsQuery(provider, trimmedCliPath, selectedRuntime?.modelListing ?? true);
+  const modelOptions = models.data?.models ?? [];
+  const selectedModel = modelOptions.find((model) => model.id === defaultModel);
+  const canSubmit = Boolean(id.trim() && selectedRuntime);
+
+  useEffect(() => {
+    if (!runtimeCatalog.length) return;
+    const catalogRuntime = runtimeCatalog.find((runtime) => runtime.id === provider);
+    if (catalogRuntime) {
+      setLabel((current) => current.trim() ? current : `${catalogRuntime.label} Main`);
+      setId((current) => current.trim() ? current : `${catalogRuntime.id}-main`);
+      return;
+    }
+    const nextRuntime = runtimeCatalog[0];
+    setProvider(nextRuntime.id);
+    setId(`${nextRuntime.id}-main`);
+    setLabel(`${nextRuntime.label} Main`);
+    setDefaultModel("");
+  }, [provider, runtimeCatalog]);
+
+  useEffect(() => {
+    if (!defaultModel || !modelOptions.length) return;
+    if (!modelOptions.some((model) => model.id === defaultModel)) {
+      setDefaultModel("");
+    }
+  }, [defaultModel, modelOptions]);
+
+  function changeProvider(nextProvider: string) {
+    const previousDefaultId = `${provider}-main`;
+    const previousDefaultLabel = selectedRuntime ? `${selectedRuntime.label} Main` : "";
+    const nextRuntime = runtimeCatalog.find((runtime) => runtime.id === nextProvider);
+    const nextDefaultId = `${nextProvider}-main`;
+    const nextDefaultLabel = `${nextRuntime?.label ?? nextProvider} Main`;
+    setProvider(nextProvider);
+    setId((current) => !current.trim() || current === previousDefaultId ? nextDefaultId : current);
+    setLabel((current) => !current.trim() || current === previousDefaultLabel ? nextDefaultLabel : current);
+    setDefaultModel("");
+  }
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSubmit) return;
+    const registeredModels = selectedModel
+      ? [{ id: selectedModel.id, label: selectedModel.label, provider: selectedModel.provider }]
+      : undefined;
     onSubmit(id.trim(), {
       provider: provider.trim(),
       label: label.trim() || undefined,
       enabled,
-      modelProvider: modelProvider.trim() || undefined,
       defaultModel: defaultModel.trim() || undefined,
+      modelProvider: selectedModel?.provider,
+      models: registeredModels,
       cliPath: cliPath.trim() || undefined,
     });
   }
@@ -289,11 +341,53 @@ function RegisterRuntimeForm({
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="ID" value={id} onChange={setId} placeholder="codex-main" />
         <Field label="Label" value={label} onChange={setLabel} placeholder="Codex Main" />
-        <Field label="Provider" value={provider} onChange={setProvider} placeholder="codex" />
-        <Field label="Model provider" value={modelProvider} onChange={setModelProvider} placeholder="openai" />
-        <Field label="Default model" value={defaultModel} onChange={setDefaultModel} placeholder="gpt-5.4" />
+        <label className="grid gap-1">
+          <span className="font-mono text-[10px] font-medium uppercase tracking-wider text-[var(--fg-muted)]">Runtime</span>
+          <select
+            className="focus-ring h-9 rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-2 text-sm text-[var(--fg)]"
+            value={provider}
+            onChange={(event) => changeProvider(event.target.value)}
+            disabled={!runtimeCatalog.length}
+          >
+            {runtimeCatalog.length ? runtimeCatalog.map((runtime) => (
+              <option key={runtime.id} value={runtime.id}>
+                {runtime.label}{runtime.available ? "" : " (not found)"}
+              </option>
+            )) : (
+              <option value={provider}>Loading</option>
+            )}
+          </select>
+        </label>
+        <label className="grid gap-1">
+          <span className="font-mono text-[10px] font-medium uppercase tracking-wider text-[var(--fg-muted)]">Default model</span>
+          <select
+            className="focus-ring h-9 rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-2 text-sm text-[var(--fg)]"
+            value={defaultModel}
+            onChange={(event) => setDefaultModel(event.target.value)}
+          >
+            <option value="">Provider default</option>
+            {modelOptions.map((model) => (
+              <option key={`${model.provider}:${model.id}`} value={model.id}>
+                {formatModelOption(model)}
+              </option>
+            ))}
+          </select>
+        </label>
         <Field label="CLI path" value={cliPath} onChange={setCliPath} placeholder="/usr/local/bin/codex" />
       </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {selectedRuntime ? (
+          <>
+            <StatusBadge tone={selectedRuntime.available ? "good" : "warn"}>{selectedRuntime.available ? "available" : "not found"}</StatusBadge>
+            <StatusBadge tone={selectedRuntime.supportsRuntimePooling ? "good" : "neutral"}>{selectedRuntime.supportsRuntimePooling ? "pooled" : "per session"}</StatusBadge>
+            <StatusBadge tone={selectedRuntime.supportsCwdPerThread ? "good" : "neutral"}>{selectedRuntime.supportsCwdPerThread ? "cwd/thread" : "cwd/process"}</StatusBadge>
+          </>
+        ) : null}
+        {models.isFetching ? <StatusBadge tone="neutral">models...</StatusBadge> : null}
+      </div>
+      {catalogError ? <ErrorText error={catalogError} /> : null}
+      {models.isError ? <ErrorText error={models.error} /> : null}
+      {models.data?.error ? <div className="font-mono text-[10px] font-medium text-[var(--warn)]">{models.data.error}</div> : null}
       <div className="flex items-center justify-between gap-3">
         <label className="inline-flex items-center gap-2 font-mono text-xs text-[var(--fg-muted)]">
           <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
@@ -311,6 +405,11 @@ function RegisterRuntimeForm({
       {error ? <ErrorText error={error} /> : null}
     </form>
   );
+}
+
+function formatModelOption(model: RuntimeModelInfo): string {
+  const label = model.label && model.label !== model.id ? `${model.label} (${model.id})` : model.id;
+  return `${label} - ${model.provider}`;
 }
 
 function Field({
