@@ -82,6 +82,50 @@ Encrypted mode is optional and requires the consumer app to install
 store without requiring admin privileges. Use the `env`, `raw`, or `custom` key
 providers when the host app wants to own key delivery itself.
 
+When the daemon is shared by multiple local apps, do not hand each app the
+launcher owner token. Instead, let the app create a PKCE request, open the local
+admin URL for approval, poll until a short-lived code is approved, and exchange
+that code for its own access/refresh token pair:
+
+```ts
+import { createHash, randomBytes } from "node:crypto";
+import { SnaClient } from "@sna-sdk/client";
+
+const verifier = randomBytes(32).toString("base64url");
+const challenge = createHash("sha256").update(verifier).digest("base64url");
+const unauthenticated = new SnaClient({ baseUrl: "http://127.0.0.1:3099", ws: false });
+
+const request = await unauthenticated.auth.startPkce({
+  clientId: "com.example.my-app",
+  displayName: "My App",
+  codeChallenge: challenge,
+  codeChallengeMethod: "S256",
+});
+open(request.authorizeUrl);
+
+let approved = await unauthenticated.auth.getPkceRequest(request.requestId);
+while (approved.status === "pending") {
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  approved = await unauthenticated.auth.getPkceRequest(request.requestId);
+}
+if (!approved.code) throw new Error(`Authorization ${approved.status}`);
+
+const tokens = await unauthenticated.auth.exchangePkceCode({
+  requestId: request.requestId,
+  code: approved.code,
+  codeVerifier: verifier,
+});
+
+const sna = new SnaClient({
+  baseUrl: "http://127.0.0.1:3099",
+  authToken: tokens.accessToken,
+});
+```
+
+Access tokens are accepted by HTTP and WebSocket transports. Refresh tokens are
+stored server-side as hashes and can be exchanged through
+`sna.auth.refreshAccessToken(refreshToken)`.
+
 ### Connecting from any framework
 
 ```ts

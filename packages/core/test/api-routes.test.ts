@@ -5,6 +5,7 @@
 
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import fs from "fs";
 import path from "path";
@@ -23,6 +24,10 @@ function setup() {
   const origCwd = process.cwd;
   process.cwd = () => TEST_DB_DIR;
   return () => { process.cwd = origCwd; removeTestDir(); };
+}
+
+function pkceChallenge(verifier: string): string {
+  return createHash("sha256").update(verifier).digest("base64url");
 }
 
 class FakeApiAgentProcess extends EventEmitter {
@@ -210,6 +215,101 @@ describe("HTTP API Routes", () => {
 
       assert.deepEqual(document.security, [{ bearerAuth: [] }]);
       assert.deepEqual(document.paths["/agent/sessions"].get.security, [{ bearerAuth: [] }]);
+    });
+  });
+
+  describe("Local OAuth PKCE", () => {
+    it("issues, refreshes, and revokes client tokens through owner-approved PKCE", async () => {
+      const verifier = "test-verifier-for-local-pkce";
+      const start = await req("POST", "/auth/pkce/start", {
+        clientId: "test-client",
+        displayName: "Test Client",
+        codeChallenge: pkceChallenge(verifier),
+        codeChallengeMethod: "S256",
+        scopes: ["agent", "sessions"],
+      }, { auth: false });
+      assert.equal(start.status, 201);
+      const started = await start.json();
+      assert.match(started.requestId, /^authreq_/);
+      assert.match(started.authorizeUrl, new RegExp(`/admin#auth_request=${started.requestId}`));
+
+      const unauthList = await req("GET", "/auth/pkce/requests", undefined, { auth: false });
+      assert.equal(unauthList.status, 401);
+
+      const ownerList = await req("GET", "/auth/pkce/requests");
+      assert.equal(ownerList.status, 200);
+      assert.equal((await ownerList.json()).requests.length, 1);
+
+      const approve = await req("POST", `/auth/pkce/requests/${started.requestId}/approve`);
+      assert.equal(approve.status, 200);
+      const approved = await approve.json();
+      assert.equal(approved.status, "approved");
+      assert.match(approved.code, /^authcode_/);
+
+      const polled = await req("GET", `/auth/pkce/requests/${started.requestId}`, undefined, { auth: false });
+      assert.equal(polled.status, 200);
+      assert.equal((await polled.json()).code, approved.code);
+
+      const token = await req("POST", "/auth/pkce/token", {
+        grantType: "authorization_code",
+        requestId: started.requestId,
+        code: approved.code,
+        codeVerifier: verifier,
+      }, { auth: false });
+      assert.equal(token.status, 200);
+      const issued = await token.json();
+      assert.match(issued.accessToken, /^sna_at_/);
+      assert.match(issued.refreshToken, /^sna_rt_/);
+      assert.equal(issued.tokenType, "Bearer");
+
+      const withAccessToken = await req("GET", "/agent/sessions", undefined, { token: issued.accessToken });
+      assert.equal(withAccessToken.status, 200);
+
+      const refresh = await req("POST", "/auth/pkce/token", {
+        grantType: "refresh_token",
+        refreshToken: issued.refreshToken,
+      }, { auth: false });
+      assert.equal(refresh.status, 200);
+      const refreshed = await refresh.json();
+      assert.match(refreshed.accessToken, /^sna_at_/);
+      assert.equal(refreshed.refreshToken, issued.refreshToken);
+
+      const revoke = await req("POST", "/auth/revoke", { token: refreshed.accessToken });
+      assert.equal(revoke.status, 200);
+      assert.equal((await revoke.json()).revoked, true);
+
+      const revokedAccess = await req("GET", "/agent/sessions", undefined, { token: refreshed.accessToken });
+      assert.equal(revokedAccess.status, 401);
+    });
+
+    it("rejects non-owner approval attempts from client access tokens", async () => {
+      const verifier = "test-verifier-for-owner-check";
+      const start = await req("POST", "/auth/pkce/start", {
+        clientId: "owner-check-client",
+        codeChallenge: pkceChallenge(verifier),
+        codeChallengeMethod: "S256",
+      }, { auth: false });
+      const started = await start.json();
+      const approve = await req("POST", `/auth/pkce/requests/${started.requestId}/approve`);
+      const approved = await approve.json();
+      const token = await req("POST", "/auth/pkce/token", {
+        grantType: "authorization_code",
+        requestId: started.requestId,
+        code: approved.code,
+        codeVerifier: verifier,
+      }, { auth: false });
+      const issued = await token.json();
+
+      const second = await req("POST", "/auth/pkce/start", {
+        clientId: "second-client",
+        codeChallenge: pkceChallenge("second-verifier"),
+        codeChallengeMethod: "S256",
+      }, { auth: false });
+      const secondStarted = await second.json();
+      const forbidden = await req("POST", `/auth/pkce/requests/${secondStarted.requestId}/approve`, undefined, {
+        token: issued.accessToken,
+      });
+      assert.equal(forbidden.status, 403);
     });
   });
 

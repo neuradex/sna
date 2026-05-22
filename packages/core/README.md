@@ -104,6 +104,11 @@ also requires the `keytar` package and stores a generated key in the OS
 credential store; `env`, `raw`, and `custom` providers are also available for
 controlled deployments and tests.
 
+Shared local daemons also expose a local PKCE authorization flow under
+`/auth/pkce/*`. The owner token approves pending requests, then consumer apps
+exchange the approved code for access/refresh tokens. Access tokens are accepted
+by HTTP and WebSocket transports.
+
 ### Mount the routes manually
 
 ```ts

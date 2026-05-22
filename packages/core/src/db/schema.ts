@@ -385,12 +385,46 @@ function initSchema(db: Database.Database) {
       retired_at      INTEGER
     );
 
+    CREATE TABLE IF NOT EXISTS auth_pkce_requests (
+      id                    TEXT PRIMARY KEY,
+      client_id             TEXT NOT NULL,
+      display_name          TEXT,
+      redirect_uri          TEXT,
+      scopes                TEXT NOT NULL,
+      code_challenge        TEXT NOT NULL,
+      code_challenge_method TEXT NOT NULL,
+      status                TEXT NOT NULL,
+      code                  TEXT,
+      created_at            INTEGER NOT NULL,
+      expires_at            INTEGER NOT NULL,
+      approved_at           INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS auth_tokens (
+      id                 TEXT PRIMARY KEY,
+      refresh_token_hash TEXT NOT NULL UNIQUE,
+      access_token_hash  TEXT NOT NULL UNIQUE,
+      client_id          TEXT NOT NULL,
+      display_name       TEXT,
+      scopes             TEXT NOT NULL,
+      created_at         INTEGER NOT NULL,
+      last_used_at       INTEGER NOT NULL,
+      access_expires_at  INTEGER NOT NULL,
+      refresh_expires_at INTEGER NOT NULL,
+      revoked_at         INTEGER
+    );
+
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session_kind ON chat_messages(session_id, kind);
     CREATE INDEX IF NOT EXISTS idx_runtime_sessions_sna ON runtime_sessions(sna_session_id);
     CREATE INDEX IF NOT EXISTS idx_runtime_sessions_parent ON runtime_sessions(parent_id);
     CREATE INDEX IF NOT EXISTS idx_runtime_sessions_alive ON runtime_sessions(sna_session_id)
       WHERE retired_at IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_auth_pkce_requests_status ON auth_pkce_requests(status, expires_at);
+    CREATE INDEX IF NOT EXISTS idx_auth_tokens_access ON auth_tokens(access_token_hash, access_expires_at)
+      WHERE revoked_at IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_auth_tokens_refresh ON auth_tokens(refresh_token_hash, refresh_expires_at)
+      WHERE revoked_at IS NULL;
   `);
 
   migrateFakeCodexContentToolUses(db);

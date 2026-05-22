@@ -31,7 +31,17 @@ import type { ContentBlock } from "../../core/providers/types.js";
 import { resolveImagePath } from "../image-store.js";
 import { runOnce, type RunOnceOptions } from "../run-once.js";
 import { renderAdminPage } from "../admin-ui.js";
-import { createHttpSecurityMiddleware, type SnaSecurityOptions } from "../security.js";
+import {
+  approvePkceRequest,
+  createPkceRequest,
+  denyPkceRequest,
+  exchangeAuthorizationCode,
+  getPkceRequest,
+  listPkceRequests,
+  refreshAccessToken,
+  revokeToken,
+} from "../auth.js";
+import { createHttpSecurityMiddleware, type SnaAuthIdentity, type SnaSecurityOptions } from "../security.js";
 
 // Resolve our own version from package.json so the OpenAPI document
 // reports whatever ships in @sna-sdk/core, not a hard-coded string that
@@ -50,6 +60,32 @@ const SNA_VERSION: string = ((): string => {
 
 const sessionStateSchema = z.enum(["idle", "processing", "waiting", "permission"]);
 const agentStatusSchema = z.enum(["idle", "busy", "disconnected"]);
+
+const PkceStartInputSchema = z.object({
+  clientId: z.string(),
+  displayName: z.string().optional(),
+  redirectUri: z.string().optional(),
+  codeChallenge: z.string(),
+  codeChallengeMethod: z.literal("S256").optional(),
+  scopes: z.array(z.string()).optional(),
+}).strict();
+
+const PkceTokenInputSchema = z.union([
+  z.object({
+    grantType: z.literal("authorization_code"),
+    requestId: z.string(),
+    code: z.string(),
+    codeVerifier: z.string(),
+  }).strict(),
+  z.object({
+    grantType: z.literal("refresh_token"),
+    refreshToken: z.string(),
+  }).strict(),
+]);
+
+const RevokeTokenInputSchema = z.object({
+  token: z.string(),
+}).strict();
 
 const SessionConfigSchema = z.object({
   provider: z.string(),
@@ -1135,6 +1171,20 @@ function getSessionId(c: { req: { query: (k: string) => string | undefined } }):
   return c.req.query("session") ?? "default";
 }
 
+async function readJsonBody(c: any): Promise<unknown> {
+  try {
+    return await c.req.json();
+  } catch {
+    return undefined;
+  }
+}
+
+function requireOwner(c: any): true | Response {
+  const identity = c.get?.("snaAuth") as SnaAuthIdentity | undefined;
+  if (identity?.type === "owner") return true;
+  return c.json({ status: "error", message: "Owner token required" }, 403);
+}
+
 export async function createOpenApiApp(options?: { sessionManager?: SessionManager } & SnaSecurityOptions) {
   const app = new OpenAPIHono();
   const getOpenAPIDocument = app.getOpenAPIDocument.bind(app);
@@ -1166,6 +1216,72 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
   app.get("/docs", swaggerUI({ url: "/openapi.json" }));
 
   app.get("/admin", (c) => c.html(renderAdminPage()));
+
+  app.post("/auth/pkce/start", async (c) => {
+    const parsed = PkceStartInputSchema.safeParse(await readJsonBody(c));
+    if (!parsed.success) return c.json({ status: "error", message: parsed.error.message }, 400);
+    try {
+      const request = createPkceRequest(parsed.data);
+      const origin = new URL(c.req.url).origin;
+      return c.json({
+        ...request,
+        authorizeUrl: `${origin}/admin#auth_request=${encodeURIComponent(request.requestId)}`,
+      }, 201);
+    } catch (err: any) {
+      return c.json({ status: "error", message: err.message }, 400);
+    }
+  });
+
+  app.get("/auth/pkce/requests/:id", (c) => {
+    const request = getPkceRequest(c.req.param("id"));
+    if (!request) return c.json({ status: "error", message: "Authorization request not found" }, 404);
+    return c.json(request);
+  });
+
+  app.get("/auth/pkce/requests", (c) => {
+    const owner = requireOwner(c);
+    if (owner !== true) return owner;
+    return c.json({ requests: listPkceRequests() });
+  });
+
+  app.post("/auth/pkce/requests/:id/approve", (c) => {
+    const owner = requireOwner(c);
+    if (owner !== true) return owner;
+    try {
+      return c.json(approvePkceRequest(c.req.param("id")));
+    } catch (err: any) {
+      return c.json({ status: "error", message: err.message }, 400);
+    }
+  });
+
+  app.post("/auth/pkce/requests/:id/deny", (c) => {
+    const owner = requireOwner(c);
+    if (owner !== true) return owner;
+    try {
+      return c.json(denyPkceRequest(c.req.param("id")));
+    } catch (err: any) {
+      return c.json({ status: "error", message: err.message }, 400);
+    }
+  });
+
+  app.post("/auth/pkce/token", async (c) => {
+    const parsed = PkceTokenInputSchema.safeParse(await readJsonBody(c));
+    if (!parsed.success) return c.json({ status: "error", message: parsed.error.message }, 400);
+    try {
+      if (parsed.data.grantType === "authorization_code") {
+        return c.json(exchangeAuthorizationCode(parsed.data));
+      }
+      return c.json(refreshAccessToken(parsed.data.refreshToken));
+    } catch (err: any) {
+      return c.json({ status: "error", message: err.message }, 400);
+    }
+  });
+
+  app.post("/auth/revoke", async (c) => {
+    const parsed = RevokeTokenInputSchema.safeParse(await readJsonBody(c));
+    if (!parsed.success) return c.json({ status: "error", message: parsed.error.message }, 400);
+    return c.json({ revoked: revokeToken(parsed.data.token) });
+  });
 
   // Plain JSON spec viewer — non-interactive, just formatted JSON
   app.get("/spec", async (c) => {

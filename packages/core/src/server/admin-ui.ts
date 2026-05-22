@@ -62,6 +62,11 @@ export function renderAdminPage(): string {
       </section>
 
       <section class="panel">
+        <h2>Authorization Requests</h2>
+        <div id="auth-requests" class="muted">Loading</div>
+      </section>
+
+      <section class="panel">
         <h2>Sessions</h2>
         <div id="sessions" class="muted">Loading</div>
       </section>
@@ -73,6 +78,7 @@ export function renderAdminPage(): string {
     const statusEl = document.querySelector("#status");
     const serverEl = document.querySelector("#server");
     const sessionsEl = document.querySelector("#sessions");
+    const authRequestsEl = document.querySelector("#auth-requests");
     const storageKey = "sna.admin.authToken";
 
     const url = new URL(window.location.href);
@@ -97,6 +103,17 @@ export function renderAdminPage(): string {
       refresh();
     });
     document.querySelector("#refresh").addEventListener("click", refresh);
+    authRequestsEl.addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-auth-action]");
+      if (!button) return;
+      button.disabled = true;
+      try {
+        await postJson("/auth/pkce/requests/" + encodeURIComponent(button.dataset.requestId) + "/" + button.dataset.authAction, token());
+        await refresh();
+      } catch (err) {
+        authRequestsEl.innerHTML = '<span class="error">' + escapeHtml(err.message || String(err)) + '</span>';
+      }
+    });
 
     function token() {
       return tokenInput.value.trim() || localStorage.getItem(storageKey) || "";
@@ -111,9 +128,19 @@ export function renderAdminPage(): string {
       return body;
     }
 
+    async function postJson(path, auth) {
+      const headers = auth ? { Authorization: "Bearer " + auth } : {};
+      const res = await fetch(path, { method: "POST", headers });
+      let body = null;
+      try { body = await res.json(); } catch {}
+      if (!res.ok) throw new Error(body?.message || res.status + " " + res.statusText);
+      return body;
+    }
+
     async function refresh() {
       statusEl.textContent = "Checking";
       sessionsEl.textContent = "Loading";
+      authRequestsEl.textContent = "Loading";
       try {
         const health = await getJson("/health");
         serverEl.innerHTML = [
@@ -126,9 +153,12 @@ export function renderAdminPage(): string {
         if (!token()) {
           statusEl.textContent = "Token Required";
           sessionsEl.textContent = "Enter an auth token to load sessions.";
+          authRequestsEl.textContent = "Enter an auth token to manage authorization requests.";
           return;
         }
 
+        const authData = await getJson("/auth/pkce/requests", token());
+        renderAuthRequests(authData.requests || []);
         const data = await getJson("/agent/sessions", token());
         renderSessions(data.sessions || []);
         statusEl.textContent = "Connected";
@@ -136,6 +166,19 @@ export function renderAdminPage(): string {
         statusEl.textContent = "Error";
         sessionsEl.innerHTML = '<span class="error">' + escapeHtml(err.message || String(err)) + '</span>';
       }
+    }
+
+    function renderAuthRequests(requests) {
+      if (!requests.length) {
+        authRequestsEl.textContent = "No pending requests";
+        return;
+      }
+      authRequestsEl.innerHTML = '<table><thead><tr><th>Client</th><th>Scopes</th><th>State</th><th></th></tr></thead><tbody>' +
+        requests.map((r) => '<tr><td>' + escapeHtml(r.displayName || r.clientId) + '<div class="muted">' + escapeHtml(r.clientId) +
+          '</div></td><td>' + escapeHtml((r.scopes || []).join(", ")) + '</td><td>' + escapeHtml(r.status) +
+          '</td><td><button data-auth-action="approve" data-request-id="' + escapeHtml(r.requestId) + '">Approve</button> ' +
+          '<button class="secondary" data-auth-action="deny" data-request-id="' + escapeHtml(r.requestId) + '">Deny</button></td></tr>').join("") +
+        '</tbody></table>';
     }
 
     function renderSessions(sessions) {

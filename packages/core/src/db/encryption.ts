@@ -15,12 +15,22 @@ export interface EncryptedDatabaseOptions {
   keyProvider?: DbKeyProvider;
 }
 
+export interface DatabaseKeyResolutionOptions {
+  keytar?: KeytarLike;
+}
+
+interface KeytarLike {
+  getPassword(service: string, account: string): Promise<string | null>;
+  setPassword(service: string, account: string, password: string): Promise<void>;
+}
+
 const DEFAULT_KEYTAR_SERVICE = "dev.neuradex.sna";
 const DEFAULT_ENV_KEY = "SNA_DB_KEY";
 
 export async function resolveDatabaseKey(
   options: EncryptedDatabaseOptions | undefined,
   dbPath: string,
+  resolutionOptions: DatabaseKeyResolutionOptions = {},
 ): Promise<string | undefined> {
   if (!options || options.encryption === undefined || options.encryption === "none") {
     return undefined;
@@ -38,7 +48,7 @@ export async function resolveDatabaseKey(
       return requireNonEmpty(process.env[envName], `database encryption key env var ${envName} is not set`);
     }
     case "keytar":
-      return resolveKeytarKey(provider, dbPath);
+      return resolveKeytarKey(provider, dbPath, resolutionOptions.keytar);
     case "custom":
       return requireNonEmpty(await provider.getKey(), "custom database encryption key is empty");
   }
@@ -53,8 +63,9 @@ function requireNonEmpty(value: string | undefined, message: string): string {
 async function resolveKeytarKey(
   provider: Extract<DbKeyProvider, { type: "keytar" }>,
   dbPath: string,
+  injectedKeytar?: KeytarLike,
 ): Promise<string> {
-  const keytar = loadKeytar();
+  const keytar = injectedKeytar ?? loadKeytar();
   const service = provider.service ?? DEFAULT_KEYTAR_SERVICE;
   const account = provider.account ?? `db:${dbPathFingerprint(dbPath)}`;
 
@@ -66,10 +77,7 @@ async function resolveKeytarKey(
   return generated;
 }
 
-function loadKeytar(): {
-  getPassword(service: string, account: string): Promise<string | null>;
-  setPassword(service: string, account: string, password: string): Promise<void>;
-} {
+function loadKeytar(): KeytarLike {
   try {
     const req = createRequire(import.meta.url);
     return req("keytar");

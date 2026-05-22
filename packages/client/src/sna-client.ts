@@ -202,6 +202,41 @@ export interface WsMessage {
   [key: string]: unknown;
 }
 
+export interface PkceStartOptions {
+  clientId: string;
+  displayName?: string;
+  redirectUri?: string;
+  codeChallenge: string;
+  codeChallengeMethod?: "S256";
+  scopes?: string[];
+}
+
+export interface PkceRequestInfo {
+  requestId: string;
+  clientId: string;
+  displayName: string | null;
+  redirectUri: string | null;
+  scopes: string[];
+  status: "pending" | "approved" | "consumed" | "expired" | "denied";
+  code?: string;
+  createdAt: number;
+  expiresAt: number;
+  approvedAt: number | null;
+}
+
+export interface PkceStartResponse extends PkceRequestInfo {
+  authorizeUrl: string;
+}
+
+export interface AuthTokenResponse {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: "Bearer";
+  expiresIn: number;
+  refreshExpiresIn: number;
+  scopes: string[];
+}
+
 // ── Helpers ───────────────────────────────────────────────────────
 
 interface ResolvedTransports {
@@ -316,6 +351,14 @@ export class SnaClient {
    */
   readonly chat: ChatApi;
 
+  /**
+   * Local daemon authorization APIs.
+   *
+   * Use this namespace when a consumer app should obtain its own access token
+   * instead of holding the daemon owner's launcher token.
+   */
+  readonly auth: AuthApi;
+
   constructor(options: SnaClientOptions) {
     const { wsUrl, httpBase } = resolveTransports(options);
     this.wsUrl = wsUrl;
@@ -328,6 +371,7 @@ export class SnaClient {
     this.sessions = new SessionsApi(this);
     this.agent = new AgentApi(this);
     this.chat = new ChatApi(this);
+    this.auth = new AuthApi(this);
   }
 
   // ── Connection lifecycle ──────────────────────────────────────
@@ -859,6 +903,69 @@ export interface ChatMessage {
   meta: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Local daemon authorization APIs.
+ *
+ * Access via `sna.auth`.
+ */
+class AuthApi {
+  constructor(private client: SnaClient) {}
+
+  async startPkce(opts: PkceStartOptions): Promise<PkceStartResponse> {
+    this.requireHttp();
+    return this.client._httpFetch("POST", "/auth/pkce/start", opts as unknown as Record<string, unknown>);
+  }
+
+  async getPkceRequest(requestId: string): Promise<PkceRequestInfo> {
+    this.requireHttp();
+    return this.client._httpFetch("GET", `/auth/pkce/requests/${encodeURIComponent(requestId)}`);
+  }
+
+  async listPkceRequests(): Promise<{ requests: PkceRequestInfo[] }> {
+    this.requireHttp();
+    return this.client._httpFetch("GET", "/auth/pkce/requests");
+  }
+
+  async approvePkceRequest(requestId: string): Promise<PkceRequestInfo> {
+    this.requireHttp();
+    return this.client._httpFetch("POST", `/auth/pkce/requests/${encodeURIComponent(requestId)}/approve`);
+  }
+
+  async denyPkceRequest(requestId: string): Promise<PkceRequestInfo> {
+    this.requireHttp();
+    return this.client._httpFetch("POST", `/auth/pkce/requests/${encodeURIComponent(requestId)}/deny`);
+  }
+
+  async exchangePkceCode(opts: {
+    requestId: string;
+    code: string;
+    codeVerifier: string;
+  }): Promise<AuthTokenResponse> {
+    this.requireHttp();
+    return this.client._httpFetch("POST", "/auth/pkce/token", {
+      grantType: "authorization_code",
+      ...opts,
+    });
+  }
+
+  async refreshAccessToken(refreshToken: string): Promise<AuthTokenResponse> {
+    this.requireHttp();
+    return this.client._httpFetch("POST", "/auth/pkce/token", {
+      grantType: "refresh_token",
+      refreshToken,
+    });
+  }
+
+  async revokeToken(token: string): Promise<{ revoked: boolean }> {
+    this.requireHttp();
+    return this.client._httpFetch("POST", "/auth/revoke", { token });
+  }
+
+  private requireHttp(): void {
+    if (!this.client._httpUrl) throw new Error("auth APIs require http: true");
+  }
 }
 
 /**

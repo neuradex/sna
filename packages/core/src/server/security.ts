@@ -1,4 +1,5 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { validateAccessToken, type SnaClientTokenIdentity } from "./auth.js";
 
 export interface SnaSecurityOptions {
   authToken?: string;
@@ -11,6 +12,10 @@ export interface ResolvedSnaSecurityOptions {
   allowedOrigins: string[];
   unsafeDisableAuth: boolean;
 }
+
+export type SnaAuthIdentity =
+  | { type: "owner" }
+  | SnaClientTokenIdentity;
 
 export function generateSnaAuthToken(): string {
   return `sna_${randomBytes(32).toString("base64url")}`;
@@ -49,6 +54,12 @@ export function isAuthorizedToken(candidate: string | undefined, expected: strin
   return timingSafeEqual(candidateBytes, expectedBytes);
 }
 
+export function resolveSnaAuthIdentity(candidate: string | undefined, ownerToken: string | undefined): SnaAuthIdentity | undefined {
+  if (isAuthorizedToken(candidate, ownerToken)) return { type: "owner" };
+  if (!candidate) return undefined;
+  return validateAccessToken(candidate);
+}
+
 export function extractBearerToken(
   authorization: string | undefined,
   headerToken?: string | undefined,
@@ -79,7 +90,10 @@ export function rejectUpgrade(socket: { write(data: string): void; destroy(): vo
 }
 
 function isPublicHttpRoute(method: string, pathname: string): boolean {
-  return method === "GET" && (pathname === "/health" || pathname === "/admin");
+  if (method === "GET" && (pathname === "/health" || pathname === "/admin")) return true;
+  if (method === "POST" && (pathname === "/auth/pkce/start" || pathname === "/auth/pkce/token")) return true;
+  if (method === "GET" && pathname.startsWith("/auth/pkce/requests/")) return true;
+  return false;
 }
 
 function applyCorsHeaders(c: any, origin: string | undefined, allowedOrigins: string[]): void {
@@ -109,14 +123,21 @@ export function createHttpSecurityMiddleware(options: SnaSecurityOptions) {
       return c.body(null, 204);
     }
 
-    if (security.unsafeDisableAuth || isPublicHttpRoute(method, pathname)) {
+    if (security.unsafeDisableAuth) {
+      c.set?.("snaAuth", { type: "owner" });
+      return next();
+    }
+
+    if (isPublicHttpRoute(method, pathname)) {
       return next();
     }
 
     const token = extractBearerToken(c.req.header("authorization"), c.req.header("x-sna-token"));
-    if (!isAuthorizedToken(token, security.authToken)) {
+    const identity = resolveSnaAuthIdentity(token, security.authToken);
+    if (!identity) {
       return c.json({ status: "error", message: "Unauthorized" }, 401);
     }
+    c.set?.("snaAuth", identity);
 
     return next();
   };

@@ -69,9 +69,9 @@ import { spawnWithPool } from "../core/providers/index.js";
 import type { RuntimeHandle } from "../core/providers/runtime.js";
 import {
   extractWsToken,
-  isAuthorizedToken,
   isOriginAllowed,
   rejectUpgrade,
+  resolveSnaAuthIdentity,
   resolveSnaSecurityOptions,
   type SnaSecurityOptions,
 } from "./security.js";
@@ -132,7 +132,7 @@ export function attachWebSocket(
         return;
       }
       const token = extractWsToken(req.headers as { authorization?: string; "x-sna-token"?: string }, url);
-      if (!security.unsafeDisableAuth && !isAuthorizedToken(token, security.authToken)) {
+      if (!security.unsafeDisableAuth && !resolveSnaAuthIdentity(token, security.authToken)) {
         rejectUpgrade(socket, 401, "Unauthorized");
         return;
       }

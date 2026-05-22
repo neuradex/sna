@@ -138,6 +138,10 @@ default keychain-backed provider, `keytar`; `keytar` stores a generated DB key
 in the OS credential store, while `env`, `raw`, and `custom` providers cover
 other deployment models.
 
+For shared local daemons, consumer apps can use the client-side PKCE helpers
+(`client.auth.startPkce()`, `exchangePkceCode()`, `refreshAccessToken()`) to get
+their own access/refresh tokens instead of receiving the launcher owner token.
+
 > The running server publishes its own live OpenAPI 3.1 spec — open `http://localhost:3099/docs` for Swagger UI, `http://localhost:3099/openapi.json` for the raw JSON, or `http://localhost:3099/spec` for a plain-text view.
 
 ### As a React app
