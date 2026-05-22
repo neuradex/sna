@@ -9,6 +9,23 @@ afterEach(() => {
 });
 
 describe("apiRequest", () => {
+  it("uses same-origin credentials for admin cookie authentication", async () => {
+    let captured: { url?: string; init?: RequestInit } = {};
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      captured = { url: String(url), init };
+      return new Response(JSON.stringify({ sessions: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await apiRequest("/agent/sessions");
+
+    assert.equal(captured.url, "/agent/sessions");
+    assert.equal(captured.init?.credentials, "same-origin");
+    assert.equal((captured.init?.headers as Record<string, string>).Authorization, undefined);
+  });
+
   it("sends JSON request bodies for runtime settings mutations", async () => {
     let captured: { url?: string; init?: RequestInit } = {};
     globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
