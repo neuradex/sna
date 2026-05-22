@@ -30,7 +30,7 @@ import { completion, type CompletionOptions } from "../../core/completion.js";
 import type { ContentBlock } from "../../core/providers/types.js";
 import { resolveImagePath } from "../image-store.js";
 import { runOnce, type RunOnceOptions } from "../run-once.js";
-import { renderAdminPage } from "../admin-ui.js";
+import { getAdminAsset, renderAdminPage } from "../admin-ui.js";
 import {
   approvePkceRequest,
   createPkceRequest,
@@ -1393,7 +1393,16 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
 
   app.get("/docs", swaggerUI({ url: "/openapi.json" }));
 
+  app.get("/admin/assets/*", (c) => {
+    const asset = getAdminAsset(new URL(c.req.url).pathname);
+    if (!asset) return c.text("Not found", 404);
+    c.header("Content-Type", asset.contentType);
+    c.header("Cache-Control", "public, max-age=31536000, immutable");
+    return c.body(asset.content as any);
+  });
+
   app.get("/admin", (c) => c.html(renderAdminPage()));
+  app.get("/admin/*", (c) => c.html(renderAdminPage()));
 
   app.openapi(pkceStartRoute, (c) => {
     const body = c.req.valid("json");
@@ -1402,7 +1411,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
       const origin = new URL(c.req.url).origin;
       return (c as any).json({
         ...request,
-        authorizeUrl: `${origin}/admin#auth_request=${encodeURIComponent(request.requestId)}`,
+        authorizeUrl: `${origin}/admin/authorization?request=${encodeURIComponent(request.requestId)}`,
       }, 201);
     } catch (err: any) {
       return (c as any).json({ status: "error", message: err.message }, 400);

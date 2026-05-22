@@ -152,9 +152,28 @@ describe("HTTP API Routes", () => {
       const html = await res.text();
       assert.equal(res.status, 200);
       assert.match(html, /<title>SNA Admin<\/title>/);
-      assert.match(html, /hashParams\.get\("token"\)/);
-      assert.match(html, /history\.replaceState/);
+      assert.match(html, /<div id="root"><\/div>/);
+      assert.match(html, /src="\/admin\/assets\/[^"]+\.js"/);
       assert.doesNotMatch(html, new RegExp(TEST_TOKEN));
+    });
+
+    it("GET /admin nested routes return the local admin shell without authentication", async () => {
+      const res = await req("GET", "/admin/authorization", undefined, { auth: false });
+      const html = await res.text();
+      assert.equal(res.status, 200);
+      assert.match(html, /<div id="root"><\/div>/);
+    });
+
+    it("GET /admin assets returns the built static asset without authentication", async () => {
+      const htmlRes = await req("GET", "/admin", undefined, { auth: false });
+      const html = await htmlRes.text();
+      const assetPath = html.match(/src="\/admin\/([^"]+\.js)"/)?.[1];
+      assert.ok(assetPath);
+
+      const assetRes = await req("GET", `/admin/${assetPath}`, undefined, { auth: false });
+      assert.equal(assetRes.status, 200);
+      assert.equal(assetRes.headers.get("content-type"), "text/javascript; charset=utf-8");
+      assert.match(await assetRes.text(), /createRoot/);
     });
 
     it("rejects protected HTTP routes without a bearer token", async () => {
@@ -263,7 +282,7 @@ describe("HTTP API Routes", () => {
       assert.equal(start.status, 201);
       const started = await start.json();
       assert.match(started.requestId, /^authreq_/);
-      assert.match(started.authorizeUrl, new RegExp(`/admin#auth_request=${started.requestId}`));
+      assert.match(started.authorizeUrl, new RegExp(`/admin/authorization\\?request=${started.requestId}`));
 
       const unauthList = await req("GET", "/auth/pkce/requests", undefined, { auth: false });
       assert.equal(unauthList.status, 401);

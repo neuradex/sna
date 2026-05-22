@@ -118,7 +118,7 @@ export function rejectUpgrade(socket: { write(data: string): void; destroy(): vo
 }
 
 function isPublicHttpRoute(method: string, pathname: string): boolean {
-  if (method === "GET" && (pathname === "/health" || pathname === "/admin")) return true;
+  if (method === "GET" && (pathname === "/health" || pathname === "/admin" || pathname.startsWith("/admin/"))) return true;
   if (method === "POST" && (pathname === "/auth/pkce/start" || pathname === "/auth/pkce/token")) return true;
   if (method === "GET" && pathname.startsWith("/auth/pkce/requests/")) return true;
   return false;
