@@ -1,9 +1,9 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { resolveAdminProxyToken } from "./vite-proxy-token";
 
 const proxyTarget = process.env.SNA_ADMIN_PROXY_TARGET ?? "http://127.0.0.1:3099";
-const proxyToken = process.env.SNA_ADMIN_PROXY_TOKEN ?? process.env.SNA_AUTH_TOKEN;
 
 function apiProxy() {
   return {
@@ -12,6 +12,7 @@ function apiProxy() {
     configure(proxy: any) {
       proxy.on("proxyReq", (proxyReq: any) => {
         proxyReq.setHeader("Origin", proxyTarget);
+        const proxyToken = resolveAdminProxyToken();
         if (proxyToken) proxyReq.setHeader("Authorization", `Bearer ${proxyToken}`);
       });
     },

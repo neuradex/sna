@@ -2,8 +2,11 @@
 SNA_HOST = "127.0.0.1"
 SNA_PORT = "3099"
 SNA_AUTH_TOKEN = "dev-owner-token"
+SNA_ADMIN_TOKEN = "dev-admin-token"
+SNA_ADMIN_PROXY_TARGET = "http://127.0.0.1:3099"
+SNA_ADMIN_PROXY_TOKEN = "dev-owner-token"
 SNA_DB_PATH = ".sna/local/sna.db"
-SNA_ALLOWED_ORIGINS = "http://localhost:5173"
+SNA_ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:3098,http://localhost:3098"
 SNA_PKCE_CLIENT_ID = "manual-test-client"
 SNA_PKCE_SCOPES = "sessions,chat"
 SNA_PKCE_STATE_DIR = ".sna/pkce-test"
@@ -45,10 +48,17 @@ process.stdin.on("end", () => {
 '''
 
 [tasks."sna:admin"]
-description = "Open the local SNA admin page with the owner token preloaded"
+description = "Open the local SNA admin page"
 run = '''
 set -euo pipefail
-open "http://${SNA_HOST}:${SNA_PORT}/admin#token=${SNA_AUTH_TOKEN}"
+open "http://${SNA_HOST}:${SNA_PORT}/admin"
+'''
+
+[tasks."sna:admin:dev"]
+description = "Start the Vite admin console with a stable proxy token for HMR development"
+run = '''
+set -euo pipefail
+pnpm --dir packages/admin dev
 '''
 
 [tasks."sna:pkce:start"]
