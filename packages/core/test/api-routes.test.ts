@@ -669,6 +669,9 @@ describe("HTTP API Routes", () => {
       assert.equal(codex.supportsCwdPerThread, true);
       assert.equal(codex.modelListing, true);
       assert.equal(typeof codex.available, "boolean");
+      assert.equal(typeof codex.detection.detected, "boolean");
+      assert.equal(typeof codex.detection.path, "string");
+      assert.match(codex.detection.source, /^(env|cache|static|shell|fallback)$/);
     });
 
     it("registers runtimes and updates profile slots", async () => {
