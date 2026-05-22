@@ -58,6 +58,13 @@ export interface ModelPreset {
   updatedAt: number;
 }
 
+export interface DeleteRegisteredRuntimeResult {
+  status: "deleted";
+  runtimeId: string;
+  removedModelPresetIds: string[];
+  clearedProfileLevels: DifficultyLevel[];
+}
+
 export interface ResolveLaunchInput extends RuntimeLaunchConfig {
   profileLevel?: DifficultyLevel;
   runtimeId?: string;
@@ -203,6 +210,56 @@ export function upsertRegisteredRuntime(
     : [...runtimes, next];
   writeSetting(db, RUNTIME_SETTINGS_KEY, updated);
   return next;
+}
+
+export function deleteRegisteredRuntime(id: string): DeleteRegisteredRuntimeResult | undefined {
+  const db = getDb();
+  assertValidId(id);
+  const now = Date.now();
+  const runtimes = listRegisteredRuntimesFromDb(db);
+  const existing = runtimes.find((runtime) => runtime.id === id);
+  if (!existing) return undefined;
+
+  writeSetting(db, RUNTIME_SETTINGS_KEY, runtimes.filter((runtime) => runtime.id !== id));
+
+  const modelPresets = listModelPresetsFromDb(db);
+  const removedModelPresetIds = modelPresets
+    .filter((preset) => preset.runtimeId === id)
+    .map((preset) => preset.id);
+  if (removedModelPresetIds.length) {
+    writeSetting(db, MODEL_PRESET_SETTINGS_KEY, modelPresets.filter((preset) => preset.runtimeId !== id));
+  }
+
+  const removedPresetIds = new Set(removedModelPresetIds);
+  const clearedProfileLevels: DifficultyLevel[] = [];
+  const profiles = listRuntimeProfilesFromDb(db);
+  const nextProfiles = profiles.map((profile) => {
+    const next: RuntimeProfile = { ...profile };
+    let changed = false;
+    if (next.runtimeId === id) {
+      delete next.runtimeId;
+      changed = true;
+    }
+    if (next.modelPresetId && removedPresetIds.has(next.modelPresetId)) {
+      delete next.modelPresetId;
+      changed = true;
+    }
+    if (changed) {
+      next.updatedAt = now;
+      clearedProfileLevels.push(next.level);
+    }
+    return next;
+  });
+  if (clearedProfileLevels.length) {
+    writeSetting(db, PROFILE_SETTINGS_KEY, nextProfiles);
+  }
+
+  return {
+    status: "deleted",
+    runtimeId: id,
+    removedModelPresetIds,
+    clearedProfileLevels,
+  };
 }
 
 function assertReasoningLevel(level: number): asserts level is ReasoningLevel {

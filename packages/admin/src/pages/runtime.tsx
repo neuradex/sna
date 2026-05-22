@@ -1,10 +1,11 @@
 import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Activity, AlertTriangle, CheckCircle2, ChevronDown, Database, Loader2, Plus, RefreshCw, Save, ServerCog } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, ChevronDown, Database, Loader2, Plus, RefreshCw, Save, ServerCog, Trash2 } from "lucide-react";
 import { Dialog, DialogContent } from "../components/dialog";
 import { RuntimeIcon, detectedPath, runtimeDescriptions } from "../components/runtime-icon";
 import { EmptyState, ErrorText, Panel, StatusBadge } from "../components/ui";
 import {
   useAgentAuditQuery,
+  useDeleteRuntimeMutation,
   useRegisteredRuntimesQuery,
   useRegisterRuntimeMutation,
   useRuntimeCatalogQuery,
@@ -16,8 +17,10 @@ export function RuntimePage() {
   const runtimes = useRegisteredRuntimesQuery();
   const audit = useAgentAuditQuery();
   const runtimeMutation = useRegisterRuntimeMutation();
+  const deleteRuntimeMutation = useDeleteRuntimeMutation();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [initialProvider, setInitialProvider] = useState<string | undefined>();
+  const [deleteTarget, setDeleteTarget] = useState<RegisteredRuntime | null>(null);
 
   const catalogEntries = catalog.data?.runtimes ?? [];
   const registeredRuntimes = runtimes.data?.runtimes ?? [];
@@ -72,6 +75,8 @@ export function RuntimePage() {
                 key={runtime.id}
                 runtime={runtime}
                 catalogRuntime={catalogById.get(runtime.provider)}
+                deleting={deleteRuntimeMutation.isPending && deleteRuntimeMutation.variables?.id === runtime.id}
+                onDelete={() => setDeleteTarget(runtime)}
               />
             ))}
           </div>
@@ -110,6 +115,22 @@ export function RuntimePage() {
           { onSuccess: () => setDialogOpen(false) },
         )}
       />
+      <DeleteRuntimeDialog
+        runtime={deleteTarget}
+        open={Boolean(deleteTarget)}
+        busy={deleteRuntimeMutation.isPending}
+        error={deleteRuntimeMutation.error}
+        onOpenChange={(open) => {
+          if (!open && !deleteRuntimeMutation.isPending) setDeleteTarget(null);
+        }}
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          deleteRuntimeMutation.mutate(
+            { id: deleteTarget.id },
+            { onSuccess: () => setDeleteTarget(null) },
+          );
+        }}
+      />
     </div>
   );
 }
@@ -117,9 +138,13 @@ export function RuntimePage() {
 function RegisteredRuntimeCard({
   runtime,
   catalogRuntime,
+  deleting,
+  onDelete,
 }: {
   runtime: RegisteredRuntime;
   catalogRuntime?: RuntimeCatalogEntry;
+  deleting: boolean;
+  onDelete: () => void;
 }) {
   return (
     <article className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--panel-subtle)] p-4">
@@ -140,13 +165,79 @@ function RegisteredRuntimeCard({
             <p className="mt-1 truncate font-mono text-[11px] text-[var(--fg-muted)]">{runtime.id}</p>
           </div>
         </div>
-        <StatusBadge tone="neutral">{runtime.provider}</StatusBadge>
+        <div className="flex shrink-0 items-center gap-2">
+          <StatusBadge tone="neutral">{runtime.provider}</StatusBadge>
+          <button
+            type="button"
+            className="focus-ring inline-flex size-8 items-center justify-center rounded-lg border border-red-500/20 bg-[var(--bad-soft)] text-[var(--bad)] transition hover:border-red-500/40"
+            title="Delete runtime"
+            aria-label={`Delete ${runtime.label}`}
+            disabled={deleting}
+            onClick={onDelete}
+          >
+            {deleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+          </button>
+        </div>
       </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
         <RuntimeFact label="CLI Path" value={runtime.cliPath || catalogRuntime?.detection.path || "provider default"} />
         <RuntimeFact label="Model Default" value={runtime.defaultModel || "provider default"} />
       </div>
     </article>
+  );
+}
+
+function DeleteRuntimeDialog({
+  runtime,
+  open,
+  busy,
+  error,
+  onOpenChange,
+  onConfirm,
+}: {
+  runtime: RegisteredRuntime | null;
+  open: boolean;
+  busy: boolean;
+  error: unknown;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md" title="Delete runtime" description="Remove this runtime registration.">
+        {runtime ? (
+          <div className="grid gap-4">
+            <div className="rounded-xl border border-red-500/20 bg-[var(--bad-soft)] p-3">
+              <div className="font-semibold text-[var(--fg)]">{runtime.label}</div>
+              <div className="mt-1 font-mono text-xs text-[var(--fg-muted)]">{runtime.id}</div>
+              <p className="mt-3 text-sm leading-6 text-[var(--fg-soft)]">
+                This also removes model presets tied to this runtime and clears profile assignments that reference them.
+              </p>
+            </div>
+            {error ? <ErrorText error={error} /> : null}
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                className="focus-ring inline-flex h-10 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--panel-subtle)] px-4 font-mono text-xs font-medium text-[var(--fg-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--fg)]"
+                disabled={busy}
+                onClick={() => onOpenChange(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-red-500/30 bg-[var(--bad-soft)] px-4 font-mono text-xs font-medium text-[var(--bad)] transition hover:border-red-500/50"
+                disabled={busy}
+                onClick={onConfirm}
+              >
+                {busy ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                Delete
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </DialogContent>
+    </Dialog>
   );
 }
 

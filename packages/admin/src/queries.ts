@@ -3,6 +3,7 @@ import {
   apiRequest,
   type AgentAuditResponse,
   type AuthRequestsResponse,
+  type DeleteRuntimeResponse,
   type DifficultyLevel,
   type HealthResponse,
   type ListModelsResponse,
@@ -196,6 +197,23 @@ export function useRegisterRuntimeMutation() {
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.registeredRuntimes }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.runtimeProfiles }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.agentAudit }),
+      ]);
+    },
+  });
+}
+
+export function useDeleteRuntimeMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => apiRequest<DeleteRuntimeResponse>(`/agent/runtimes/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.registeredRuntimes }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.modelPresets }),
         queryClient.invalidateQueries({ queryKey: queryKeys.runtimeProfiles }),
         queryClient.invalidateQueries({ queryKey: queryKeys.agentAudit }),
       ]);

@@ -763,6 +763,49 @@ describe("HTTP API Routes", () => {
       assert.equal(registered.defaultModel, "gpt-5.4");
     });
 
+    it("deletes runtimes and clears dependent model/profile assignments", async () => {
+      await req("PUT", "/agent/runtimes/delete-runtime", {
+        provider: "codex",
+        label: "Delete Runtime",
+        enabled: true,
+      });
+      await req("PUT", "/agent/model-presets/delete-preset", {
+        name: "Delete Preset",
+        runtimeId: "delete-runtime",
+        model: "gpt-5.4-mini",
+        reasoningLevel: 2,
+      });
+      await req("PUT", "/agent/profiles/4", {
+        runtimeId: "delete-runtime",
+      });
+      await req("PUT", "/agent/profiles/5", {
+        modelPresetId: "delete-preset",
+      });
+
+      const deleteRes = await req("DELETE", "/agent/runtimes/delete-runtime");
+      assert.equal(deleteRes.status, 200);
+      const deleted = await deleteRes.json();
+      assert.equal(deleted.status, "deleted");
+      assert.equal(deleted.runtimeId, "delete-runtime");
+      assert.deepEqual(deleted.removedModelPresetIds, ["delete-preset"]);
+      assert.deepEqual([...deleted.clearedProfileLevels].sort(), [4, 5]);
+
+      const runtimes = await (await req("GET", "/agent/runtimes")).json();
+      assert.equal(runtimes.runtimes.some((r: any) => r.id === "delete-runtime"), false);
+
+      const presets = await (await req("GET", "/agent/model-presets")).json();
+      assert.equal(presets.presets.some((p: any) => p.id === "delete-preset"), false);
+
+      const profiles = await (await req("GET", "/agent/profiles")).json();
+      const level4 = profiles.profiles.find((p: any) => p.level === 4);
+      const level5 = profiles.profiles.find((p: any) => p.level === 5);
+      assert.equal(level4.runtimeId, undefined);
+      assert.equal(level5.modelPresetId, undefined);
+
+      const missingRes = await req("DELETE", "/agent/runtimes/delete-runtime");
+      assert.equal(missingRes.status, 404);
+    });
+
     it("saves model presets and assigns them to profile slots", async () => {
       await req("PUT", "/agent/runtimes/model-runtime", {
         provider: "codex",

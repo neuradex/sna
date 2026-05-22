@@ -1800,6 +1800,25 @@ describe("HTTP transport — new operations", () => {
     assert.equal(mock.httpRequests[0].url, "/agent/runtimes");
   });
 
+  it("runtime.deleteRuntime — DELETE /agent/runtimes/:id", async () => {
+    mock.queueHttpResponse(200, {
+      status: "deleted",
+      runtimeId: "codex-main",
+      removedModelPresetIds: ["fast-codex"],
+      clearedProfileLevels: [2],
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.deleteRuntime("codex-main");
+
+    assert.equal(res.status, "deleted");
+    assert.equal(res.runtimeId, "codex-main");
+    assert.deepEqual(res.removedModelPresetIds, ["fast-codex"]);
+    assert.deepEqual(res.clearedProfileLevels, [2]);
+    assert.equal(mock.httpRequests[0].method, "DELETE");
+    assert.equal(mock.httpRequests[0].url, "/agent/runtimes/codex-main");
+  });
+
   it("runtime.audit — GET /agent/audit", async () => {
     mock.queueHttpResponse(200, {
       profiles: [],

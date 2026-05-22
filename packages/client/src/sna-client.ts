@@ -315,6 +315,12 @@ export type RegisterRuntimeInput = {
   models?: Array<{ id: string; label?: string; provider?: string }>;
   config?: RuntimeLaunchConfig;
 };
+export interface DeleteRuntimeResult {
+  status: "deleted";
+  runtimeId: string;
+  removedModelPresetIds: string[];
+  clearedProfileLevels: DifficultyLevel[];
+}
 export type UpdateRuntimeProfileInput = Partial<Omit<RuntimeProfile, "level" | "updatedAt" | "runtimeId" | "modelPresetId">> & {
   runtimeId?: string | null;
   modelPresetId?: string | null;
@@ -1164,6 +1170,11 @@ class RuntimeSettingsApi {
       `/agent/runtimes/${encodeURIComponent(id)}`,
       input as unknown as Record<string, unknown>,
     );
+  }
+
+  async deleteRuntime(id: string): Promise<DeleteRuntimeResult> {
+    this.requireHttp();
+    return this.client._httpFetch("DELETE", `/agent/runtimes/${encodeURIComponent(id)}`);
   }
 
   async listProfiles(): Promise<{ profiles: RuntimeProfile[] }> {

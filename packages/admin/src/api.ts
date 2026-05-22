@@ -93,6 +93,13 @@ export interface RuntimesResponse {
   runtimes: RegisteredRuntime[];
 }
 
+export interface DeleteRuntimeResponse {
+  status: "deleted";
+  runtimeId: string;
+  removedModelPresetIds: string[];
+  clearedProfileLevels: DifficultyLevel[];
+}
+
 export interface RuntimeCatalogResponse {
   runtimes: RuntimeCatalogEntry[];
 }

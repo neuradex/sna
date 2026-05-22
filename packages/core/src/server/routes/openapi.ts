@@ -45,6 +45,7 @@ import {
 import { createHttpSecurityMiddleware, type SnaAuthIdentity, type SnaSecurityOptions } from "../security.js";
 import {
   buildAgentAudit,
+  deleteRegisteredRuntime,
   listModelPresets,
   listRegisteredRuntimes,
   listRuntimeProfiles,
@@ -672,6 +673,35 @@ const upsertRuntimeRoute = protectedRoute({
     },
     400: {
       description: "Invalid runtime registration.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const deleteRuntimeRoute = protectedRoute({
+  method: "delete",
+  path: "/agent/runtimes/{id}",
+  summary: "Delete runtime",
+  description: "Delete a named runtime registration. Model presets tied to the runtime are removed, and profile assignments referencing the runtime or removed presets are cleared.",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: {
+      description: "Runtime deleted.",
+      content: { "application/json": { schema: z.object({
+        status: z.literal("deleted"),
+        runtimeId: z.string(),
+        removedModelPresetIds: z.array(z.string()),
+        clearedProfileLevels: z.array(z.number()),
+      }) } },
+    },
+    404: {
+      description: "Runtime not found.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+    400: {
+      description: "Invalid runtime id.",
       content: { "application/json": { schema: ErrorResponse } },
     },
   },
@@ -1865,6 +1895,17 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     const body = c.req.valid("json");
     try {
       return c.json({ status: "registered" as const, runtime: upsertRegisteredRuntime(id, body as any) }, 200);
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
+  });
+
+  app.openapi(deleteRuntimeRoute, (c) => {
+    const { id } = c.req.valid("param");
+    try {
+      const deleted = deleteRegisteredRuntime(id);
+      if (!deleted) return c.json({ status: "error", message: "Runtime not found" }, 404);
+      return c.json(deleted, 200);
     } catch (e: any) {
       return c.json({ status: "error", message: e.message }, 400);
     }
