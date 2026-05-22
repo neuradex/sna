@@ -1623,6 +1623,131 @@ describe("HTTP transport — new operations", () => {
     assert.equal(req.body.timeout, 5000);
   });
 
+  it("agent.startWithProfile — POST /agent/start with profileLevel", async () => {
+    mock.queueHttpResponse(200, { status: "started", provider: "codex", sessionId: "default" });
+    sna = httpClient();
+
+    const res = await sna.agent.startWithProfile("default", 4, {
+      force: true,
+      prompt: "inspect",
+    });
+
+    assert.equal(res.status, "started");
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "POST");
+    assert.equal(req.url, "/agent/start?session=default");
+    assert.equal(req.body.profileLevel, 4);
+    assert.equal(req.body.force, true);
+    assert.equal(req.body.prompt, "inspect");
+  });
+
+  it("agent lifecycle calls can include profileLevel and runtimeId", async () => {
+    mock.queueHttpResponse(200, { status: "resumed", provider: "codex", sessionId: "default", historyCount: 2 });
+    mock.queueHttpResponse(200, { result: "done", usage: null });
+    mock.queueHttpResponse(200, {
+      text: "done",
+      usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 },
+      costUsd: 0,
+      durationMs: 1,
+      durationApiMs: 1,
+      model: "gpt-5.4",
+    });
+    sna = httpClient();
+
+    await sna.agent.resume("default", { profileLevel: 3, runtimeId: "codex-main" });
+    await sna.agent.runOnce({ message: "run", profileLevel: 2, runtimeId: "codex-main" });
+    await sna.agent.completion({ prompt: "complete", profileLevel: 1, runtimeId: "codex-main" });
+
+    assert.equal(mock.httpRequests[0].body.profileLevel, 3);
+    assert.equal(mock.httpRequests[0].body.runtimeId, "codex-main");
+    assert.equal(mock.httpRequests[1].body.profileLevel, 2);
+    assert.equal(mock.httpRequests[1].body.runtimeId, "codex-main");
+    assert.equal(mock.httpRequests[2].body.profileLevel, 1);
+    assert.equal(mock.httpRequests[2].body.runtimeId, "codex-main");
+  });
+
+  it("runtime.listProfiles — GET /agent/profiles", async () => {
+    mock.queueHttpResponse(200, {
+      profiles: [{ level: 1, label: "Level 1", config: { reasoningLevel: 1 }, updatedAt: 1 }],
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.listProfiles();
+
+    assert.equal(res.profiles[0].level, 1);
+    assert.equal(mock.httpRequests[0].method, "GET");
+    assert.equal(mock.httpRequests[0].url, "/agent/profiles");
+  });
+
+  it("runtime.updateProfile — PUT /agent/profiles/:level", async () => {
+    mock.queueHttpResponse(200, {
+      status: "updated",
+      profile: { level: 3, label: "Level 3", runtimeId: "codex-main", config: { reasoningLevel: 3 }, updatedAt: 2 },
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.updateProfile(3, {
+      runtimeId: "codex-main",
+      config: { reasoningLevel: 3, model: "gpt-5.4" },
+    });
+
+    assert.equal(res.status, "updated");
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "PUT");
+    assert.equal(req.url, "/agent/profiles/3");
+    assert.equal(req.body.runtimeId, "codex-main");
+    assert.equal(req.body.config.model, "gpt-5.4");
+  });
+
+  it("runtime.registerRuntime — PUT /agent/runtimes/:id", async () => {
+    mock.queueHttpResponse(200, {
+      status: "registered",
+      runtime: { id: "codex-main", label: "Codex", enabled: true, config: { provider: "codex" }, updatedAt: 3 },
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.registerRuntime("codex-main", {
+      label: "Codex",
+      config: { provider: "codex", model: "gpt-5.4" },
+    });
+
+    assert.equal(res.status, "registered");
+    const req = mock.httpRequests[0];
+    assert.equal(req.method, "PUT");
+    assert.equal(req.url, "/agent/runtimes/codex-main");
+    assert.equal(req.body.label, "Codex");
+    assert.equal(req.body.config.provider, "codex");
+  });
+
+  it("runtime.listRuntimes — GET /agent/runtimes", async () => {
+    mock.queueHttpResponse(200, {
+      runtimes: [{ id: "codex-main", label: "Codex", enabled: true, config: { provider: "codex" }, updatedAt: 3 }],
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.listRuntimes();
+
+    assert.equal(res.runtimes[0].id, "codex-main");
+    assert.equal(mock.httpRequests[0].method, "GET");
+    assert.equal(mock.httpRequests[0].url, "/agent/runtimes");
+  });
+
+  it("runtime.audit — GET /agent/audit", async () => {
+    mock.queueHttpResponse(200, {
+      profiles: [],
+      runtimes: [],
+      sessions: [],
+      apps: [{ clientId: "app-a", displayName: "App A", scopes: ["agent:read"], tokenCount: 1, activeTokenCount: 1 }],
+    });
+    sna = httpClient();
+
+    const res = await sna.runtime.audit();
+
+    assert.equal(res.apps[0].clientId, "app-a");
+    assert.equal(mock.httpRequests[0].method, "GET");
+    assert.equal(mock.httpRequests[0].url, "/agent/audit");
+  });
+
   it("chat.listSessions — GET /chat/sessions", async () => {
     mock.queueHttpResponse(200, { sessions: [] });
     sna = httpClient();
