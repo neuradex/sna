@@ -1400,47 +1400,47 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     try {
       const request = createPkceRequest(body);
       const origin = new URL(c.req.url).origin;
-      return c.json({
+      return (c as any).json({
         ...request,
         authorizeUrl: `${origin}/admin#auth_request=${encodeURIComponent(request.requestId)}`,
       }, 201);
     } catch (err: any) {
-      return c.json({ status: "error", message: err.message }, 400);
+      return (c as any).json({ status: "error", message: err.message }, 400);
     }
   });
 
   app.openapi(pkceRequestRoute, (c) => {
     const { id } = c.req.valid("param");
     const request = getPkceRequest(id);
-    if (!request) return c.json({ status: "error", message: "Authorization request not found" }, 404);
-    return c.json(request);
+    if (!request) return (c as any).json({ status: "error", message: "Authorization request not found" }, 404);
+    return (c as any).json(request);
   });
 
   app.openapi(pkceRequestsListRoute, (c) => {
     const owner = requireOwner(c);
-    if (owner !== true) return owner;
-    return c.json({ requests: listPkceRequests() });
+    if (owner !== true) return owner as any;
+    return (c as any).json({ requests: listPkceRequests() });
   });
 
   app.openapi(pkceApproveRoute, (c) => {
     const owner = requireOwner(c);
-    if (owner !== true) return owner;
+    if (owner !== true) return owner as any;
     const { id } = c.req.valid("param");
     try {
-      return c.json(approvePkceRequest(id));
+      return (c as any).json(approvePkceRequest(id));
     } catch (err: any) {
-      return c.json({ status: "error", message: err.message }, 400);
+      return (c as any).json({ status: "error", message: err.message }, 400);
     }
   });
 
   app.openapi(pkceDenyRoute, (c) => {
     const owner = requireOwner(c);
-    if (owner !== true) return owner;
+    if (owner !== true) return owner as any;
     const { id } = c.req.valid("param");
     try {
-      return c.json(denyPkceRequest(id));
+      return (c as any).json(denyPkceRequest(id));
     } catch (err: any) {
-      return c.json({ status: "error", message: err.message }, 400);
+      return (c as any).json({ status: "error", message: err.message }, 400);
     }
   });
 
@@ -1448,17 +1448,17 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     const body = c.req.valid("json");
     try {
       if (body.grantType === "authorization_code") {
-        return c.json(exchangeAuthorizationCode(body));
+        return (c as any).json(exchangeAuthorizationCode(body));
       }
-      return c.json(refreshAccessToken(body.refreshToken));
+      return (c as any).json(refreshAccessToken(body.refreshToken));
     } catch (err: any) {
-      return c.json({ status: "error", message: err.message }, 400);
+      return (c as any).json({ status: "error", message: err.message }, 400);
     }
   });
 
   app.openapi(revokeTokenRoute, (c) => {
     const body = c.req.valid("json");
-    return c.json({ revoked: revokeToken(body.token) });
+    return (c as any).json({ revoked: revokeToken(body.token) });
   });
 
   // Plain JSON spec viewer — non-interactive, just formatted JSON
