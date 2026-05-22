@@ -11,7 +11,6 @@ import {
   type RuntimesResponse,
   type SessionsResponse,
 } from "./api";
-import { useAuthToken } from "./auth-token";
 
 export const queryKeys = {
   health: ["health"] as const,
@@ -31,33 +30,27 @@ export function useHealthQuery() {
 }
 
 export function useAuthRequestsQuery() {
-  const { token } = useAuthToken();
   return useQuery({
     queryKey: queryKeys.authRequests,
-    queryFn: () => apiRequest<AuthRequestsResponse>("/auth/pkce/requests", { token }),
-    enabled: Boolean(token),
+    queryFn: () => apiRequest<AuthRequestsResponse>("/auth/pkce/requests"),
     refetchInterval: 3_000,
   });
 }
 
 export function useSessionsQuery() {
-  const { token } = useAuthToken();
   return useQuery({
     queryKey: queryKeys.sessions,
-    queryFn: () => apiRequest<SessionsResponse>("/agent/sessions", { token }),
-    enabled: Boolean(token),
+    queryFn: () => apiRequest<SessionsResponse>("/agent/sessions"),
     refetchInterval: 3_000,
   });
 }
 
 export function useAuthRequestAction() {
-  const { token } = useAuthToken();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ requestId, action }: { requestId: string; action: "approve" | "deny" }) =>
       apiRequest(`/auth/pkce/requests/${encodeURIComponent(requestId)}/${action}`, {
         method: "POST",
-        token,
       }),
     onSuccess: async () => {
       await Promise.all([
@@ -69,37 +62,30 @@ export function useAuthRequestAction() {
 }
 
 export function useRuntimeProfilesQuery() {
-  const { token } = useAuthToken();
   return useQuery({
     queryKey: queryKeys.runtimeProfiles,
-    queryFn: () => apiRequest<ProfilesResponse>("/agent/profiles", { token }),
-    enabled: Boolean(token),
+    queryFn: () => apiRequest<ProfilesResponse>("/agent/profiles"),
     refetchInterval: 5_000,
   });
 }
 
 export function useRegisteredRuntimesQuery() {
-  const { token } = useAuthToken();
   return useQuery({
     queryKey: queryKeys.registeredRuntimes,
-    queryFn: () => apiRequest<RuntimesResponse>("/agent/runtimes", { token }),
-    enabled: Boolean(token),
+    queryFn: () => apiRequest<RuntimesResponse>("/agent/runtimes"),
     refetchInterval: 5_000,
   });
 }
 
 export function useAgentAuditQuery() {
-  const { token } = useAuthToken();
   return useQuery({
     queryKey: queryKeys.agentAudit,
-    queryFn: () => apiRequest<AgentAuditResponse>("/agent/audit", { token }),
-    enabled: Boolean(token),
+    queryFn: () => apiRequest<AgentAuditResponse>("/agent/audit"),
     refetchInterval: 5_000,
   });
 }
 
 export function useRuntimeProfileMutation() {
-  const { token } = useAuthToken();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ level, input }: {
@@ -112,7 +98,6 @@ export function useRuntimeProfileMutation() {
       };
     }) => apiRequest(`/agent/profiles/${level}`, {
       method: "PUT",
-      token,
       body: input,
     }),
     onSuccess: async () => {
@@ -125,7 +110,6 @@ export function useRuntimeProfileMutation() {
 }
 
 export function useRegisterRuntimeMutation() {
-  const { token } = useAuthToken();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, input }: {
@@ -142,7 +126,6 @@ export function useRegisterRuntimeMutation() {
       };
     }) => apiRequest(`/agent/runtimes/${encodeURIComponent(id)}`, {
       method: "PUT",
-      token,
       body: input,
     }),
     onSuccess: async () => {

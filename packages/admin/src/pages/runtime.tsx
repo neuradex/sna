@@ -1,7 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Activity, Database, Plus, Save, ServerCog } from "lucide-react";
 import { EmptyState, ErrorText, Panel, StatusBadge } from "../components/ui";
-import { useAuthToken } from "../auth-token";
 import {
   useAgentAuditQuery,
   useRegisteredRuntimesQuery,
@@ -15,7 +14,6 @@ const reasoningLevels = [0, 1, 2, 3, 4, 5] as const;
 const permissionModes = ["", "default", "acceptEdits", "auto", "bypassPermissions", "dontAsk", "plan"] as const;
 
 export function RuntimePage() {
-  const { token } = useAuthToken();
   const profiles = useRuntimeProfilesQuery();
   const runtimes = useRegisteredRuntimesQuery();
   const audit = useAgentAuditQuery();
@@ -27,14 +25,10 @@ export function RuntimePage() {
 
   return (
     <div className="grid gap-4">
-      {!token ? <Panel title="Runtime Settings"><EmptyState>Enter an auth token to manage runtime settings.</EmptyState></Panel> : null}
-
-      {token ? (
-        <>
-          <Panel
-            title="Difficulty Profiles"
-            action={<StatusBadge tone={profiles.isError ? "bad" : "neutral"}>{profiles.data?.profiles.length ?? 0} levels</StatusBadge>}
-          >
+      <Panel
+        title="Difficulty Profiles"
+        action={<StatusBadge tone={profiles.isError ? "bad" : "neutral"}>{profiles.data?.profiles.length ?? 0} levels</StatusBadge>}
+      >
             {profiles.isError ? <ErrorText error={profiles.error} /> : null}
             {profiles.isSuccess ? (
               <div className="overflow-x-auto">
@@ -65,9 +59,9 @@ export function RuntimePage() {
                 </table>
               </div>
             ) : null}
-          </Panel>
+      </Panel>
 
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
             <Panel title="Register Runtime">
               <RegisterRuntimeForm
                 busy={runtimeMutation.isPending}
@@ -110,9 +104,9 @@ export function RuntimePage() {
                 </div>
               ) : null}
             </Panel>
-          </div>
+      </div>
 
-          <Panel title="Audit">
+      <Panel title="Audit">
             {audit.isError ? <ErrorText error={audit.error} /> : null}
             {audit.isSuccess ? (
               <div className="grid gap-5">
@@ -158,9 +152,7 @@ export function RuntimePage() {
                 />
               </div>
             ) : null}
-          </Panel>
-        </>
-      ) : null}
+      </Panel>
     </div>
   );
 }

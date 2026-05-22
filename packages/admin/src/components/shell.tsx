@@ -1,6 +1,5 @@
 import { Link, Outlet } from "@tanstack/react-router";
-import { Gauge, KeyRound, LayoutDashboard, ListChecks, Moon, ShieldCheck, Sun } from "lucide-react";
-import { useAuthToken } from "../auth-token";
+import { Gauge, LayoutDashboard, ListChecks, Moon, ShieldCheck, Sun } from "lucide-react";
 import { useHealthQuery } from "../queries";
 import { useTheme } from "../theme";
 import snaIcon from "../assets/sna-icon.svg";
@@ -14,7 +13,6 @@ const navItems = [
 ] as const;
 
 export function Shell() {
-  const { token } = useAuthToken();
   const { theme, toggleTheme } = useTheme();
   const health = useHealthQuery();
   const connected = health.isSuccess && health.data?.ok;
@@ -43,10 +41,7 @@ export function Shell() {
           <StatusBadge tone={connected ? "good" : health.isError ? "bad" : "neutral"}>
             {connected ? "Connected" : health.isError ? "Error" : "Checking"}
           </StatusBadge>
-          <StatusBadge tone={token ? "good" : "warn"}>
-            <KeyRound size={13} className="mr-1" />
-            {token ? "Token set" : "Token required"}
-          </StatusBadge>
+          <StatusBadge tone="good">Admin</StatusBadge>
         </div>
       </header>
 

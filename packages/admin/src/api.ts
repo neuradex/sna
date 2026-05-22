@@ -125,6 +125,7 @@ export async function apiRequest<T>(
   const res = await fetch(path, {
     method: options.method ?? "GET",
     headers,
+    credentials: "same-origin",
     body: hasBody ? JSON.stringify(options.body) : undefined,
   });
   let body: unknown = null;

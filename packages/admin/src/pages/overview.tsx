@@ -1,11 +1,8 @@
 import { ShieldCheck, Terminal } from "lucide-react";
-import { ConnectionPanel } from "../components/connection-panel";
 import { EmptyState, ErrorText, Panel, StatusBadge } from "../components/ui";
-import { useAuthToken } from "../auth-token";
 import { useAuthRequestsQuery, useHealthQuery, useSessionsQuery } from "../queries";
 
 export function OverviewPage() {
-  const { token } = useAuthToken();
   const health = useHealthQuery();
   const authRequests = useAuthRequestsQuery();
   const sessions = useSessionsQuery();
@@ -13,7 +10,6 @@ export function OverviewPage() {
 
   return (
     <div className="grid gap-4">
-      <ConnectionPanel />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <Panel title="Server">
           {health.isError ? <ErrorText error={health.error} /> : (
@@ -29,7 +25,7 @@ export function OverviewPage() {
         </Panel>
 
         <Panel title="Activity">
-          {!token ? <EmptyState>Enter an auth token to load daemon activity.</EmptyState> : (
+          {authRequests.isError || sessions.isError ? <EmptyState>Admin session unavailable.</EmptyState> : (
             <div className="grid gap-3 sm:grid-cols-2">
               <Metric icon={<ShieldCheck size={18} />} label="Pending authorizations" value={pendingCount} tone={pendingCount ? "warn" : "good"} />
               <Metric icon={<Terminal size={18} />} label="Sessions" value={sessions.data?.sessions.length ?? 0} tone="neutral" />

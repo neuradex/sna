@@ -1,21 +1,18 @@
 import { Check, X } from "lucide-react";
 import { EmptyState, ErrorText, Panel, StatusBadge } from "../components/ui";
 import { canActOnAuthRequest, authRequestLabel, statusTone, type AuthRequest } from "../features/auth-requests";
-import { useAuthToken } from "../auth-token";
 import { useAuthRequestAction, useAuthRequestsQuery } from "../queries";
 
 export function AuthorizationPage() {
-  const { token } = useAuthToken();
   const requests = useAuthRequestsQuery();
   const action = useAuthRequestAction();
   const focusedRequestId = new URLSearchParams(location.search).get("request");
 
   return (
     <Panel title="Authorization Requests">
-      {!token ? <EmptyState>Enter an auth token to manage authorization requests.</EmptyState> : null}
-      {token && requests.isError ? <ErrorText error={requests.error} /> : null}
-      {token && requests.isSuccess && !requests.data.requests.length ? <EmptyState>No authorization requests</EmptyState> : null}
-      {token && requests.isSuccess && requests.data.requests.length ? (
+      {requests.isError ? <ErrorText error={requests.error} /> : null}
+      {requests.isSuccess && !requests.data.requests.length ? <EmptyState>No authorization requests</EmptyState> : null}
+      {requests.isSuccess && requests.data.requests.length ? (
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm">
             <thead>

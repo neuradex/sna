@@ -1,17 +1,14 @@
 import { EmptyState, ErrorText, Panel, StatusBadge } from "../components/ui";
-import { useAuthToken } from "../auth-token";
 import { useSessionsQuery } from "../queries";
 
 export function SessionsPage() {
-  const { token } = useAuthToken();
   const sessions = useSessionsQuery();
 
   return (
     <Panel title="Sessions">
-      {!token ? <EmptyState>Enter an auth token to load sessions.</EmptyState> : null}
-      {token && sessions.isError ? <ErrorText error={sessions.error} /> : null}
-      {token && sessions.isSuccess && !sessions.data.sessions.length ? <EmptyState>No sessions</EmptyState> : null}
-      {token && sessions.isSuccess && sessions.data.sessions.length ? (
+      {sessions.isError ? <ErrorText error={sessions.error} /> : null}
+      {sessions.isSuccess && !sessions.data.sessions.length ? <EmptyState>No sessions</EmptyState> : null}
+      {sessions.isSuccess && sessions.data.sessions.length ? (
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm">
             <thead>
