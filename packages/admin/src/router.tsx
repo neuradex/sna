@@ -2,6 +2,7 @@ import { createRootRoute, createRoute, createRouter } from "@tanstack/react-rout
 import { Shell } from "./components/shell";
 import { OverviewPage } from "./pages/overview";
 import { AuthorizationPage } from "./pages/authorization";
+import { RuntimePage } from "./pages/runtime";
 import { SessionsPage } from "./pages/sessions";
 
 const rootRoute = createRootRoute({
@@ -26,7 +27,13 @@ const sessionsRoute = createRoute({
   component: SessionsPage,
 });
 
-const routeTree = rootRoute.addChildren([overviewRoute, authorizationRoute, sessionsRoute]);
+const runtimeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/runtime",
+  component: RuntimePage,
+});
+
+const routeTree = rootRoute.addChildren([overviewRoute, authorizationRoute, sessionsRoute, runtimeRoute]);
 
 export const router = createRouter({
   routeTree,

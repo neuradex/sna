@@ -15,6 +15,95 @@ export interface SessionsResponse {
   sessions: SnaSession[];
 }
 
+export type DifficultyLevel = 1 | 2 | 3 | 4 | 5;
+export type ReasoningLevel = 0 | 1 | 2 | 3 | 4 | 5;
+
+export interface RuntimeLaunchConfig {
+  provider?: string;
+  modelProvider?: string;
+  model?: string;
+  cwd?: string;
+  permissionMode?: string;
+  configDir?: string;
+  extraArgs?: string[];
+  providerOptions?: Record<string, unknown>;
+  systemPrompt?: string;
+  appendSystemPrompt?: string;
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  mcpServers?: Record<string, unknown>;
+  env?: Record<string, string>;
+  reasoningLevel?: ReasoningLevel;
+}
+
+export interface RegisteredRuntime {
+  id: string;
+  provider: string;
+  label: string;
+  enabled: boolean;
+  modelProvider?: string;
+  defaultModel?: string;
+  cliPath?: string;
+  models?: Array<{ id: string; label?: string; provider?: string }>;
+  config?: RuntimeLaunchConfig;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface RuntimeProfile {
+  level: DifficultyLevel;
+  label: string;
+  description: string;
+  runtimeId?: string;
+  config: RuntimeLaunchConfig;
+  updatedAt?: number;
+}
+
+export interface RuntimesResponse {
+  runtimes: RegisteredRuntime[];
+}
+
+export interface ProfilesResponse {
+  profiles: RuntimeProfile[];
+}
+
+export interface RuntimeAuditRuntime extends RegisteredRuntime {
+  activeSessionCount: number;
+  sessionCount: number;
+}
+
+export interface RuntimeAuditSession {
+  id: string;
+  label: string;
+  state: string;
+  alive: boolean;
+  provider?: string;
+  modelProvider?: string;
+  model?: string;
+  runtimeId?: string;
+  profileLevel?: DifficultyLevel;
+  reasoningLevel?: ReasoningLevel;
+  cwd: string;
+  createdAt: number;
+  lastActivityAt: number;
+}
+
+export interface RuntimeAuditApp {
+  clientId: string;
+  displayName: string | null;
+  scopes: string[];
+  tokenCount: number;
+  activeTokenCount: number;
+  lastIssuedAt?: number;
+}
+
+export interface AgentAuditResponse {
+  profiles: RuntimeProfile[];
+  runtimes: RuntimeAuditRuntime[];
+  sessions: RuntimeAuditSession[];
+  apps: RuntimeAuditApp[];
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -27,11 +116,17 @@ export class ApiError extends Error {
 
 export async function apiRequest<T>(
   path: string,
-  options: { token?: string; method?: string } = {},
+  options: { token?: string; method?: string; body?: unknown } = {},
 ): Promise<T> {
   const headers: Record<string, string> = {};
   if (options.token) headers.Authorization = `Bearer ${options.token}`;
-  const res = await fetch(path, { method: options.method ?? "GET", headers });
+  const hasBody = options.body !== undefined;
+  if (hasBody) headers["Content-Type"] = "application/json";
+  const res = await fetch(path, {
+    method: options.method ?? "GET",
+    headers,
+    body: hasBody ? JSON.stringify(options.body) : undefined,
+  });
   let body: unknown = null;
   try {
     body = await res.json();

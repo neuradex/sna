@@ -1,5 +1,5 @@
 import { Link, Outlet } from "@tanstack/react-router";
-import { KeyRound, LayoutDashboard, ListChecks, Moon, ShieldCheck, Sun } from "lucide-react";
+import { Gauge, KeyRound, LayoutDashboard, ListChecks, Moon, ShieldCheck, Sun } from "lucide-react";
 import { useAuthToken } from "../auth-token";
 import { useHealthQuery } from "../queries";
 import { useTheme } from "../theme";
@@ -10,6 +10,7 @@ const navItems = [
   { to: "/", label: "Overview", icon: LayoutDashboard },
   { to: "/authorization", label: "Authorization", icon: ShieldCheck },
   { to: "/sessions", label: "Sessions", icon: ListChecks },
+  { to: "/runtime", label: "Runtime", icon: Gauge },
 ] as const;
 
 export function Shell() {
