@@ -18,12 +18,12 @@ export function OverviewPage() {
         <Panel title="Server">
           {health.isError ? <ErrorText error={health.error} /> : (
             <dl className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
-              <dt className="text-stone-500">Name</dt>
-              <dd className="font-medium text-stone-950">{health.data?.name ?? "sna"}</dd>
-              <dt className="text-stone-500">Version</dt>
-              <dd className="font-medium text-stone-950">{health.data?.version ?? "unknown"}</dd>
-              <dt className="text-stone-500">URL</dt>
-              <dd className="break-all font-medium text-stone-950">{location.origin}</dd>
+              <dt className="font-mono text-xs text-[var(--fg-muted)]">Name</dt>
+              <dd className="font-medium text-[var(--fg)]">{health.data?.name ?? "sna"}</dd>
+              <dt className="font-mono text-xs text-[var(--fg-muted)]">Version</dt>
+              <dd className="font-medium text-[var(--fg)]">{health.data?.version ?? "unknown"}</dd>
+              <dt className="font-mono text-xs text-[var(--fg-muted)]">URL</dt>
+              <dd className="break-all font-medium text-[var(--fg)]">{location.origin}</dd>
             </dl>
           )}
         </Panel>
@@ -53,12 +53,12 @@ function Metric({
   tone: "neutral" | "good" | "warn";
 }) {
   return (
-    <div className="rounded-md border border-stone-200 bg-stone-50 p-3">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--panel-subtle)] p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="text-stone-600">{icon}</div>
+        <div className="text-[var(--accent)]">{icon}</div>
         <StatusBadge tone={tone}>{value}</StatusBadge>
       </div>
-      <div className="text-sm font-semibold text-stone-900">{label}</div>
+      <div className="text-sm font-semibold text-[var(--fg)]">{label}</div>
     </div>
   );
 }

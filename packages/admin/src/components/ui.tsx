@@ -2,9 +2,9 @@ import type { ReactNode } from "react";
 
 export function Panel({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) {
   return (
-    <section className="rounded-lg border border-stone-300 bg-white/95 p-4 shadow-sm">
+    <section className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.08)] backdrop-blur">
       <div className="mb-3 flex min-h-8 items-center justify-between gap-3">
-        <h2 className="text-[15px] font-semibold tracking-normal text-stone-950">{title}</h2>
+        <h2 className="font-mono text-xs font-semibold uppercase tracking-wider text-[var(--fg-muted)]">{title}</h2>
         {action}
       </div>
       {children}
@@ -20,13 +20,13 @@ export function StatusBadge({
   tone?: "neutral" | "good" | "warn" | "bad";
 }) {
   const className = {
-    neutral: "border-stone-300 bg-stone-100 text-stone-700",
-    good: "border-emerald-200 bg-emerald-50 text-emerald-800",
-    warn: "border-amber-200 bg-amber-50 text-amber-800",
-    bad: "border-red-200 bg-red-50 text-red-800",
+    neutral: "border-[var(--border)] bg-[var(--panel-subtle)] text-[var(--fg-muted)]",
+    good: "border-emerald-500/20 bg-[var(--good-soft)] text-[var(--good)]",
+    warn: "border-amber-500/20 bg-[var(--warn-soft)] text-[var(--warn)]",
+    bad: "border-red-500/20 bg-[var(--bad-soft)] text-[var(--bad)]",
   }[tone];
   return (
-    <span className={`inline-flex h-7 items-center rounded-md border px-2 text-xs font-semibold ${className}`}>
+    <span className={`inline-flex h-7 items-center rounded-md border px-2 font-mono text-[10px] font-medium ${className}`}>
       {children}
     </span>
   );
@@ -34,7 +34,7 @@ export function StatusBadge({
 
 export function EmptyState({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-md border border-dashed border-stone-300 bg-stone-50 px-3 py-5 text-sm text-stone-600">
+    <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--panel-subtle)] px-3 py-5 text-sm text-[var(--fg-muted)]">
       {children}
     </div>
   );
@@ -42,5 +42,5 @@ export function EmptyState({ children }: { children: ReactNode }) {
 
 export function ErrorText({ error }: { error: unknown }) {
   const message = error instanceof Error ? error.message : String(error);
-  return <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-800">{message}</div>;
+  return <div className="rounded-lg border border-red-500/20 bg-[var(--bad-soft)] px-3 py-2 font-mono text-xs font-medium text-[var(--bad)]">{message}</div>;
 }

@@ -1,7 +1,9 @@
 import { Link, Outlet } from "@tanstack/react-router";
-import { KeyRound, LayoutDashboard, ListChecks, Server, ShieldCheck } from "lucide-react";
+import { KeyRound, LayoutDashboard, ListChecks, Moon, ShieldCheck, Sun } from "lucide-react";
 import { useAuthToken } from "../auth-token";
 import { useHealthQuery } from "../queries";
+import { useTheme } from "../theme";
+import snaIcon from "../assets/sna-icon.svg";
 import { StatusBadge } from "./ui";
 
 const navItems = [
@@ -12,24 +14,31 @@ const navItems = [
 
 export function Shell() {
   const { token } = useAuthToken();
+  const { theme, toggleTheme } = useTheme();
   const health = useHealthQuery();
   const connected = health.isSuccess && health.data?.ok;
 
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
+    <main className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-lg bg-stone-950 text-white">
-              <Server size={20} />
-            </div>
+            <img src={snaIcon} alt="SNA" className="size-10 rounded-xl shadow-[0_0_30px_var(--accent-soft)]" />
             <div>
-              <h1 className="text-3xl font-bold leading-tight tracking-normal text-stone-950">SNA Admin</h1>
-              <p className="text-sm text-stone-600">Local daemon control surface</p>
+              <h1 className="text-2xl font-bold leading-tight tracking-normal text-[var(--fg)]">SNA Admin</h1>
+              <p className="font-mono text-xs text-[var(--fg-muted)]">local daemon control surface</p>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="focus-ring inline-flex h-8 items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--panel-subtle)] px-2 font-mono text-[10px] font-medium text-[var(--fg-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--fg-soft)]"
+            onClick={toggleTheme}
+          >
+            {theme === "dark" ? <Moon size={14} /> : <Sun size={14} />}
+            {theme}
+          </button>
           <StatusBadge tone={connected ? "good" : health.isError ? "bad" : "neutral"}>
             {connected ? "Connected" : health.isError ? "Error" : "Checking"}
           </StatusBadge>
@@ -40,14 +49,14 @@ export function Shell() {
         </div>
       </header>
 
-      <nav className="flex gap-1 rounded-lg border border-stone-300 bg-white/80 p-1 shadow-sm">
+      <nav className="flex gap-1 rounded-xl border border-[var(--border)] bg-[var(--panel)] p-1 backdrop-blur">
         {navItems.map((item) => {
           const Icon = item.icon;
           return (
             <Link
               key={item.to}
               to={item.to}
-              className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold text-stone-600 transition hover:bg-stone-100 [&.active]:bg-stone-950 [&.active]:text-white"
+              className="focus-ring inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-lg border border-transparent px-3 font-mono text-xs font-medium text-[var(--fg-muted)] transition hover:bg-[var(--panel-subtle)] hover:text-[var(--fg-soft)] [&.active]:border-[var(--accent-border)] [&.active]:bg-[var(--accent-soft)] [&.active]:text-[var(--accent)]"
               activeOptions={{ exact: item.to === "/" }}
             >
               <Icon size={16} />

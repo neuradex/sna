@@ -22,7 +22,7 @@ export function ConnectionPanel() {
     <Panel title="Connection">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <input
-          className="h-10 min-w-0 flex-1 rounded-md border border-stone-300 bg-white px-3 text-sm outline-none transition focus:border-stone-950 focus:ring-2 focus:ring-stone-200"
+          className="focus-ring h-10 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-3 font-mono text-sm text-[var(--fg)] transition placeholder:text-[var(--fg-faint)] focus:border-[var(--accent-border)]"
           type="password"
           autoComplete="off"
           spellCheck={false}
@@ -32,7 +32,7 @@ export function ConnectionPanel() {
         />
         <div className="flex gap-2">
           <button
-            className="inline-flex h-10 items-center gap-2 rounded-md bg-stone-950 px-3 text-sm font-semibold text-white"
+            className="focus-ring inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 font-mono text-xs font-medium text-[var(--accent)] transition hover:border-[var(--accent)]"
             type="button"
             onClick={() => setToken(draft)}
           >
@@ -40,7 +40,7 @@ export function ConnectionPanel() {
             Save
           </button>
           <button
-            className="inline-flex h-10 items-center gap-2 rounded-md border border-stone-300 bg-white px-3 text-sm font-semibold text-stone-900"
+            className="focus-ring inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel-subtle)] px-3 font-mono text-xs font-medium text-[var(--fg-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--fg-soft)]"
             type="button"
             onClick={() => {
               setDraft("");
@@ -51,7 +51,7 @@ export function ConnectionPanel() {
             Clear
           </button>
           <button
-            className="inline-flex h-10 items-center gap-2 rounded-md border border-stone-300 bg-white px-3 text-sm font-semibold text-stone-900"
+            className="focus-ring inline-flex h-10 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel-subtle)] px-3 font-mono text-xs font-medium text-[var(--fg-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--fg-soft)]"
             type="button"
             onClick={refresh}
           >

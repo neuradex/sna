@@ -19,7 +19,7 @@ export function AuthorizationPage() {
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm">
             <thead>
-              <tr className="border-b border-stone-200 text-left text-xs font-semibold uppercase tracking-normal text-stone-500">
+              <tr className="border-b border-[var(--border)] text-left font-mono text-[10px] font-medium uppercase tracking-wider text-[var(--fg-muted)]">
                 <th className="py-2 pr-3">Client</th>
                 <th className="px-3 py-2">Scopes</th>
                 <th className="px-3 py-2">State</th>
@@ -60,13 +60,13 @@ function AuthRequestRow({
 }) {
   const canAct = canActOnAuthRequest(request);
   return (
-    <tr className={`border-b border-stone-100 last:border-0 ${focused ? "bg-amber-50" : ""}`}>
+    <tr className={`border-b border-[var(--border)] last:border-0 ${focused ? "bg-[var(--accent-soft)]" : ""}`}>
       <td className="max-w-[320px] py-3 pr-3">
-        <div className="font-semibold text-stone-950">{authRequestLabel(request)}</div>
-        <div className="break-all text-xs text-stone-500">{request.clientId}</div>
-        {error ? <div className="mt-2 text-xs font-medium text-red-700">{error instanceof Error ? error.message : String(error)}</div> : null}
+        <div className="font-semibold text-[var(--fg)]">{authRequestLabel(request)}</div>
+        <div className="break-all font-mono text-[10px] text-[var(--fg-muted)]">{request.clientId}</div>
+        {error ? <div className="mt-2 font-mono text-[10px] font-medium text-[var(--bad)]">{error instanceof Error ? error.message : String(error)}</div> : null}
       </td>
-      <td className="px-3 py-3 text-stone-700">{request.scopes.join(", ") || "none"}</td>
+      <td className="px-3 py-3 font-mono text-xs text-[var(--fg-soft)]">{request.scopes.join(", ") || "none"}</td>
       <td className="px-3 py-3">
         <StatusBadge tone={statusTone(request.status)}>{request.status}</StatusBadge>
       </td>
@@ -75,7 +75,7 @@ function AuthRequestRow({
           {canAct ? (
             <>
               <button
-                className="inline-flex h-9 items-center gap-2 rounded-md bg-stone-950 px-3 text-sm font-semibold text-white"
+                className="focus-ring inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--accent-border)] bg-[var(--accent-soft)] px-3 font-mono text-xs font-medium text-[var(--accent)] transition hover:border-[var(--accent)]"
                 type="button"
                 disabled={busy}
                 onClick={() => onAction("approve")}
@@ -84,7 +84,7 @@ function AuthRequestRow({
                 Approve
               </button>
               <button
-                className="inline-flex h-9 items-center gap-2 rounded-md border border-stone-300 bg-white px-3 text-sm font-semibold text-stone-900"
+                className="focus-ring inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel-subtle)] px-3 font-mono text-xs font-medium text-[var(--fg-muted)] transition hover:border-[var(--border-strong)] hover:text-[var(--fg-soft)]"
                 type="button"
                 disabled={busy}
                 onClick={() => onAction("deny")}
@@ -93,7 +93,7 @@ function AuthRequestRow({
                 Deny
               </button>
             </>
-          ) : <span className="text-sm text-stone-400">Handled</span>}
+          ) : <span className="font-mono text-xs text-[var(--fg-faint)]">Handled</span>}
         </div>
       </td>
     </tr>
