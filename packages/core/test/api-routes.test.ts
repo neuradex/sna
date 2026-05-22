@@ -651,8 +651,9 @@ describe("HTTP API Routes", () => {
       assert.equal(level3.config.permissionMode, "default");
 
       const runtimes = await (await req("GET", "/agent/runtimes")).json();
-      assert.equal(runtimes.runtimes.length, 1);
-      assert.equal(runtimes.runtimes[0].defaultModel, "gpt-5.4");
+      const registered = runtimes.runtimes.find((r: any) => r.id === "codex-main");
+      assert.ok(registered);
+      assert.equal(registered.defaultModel, "gpt-5.4");
     });
 
     it("reports runtime and app audit information", async () => {

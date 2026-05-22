@@ -56,6 +56,12 @@ export interface SessionConfig {
    */
   cwd: string;
   permissionMode?: string;
+  /** Difficulty profile slot used to derive this config, if any. */
+  profileLevel?: 1 | 2 | 3 | 4 | 5;
+  /** Registered runtime settings entry used to derive this config, if any. */
+  runtimeId?: string;
+  /** Provider-agnostic reasoning effort level applied at spawn time. */
+  reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
   configDir?: string;
   /**
    * Runtime-specific CLI flags. Inherited on same-runtime restart,
@@ -772,6 +778,9 @@ export class SessionManager {
       model: overrides.model ?? base.model,
       cwd: overrides.cwd ?? base.cwd,
       permissionMode: overrides.permissionMode ?? base.permissionMode,
+      profileLevel: overrides.profileLevel ?? base.profileLevel,
+      runtimeId: overrides.runtimeId ?? base.runtimeId,
+      reasoningLevel: overrides.reasoningLevel ?? base.reasoningLevel,
       configDir: providerChanged ? overrides.configDir : (overrides.configDir ?? base.configDir),
       extraArgs: providerChanged ? overrides.extraArgs : (overrides.extraArgs ?? base.extraArgs),
       providerOptions: providerChanged ? overrides.providerOptions : (overrides.providerOptions ?? base.providerOptions),

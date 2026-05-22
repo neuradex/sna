@@ -42,6 +42,14 @@ import {
   revokeToken,
 } from "../auth.js";
 import { createHttpSecurityMiddleware, type SnaAuthIdentity, type SnaSecurityOptions } from "../security.js";
+import {
+  buildAgentAudit,
+  listRegisteredRuntimes,
+  listRuntimeProfiles,
+  resolveLaunchConfig,
+  upsertRegisteredRuntime,
+  upsertRuntimeProfile,
+} from "../runtime-settings.js";
 
 // Resolve our own version from package.json so the OpenAPI document
 // reports whatever ships in @sna-sdk/core, not a hard-coded string that
@@ -123,9 +131,57 @@ const SessionConfigSchema = z.object({
   model: z.string(),
   cwd: z.string(),
   permissionMode: z.string().optional(),
+  profileLevel: z.number().int().min(1).max(5).optional(),
+  runtimeId: z.string().optional(),
+  reasoningLevel: z.number().int().min(0).max(5).optional(),
   configDir: z.string().optional(),
   extraArgs: z.array(z.string()).optional(),
   providerOptions: z.record(z.string(), z.any()).optional(),
+});
+
+const RuntimeLaunchConfigSchema = z.object({
+  provider: z.string().optional(),
+  modelProvider: z.string().optional(),
+  model: z.string().optional(),
+  cwd: z.string().optional(),
+  permissionMode: z.string().optional(),
+  configDir: z.string().optional(),
+  extraArgs: z.array(z.string()).optional(),
+  providerOptions: z.record(z.string(), z.any()).optional(),
+  systemPrompt: z.string().optional(),
+  appendSystemPrompt: z.string().optional(),
+  allowedTools: z.array(z.string()).optional(),
+  disallowedTools: z.array(z.string()).optional(),
+  mcpServers: z.record(z.string(), z.any()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  reasoningLevel: z.number().int().min(0).max(5).optional(),
+}).strict();
+
+const RegisteredRuntimeSchema = z.object({
+  id: z.string(),
+  provider: z.string(),
+  label: z.string(),
+  enabled: z.boolean(),
+  modelProvider: z.string().optional(),
+  defaultModel: z.string().optional(),
+  cliPath: z.string().optional(),
+  models: z.array(z.object({
+    id: z.string(),
+    label: z.string().optional(),
+    provider: z.string().optional(),
+  })).optional(),
+  config: RuntimeLaunchConfigSchema.optional(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+
+const RuntimeProfileSchema = z.object({
+  level: z.number().int().min(1).max(5),
+  label: z.string(),
+  description: z.string(),
+  runtimeId: z.string().optional(),
+  config: RuntimeLaunchConfigSchema,
+  updatedAt: z.number().optional(),
 });
 
 const RuntimeChainEntrySchema = z.object({
@@ -525,6 +581,127 @@ const updateSessionRoute = protectedRoute({
   },
 });
 
+// ── Runtime Settings ─────────────────────────────────────────────────
+
+const listRuntimesRoute = protectedRoute({
+  method: "get",
+  path: "/agent/runtimes",
+  summary: "List registered runtimes",
+  description: "List daemon-level runtime registrations used by difficulty profiles.",
+  responses: {
+    200: {
+      description: "Registered runtimes.",
+      content: { "application/json": { schema: z.object({ runtimes: z.array(RegisteredRuntimeSchema) }) } },
+    },
+  },
+});
+
+const upsertRuntimeRoute = protectedRoute({
+  method: "put",
+  path: "/agent/runtimes/{id}",
+  summary: "Register runtime",
+  description: "Create or update a named runtime registration. Consumers can reference it through profile levels.",
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: { "application/json": { schema: z.object({
+        provider: z.string(),
+        label: z.string().optional(),
+        enabled: z.boolean().optional(),
+        modelProvider: z.string().optional(),
+        defaultModel: z.string().optional(),
+        cliPath: z.string().optional(),
+        models: z.array(z.object({
+          id: z.string(),
+          label: z.string().optional(),
+          provider: z.string().optional(),
+        })).optional(),
+        config: RuntimeLaunchConfigSchema.optional(),
+      }).strict() }},
+    },
+  },
+  responses: {
+    200: {
+      description: "Runtime registered.",
+      content: { "application/json": { schema: z.object({ status: z.literal("registered"), runtime: RegisteredRuntimeSchema }) } },
+    },
+    400: {
+      description: "Invalid runtime registration.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const listProfilesRoute = protectedRoute({
+  method: "get",
+  path: "/agent/profiles",
+  summary: "List difficulty profiles",
+  description: "List the five daemon-level task difficulty profiles. Consumers may pass `profileLevel` to lifecycle calls instead of duplicating runtime settings.",
+  responses: {
+    200: {
+      description: "Difficulty profiles.",
+      content: { "application/json": { schema: z.object({ profiles: z.array(RuntimeProfileSchema) }) } },
+    },
+  },
+});
+
+const upsertProfileRoute = protectedRoute({
+  method: "put",
+  path: "/agent/profiles/{level}",
+  summary: "Update difficulty profile",
+  description: "Update one of the five difficulty profile slots.",
+  request: {
+    params: z.object({ level: z.string().regex(/^[1-5]$/) }),
+    body: {
+      content: { "application/json": { schema: z.object({
+        label: z.string().optional(),
+        description: z.string().optional(),
+        runtimeId: z.string().optional(),
+        config: RuntimeLaunchConfigSchema.optional(),
+      }).strict() }},
+    },
+  },
+  responses: {
+    200: {
+      description: "Profile updated.",
+      content: { "application/json": { schema: z.object({ status: z.literal("updated"), profile: RuntimeProfileSchema }) } },
+    },
+    400: {
+      description: "Invalid profile update.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
+  },
+});
+
+const auditRoute = protectedRoute({
+  method: "get",
+  path: "/agent/audit",
+  summary: "Agent audit",
+  description: "Return registered runtimes, difficulty profiles, live session audit data, and app/client attribution data.",
+  responses: {
+    200: {
+      description: "Audit snapshot.",
+      content: { "application/json": { schema: z.object({
+        profiles: z.array(RuntimeProfileSchema),
+        runtimes: z.array(RegisteredRuntimeSchema.extend({
+          activeSessionCount: z.number(),
+          sessionCount: z.number(),
+        })),
+        sessions: z.array(SessionInfoSchema),
+        apps: z.array(z.object({
+          appId: z.string(),
+          displayName: z.string().nullable(),
+          scopes: z.array(z.string()),
+          tokenCount: z.number(),
+          activeTokenCount: z.number(),
+          sessionCount: z.number(),
+          lastUsedAt: z.number().nullable(),
+        })),
+      }) } },
+    },
+  },
+});
+
 // ── Agent Lifecycle ───────────────────────────────────────────────────
 
 const startRoute = protectedRoute({
@@ -538,6 +715,8 @@ const startRoute = protectedRoute({
       content: { "application/json": { schema: z.object({
         provider: z.string().optional(),
         modelProvider: z.string().optional(),
+        profileLevel: z.number().int().min(1).max(5).optional(),
+        runtimeId: z.string().optional(),
         prompt: z.string().optional(),
         model: z.string().optional(),
         permissionMode: z.string().optional(),
@@ -566,6 +745,10 @@ const startRoute = protectedRoute({
         provider: z.string(),
         sessionId: z.string(),
       }) } },
+    },
+    400: {
+      description: "Invalid profile or runtime reference.",
+      content: { "application/json": { schema: ErrorResponse } },
     },
     500: {
       description: "Start failed.",
@@ -619,6 +802,8 @@ const restartRoute = protectedRoute({
       content: { "application/json": { schema: z.object({
         provider: z.string().optional(),
         modelProvider: z.string().optional(),
+        profileLevel: z.number().int().min(1).max(5).optional(),
+        runtimeId: z.string().optional(),
         model: z.string().optional(),
         cwd: z.string().optional(),
         permissionMode: z.string().optional(),
@@ -644,6 +829,10 @@ const restartRoute = protectedRoute({
         sessionId: z.string(),
       }) } },
     },
+    400: {
+      description: "Invalid profile or runtime reference.",
+      content: { "application/json": { schema: ErrorResponse } },
+    },
     500: {
       description: "Restart failed.",
       content: { "application/json": { schema: ErrorResponse } },
@@ -666,6 +855,8 @@ const resumeRoute = protectedRoute({
         configDir: z.string().optional(),
         provider: z.string().optional(),
         modelProvider: z.string().optional(),
+        profileLevel: z.number().int().min(1).max(5).optional(),
+        runtimeId: z.string().optional(),
         extraArgs: z.array(z.string()).optional(),
         providerOptions: z.record(z.string(), z.any()).optional(),
         systemPrompt: z.string().optional(),
@@ -875,6 +1066,8 @@ const runOnceRoute = protectedRoute({
         cwd: z.string().optional(),
         timeout: z.number().optional(),
         provider: z.string().optional(),
+        profileLevel: z.number().int().min(1).max(5).optional(),
+        runtimeId: z.string().optional(),
         extraArgs: z.array(z.string()).optional(),
         env: z.record(z.string(), z.any()).optional(),
         providerOptions: z.record(z.string(), z.any()).optional(),
@@ -918,6 +1111,8 @@ const runOnceStreamRoute = protectedRoute({
         cwd: z.string().optional(),
         timeout: z.number().optional(),
         provider: z.string().optional(),
+        profileLevel: z.number().int().min(1).max(5).optional(),
+        runtimeId: z.string().optional(),
         extraArgs: z.array(z.string()).optional(),
         env: z.record(z.string(), z.any()).optional(),
         providerOptions: z.record(z.string(), z.any()).optional(),
@@ -954,6 +1149,8 @@ const completionRoute = protectedRoute({
         prompt: z.string(),
         provider: z.string().optional(),
         model: z.string().optional(),
+        profileLevel: z.number().int().min(1).max(5).optional(),
+        runtimeId: z.string().optional(),
         systemPrompt: z.string().optional(),
         appendSystemPrompt: z.string().optional(),
         reasoningLevel: z.number().int().min(0).max(5).optional(),
@@ -1558,12 +1755,54 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     }
   });
 
+  // ── Runtime Settings ─────────────────────────────────────────
+
+  app.openapi(listRuntimesRoute, (c) => {
+    return c.json({ runtimes: listRegisteredRuntimes() }, 200);
+  });
+
+  app.openapi(upsertRuntimeRoute, (c) => {
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      return c.json({ status: "registered" as const, runtime: upsertRegisteredRuntime(id, body as any) }, 200);
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
+  });
+
+  app.openapi(listProfilesRoute, (c) => {
+    return c.json({ profiles: listRuntimeProfiles() }, 200);
+  });
+
+  app.openapi(upsertProfileRoute, (c) => {
+    const { level } = c.req.valid("param");
+    const body = c.req.valid("json");
+    try {
+      return c.json({ status: "updated" as const, profile: upsertRuntimeProfile(Number(level), body as any) }, 200);
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
+  });
+
+  app.openapi(auditRoute, (c) => {
+    if (!sessionManager) {
+      return c.json(buildAgentAudit([]), 200);
+    }
+    return c.json(buildAgentAudit(sessionManager.listSessions({ includeRuntimeChain: true })), 200);
+  });
+
   // ── Agent Lifecycle ───────────────────────────────────────────
 
   app.openapi(startRoute, async (c) => {
     if (!sessionManager) return c.json({ status: "error", message: "SessionManager not provided" }, 500);
     const sessionId = getSessionId(c);
-    const body = c.req.valid("json");
+    let body = c.req.valid("json");
+    try {
+      body = resolveLaunchConfig(body as any) as typeof body;
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
 
     const session = sessionManager.getOrCreateSession(sessionId, { cwd: body.cwd, meta: configuredAppMeta() });
 
@@ -1624,6 +1863,9 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
         model,
         cwd: session.cwd,
         permissionMode: body.permissionMode,
+        profileLevel: body.profileLevel as (1 | 2 | 3 | 4 | 5) | undefined,
+        runtimeId: body.runtimeId,
+        reasoningLevel: body.reasoningLevel as (0 | 1 | 2 | 3 | 4 | 5) | undefined,
         configDir: body.configDir,
         extraArgs: body.extraArgs,
         providerOptions: body.providerOptions,
@@ -1714,7 +1956,12 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
   app.openapi(restartRoute, async (c) => {
     if (!sessionManager) return c.json({ status: "error", message: "SessionManager not provided" }, 500);
     const sessionId = getSessionId(c);
-    const body = c.req.valid("json");
+    let body = c.req.valid("json");
+    try {
+      body = resolveLaunchConfig(body as any) as typeof body;
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
 
     try {
       const session = sessionManager.getSession(sessionId);
@@ -1742,7 +1989,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
       // branch (no-op for non-pooled providers like claude-code). Earlier
       // versions had separate branches and the duplication caused #21's
       // openapi.ts regression — the helper closes that off.
-      const { config } = await sessionManager.restartSession(sessionId, body, async (cfg) => {
+      const { config } = await sessionManager.restartSession(sessionId, body as Partial<SessionConfig>, async (cfg) => {
         const prov = getProvider(cfg.provider);
         const providerChanged = prevProvider && cfg.provider !== prevProvider;
 
@@ -1758,6 +2005,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
             history: history.length > 0 ? history : undefined,
             extraArgs: cfg.extraArgs,
             providerOptions: cfg.providerOptions,
+            reasoningLevel: cfg.reasoningLevel,
             ...typedOpts,
           });
         }
@@ -1771,6 +2019,7 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
           resumeSessionId: ccSessionId ?? undefined,
           extraArgs: cfg.extraArgs,
           providerOptions: cfg.providerOptions,
+          reasoningLevel: cfg.reasoningLevel,
           ...typedOpts,
         });
       });
@@ -1785,7 +2034,12 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
   app.openapi(resumeRoute, async (c) => {
     if (!sessionManager) return c.json({ status: "error", message: "SessionManager not provided" }, 500);
     const sessionId = getSessionId(c);
-    const body = c.req.valid("json");
+    let body = c.req.valid("json");
+    try {
+      body = resolveLaunchConfig(body as any) as typeof body;
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
 
     const session = sessionManager.getOrCreateSession(sessionId);
     if (session.process?.alive) {
@@ -1832,6 +2086,9 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
         model,
         cwd: session.cwd,
         permissionMode,
+        profileLevel: body.profileLevel as (1 | 2 | 3 | 4 | 5) | undefined,
+        runtimeId: body.runtimeId,
+        reasoningLevel: body.reasoningLevel as (0 | 1 | 2 | 3 | 4 | 5) | undefined,
         configDir,
         extraArgs,
         providerOptions,
@@ -1966,7 +2223,12 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
 
   app.openapi(runOnceRoute, async (c) => {
     if (!sessionManager) return c.json({ status: "error", message: "SessionManager not provided" }, 500);
-    const body = c.req.valid("json");
+    let body = c.req.valid("json");
+    try {
+      body = resolveLaunchConfig(body as any) as typeof body;
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
     if (!body.message) {
       return c.json({ status: "error", message: "message is required" }, 400);
     }
@@ -1983,7 +2245,12 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
     if (!sessionManager) {
       return c.json({ status: "error", message: "SessionManager not provided" }, 500) as any;
     }
-    const body = c.req.valid("json");
+    let body = c.req.valid("json");
+    try {
+      body = resolveLaunchConfig(body as any) as typeof body;
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400) as any;
+    }
     if (!body.message) {
       return c.json({ status: "error", message: "message is required" }, 400);
     }
@@ -2056,7 +2323,12 @@ export async function createOpenApiApp(options?: { sessionManager?: SessionManag
   });
 
   app.openapi(completionRoute, async (c) => {
-    const body = c.req.valid("json");
+    let body = c.req.valid("json");
+    try {
+      body = resolveLaunchConfig(body as any) as typeof body;
+    } catch (e: any) {
+      return c.json({ status: "error", message: e.message }, 400);
+    }
     if (!body.prompt) {
       return c.json({ status: "error", message: "prompt is required" }, 400);
     }

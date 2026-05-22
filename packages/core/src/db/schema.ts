@@ -414,6 +414,12 @@ function initSchema(db: Database.Database) {
       revoked_at         INTEGER
     );
 
+    CREATE TABLE IF NOT EXISTS sna_settings (
+      key        TEXT PRIMARY KEY,
+      value      TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
     CREATE INDEX IF NOT EXISTS idx_chat_messages_session_kind ON chat_messages(session_id, kind);
     CREATE INDEX IF NOT EXISTS idx_runtime_sessions_sna ON runtime_sessions(sna_session_id);
