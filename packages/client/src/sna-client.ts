@@ -281,14 +281,28 @@ export interface RuntimeProfile {
 
 export interface RegisteredRuntime {
   id: string;
+  provider: string;
   label: string;
-  description?: string;
   enabled: boolean;
-  config: RuntimeLaunchConfig;
+  modelProvider?: string;
+  defaultModel?: string;
+  cliPath?: string;
+  models?: Array<{ id: string; label?: string; provider?: string }>;
+  config?: RuntimeLaunchConfig;
+  createdAt: number;
   updatedAt: number;
 }
 
-export type RegisterRuntimeInput = Partial<Omit<RegisteredRuntime, "id" | "updatedAt">>;
+export type RegisterRuntimeInput = {
+  provider: string;
+  label?: string;
+  enabled?: boolean;
+  modelProvider?: string;
+  defaultModel?: string;
+  cliPath?: string;
+  models?: Array<{ id: string; label?: string; provider?: string }>;
+  config?: RuntimeLaunchConfig;
+};
 export type UpdateRuntimeProfileInput = Partial<Omit<RuntimeProfile, "level" | "updatedAt">>;
 
 export interface RuntimeAuditRuntime extends RegisteredRuntime {

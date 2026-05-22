@@ -1702,26 +1702,28 @@ describe("HTTP transport — new operations", () => {
   it("runtime.registerRuntime — PUT /agent/runtimes/:id", async () => {
     mock.queueHttpResponse(200, {
       status: "registered",
-      runtime: { id: "codex-main", label: "Codex", enabled: true, config: { provider: "codex" }, updatedAt: 3 },
+      runtime: { id: "codex-main", provider: "codex", label: "Codex", enabled: true, defaultModel: "gpt-5.4", createdAt: 3, updatedAt: 3 },
     });
     sna = httpClient();
 
     const res = await sna.runtime.registerRuntime("codex-main", {
+      provider: "codex",
       label: "Codex",
-      config: { provider: "codex", model: "gpt-5.4" },
+      defaultModel: "gpt-5.4",
     });
 
     assert.equal(res.status, "registered");
     const req = mock.httpRequests[0];
     assert.equal(req.method, "PUT");
     assert.equal(req.url, "/agent/runtimes/codex-main");
+    assert.equal(req.body.provider, "codex");
     assert.equal(req.body.label, "Codex");
-    assert.equal(req.body.config.provider, "codex");
+    assert.equal(req.body.defaultModel, "gpt-5.4");
   });
 
   it("runtime.listRuntimes — GET /agent/runtimes", async () => {
     mock.queueHttpResponse(200, {
-      runtimes: [{ id: "codex-main", label: "Codex", enabled: true, config: { provider: "codex" }, updatedAt: 3 }],
+      runtimes: [{ id: "codex-main", provider: "codex", label: "Codex", enabled: true, createdAt: 3, updatedAt: 3 }],
     });
     sna = httpClient();
 
