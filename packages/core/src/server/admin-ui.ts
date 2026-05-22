@@ -106,6 +106,7 @@ export function renderAdminPage(): string {
     authRequestsEl.addEventListener("click", async (event) => {
       const button = event.target.closest("button[data-auth-action]");
       if (!button) return;
+      if (button.disabled) return;
       button.disabled = true;
       try {
         await postJson("/auth/pkce/requests/" + encodeURIComponent(button.dataset.requestId) + "/" + button.dataset.authAction, token());
@@ -176,9 +177,14 @@ export function renderAdminPage(): string {
       authRequestsEl.innerHTML = '<table><thead><tr><th>Client</th><th>Scopes</th><th>State</th><th></th></tr></thead><tbody>' +
         requests.map((r) => '<tr><td>' + escapeHtml(r.displayName || r.clientId) + '<div class="muted">' + escapeHtml(r.clientId) +
           '</div></td><td>' + escapeHtml((r.scopes || []).join(", ")) + '</td><td>' + escapeHtml(r.status) +
-          '</td><td><button data-auth-action="approve" data-request-id="' + escapeHtml(r.requestId) + '">Approve</button> ' +
-          '<button class="secondary" data-auth-action="deny" data-request-id="' + escapeHtml(r.requestId) + '">Deny</button></td></tr>').join("") +
+          '</td><td>' + renderAuthRequestActions(r) + '</td></tr>').join("") +
         '</tbody></table>';
+    }
+
+    function renderAuthRequestActions(request) {
+      if (request.status !== "pending") return "";
+      return '<button data-auth-action="approve" data-request-id="' + escapeHtml(request.requestId) + '">Approve</button> ' +
+        '<button class="secondary" data-auth-action="deny" data-request-id="' + escapeHtml(request.requestId) + '">Deny</button>';
     }
 
     function renderSessions(sessions) {
