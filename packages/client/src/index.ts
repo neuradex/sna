@@ -14,15 +14,18 @@ export type {
   PkceRequestInfo,
   PkceStartResponse,
   AuthTokenResponse,
+  DifficultyLevel,
+  ReasoningLevel,
+  RuntimeLaunchConfig,
+  RuntimeProfile,
+  RegisteredRuntime,
+  RegisterRuntimeInput,
+  UpdateRuntimeProfileInput,
+  RuntimeAuditRuntime,
+  RuntimeAuditSession,
+  RuntimeAuditApp,
+  AgentAuditSnapshot,
   ListModelsConfig,
   ListModelsResult,
   RuntimeModelInfo,
 } from "./sna-client.js";
-
-/**
- * Provider-agnostic reasoning-level scale (0..5, lightest → heaviest).
- * Defined locally so `@sna-sdk/client` stays free of any `@sna-sdk/core`
- * dependency. See {@link AgentStartConfig.reasoningLevel} for the
- * per-provider mapping table.
- */
-export type ReasoningLevel = 0 | 1 | 2 | 3 | 4 | 5;

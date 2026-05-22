@@ -237,6 +237,97 @@ export interface AuthTokenResponse {
   scopes: string[];
 }
 
+/**
+ * User-facing task difficulty profile.
+ *
+ * Levels are ordered from lightest to heaviest so consumer apps can call a
+ * generic level without knowing the provider-specific runtime knobs.
+ */
+export type DifficultyLevel = 1 | 2 | 3 | 4 | 5;
+
+/**
+ * Provider-agnostic reasoning-level scale.
+ *
+ * 0 is the lightest reasoning the provider supports, 5 is the heaviest.
+ */
+export type ReasoningLevel = 0 | 1 | 2 | 3 | 4 | 5;
+
+export interface RuntimeLaunchConfig {
+  provider?: string;
+  modelProvider?: string;
+  model?: string;
+  permissionMode?: string;
+  cwd?: string;
+  configDir?: string;
+  systemPrompt?: string;
+  appendSystemPrompt?: string;
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  mcpServers?: Record<string, unknown>;
+  reasoningLevel?: ReasoningLevel;
+  providerOptions?: Record<string, unknown>;
+  extraArgs?: string[];
+  env?: Record<string, string>;
+}
+
+export interface RuntimeProfile {
+  level: DifficultyLevel;
+  label: string;
+  description?: string;
+  runtimeId?: string;
+  config: RuntimeLaunchConfig;
+  updatedAt: number;
+}
+
+export interface RegisteredRuntime {
+  id: string;
+  label: string;
+  description?: string;
+  enabled: boolean;
+  config: RuntimeLaunchConfig;
+  updatedAt: number;
+}
+
+export type RegisterRuntimeInput = Partial<Omit<RegisteredRuntime, "id" | "updatedAt">>;
+export type UpdateRuntimeProfileInput = Partial<Omit<RuntimeProfile, "level" | "updatedAt">>;
+
+export interface RuntimeAuditRuntime extends RegisteredRuntime {
+  activeSessionCount: number;
+  sessionCount: number;
+}
+
+export interface RuntimeAuditSession {
+  id: string;
+  label: string;
+  state: string;
+  alive: boolean;
+  provider?: string;
+  modelProvider?: string;
+  model?: string;
+  runtimeId?: string;
+  profileLevel?: DifficultyLevel;
+  reasoningLevel?: ReasoningLevel;
+  cwd: string;
+  createdAt: number;
+  lastActivityAt: number;
+}
+
+export interface RuntimeAuditApp {
+  clientId: string;
+  displayName: string | null;
+  scopes: string[];
+  tokenCount: number;
+  activeTokenCount: number;
+  lastIssuedAt?: number;
+}
+
+export interface AgentAuditSnapshot {
+  profiles: RuntimeProfile[];
+  runtimes: RuntimeAuditRuntime[];
+  sessions: RuntimeAuditSession[];
+  apps: RuntimeAuditApp[];
+}
+
 // ── Helpers ───────────────────────────────────────────────────────
 
 interface ResolvedTransports {
@@ -359,6 +450,14 @@ export class SnaClient {
    */
   readonly auth: AuthApi;
 
+  /**
+   * Runtime profile, runtime registration, and local audit APIs.
+   *
+   * These APIs are HTTP-only because they mutate daemon settings and return
+   * point-in-time audit snapshots.
+   */
+  readonly runtime: RuntimeSettingsApi;
+
   constructor(options: SnaClientOptions) {
     const { wsUrl, httpBase } = resolveTransports(options);
     this.wsUrl = wsUrl;
@@ -372,6 +471,7 @@ export class SnaClient {
     this.agent = new AgentApi(this);
     this.chat = new ChatApi(this);
     this.auth = new AuthApi(this);
+    this.runtime = new RuntimeSettingsApi(this);
   }
 
   // ── Connection lifecycle ──────────────────────────────────────
@@ -750,6 +850,10 @@ export interface SessionInfo {
 /** Options for a lightweight one-shot completion (no session). */
 export interface CompletionOptions {
   prompt: string;
+  /** Difficulty profile to resolve on the daemon before launch. */
+  profileLevel?: DifficultyLevel;
+  /** Registered runtime defaults to merge before explicit options. */
+  runtimeId?: string;
   model?: string;
   systemPrompt?: string;
   appendSystemPrompt?: string;
@@ -770,7 +874,7 @@ export interface CompletionOptions {
    *     5   | max                  | xhigh
    * Omit to inherit the provider's own default.
    */
-  reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
+  reasoningLevel?: ReasoningLevel;
   /**
    * Provider-specific options passed through to the selected runtime.
    *
@@ -803,6 +907,10 @@ export interface CompletionResult {
 /** Options for a one-shot agent execution. */
 export interface RunOnceOptions {
   message: string;
+  /** Difficulty profile to resolve on the daemon before launch. */
+  profileLevel?: DifficultyLevel;
+  /** Registered runtime defaults to merge before explicit options. */
+  runtimeId?: string;
   model?: string;
   systemPrompt?: string;
   appendSystemPrompt?: string;
@@ -812,7 +920,7 @@ export interface RunOnceOptions {
   provider?: string;
   extraArgs?: string[];
   /** Reasoning effort 0..5. See {@link CompletionOptions.reasoningLevel}. */
-  reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
+  reasoningLevel?: ReasoningLevel;
   /** Provider-specific options. See {@link CompletionOptions.providerOptions}. */
   providerOptions?: Record<string, unknown>;
 }
@@ -965,6 +1073,58 @@ class AuthApi {
 
   private requireHttp(): void {
     if (!this.client._httpUrl) throw new Error("auth APIs require http: true");
+  }
+}
+
+/**
+ * Runtime settings, difficulty profiles, and audit APIs.
+ *
+ * Access via `sna.runtime`.
+ */
+class RuntimeSettingsApi {
+  constructor(private client: SnaClient) {}
+
+  async listRuntimes(): Promise<{ runtimes: RegisteredRuntime[] }> {
+    this.requireHttp();
+    return this.client._httpFetch("GET", "/agent/runtimes");
+  }
+
+  async registerRuntime(id: string, input: RegisterRuntimeInput): Promise<{
+    status: "registered";
+    runtime: RegisteredRuntime;
+  }> {
+    this.requireHttp();
+    return this.client._httpFetch(
+      "PUT",
+      `/agent/runtimes/${encodeURIComponent(id)}`,
+      input as unknown as Record<string, unknown>,
+    );
+  }
+
+  async listProfiles(): Promise<{ profiles: RuntimeProfile[] }> {
+    this.requireHttp();
+    return this.client._httpFetch("GET", "/agent/profiles");
+  }
+
+  async updateProfile(level: DifficultyLevel, input: UpdateRuntimeProfileInput): Promise<{
+    status: "updated";
+    profile: RuntimeProfile;
+  }> {
+    this.requireHttp();
+    return this.client._httpFetch(
+      "PUT",
+      `/agent/profiles/${level}`,
+      input as unknown as Record<string, unknown>,
+    );
+  }
+
+  async audit(): Promise<AgentAuditSnapshot> {
+    this.requireHttp();
+    return this.client._httpFetch("GET", "/agent/audit");
+  }
+
+  private requireHttp(): void {
+    if (!this.client._httpUrl) throw new Error("runtime APIs require http: true");
   }
 }
 
@@ -1193,6 +1353,17 @@ class SessionsApi {
  */
 export interface AgentStartConfig {
   /**
+   * Difficulty profile to resolve on the daemon before launch.
+   * Explicit fields on this config still win after profile/runtime defaults.
+   */
+  profileLevel?: DifficultyLevel;
+  /**
+   * Registered runtime defaults to merge before explicit options.
+   * This is useful for consumer apps that only know "use my default Codex
+   * runtime" and do not want to carry CLI/model settings.
+   */
+  runtimeId?: string;
+  /**
    * Runtime — the CLI binary to spawn (e.g. `"claude-code"`, `"codex"`).
    * Dispatches the request to a registered AgentProvider.
    */
@@ -1247,7 +1418,7 @@ export interface AgentStartConfig {
    *     5   | max                  | xhigh
    * OpenCode ignores it. Omit to inherit the provider's own default.
    */
-  reasoningLevel?: 0 | 1 | 2 | 3 | 4 | 5;
+  reasoningLevel?: ReasoningLevel;
   /**
    * Provider-specific structured options. See SpawnOptions.providerOptions
    * for the per-provider shape. Dropped on cross-provider restart.
@@ -1368,6 +1539,25 @@ class AgentApi {
       return this.client._httpFetch("POST", `/agent/start?session=${encodeURIComponent(session)}`, config as Record<string, unknown>);
     }
     return this.client.request("agent.start", { session, ...config });
+  }
+
+  /**
+   * Start an agent using one of the daemon's ordered difficulty profiles.
+   *
+   * This is a convenience wrapper around {@link start}. The daemon resolves
+   * the profile and any registered runtime defaults, then explicit config
+   * fields still override those defaults.
+   */
+  async startWithProfile(
+    session: string,
+    profileLevel: DifficultyLevel,
+    config: Omit<AgentStartConfig, "profileLevel"> = {},
+  ): Promise<{
+    status: "started" | "already_running";
+    provider: string;
+    sessionId: string;
+  }> {
+    return this.start(session, { ...config, profileLevel });
   }
 
   /**
@@ -1497,12 +1687,16 @@ class AgentApi {
    * ```
    */
   async resume(session: string, opts?: {
+    profileLevel?: DifficultyLevel;
+    runtimeId?: string;
     provider?: string;
+    modelProvider?: string;
     model?: string;
     permissionMode?: string;
     configDir?: string;
     prompt?: string;
     extraArgs?: string[];
+    reasoningLevel?: ReasoningLevel;
     providerOptions?: Record<string, unknown>;
   }): Promise<{
     status: "resumed";
