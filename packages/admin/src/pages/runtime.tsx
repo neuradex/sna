@@ -5,6 +5,7 @@ import Cursor from "@lobehub/icons/es/Cursor";
 import Grok from "@lobehub/icons/es/Grok";
 import OpenCode from "@lobehub/icons/es/OpenCode";
 import { Activity, AlertTriangle, CheckCircle2, Database, Loader2, Plus, RefreshCw, Save, ServerCog, SlidersHorizontal } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/select";
 import { EmptyState, ErrorText, Panel, StatusBadge } from "../components/ui";
 import {
   useAgentAuditQuery,
@@ -20,6 +21,9 @@ import { useTheme } from "../theme";
 
 const reasoningLevels = [0, 1, 2, 3, 4, 5] as const;
 const permissionModes = ["", "default", "acceptEdits", "auto", "bypassPermissions", "dontAsk", "plan"] as const;
+const noRuntimeValue = "__sna_no_runtime__";
+const defaultPermissionValue = "__sna_default_permission__";
+const providerDefaultModelValue = "__sna_provider_default_model__";
 
 type LobeIconComponent = ComponentType<{
   className?: string;
@@ -232,25 +236,47 @@ function ProfileRow({
         {error ? <div className="mt-2 font-mono text-[10px] font-medium text-[var(--bad)]">{error instanceof Error ? error.message : String(error)}</div> : null}
       </td>
       <td className="px-3 py-3">
-        <select className="focus-ring h-9 w-40 rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-2 text-sm text-[var(--fg)]" value={runtimeId} onChange={(event) => setRuntimeId(event.target.value)}>
-          <option value="">None</option>
-          {runtimes.map((runtime) => (
-            <option key={runtime.id} value={runtime.id}>{runtime.label}</option>
-          ))}
-        </select>
+        <Select value={runtimeId || noRuntimeValue} onValueChange={(value) => setRuntimeId(value === noRuntimeValue ? "" : value)}>
+          <SelectTrigger className="w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={noRuntimeValue}>None</SelectItem>
+            {runtimes.map((runtime) => (
+              <SelectItem key={runtime.id} value={runtime.id}>{runtime.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </td>
       <td className="px-3 py-3">
         <input className="focus-ring h-9 w-44 rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-2 font-mono text-xs text-[var(--fg)]" value={model} onChange={(event) => setModel(event.target.value)} />
       </td>
       <td className="px-3 py-3">
-        <select className="focus-ring h-9 w-40 rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-2 text-sm text-[var(--fg)]" value={permissionMode} onChange={(event) => setPermissionMode(event.target.value)}>
-          {permissionModes.map((mode) => <option key={mode || "empty"} value={mode}>{mode || "Default"}</option>)}
-        </select>
+        <Select
+          value={permissionMode || defaultPermissionValue}
+          onValueChange={(value) => setPermissionMode(value === defaultPermissionValue ? "" : value)}
+        >
+          <SelectTrigger className="w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {permissionModes.map((mode) => (
+              <SelectItem key={mode || "empty"} value={mode || defaultPermissionValue}>
+                {mode || "Default"}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </td>
       <td className="px-3 py-3">
-        <select className="focus-ring h-9 w-24 rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-2 font-mono text-xs text-[var(--fg)]" value={reasoningLevel} onChange={(event) => setReasoningLevel(event.target.value)}>
-          {reasoningLevels.map((level) => <option key={level} value={level}>{level}</option>)}
-        </select>
+        <Select value={reasoningLevel} onValueChange={setReasoningLevel}>
+          <SelectTrigger className="w-24 font-mono text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {reasoningLevels.map((level) => <SelectItem key={level} value={String(level)}>{level}</SelectItem>)}
+          </SelectContent>
+        </Select>
       </td>
       <td className="py-3 pl-3 text-right">
         <button
@@ -537,18 +563,22 @@ function ModelSettingsPanel({
 
             <label className="grid min-w-0 gap-1">
               <span className="font-mono text-[10px] font-medium uppercase tracking-wider text-[var(--fg-muted)]">Default model</span>
-              <select
-                className="focus-ring h-10 w-full min-w-0 rounded-lg border border-[var(--border)] bg-[var(--panel-solid)] px-3 text-sm text-[var(--fg)]"
-                value={defaultModel}
-                onChange={(event) => setDefaultModel(event.target.value)}
+              <Select
+                value={defaultModel || providerDefaultModelValue}
+                onValueChange={(value) => setDefaultModel(value === providerDefaultModelValue ? "" : value)}
               >
-                <option value="">Provider default</option>
-                {modelOptions.map((model) => (
-                  <option key={`${model.provider}:${model.id}`} value={model.id}>
-                    {formatModelOption(model)}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="h-10 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={providerDefaultModelValue}>Provider default</SelectItem>
+                  {modelOptions.map((model) => (
+                    <SelectItem key={`${model.provider}:${model.id}`} value={model.id}>
+                      {formatModelOption(model)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </label>
 
             <div className="grid gap-2 sm:grid-cols-3">
